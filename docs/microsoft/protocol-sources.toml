@@ -1,0 +1,3463 @@
+# Microsoft protocol sources used by LPE.
+#
+# Keep full Microsoft documents in docs/microsoft/cache/ only. Do not commit
+# cached PDFs/DOCX files or extracted full-text copies.
+
+[[reference]]
+id = "ReadmefirstExProto"
+title = "Exchange Server Protocols Readme"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/"
+pdf_url = "http://download.microsoft.com/download/5/D/D/5DD33FDF-91F5-496D-9884-0A0B0EE698BB/Exchange_Protocols.zip"
+published_version = "2015-09-14"
+local_cache = "docs/microsoft/cache/archive/ReadmefirstExProto-2015-09-14.pdf"
+sha256 = "e7c2604166b9f4703fec26686e854cc7bd59ee1e81445e8abba1413a9af36d88"
+used_for = [
+  "Historical 2015 Exchange Server Protocols documentation-set readme; retained for audit context, not used as a current protocol source",
+]
+sections = [
+  "Exchange Server Protocols Readme",
+  "Important notes about the documentation",
+  "Documentation Roadmap and Forum Information",
+]
+
+[[protocol]]
+id = "MS-ASCMD"
+title = "Exchange ActiveSync: Command Reference Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-ascmd/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASCMD/%5bMS-ASCMD%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASCMD.pdf"
+sha256 = "0b68b75d80ba2a01976d83f31d52ae648599d65114716be5c2f66cdfefeeac3b"
+used_for = [
+  "ActiveSync command reference examples and simple command/status values",
+  "ConversationMode and RightsManagementInformation unsupported-boundary documentation",
+]
+sections = [
+  "2.2.1 Commands",
+  "2.2.3.35 ConversationId",
+  "2.2.3.36 ConversationMode",
+  "2.2.3.156 RightsManagementInformation",
+  "4 Protocol Examples",
+]
+
+[[protocol]]
+id = "MS-ASCON"
+title = "Exchange ActiveSync: Conversations Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-ascon/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASCON/%5bMS-ASCON%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASCON.pdf"
+sha256 = "d5d6ee193aca2237ca4bd8273aeff00816e05f1d29fa6c818b117fe28374c9cd"
+used_for = [
+  "ActiveSync ConversationMode token and unsupported conversation-operation boundary documentation",
+]
+sections = [
+  "2.2.2.3 ConversationId",
+  "2.2.2.4 ConversationIndex",
+  "2.2.2.5 ConversationMode",
+  "3.1.4 Higher-Layer Triggered Events",
+  "3.2.5 Message Processing Events and Sequencing Rules",
+]
+
+[[protocol]]
+id = "MS-ASHTTP"
+title = "Exchange ActiveSync: HTTP Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-ashttp/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASHTTP/%5bMS-ASHTTP%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASHTTP.pdf"
+sha256 = "d76518a20157b9da21ab5613ccea46168be5f1889d4d99791a684546f5b7228c"
+used_for = [
+  "ActiveSync HTTP request query forms, command codes, OPTIONS headers, and version advertisement",
+]
+sections = [
+  "2.2.1.1.1.1 Base64-Encoded Query Value",
+  "2.2.1.1.1.1.2 Command Codes",
+  "2.2.1.1.1.2 Plain Text Query Value",
+  "2.2.2.1.2.7 MS-ASProtocolCommands",
+  "4.3 HTTP OPTIONS Command Request and Response",
+]
+
+[[protocol]]
+id = "MS-ASRM"
+title = "Exchange ActiveSync: Rights Management Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asrm/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASRM/%5bMS-ASRM%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASRM.pdf"
+sha256 = "c01973094744f3eb848554d3aafe83e80a684dab2377a10d6bf163d2907da971"
+used_for = [
+  "RightsManagement WBXML code-page unsupported-boundary documentation",
+]
+sections = [
+  "2.2.2.14 RightsManagementLicense",
+  "2.2.2.15 RightsManagementSupport",
+  "2.2.2.16 RightsManagementTemplate",
+  "2.2.2.17 RightsManagementTemplates",
+  "3.1.4 Higher-Layer Triggered Events",
+  "4 Protocol Examples",
+]
+
+[[protocol]]
+id = "MS-ASWBXML"
+title = "Exchange ActiveSync: WAP Binary XML (WBXML) Algorithm"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-aswbxml/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASWBXML/%5bMS-ASWBXML%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASWBXML.pdf"
+sha256 = "03e7843bfb5468c8b51ff0ff1866e3c37bb4898a1af746376b17984054d56a79"
+used_for = [
+  "ActiveSync WBXML code page and token coverage",
+  "Unsupported code-page boundary documentation",
+]
+sections = [
+  "2.1 ActiveSync WBXML Algorithm Details",
+  "2.1.2.1 Code Pages",
+  "2.1.2.1.1 Code Page 0: AirSync",
+  "2.1.2.1.25 Code Page 24: RightsManagement",
+]
+
+[[protocol]]
+id = "MS-ASAIRS"
+title = "Exchange ActiveSync: AirSyncBase Namespace Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asairs/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASAIRS/%5bMS-ASAIRS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASAIRS.pdf"
+sha256 = "a53bf328e888ac8fd63ad9c3b6c02fef6614f8b39a339552670838223d6b7f88"
+used_for = [
+  "ActiveSync AirSyncBase body preference, body, attachment, and FileReference token coverage",
+  "Body projection and attachment fetch boundaries for canonical message data",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.2 Elements",
+]
+
+[[protocol]]
+id = "MS-ASCAL"
+title = "Exchange ActiveSync: Calendar Class Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-ascal/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASCAL/%5bMS-ASCAL%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASCAL.pdf"
+sha256 = "42086fe422d74c6bfe3211791df8c8f93e05f6515f0424d30c9ed92dca3404ad"
+used_for = [
+  "ActiveSync calendar ApplicationData token mapping",
+  "Bounded canonical event create, update, delete, and projection behavior",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.2 Elements",
+]
+
+[[protocol]]
+id = "MS-ASCNTC"
+title = "Exchange ActiveSync: Contact Class Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-ascntc/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASCNTC/%5bMS-ASCNTC%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASCNTC.pdf"
+sha256 = "d257dcd86f0de2b17099d8e21cf350dce96e2f2a020437984c2d6aa3f3558076"
+used_for = [
+  "ActiveSync contact ApplicationData token mapping",
+  "Bounded canonical contact create, update, delete, and projection behavior",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.2 Elements",
+]
+
+[[protocol]]
+id = "MS-ASDOC"
+title = "Exchange ActiveSync: Document Class Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asdoc/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASDOC/%5bMS-ASDOC%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASDOC.pdf"
+sha256 = "6b7537a3efd62c0205985303b28bd1d2e52f3513bd5357739f81df33d2da7aef"
+used_for = [
+  "DocumentLibrary ActiveSync class unsupported-boundary documentation",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.2 Elements",
+]
+
+[[protocol]]
+id = "MS-ASDTYPE"
+title = "Exchange ActiveSync: Data Types"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asdtype/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASDTYPE/%5bMS-ASDTYPE%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASDTYPE.pdf"
+sha256 = "b97433a2202df9ddb301ad0734b7c08741b7c1d15c7d1a6fd7348e7ee1303bab"
+used_for = [
+  "ActiveSync date/time and string scalar boundary documentation",
+]
+sections = [
+  "2 Structures",
+  "2.3 dateTime Data Type",
+  "2.7.2 Compact DateTime",
+]
+
+[[protocol]]
+id = "MS-ASEMAIL"
+title = "Exchange ActiveSync: Email Class Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asemail/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASEMAIL/%5bMS-ASEMAIL%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASEMAIL.pdf"
+sha256 = "aab589cb9339d6bf212962b6e6ed410fd59702d98d6940fd63d3055bd6f32f3e"
+used_for = [
+  "ActiveSync email ApplicationData token mapping",
+  "Read state, delete-as-move, follow-up flag, and canonical Sent behavior",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.2 Elements",
+]
+
+[[protocol]]
+id = "MS-ASMS"
+title = "Exchange ActiveSync: Short Message Service (SMS) Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asms/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASMS/%5bMS-ASMS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASMS.pdf"
+sha256 = "807a3538a92ab6e8ead8bb0c06e50612cb03b51b2159828b331490a508c593b9"
+used_for = [
+  "SMS ActiveSync class unsupported-boundary documentation",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.2 Elements",
+]
+
+[[protocol]]
+id = "MS-ASNOTE"
+title = "Exchange ActiveSync: Notes Class Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asnote/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASNOTE/%5bMS-ASNOTE%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASNOTE.pdf"
+sha256 = "b0247780cb18f85fc4c2aa625c46bca278507e163f91bae41859e844ff9c77a7"
+used_for = [
+  "Notes ActiveSync class unsupported-boundary documentation",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.2 Elements",
+]
+
+[[protocol]]
+id = "MS-ASPROV"
+title = "Exchange ActiveSync: Provisioning Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asprov/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASPROV/%5bMS-ASPROV%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASPROV.pdf"
+sha256 = "145076aee4e71c9d152be330eaf9f8ff73620fb8ad2e1868931c1798c155a85f"
+used_for = [
+  "ActiveSync Provision policy-key handshake and policy document behavior",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.2 Elements",
+  "3 Protocol Details",
+]
+
+[[protocol]]
+id = "MS-ASTASK"
+title = "Exchange ActiveSync: Tasks Class Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-astask/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-ASTASK/%5bMS-ASTASK%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-ASTASK.pdf"
+sha256 = "42d5eb83a784b4d598d0d90f950cdfd7f87b3ffe0b72b9d3690b0814deefefd1"
+used_for = [
+  "Tasks namespace tokens used inside ActiveSync email follow-up flag payloads",
+  "Task-folder ActiveSync unsupported-boundary documentation",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.2 Elements",
+]
+
+[[protocol]]
+id = "MS-OXNSPI"
+title = "Exchange Server Name Service Provider Interface (NSPI) Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxnspi/63662a26-c8fc-4493-a41a-fbcbb7e43136"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXNSPI/%5bMS-OXNSPI%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXNSPI.pdf"
+sha256 = "8365f7bd3da23e3c46f21edf83946684c2cc7981eed6f565390af781e5da6d02"
+used_for = [
+  "NSPI Bind, DNToMId, GetProps, GetMatches, QueryRows, and GetSpecialTable behavior",
+  "PropertyRowSet_r and PropertyValue_r wire layout",
+  "Outlook address book bootstrap and hierarchy debugging",
+  "Address book hierarchy and QueryRows protocol example behavior",
+]
+sections = [
+  "2.2.1.12 NspiGetSpecialTable Flags",
+  "2.2.3 PropertyRow_r Structure",
+  "2.2.4 PropertyRowSet_r Structure",
+  "3.1.4.1.1 NspiBind",
+  "3.1.4.1.3 NspiGetSpecialTable",
+  "3.1.4.1.8 NspiQueryRows",
+  "4 Protocol Examples",
+]
+
+[[protocol]]
+id = "MS-OXOABK"
+title = "Address Book Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxoabk/f4cf9b4c-9232-4506-9e71-2270de217614"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOABK/%5bMS-OXOABK%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOABK.pdf"
+sha256 = "53e9e89d2a8c14818d478ba2093fd94b804e48b4b75643c5824e861a06cb0ac2"
+used_for = [
+  "Address book hierarchy container properties",
+  "Address book distinguished name formats used inside NSPI PermanentEntryID values",
+  "PidTagContainerFlags, PidTagAddressBookContainerId, and PidTagAddressBookIsMaster semantics",
+  "Bounded NSPI address-book object property projection audit row",
+  "Calendar navigation shortcut owner EntryID validation",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.1 Definitions",
+  "2.2.1.1 Distinguished Names for Objects",
+  "2.2.2 Properties that Apply to Containers in the Address Book Hierarchy Table",
+  "2.2.2.1 PidTagContainerFlags",
+  "2.2.2.3 PidTagAddressBookContainerId",
+  "2.2.2.4 PidTagAddressBookIsMaster",
+  "2.2.3 Properties that Apply to All Address Book Objects",
+  "2.2.3.2 PidTagEntryId",
+]
+
+[[protocol]]
+id = "MS-OXCMAPIHTTP"
+title = "Messaging Application Programming Interface (MAPI) Extensions for HTTP"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCMAPIHTTP/%5bMS-OXCMAPIHTTP%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCMAPIHTTP.pdf"
+sha256 = "e456a07aa04919468e46c2cc470a79f10213a1e0564ad0ebf68056b381cfb97f"
+used_for = [
+  "MAPI over HTTP request and response framing",
+  "EMSMDB and NSPI endpoint transport behavior",
+  "Bind, Execute, Connect, Disconnect, and session cookie interoperability",
+  "PING idle Session Context refresh behavior",
+  "NotificationWait event-pending signaling followed by notification details in Execute",
+  "Connect, Execute, reconnect, and Disconnect protocol example sequence behavior",
+  "GetProps, GetSpecialTable, and GetTemplateInfo AddressBookPropertyValueList encoding",
+  "HTTP, X-ResponseCode, Content-Type, and Execute failure-layer separation with complete Session Context cookie propagation",
+  "Execute MaxRopOut and RopBuffer response-size boundary",
+]
+sections = [
+  "2.2.1.1 AddressBookPropertyValue Structure",
+  "2.2.1.2 AddressBookTaggedPropertyValue Structure",
+  "2.2.1.3 AddressBookPropertyValueList Structure",
+  "2.2.2.2 Common Response Format",
+  "2.2.3.2.2 Content-Type Header Field",
+  "2.2.3.2.3 Set-Cookie Header Field",
+  "2.2.3.2.4 Cookie Header Field",
+  "2.2.3.3.1 X-RequestType Header Field",
+  "2.2.3.3.3 X-ResponseCode Header Field",
+  "2.2.4.1 Connect Request Type",
+  "2.2.4.2 Execute Request Type",
+  "2.2.4.2.1 Execute Request Type Request Body",
+  "2.2.4.2.2 Execute Request Type Success Response Body",
+  "2.2.4.2.3 Execute Request Type Failure Response Body",
+  "2.2.4.3 Disconnect Request Type",
+  "2.2.4.4 NotificationWait Request Type",
+  "2.2.4.4.2 NotificationWait Request Type Success Response Body",
+  "2.2.5.1 Bind Request Type",
+  "2.2.5.7.2 GetProps Request Type Success Response Body",
+  "2.2.5.8.2 GetSpecialTable Request Type Success Response Body",
+  "2.2.5.9.2 GetTemplateInfo Request Type Success Response Body",
+  "2.2.6 PING Request Type",
+  "3.1.1 Abstract Data Model",
+  "3.1.5.2 Sending Remote Operations by Using the Execute Request Type",
+  "3.2.5.2 Responding to All Request Type Requests",
+  "4.1 Establish a New Session Context",
+  "4.2 Issue ROP Commands to the Server",
+  "4.3 Refresh an Idle Session Context",
+  "4.4 Re-Establish a Timed-Out Connection to the Server",
+  "4.5 Disconnect from the Server",
+  "3.1.5.5 Requesting Notification by Using the NotificationWait Request Type",
+  "3.2.5.5 Responding to a NotificationWait Request Type Request",
+]
+
+[[protocol]]
+id = "MS-OXCROPS"
+title = "Remote Operations (ROP) List and Encoding Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcrops/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCROPS/%5bMS-OXCROPS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCROPS.pdf"
+sha256 = "c926eb96973fb81310bd19d99447d5dbb1d30a5e430855201bee5d554d480a8b"
+used_for = [
+  "ROP request and response encoding",
+  "Mailbox logon, folder open, property, table, and synchronization ROP behavior",
+  "RopSetColumns, RopQueryRows, and RopGetPropertiesSpecific response-shape checks for Outlook Inbox startup",
+  "RopSetProperties, RopDeletePropertiesNoReplicate, and RopSaveChangesMessage response contracts for retained Outlook Calendar message handles",
+  "Calendar named-property registration and SetColumns/QueryPosition/QueryRows wire-contract checks",
+  "Released handle table compatibility for mixed ROP batches containing RopRelease",
+  "Cumulative associated-configuration property mutations before RopSaveChangesMessage",
+  "Sequential same-buffer RopSaveChangesMessage and post-save RopGetPropertiesSpecific visibility",
+  "RopGetAttachmentTable success response shape without an embedded row count",
+  "RopSetReadFlags and RopSetMessageReadFlag read-state request and response encoding",
+  "RopNotify response encoding and extra ROP placement at the end of the Execute RopsList",
+  "RopSynchronizationImportDeletes TaggedPropertyValue request framing and response encoding",
+  "RopSynchronizationImportMessageChange success/failure response framing, including SyncConflict",
+  "Outlook appointment PidTagHtml RopOpenStream and RopWriteStream request and response encoding",
+  "Calendar Body and HTML RopCommitStream transaction behavior before the parent RopSaveChangesMessage",
+  "Calendar attachment create, save, delete, and parent-Message commit request and response encoding",
+  "Outlook startup RopOpenFolder and RopGetHierarchyTable request, response, handle-table, and failure boundaries",
+  "Outlook Calendar same-folder and Calendar-to-Deleted-Items RopMoveCopyMessages request and response encoding",
+  "RopBufferTooSmall size, unprocessed-request, handle-table, and retry semantics",
+  "RopGetLocalReplicaIds request count and success/failure response encoding",
+  "RopSynchronizationOpenCollector hierarchy/content Boolean request encoding",
+  "RopSynchronizationGetTransferState request and response encoding",
+  "ecNullObject response for an unassigned ROP input handle",
+]
+sections = [
+  "1.3 Overview",
+  "2.2.4.1 RopOpenFolder ROP",
+  "2.2.4.1.1 RopOpenFolder ROP Request Buffer",
+  "2.2.4.1.2 RopOpenFolder ROP Success Response Buffer",
+  "2.2.4.1.3 RopOpenFolder ROP Failure Response Buffer",
+  "2.2.4.13 RopGetHierarchyTable ROP",
+  "2.2.4.13.1 RopGetHierarchyTable ROP Request Buffer",
+  "2.2.4.13.2 RopGetHierarchyTable ROP Success Response Buffer",
+  "2.2.4.13.3 RopGetHierarchyTable ROP Failure Response Buffer",
+  "2.2.5.1 RopSetColumns ROP",
+  "2.2.5.4 RopQueryRows ROP",
+  "2.2.5.7 RopQueryPosition ROP",
+  "2.2.8.1 RopGetPropertyIdsFromNames ROP",
+  "2.2.8.2 RopGetNamesFromPropertyIds ROP",
+  "2.2.4.6 RopMoveCopyMessages ROP",
+  "2.2.4.6.1 RopMoveCopyMessages ROP Request Buffer",
+  "2.2.4.6.2 RopMoveCopyMessages ROP Response Buffer",
+  "2.2.4.7 RopMoveFolder ROP",
+  "2.2.4.7.1 RopMoveFolder ROP Request Buffer",
+  "2.2.4.7.2 RopMoveFolder ROP Response Buffer",
+  "2.2.4.8 RopCopyFolder ROP",
+  "2.2.4.8.1 RopCopyFolder ROP Request Buffer",
+  "2.2.4.8.2 RopCopyFolder ROP Response Buffer",
+  "2.2.7.4 RopSetSpooler ROP",
+  "2.2.7.4.1 RopSetSpooler ROP Request Buffer",
+  "2.2.7.4.2 RopSetSpooler ROP Response Buffer",
+  "2.2.8.11 RopCopyProperties ROP",
+  "2.2.8.3 RopGetPropertiesSpecific ROP",
+  "2.2.8.3.1 RopGetPropertiesSpecific ROP Request Buffer",
+  "2.2.8.3.2 RopGetPropertiesSpecific ROP Success Response Buffer",
+  "2.2.8.6 RopSetProperties ROP",
+  "2.2.8.6.1 RopSetProperties ROP Request Buffer",
+  "2.2.8.6.2 RopSetProperties ROP Success Response Buffer",
+  "2.2.8.6.3 RopSetProperties ROP Failure Response Buffer",
+  "2.2.8.9 RopDeletePropertiesNoReplicate ROP",
+  "2.2.8.9.1 RopDeletePropertiesNoReplicate ROP Request Buffer",
+  "2.2.8.9.2 RopDeletePropertiesNoReplicate ROP Success Response Buffer",
+  "2.2.8.9.3 RopDeletePropertiesNoReplicate ROP Failure Response Buffer",
+  "2.2.13.5 RopSynchronizationImportDeletes ROP",
+  "2.2.13.5.1 RopSynchronizationImportDeletes ROP Request Buffer",
+  "2.2.13.5.2 RopSynchronizationImportDeletes ROP Response Buffer",
+  "2.2.13.2.1 RopSynchronizationImportMessageChange ROP Request Buffer",
+  "2.2.13.2.2 RopSynchronizationImportMessageChange ROP Success Response Buffer",
+  "2.2.13.2.3 RopSynchronizationImportMessageChange ROP Failure Response Buffer",
+  "2.2.13.6.1 RopSynchronizationImportMessageMove ROP Request Buffer",
+  "2.2.13.6.2 RopSynchronizationImportMessageMove ROP Success Response Buffer",
+  "2.2.13.6.3 RopSynchronizationImportMessageMove ROP Failure Response Buffer",
+  "2.2.13.13 RopGetLocalReplicaIds ROP",
+  "2.2.13.13.1 RopGetLocalReplicaIds ROP Request Buffer",
+  "2.2.13.13.2 RopGetLocalReplicaIds ROP Success Response Buffer",
+  "2.2.13.13.3 RopGetLocalReplicaIds ROP Failure Response Buffer",
+  "2.2.13.7.1 RopSynchronizationOpenCollector ROP Request Buffer",
+  "2.2.13.8.1 RopSynchronizationGetTransferState ROP Request Buffer",
+  "2.2.13.8.2 RopSynchronizationGetTransferState ROP Response Buffer",
+  "2.2.6.3 RopSaveChangesMessage ROP",
+  "2.2.6.3.1 RopSaveChangesMessage ROP Request Buffer",
+  "2.2.6.3.2 RopSaveChangesMessage ROP Success Response Buffer",
+  "2.2.6.3.3 RopSaveChangesMessage ROP Failure Response Buffer",
+  "2.2.6.13 RopCreateAttachment ROP",
+  "2.2.6.13.1 RopCreateAttachment ROP Request Buffer",
+  "2.2.6.13.2 RopCreateAttachment ROP Success Response Buffer",
+  "2.2.6.14 RopDeleteAttachment ROP",
+  "2.2.6.14.1 RopDeleteAttachment ROP Request Buffer",
+  "2.2.6.14.2 RopDeleteAttachment ROP Response Buffer",
+  "2.2.6.15 RopSaveChangesAttachment ROP",
+  "2.2.6.15.1 RopSaveChangesAttachment ROP Request Buffer",
+  "2.2.6.15.2 RopSaveChangesAttachment ROP Response Buffer",
+  "2.2.6.17.2 RopGetAttachmentTable ROP Response Buffer",
+  "2.2.6.10 RopSetReadFlags ROP",
+  "2.2.6.10.1 RopSetReadFlags ROP Request Buffer",
+  "2.2.6.10.2 RopSetReadFlags ROP Response Buffer",
+  "2.2.6.11 RopSetMessageReadFlag ROP",
+  "2.2.6.11.1 RopSetMessageReadFlag ROP Request Buffer",
+  "2.2.6.11.2 RopSetMessageReadFlag ROP Success Response Buffer",
+  "2.2.8.11.1 RopCopyProperties ROP Request Buffer",
+  "2.2.8.11.2 RopCopyProperties ROP Success Response Buffer",
+  "2.2.8.11.3 RopCopyProperties ROP Null Destination Failure Response Buffer",
+  "2.2.8.12 RopCopyTo ROP",
+  "2.2.8.12.1 RopCopyTo ROP Request Buffer",
+  "2.2.8.12.2 RopCopyTo ROP Success Response Buffer",
+  "2.2.8.12.3 RopCopyTo ROP Null Destination Failure Response Buffer",
+  "2.2.9.1 RopOpenStream ROP",
+  "2.2.9.1.1 RopOpenStream ROP Request Buffer",
+  "2.2.9.1.2 RopOpenStream ROP Success Response Buffer",
+  "2.2.9.2 RopReadStream ROP",
+  "2.2.9.2.1 RopReadStream ROP Request Buffer",
+  "2.2.9.2.2 RopReadStream ROP Response Buffer",
+  "2.2.9.3 RopWriteStream ROP",
+  "2.2.9.5 RopCommitStream ROP",
+  "2.2.9.5.1 RopCommitStream ROP Request Buffer",
+  "2.2.9.5.2 RopCommitStream ROP Response Buffer",
+  "2.2.9.10 RopLockRegionStream ROP",
+  "2.2.9.10.1 RopLockRegionStream ROP Request Buffer",
+  "2.2.9.10.2 RopLockRegionStream ROP Response Buffer",
+  "2.2.9.11 RopUnlockRegionStream ROP",
+  "2.2.9.11.1 RopUnlockRegionStream ROP Request Buffer",
+  "2.2.9.11.2 RopUnlockRegionStream ROP Response Buffer",
+  "2.2.14.1 RopRegisterNotification ROP",
+  "2.2.14.1.1 RopRegisterNotification ROP Request Buffer",
+  "2.2.14.1.2 RopRegisterNotification ROP Response Buffer",
+  "2.2.14.2 RopNotify ROP",
+  "2.2.14.2.1 RopNotify ROP Response Buffer",
+  "2.2.15.1 RopBufferTooSmall ROP",
+  "2.2.15.1.1 RopBufferTooSmall ROP Response Buffer",
+  "3.1.5.1.2 Processing the RopBufferTooSmall Response Buffer",
+  "3.1.5.1.3 Processing the RopNotify and RopPending Responses",
+  "3.2.4.3 Responding to Insufficient Output Buffer Space",
+  "4.1 Empty ROP Buffer",
+  "4.2 Single ROP Request",
+  "4.3 Multiple ROP Request",
+  "4.4 RopRelease ROP Request",
+  "4.5 RopBufferTooSmall ROP Response",
+  "4.6 Logon RopBackoff ROP Response",
+  "4.7 RopBackoff ROP Response",
+  "3.2.5.1 Processing a ROP Input Buffer",
+  "3.2.5.2 Creating a ROP Output Buffer",
+  "3.2.5.3 Processing the RopRelease ROP Request",
+  "3.2.5.4 Error Codes Returned When an Object Is Invalid",
+  "6 Appendix A: Product Behavior, section 3.2.5.3 footnote 25",
+]
+
+[[protocol]]
+id = "MS-OXCPRPT"
+title = "Property and Stream Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcprpt/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCPRPT/%5bMS-OXCPRPT%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCPRPT.pdf"
+sha256 = "ccaeed20d67551bba60d670e6a7040f67d7345a6f3b91057973a00081fc6df09"
+used_for = [
+  "Named-property ID mapping behavior for RopGetPropertyIdsFromNames and RopGetNamesFromPropertyIds",
+  "Post-calendar Outlook view diagnostics for named-property mapping batches",
+  "Outlook appointment PidTagHtml stream opening, writing, and save-time persistence",
+  "Existing Calendar Event Body and HTML stream staging, CommitStream visibility, Release discard, and parent-Message persistence",
+  "Property mutation and deletion semantics for an existing Outlook Calendar Message object",
+  "Per-handle staging of writable Calendar properties and deletions until RopSaveChangesMessage",
+  "RopGetPropertiesSpecific response-buffer budgeting, per-property NotEnoughMemory, and stream fallback for oversized Outlook Calendar HTML",
+]
+sections = [
+  "2.2.2 RopGetPropertiesSpecific ROP",
+  "2.2.2.1 RopGetPropertiesSpecific ROP Request Buffer",
+  "2.2.2.2 RopGetPropertiesSpecific ROP Response Buffer",
+  "2.2.5 RopSetProperties ROP",
+  "2.2.5.1 RopSetProperties ROP Request Buffer",
+  "2.2.5.2 RopSetProperties ROP Response Buffer",
+  "2.2.7 RopDeleteProperties ROP",
+  "2.2.7.1 RopDeleteProperties ROP Request Buffer",
+  "2.2.7.2 RopDeleteProperties ROP Response Buffer",
+  "2.2.8 RopDeletePropertiesNoReplicate ROP",
+  "2.2.8.1 RopDeletePropertiesNoReplicate ROP Request Buffer",
+  "2.2.8.2 RopDeletePropertiesNoReplicate ROP Response Buffer",
+  "2.2.14 RopOpenStream ROP",
+  "2.2.14.1 RopOpenStream ROP Request Buffer",
+  "2.2.14.2 RopOpenStream ROP Response Buffer",
+  "2.2.15 RopReadStream ROP",
+  "2.2.15.1 RopReadStream ROP Request Buffer",
+  "2.2.15.2 RopReadStream ROP Response Buffer",
+  "2.2.18 RopCommitStream ROP",
+  "2.2.12 RopGetPropertyIdsFromNames ROP",
+  "2.2.12.1 RopGetPropertyIdsFromNames ROP Request Buffer",
+  "2.2.12.2 RopGetPropertyIdsFromNames ROP Response Buffer",
+  "3.1.4.1 Getting Property IDs for Named Properties",
+  "3.1.4.5 Reading a Property as a Stream",
+  "3.2.5.9 Processing RopGetNamesFromPropertyIds",
+  "3.2.5.10 Processing RopGetPropertyIdsFromNames",
+  "3.2.5.4 Processing RopSetProperties",
+  "3.2.5.5 Processing RopDeleteProperties",
+  "3.2.5.13 Processing RopWriteStream",
+  "3.1.4.6 Setting a Property with a Stream",
+  "3.2.5.15 Processing RopCommitStream",
+  "3.2.5.1 Processing RopGetPropertiesSpecific",
+]
+
+[[protocol]]
+id = "MS-OXCDATA"
+title = "Data Structures"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcdata/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCDATA/%5bMS-OXCDATA%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCDATA.pdf"
+sha256 = "a49fba35dbfef6d4cb02584610c4c4326c029a573b6f4c2ad84820c13df50e69"
+used_for = [
+  "Common MAPI data structures and property value encodings",
+  "Property tags, typed values, EntryIDs, GUIDs, and FILETIME values",
+  "FlatEntryList and PropertyProblem structures used by Outlook reply-recipient deletion and property mutation responses",
+  "RopGetPropertiesSpecific PropertyRow and per-property error encoding checks",
+  "Calendar default-view Message EntryID folder and message identity",
+  "Calendar FAI QueryRows flagged-property encoding for selected properties absent from a FolderDesign.NamedView message",
+  "Common Views FindRow and QueryRows flagged-property encoding across heterogeneous FolderDesign.NamedView and WunderBar.Link rows",
+  "Mailbox Store Object EntryID projection for Common Views navigation shortcuts",
+  "TaggedPropertyValue, PtypMultipleBinary, and GID encoding for ICS imported deletions",
+  "Outlook Calendar descending SortOrder encoding",
+  "Common ROP InvalidParameter and GeneralFailure return values",
+  "PtypBoolean wire values used by RopSynchronizationOpenCollector",
+]
+  sections = [
+    "2.2.1.1 Folder ID Structure",
+    "2.2.1.2 Message ID Structure",
+    "2.3.3 FlatEntryList Structure",
+    "2.4 Error Codes",
+    "2.4.2 Property Error Codes",
+    "2.2.4.3 Store Object EntryID Structure",
+  "2.2.1.3 GID Structure",
+  "2.6 PropertyName Structure",
+  "2.2.4.2 Message EntryID Structure",
+  "2.7 PropertyProblem Structure",
+  "2.8.1 PropertyRow Structures",
+  "2.8.1.1 StandardPropertyRow Structure",
+  "2.8.1.2 FlaggedPropertyRow Structure",
+  "2.11.5 FlaggedPropertyValue Structure",
+  "2.11.6 FlaggedPropertyValueWithType Structure",
+  "2.11.1 Property Data Types (PtypBoolean)",
+  "2.11.4 TaggedPropertyValue Structure",
+  "2.13.1 SortOrder Structure",
+  "3.1 Restriction",
+  "3.2 PropertyRow",
+]
+
+[[protocol]]
+id = "MS-OXPROPS"
+title = "Exchange Server Protocols Master Property List"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxprops/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXPROPS/%5bMS-OXPROPS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXPROPS.pdf"
+sha256 = "a41aaceb071e409859faa975b28f02a628c6f337074bd13e6e5198c601896d85"
+used_for = [
+  "Canonical property tag definitions used by EWS, MAPI, ROP, NSPI, ICS, and FastTransfer projections",
+  "Normal message contents-table projection for Outlook-selected Inbox view columns",
+  "Outlook Calendar named-property sort keys PidLidAppointmentEndWhole and PidLidRecurring",
+  "PidTagReplyRecipientEntries type and property tag used by Outlook Calendar update batches",
+  "PidTagBodyHtml and PidTagHtml identities and types used by Calendar Event property and stream staging",
+  "Separation of Calendar PidLidLocation from address-book PidTagLocation and PidTagLastModifierEntryId",
+  "PidTagLocalCommitTime identity and UTC PtypTime value projected after Calendar Event Save",
+]
+sections = [
+  "2.9 PidLidAppointmentColor",
+  "2.14 PidLidAppointmentEndWhole",
+  "2.47 PidLidBusyStatus",
+  "2.159 PidLidLocation",
+  "2.216 PidLidRecurring",
+  "2.299 PidLidSideEffects",
+  "2.413 PidNameContentClass",
+  "2.618 PidTagBody",
+  "2.621 PidTagBodyHtml",
+  "2.655 PidTagCreationTime",
+  "2.717 PidTagHasAttachments",
+  "2.734 PidTagHtml",
+  "2.739 PidTagImportance",
+  "2.767 PidTagLastModifierEntryId",
+  "2.774 PidTagLocalCommitTime",
+  "2.778 PidTagLocation",
+  "2.791 PidTagMessageDeliveryTime",
+  "2.793 PidTagMessageFlags",
+  "2.798 PidTagMessageSize",
+  "2.921 PidTagReplyTime",
+  "2.917 PidTagReplyRecipientEntries",
+  "2.1006 PidTagSenderName",
+  "2.1007 PidTagSenderSearchKey",
+  "2.1008 PidTagSenderSmtpAddress",
+  "2.1014 PidTagSentRepresentingAddressType",
+  "2.1015 PidTagSentRepresentingEmailAddress",
+  "2.1016 PidTagSentRepresentingEntryId",
+  "2.1018 PidTagSentRepresentingName",
+  "2.1020 PidTagSentRepresentingSmtpAddress",
+  "2.1035 PidTagSubject",
+]
+
+[[protocol]]
+id = "MS-OXCMSG"
+title = "Message and Attachment Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmsg/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCMSG/%5bMS-OXCMSG%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCMSG.pdf"
+sha256 = "4822471210f7f71c731469d3bae60f2c95332dad8b2c3c577589af53ced88da0"
+used_for = [
+  "Message property semantics for normal Inbox contents-table rows",
+  "Default normal importance value for Message objects",
+  "Message content-class projection requirements",
+  "Pending message attachment composition sequence before RopSaveChangesMessage",
+  "Per-Event-handle Calendar attachment staging and prohibition on database persistence before the parent RopSaveChangesMessage",
+  "GetAttachmentTable protocol example behavior over canonical message attachments",
+  "Embedded HTML image attachment stream sequence before RopSaveChangesAttachment",
+  "Text file attachment stream sequence before RopSaveChangesAttachment",
+  "Save Message protocol example KeepOpenReadWrite behavior over canonical message import",
+  "KeepOpenReadWrite retention of the saved Message handle and returned MID",
+  "Repeated property mutation and save through a Message handle retained read/write by SaveFlags bit 0x02",
+  "Outlook Contacts FAI SaveFlags 0x0E handling with unlisted bits ignored and compatible ForceSave/KeepOpenReadWrite behavior retained",
+  "Calendar Event optimistic conflict detection at Save and ForceSave overwrite semantics",
+  "Deterministic Calendar Subject, NormalizedSubject, and empty SubjectPrefix relationship",
+  "Coherent PidTagBodyHtml and PidTagHtml conversion for Calendar Event bodies",
+  "Calendar Event PidTagLocalCommitTime update when RopSaveChangesMessage is processed",
+  "Releasing Message Object protocol example handle invalidation behavior",
+  "Embedded message open response shape and attachment method semantics",
+  "Opening the Calendar default-view descriptor by FID and MID",
+  "PidTagMessageFlags mfUnsent projection from canonical Draft mailbox state",
+  "PidTagMessageFlags mfFAI projection for folder-associated messages",
+  "New Message object identity returned by the first RopSaveChangesMessage",
+  "Initial property state of newly created folder-associated messages before the client sets configuration properties",
+  "Canonical message read-state flags and Outlook standalone rfClearReadFlag interoperability",
+  "Message-object acceptance of additional MS-OXPROPS properties during Outlook appointment creation",
+  "RopSaveChangesMessage ignores invalid or unknown SaveFlags values while still committing the message",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.1.2 PidTagHasAttachments Property",
+  "2.2.1.6 PidTagMessageFlags Property",
+  "2.2.1.7 PidTagMessageSize Property",
+  "2.2.1.9 PidTagSubjectPrefix Property",
+  "2.2.1.10 PidTagNormalizedSubject Property",
+  "2.2.1.11 PidTagImportance Property",
+  "2.2.1.46 PidTagSubject Property",
+  "2.2.1.48 PidNameContentClass Property",
+  "2.2.1.49 PidTagLocalCommitTime Property",
+  "2.2.1.58.3 PidTagBodyHtml Property",
+  "2.2.1.58.9 PidTagHtml Property",
+  "2.2.2.9 PidTagAttachMethod Property",
+  "2.2.3.16 RopOpenEmbeddedMessage ROP",
+  "2.2.3.1 RopOpenMessage ROP",
+  "2.2.3.2 RopCreateMessage ROP",
+  "2.2.3.3 RopSaveChangesMessage ROP",
+  "2.2.3.3.1 RopSaveChangesMessage ROP Request Buffer",
+  "2.2.3.3.2 RopSaveChangesMessage ROP Response Buffer",
+  "2.2.3.13 RopCreateAttachment ROP",
+  "2.2.3.14 RopDeleteAttachment ROP",
+  "2.2.3.15 RopSaveChangesAttachment ROP",
+  "2.2.3.10 RopSetReadFlags ROP",
+  "2.2.3.10.1 RopSetReadFlags ROP Request Buffer",
+  "2.2.3.10.2 RopSetReadFlags ROP Response Buffer",
+  "2.2.3.11 RopSetMessageReadFlag ROP",
+  "2.2.3.11.1 RopSetMessageReadFlag ROP Request Buffer",
+  "2.2.3.11.2 RopSetMessageReadFlag ROP Response Buffer",
+  "3.1.5.1 Sending a RopOpenMessage ROP Request",
+  "3.2.4.1 Requesting Body Properties",
+  "3.2.5.2 Receiving a RopCreateMessage ROP Request",
+  "3.2.5.3 Receiving a RopSaveChangesMessage ROP Request",
+  "3.2.5.13 Receiving a RopCreateAttachment ROP Request",
+  "3.2.5.14 Receiving a RopSaveChangesAttachment ROP Request",
+  "3.2.5.15 Receiving a RopDeleteAttachment ROP Request",
+  "3.2.5.10 Receiving a RopSetReadFlags ROP Request",
+  "3.2.5.11 Receiving a RopSetMessageReadFlag ROP Request",
+  "4.1 Create Message",
+  "4.2 Name to Id Mapping",
+  "4.3 Get Attachment Table",
+  "4.3.1 RopGetAttachmentTable Request Buffer",
+  "4.3.2 RopGetAttachmentTable Response Buffer",
+  "4.4 Insert HTML Embedded Image",
+  "4.4.1 RopCreateAttachment Request Buffer",
+  "4.4.2 RopCreateAttachment Response Buffer",
+  "4.4.3 Setting Properties",
+  "4.4.4 RopSaveChangesAttachment Request Buffer",
+  "4.4.5 RopSaveChangesAttachment Response Buffer",
+  "4.4.6 Releasing Attachment Object",
+  "4.5 Attach Text File",
+  "4.5.1 RopCreateAttachment Request Buffer",
+  "4.5.2 RopCreateAttachment Response Buffer",
+  "4.5.3 Setting Properties",
+  "4.5.4 RopSaveChangesAttachment Request Buffer",
+  "4.5.5 RopSaveChangesAttachment Response Buffer",
+  "4.5.6 Releasing Attachment Object",
+  "4.6 Setting Message Properties",
+  "4.7 Adding Recipients",
+  "4.8 Save Message",
+  "4.8.1 RopSaveChangesMessage Request Buffer",
+  "4.8.2 RopSaveChangesMessage Response Buffer",
+  "4.9 Releasing Message Object",
+]
+
+[[protocol]]
+id = "MS-OXOCFG"
+title = "Configuration Information Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxocfg/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOCFG/%5bMS-OXOCFG%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOCFG.pdf"
+sha256 = "55616b5996b640448d89518516559c56c84b086b12be49fa5aded456110331bc"
+used_for = [
+  "Outlook folder-associated configuration message classes and roaming stream datatype flags",
+  "FolderDesign.NamedView FAI message requirements and view descriptor properties",
+  "Configuration-data FAI table lookup sequence for SetColumns, SortTable, FindRow, QueryRows, OpenMessage, and OpenStream",
+  "UMOLK/UserOptions-style configuration rows as bounded IPM.Configuration FAI messages with roaming stream properties",
+  "PidTagExtendedFolderFlags read/write behavior for Outlook folder UI display state",
+  "Canonical identity and property preservation for client-owned Common Views navigation shortcuts",
+  "Client-created navigation shortcut replacement and superseded identity lifecycle",
+  "Server-created Calendar shortcuts omit unavailable client-owned and owner identity fields",
+  "Canonical KindString Categories ColumnPacket encoding for PS_PUBLIC_STRINGS/Keywords",
+  "Canonical default-view primary sort applied to newly opened normal contents tables",
+  "View descriptor ulFlags and sorted ColumnPacket VCDF_SORTDESCENDING direction consistency",
+  "FolderDesign.NamedView property requirements contrasted with configuration-data FAI lookup columns",
+  "FolderDesign.NamedView selection contract contrasted with Outlook's additional registered view CLSID requirement",
+  "Conversation Action Settings FAI projection only from canonical conversation action rows",
+]
+sections = [
+  "2.2.2.1 PidTagRoamingDatatypes Property",
+  "2.2.2.2 PidTagRoamingDictionary Property",
+  "2.2.2.3 PidTagRoamingXmlStream Property",
+  "2.2.5 Configuration Data",
+  "2.2.5.1 Dictionaries",
+  "2.2.6 View Definitions",
+  "2.2.6.1 PidTagViewDescriptorBinary Property",
+  "2.2.6.1.1 ColumnPacket Structure",
+  "2.2.6.3 PidTagViewDescriptorStrings Property",
+  "4.2.1 PidTagViewDescriptorBinary",
+  "4.2.1.11 Column \"Categories\"",
+  "2.2.7 Folder Flags",
+  "2.2.8 Conversation Actions",
+  "3.1.4.1 Reading Configuration Data",
+  "3.1.4.3 Reading View Definitions",
+  "2.2.8.1 PidLidConversationActionLastAppliedTime Property",
+  "2.2.8.2 PidLidConversationActionMaxDeliveryTime Property",
+  "2.2.8.3 PidLidConversationActionMoveFolderEid Property",
+  "2.2.8.4 PidLidConversationActionMoveStoreEid Property",
+  "2.2.8.5 PidLidConversationActionVersion Property",
+  "2.2.8.6 PidLidConversationProcessed Property",
+  "2.2.8.7 PidNameKeywords Property",
+  "2.2.8.8 PidTagConversationIndex Property",
+  "2.2.8.9 PidTagMessageClass Property",
+  "2.2.8.10 PidTagSubject Property",
+  "3.1.5.1 Processing a Conversation Action on Incoming E-mail Objects",
+  "2.2.9 Navigation Shortcuts",
+  "2.2.9.3 PidTagWlinkGroupHeaderID Property",
+  "2.2.9.5 PidTagWlinkType Property",
+  "2.2.9.6 PidTagWlinkFlags Property",
+  "2.2.9.7 PidTagWlinkOrdinal Property",
+  "2.2.9.8 PidTagWlinkEntryId Property",
+  "2.2.9.9 PidTagWlinkRecordKey Property",
+  "2.2.9.10 PidTagWlinkStoreEntryId Property",
+  "2.2.9.11 PidTagWlinkFolderType Property",
+  "2.2.9.12 PidTagWlinkGroupClsid Property",
+  "2.2.9.13 PidTagWlinkGroupName Property",
+  "2.2.9.14 PidTagWlinkSection Property",
+  "2.2.9.16 PidTagWlinkAddressBookEID Property",
+  "2.2.9.17 PidTagWlinkAddressBookStoreEID Property",
+  "2.2.9.18 PidTagWlinkClientID Property",
+  "3.1.3.1 Navigation Shortcuts",
+  "3.1.4.1 Reading Configuration Data",
+  "3.1.4.2 Writing Configuration Data",
+  "3.1.4.3 Reading View Definitions",
+  "3.1.4.4 Writing View Definitions",
+  "3.1.4.5.1 Reading ExtendedFolderFlags",
+  "3.1.4.6.1 Writing ExtendedFolderFlags",
+  "3.1.4.9 Reading Navigation Shortcuts",
+  "3.1.4.10.2 Shortcuts",
+  "4.1 Configuration Data",
+  "4.1.1 Dictionaries",
+  "4.1.2 Working Hours",
+  "4.1.3 Category List",
+  "4.2 View Definitions",
+  "4.2.1 PidTagViewDescriptorBinary",
+  "4.2.1.2 Column \"Importance\"",
+  "4.2.1.3 Column \"Reminder\"",
+  "4.2.1.4 Column \"Icon\"",
+  "4.2.1.5 Column \"Flag Status\"",
+  "4.2.1.6 Column \"Attachment\"",
+  "4.2.1.7 Column \"From\"",
+  "4.2.1.8 Column \"Subject\"",
+  "4.2.1.9 Column \"Received\"",
+  "4.2.1.10 Column \"Size\"",
+  "4.2.1.11 Column \"Categories\"",
+  "4.2.2 PidTagViewDescriptorStrings",
+  "4.3.1 A Categorized and Moved Conversation Action",
+  "4.4.1 Group Header",
+  "4.4.2 Navigation Shortcut",
+]
+
+[[protocol]]
+id = "MS-OXCFXICS"
+title = "ICS and Fast Transfer Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCFXICS/%5bMS-OXCFXICS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCFXICS.pdf"
+sha256 = "140dcc7aa7d8313b6257d2827f36405480f74de62d3b63f2dd8aeb56ea5bb5c5"
+used_for = [
+  "Outlook cached-mode hierarchy and content synchronization",
+  "ICS state, FastTransfer streams, and sync progress behavior",
+  "folderChange conditional FolderId and ParentFolderId identity properties",
+  "Unicode and ForceUnicode FastTransfer string-property encoding",
+  "RopFastTransferSourceCopyFolder topFolder root and folderContent marker behavior",
+  "FastTransfer message element StartMessage versus StartFAIMsg behavior",
+  "Content synchronization messageChangeFull grammar without an ad hoc null-property terminator before the next ICS marker",
+  "PartialItem SendOptions handling and documented full-item fallback when partial changes are unsupported",
+  "Partial item upload example using OpenCollector, UploadStateStream, existing-message property changes, and GetTransferState",
+  "PredecessorChangeList conflict detection examples for FailOnConflict content uploads",
+  "Imported message and hierarchy deletion flags and PtypMultipleBinary GID list semantics",
+  "Preservation of persisted FAI SourceKey, ChangeKey, and PredecessorChangeList across ICS upload and download",
+  "Post-save retrieval of PidTagChangeKey on a Message object kept open by the client",
+  "Durable Calendar Event ChangeNumber, ChangeKey, PredecessorChangeList, and stable SourceKey projection across direct reads and ICS",
+  "Calendar identity-material repair that distinguishes immutable object identity from the current or imported version ChangeKey",
+  "Final Calendar ICS CnsetSeen and CnsetSeenFAI advancement using each emitted object's durable change number rather than its message identifier",
+  "Calendar-to-Deleted-Items move identity replacement, source deletion, and destination creation semantics",
+  "Calendar ICS upload PCL conflict detection, conflict resolution, last-writer-wins selection, and final CnsetRead boundaries",
+  "Durable exclusive reservation of the complete RopGetLocalReplicaIds range used by Outlook cached mode",
+  "SynchronizationExtraFlags bit values and conditional messageChangeHeader properties",
+  "Hierarchy collector Boolean semantics and upload GetTransferState checkpoint composition",
+  "Durable special-folder alias reconciliation with a server CN distinct from the client-reserved FID",
+  "Durable special-folder identity with distinct folder IDs and server change numbers across properties, hierarchy tables, and ICS state",
+  "Existing canonical-folder hierarchy uploads, duplicate detection, and conflict responses without advancing CnsetSeen",
+  "Upload state ignores MetaTagIdsetGiven and returns only applicable CN sets",
+  "RopFastTransferSourceCopyTo and CopyProperties Message-object messageContent root without StartMessage or StartFAIMsg wrappers",
+]
+sections = [
+  "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",
+  "2.2.1.1.2 MetaTagCnsetSeen ICS State Property",
+  "2.2.1.1.3 MetaTagCnsetSeenFAI ICS State Property",
+  "2.2.1.1.4 MetaTagCnsetRead ICS State Property",
+  "2.2.1.2.3 PidTagChangeNumber Property",
+  "2.2.1.2.5 PidTagSourceKey Property",
+  "2.2.1.2.7 PidTagChangeKey Property",
+  "2.2.1.2.8 PidTagPredecessorChangeList Property",
+  "2.2.2.1 CN Structure",
+  "2.2.2.2 XID Structure",
+  "2.2.2.3 PredecessorChangeList Structure",
+  "2.2.2.3.1 SizedXid Structure",
+  "2.2.2.5 GLOBCNT Structure",
+  "2.2.2.7 ProgressInformation Structure",
+  "2.2.3.1.1.1.1 RopFastTransferSourceCopyTo ROP Request Buffer",
+  "2.2.3.1.1.1 RopFastTransferSourceCopyTo ROP",
+  "2.2.3.1.1.2 RopFastTransferSourceCopyProperties ROP",
+  "2.2.3.2.1.1.1 RopSynchronizationConfigure ROP Request Buffer",
+  "2.2.3.2.3.1 RopSynchronizationGetTransferState ROP",
+  "2.2.3.2.4.1.1 RopSynchronizationOpenCollector ROP Request Buffer",
+  "2.2.3.2.4.3.1 RopSynchronizationImportHierarchyChange ROP Request Buffer",
+  "2.2.3.2.4.3.2 RopSynchronizationImportHierarchyChange ROP Response Buffer",
+  "2.2.3.2.4.7.2 RopGetLocalReplicaIds ROP Response Buffer",
+  "2.2.4.1.4 Markers",
+  "2.2.4.1.5.4 MetaTagIncrSyncGroupId Meta-Property",
+  "2.2.4.1.5.5 MetaTagIncrementalSyncMessagePartial Meta-Property",
+  "2.2.4.2 Syntactical Structure",
+  "2.2.4.3.5 folderChange Element",
+  "2.2.4.3.6 folderContent Element",
+  "2.2.4.3.8 groupInfo Element",
+  "2.2.4.3.9 hierarchySync Element",
+  "2.2.4.3.10 message Element",
+  "2.2.4.3.11 messageChange Element",
+  "2.2.4.3.13 messageChangeFull Element",
+  "2.2.4.3.14 messageChangeHeader Element",
+  "2.2.4.3.16 messageContent Element",
+  "2.2.4.4 FastTransfer Streams in ROPs",
+  "2.2.3.2.4.2.1 RopSynchronizationImportMessageChange ROP Request Buffer",
+  "2.2.3.2.4.5.1 RopSynchronizationImportDeletes ROP Request Buffer",
+  "2.2.3.2.4.5.2 RopSynchronizationImportDeletes ROP Response Buffer",
+  "2.2.3.2.4.4.1 RopSynchronizationImportMessageMove ROP Request Buffer",
+  "2.2.3.2.4.4.2 RopSynchronizationImportMessageMove ROP Response Buffer",
+  "2.2.3.2.4.7 RopGetLocalReplicaIds ROP",
+  "3.2.5.9.4.7 Receiving a RopGetLocalReplicaIds ROP Request",
+  "3.1.5.3 Identifying Objects and Maintaining Change Numbers",
+  "3.1.5.6.1 Detection",
+  "3.1.5.6.2 Resolution",
+  "3.1.5.6.2.2 Last Writer Wins Algorithm",
+  "3.2.5.3 Determining What Differences To Download",
+  "3.2.5.2.1 Receiving the MetaTagIdsetGiven ICS State Property",
+  "3.2.5.5 Generating the PidTagSourceKey Value",
+  "3.2.5.7 Working with Property Groups and Partial Changes",
+  "3.2.5.8.1.1 Receiving a RopFastTransferSourceCopyTo ROP Request",
+  "3.2.5.9.1.1 Receiving a RopSynchronizationConfigure ROP Request",
+  "3.2.5.9.4.2 Receiving a RopSynchronizationImportMessageChange ROP Request",
+  "3.2.5.9.3.1 Receiving a RopSynchronizationGetTransferState ROP Request",
+  "3.2.5.9.4.3 Receiving a RopSynchronizationImportHierarchyChange ROP Request",
+  "3.2.5.9.4.4 Receiving a RopSynchronizationImportMessageMove ROP Request",
+  "3.2.5.9.4.5 Receiving a RopSynchronizationImportDeletes ROP Request",
+  "3.3.4.3.3.2.1.1 Moves and Modifications",
+  "3.3.4.3.3 Uploading Changes Using ICS",
+  "3.3.4.3.3.1 Hierarchy Upload",
+  "3.3.4.3.3.1.1 Uploading Hierarchy Changes",
+  "3.3.4.3.3.2.2.1 Full Item Upload",
+  "3.3.4.3.3.2.2.2 Partial Item Upload",
+  "3.3.5.2.1 Client-Assigned Internal Identifiers",
+  "3.3.5.8.7 Sending a RopSynchronizationImportMessageChange ROP Request",
+  "3.3.5.8.12 Sending a RopGetLocalReplicaIds ROP Request",
+  "3.3.5.8.8 Sending a RopSynchronizationImportHierarchyChange ROP Request",
+  "3.3.5.11 Client Conflict Resolution",
+  "4.1 Hierarchy Synchronization Examples",
+  "4.2 Message Synchronization Upload Examples",
+  "4.3.1 Uploading a Partial Item",
+  "4.3.2 Downloading a Partial Item",
+  "4.3 Partial Item Examples",
+  "4.4 Serialization of an IDSET Structure Example",
+  "4.5 FastTransfer Stream Produced by a Content Synchronization Download Example",
+  "4.6 Conflict Detection and Conflict Resolution Examples",
+  "4.6.1 Comparing the PidTagPredecessorChangeList Property to Detect Conficts, No Conflicts Found",
+  "4.6.2 Comparing the PidTagPredecessorChangeList Property to Detect Conflicts, Conflicts Found",
+]
+
+[[protocol]]
+id = "MS-OXCTABL"
+title = "Table Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxctabl/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCTABL/%5bMS-OXCTABL%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCTABL.pdf"
+sha256 = "8e45ff7e78cd9c468508c36dde59eda28b7f6d92f27c8734d8d369479ad2ed27"
+used_for = [
+  "Folder hierarchy, contents table, sort, restriction, categorized view, and row semantics",
+  "Custom bookmark create, seek, and free table behavior",
+  "Collapsed categorized table state restore and returned bookmark lifetime",
+  "Outlook Inbox SetColumns, Release-before-QueryRows, QueryPosition, SeekRow, and QueryRows window diagnostics",
+  "RopFindRow matching and preservation of the opened table rowset",
+  "Client-issued RopSortTable ownership of Calendar contents-table sort state",
+]
+sections = [
+  "2.2.1.1 PidTagInstID",
+  "2.2.1.2 PidTagInstanceNum",
+  "2.2.2.2 RopSetColumns",
+  "2.2.2.3 RopSortTable",
+  "2.2.2.3.1 RopSortTable ROP Request Buffer",
+  "3.2.5.3 RopSortTable ROP",
+  "2.2.2.5 RopQueryRows",
+  "2.2.2.5.2 RopQueryRows ROP Response Buffer",
+  "2.2.2.8 RopQueryPosition ROP",
+  "2.2.2.8.1 RopQueryPosition ROP Request Buffer",
+  "2.2.2.8.2 RopQueryPosition ROP Response Buffer",
+  "2.2.2.9 RopSeekRow ROP",
+  "2.2.2.9.1 RopSeekRow ROP Request Buffer",
+  "2.2.2.9.2 RopSeekRow ROP Response Buffer",
+  "2.2.2.10 RopSeekRowBookmark ROP",
+  "2.2.2.10.1 RopSeekRowBookmark ROP Request Buffer",
+  "2.2.2.10.2 RopSeekRowBookmark ROP Response Buffer",
+  "2.2.2.11 RopSeekRowFractional ROP",
+  "2.2.2.11.1 RopSeekRowFractional ROP Request Buffer",
+  "2.2.2.11.2 RopSeekRowFractional ROP Response Buffer",
+  "2.2.2.12 RopCreateBookmark ROP",
+  "2.2.2.12.1 RopCreateBookmark ROP Request Buffer",
+  "2.2.2.12.2 RopCreateBookmark ROP Response Buffer",
+  "2.2.2.14 RopFindRow ROP",
+  "2.2.2.15 RopFreeBookmark ROP",
+  "2.2.2.15.1 RopFreeBookmark ROP Request Buffer",
+  "2.2.2.15.2 RopFreeBookmark ROP Response Buffer",
+  "2.2.2.16 RopResetTable ROP",
+  "2.2.2.16.1 RopResetTable ROP Request Buffer",
+  "2.2.2.16.2 RopResetTable ROP Response Buffer",
+  "2.2.2.17 RopExpandRow",
+  "2.2.2.19 RopGetCollapseState ROP",
+  "2.2.2.19.1 RopGetCollapseState ROP Request Buffer",
+  "2.2.2.19.2 RopGetCollapseState ROP Response Buffer",
+  "2.2.2.20 RopSetCollapseState ROP",
+  "2.2.2.20.1 RopSetCollapseState ROP Request Buffer",
+  "2.2.2.20.2 RopSetCollapseState ROP Response Buffer",
+  "4.1 Obtaining a Message List",
+  "3.2.5.14 RopFindRow ROP",
+  "4.2 Setting the Columns on a Table",
+  "4.3 Sorting a Table by Time Delivered",
+  "4.4 Querying Rows",
+  "4.5 Working with Categories",
+]
+
+[[protocol]]
+id = "MS-OXCFOLD"
+title = "Folder Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfold/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCFOLD/%5bMS-OXCFOLD%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCFOLD.pdf"
+sha256 = "23c199854cfde4d728663e566b8362209e9744dee6a634b87b55870cc8fb9737"
+used_for = [
+  "Mailbox folder properties, special folders, receive folders, folder hierarchy behavior, and search folder criteria",
+  "Custom folder create, delete, move, and copy protocol example behavior over canonical mailbox state",
+  "Folder and message soft-delete and hard-delete behavior over canonical mailbox state",
+  "Contents-table RowCount semantics for normal and associated contents",
+  "Calendar folder use of client Normal view when no default-view EntryID is advertised",
+  "Hierarchy and contents table NoNotifications flag semantics",
+  "Outlook startup folder-open existence/access and hierarchy-table object contracts",
+  "Outlook Calendar same-folder and Calendar-to-Deleted-Items message move and partial-completion semantics",
+  "Durable MAPI folder hierarchy version times and the LocalCommitTimeMax boundary",
+]
+sections = [
+  "2.2.1.1 RopOpenFolder ROP",
+  "2.2.1.1.1 RopOpenFolder ROP Request Buffer",
+  "2.2.1.1.2 RopOpenFolder ROP Response Buffer",
+  "2.2.1.2 RopCreateFolder",
+  "2.2.1.3 RopDeleteFolder",
+  "2.2.1.4 RopSetSearchCriteria",
+  "2.2.1.5 RopGetSearchCriteria",
+  "2.2.1.6 RopMoveCopyMessages",
+  "2.2.1.6.1 RopMoveCopyMessages ROP Request Buffer",
+  "2.2.1.6.2 RopMoveCopyMessages ROP Response Buffer",
+  "2.2.1.7 RopMoveFolder",
+  "2.2.1.8 RopCopyFolder",
+  "2.2.1.9 RopEmptyFolder",
+  "2.2.1.10 RopHardDeleteMessagesAndSubfolders",
+  "2.2.1.11 RopDeleteMessages",
+  "2.2.1.12 RopHardDeleteMessages",
+  "2.2.1.13 RopGetHierarchyTable",
+  "2.2.1.13.1 RopGetHierarchyTable ROP Request Buffer",
+  "2.2.1.13.2 RopGetHierarchyTable ROP Response Buffer",
+  "2.2.1.14 RopGetContentsTable",
+  "2.2.1.14.1 RopGetContentsTable ROP Request Buffer",
+  "2.2.1.14.2 RopGetContentsTable ROP Response Buffer",
+  "2.2.2.2 Folder Object Properties",
+  "2.2.2.2.1.9 PidTagHierRev Property",
+  "2.2.2.2.1.13 PidTagLocalCommitTime Property",
+  "2.2.2.2.1.14 PidTagLocalCommitTimeMax Property",
+  "3.1.4.6 Moving a Folder and Its Contents",
+  "3.2.5.6 Processing a RopMoveCopyMessages ROP Request",
+  "3.2.5.11 Processing a RopDeleteMessages ROP Request",
+  "4.1 Create Folder",
+  "4.2 Delete Folder",
+  "4.3 Delete Messages",
+  "4.4 MoveCopyMessages",
+  "4.5 MoveFolder",
+  "4.6 CopyFolder",
+  "4.7 GetHierarchyTable",
+  "4.8 SetSearchCriteria",
+  "4.9 GetSearchCriteria",
+  "3.2.5.1 Processing a RopOpenFolder ROP Request",
+  "3.2.5.13 Processing a RopGetHierarchyTable ROP Request",
+]
+
+[[protocol]]
+id = "MS-OXOSRCH"
+title = "Search Folder List Configuration Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxosrch/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOSRCH/%5bMS-OXOSRCH%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOSRCH.pdf"
+sha256 = "5aa019be10414e923f0804466cbba0d1532c15e121ebe3ffd9a4746efbb6dc13"
+used_for = [
+  "Common Views search folder definition FAI message projection",
+  "PidTagSearchFolderId, PidTagSearchFolderTemplateId, PidTagSearchFolderTag, PidTagSearchFolderStorageType, PidTagSearchFolderEfpFlags, and PidTagSearchFolderDefinition behavior",
+  "Search folder container ExtendedFolderFlags SearchFolderTag and SearchFolderID subproperty alignment",
+]
+sections = [
+  "2.2.1.2 Additional Properties",
+  "2.2.1.2.1 PidTagSearchFolderId",
+  "2.2.1.2.2 PidTagSearchFolderTemplateId",
+  "2.2.1.2.3 PidTagSearchFolderTag",
+  "2.2.1.2.4 PidTagSearchFolderLastUsed",
+  "2.2.1.2.5 PidTagSearchFolderExpiration",
+  "2.2.1.2.6 PidTagSearchFolderStorageType",
+  "2.2.1.2.7 PidTagSearchFolderEfpFlags",
+    "2.2.1.2.8 PidTagSearchFolderDefinition",
+    "2.2.1.2.8.2 Restriction",
+    "2.2.3 Search Templates",
+    "2.2.3.1 Unread Messages",
+    "2.2.2.1.2 PidTagExtendedFolderFlags",
+    "2.2.4 Search Folder Definition Messages and Search Folder Containers",
+  "3.1.3 Initialization",
+  "4.1 Search Folder Message Object",
+]
+
+[[protocol]]
+id = "MS-OXCPERM"
+title = "Folder Permissions Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcperm/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCPERM/%5bMS-OXCPERM%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCPERM.pdf"
+sha256 = "f129904f77752739be0a8a5ca36a23095412e29dc53383493b97792510fd3dfe"
+used_for = [
+  "Folder permissions table projection and bounded permission mutation over canonical grants",
+]
+sections = [
+  "2.2.1 RopGetPermissionsTable ROP",
+  "2.2.2 RopModifyPermissions ROP",
+  "2.2.2.1.1 PermissionData Structure",
+  "2.2.5 PidTagMemberId Property",
+  "2.2.6 PidTagMemberName Property",
+  "2.2.7 PidTagMemberRights Property",
+  "3.2.5.1 Processing a RopGetPermissionsTable ROP Request",
+  "3.2.5.2 Processing a RopModifyPermissions ROP Request",
+  "4.1 Adding an Entry to the Permissions List",
+  "4.2 Modifying an Entry in the Permissions List",
+  "4.3 Removing an Entry from the Permissions List",
+]
+
+[[protocol]]
+id = "MS-OXCNOTIF"
+title = "Core Notifications Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcnotif/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCNOTIF/%5bMS-OXCNOTIF%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCNOTIF.pdf"
+sha256 = "0cded97eba05cf4e745534683c9e5672683aedfef52c4d11dc24a223a20fea82"
+used_for = [
+  "MAPI notification registration and MAPI/HTTP NotificationWait event delivery",
+  "RopNotify content, hierarchy, table, and folder-count notification data",
+  "NewMail versus ObjectCreated event classification for canonical Inbox delivery",
+  "Automatic table notification subscription lifecycle",
+  "Protocol gate for Calendar Event ObjectCreated, ObjectModified, ObjectDeleted, and NotificationData folder/message identifiers",
+  "Calendar-to-Deleted-Items ObjectMoved old/new FolderId and MessageId notification semantics",
+]
+sections = [
+  "2.2.1 Notifications",
+  "2.2.1.1 Server Event Types",
+  "2.2.1.2.1 RopRegisterNotification ROP",
+  "2.2.1.3 Pending Notifications",
+  "2.2.1.4.1 RopNotify ROP",
+  "2.2.1.4.1.2 NotificationData Structure",
+  "3.1.4.2 Sending Notification Details",
+  "3.1.4.3 Creating and Sending TableModified Event Notifications",
+  "3.1.5.1 Receiving a RopRegisterNotification ROP Request",
+  "3.1.5.6 Sending a RopPending ROP Response",
+  "3.1.5.7 Sending a RopNotify ROP Response",
+  "3.2.5.7 Receiving Notification Details By Using the RopNotify ROP",
+  "4 Protocol Examples",
+]
+
+[[protocol]]
+id = "MS-OXCSTOR"
+title = "Store Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcstor/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCSTOR/%5bMS-OXCSTOR%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCSTOR.pdf"
+sha256 = "c4c2fd644d533c3c1ed20646096b91f4d487f60f75ad2b922cc13d5d5fa5b67c"
+used_for = [
+  "Private mailbox and public-folder store logon, receive-folder bootstrap, store-state probes, and public-folder per-user identity lookup",
+]
+sections = [
+  "2.2.1.1 RopLogon ROP",
+  "2.2.1.1.3 RopLogon ROP Success Response Buffer for Private Mailbox",
+  "2.2.1.1.4 RopLogon ROP Success Response Buffer for Public Folders",
+  "2.2.1.2 RopGetReceiveFolder ROP",
+  "2.2.1.3 RopSetReceiveFolder ROP",
+  "2.2.1.4 RopGetReceiveFolderTable ROP",
+  "2.2.1.5 RopGetStoreState ROP",
+  "2.2.1.10 RopGetPerUserLongTermIds ROP",
+  "2.2.1.11 RopGetPerUserGuid ROP",
+  "2.2.1.12 RopReadPerUserInformation ROP",
+  "2.2.1.13 RopWritePerUserInformation ROP",
+  "4.1 RopLogon for a Private Mailbox",
+  "4.2 RopLogon for Public Folders",
+  "4.3 RopGetReceiveFolder",
+  "4.4 RopSetReceiveFolder",
+  "4.5 RopGetReceiveFolderTable",
+]
+
+[[protocol]]
+id = "MS-OXOSFLD"
+title = "Special Folders Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxosfld/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOSFLD/%5bMS-OXOSFLD%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOSFLD.pdf"
+sha256 = "68ef599b563b6258ebe1f88a39f48f271fecf7117c3848b7dd9dbc0ef7adc400"
+used_for = [
+  "Outlook special folder hierarchy projection, identifiers, container classes, and search-folder placement",
+  "Root, Finder/Search, Common Views, Personal Views, Deferred Action, FreeBusy Data, Reminders, To-Do, tracked mail, and Conversation Action Settings compatibility",
+  "Deleted Items as the default destination for deleted objects and Calendar move projection",
+]
+sections = [
+  "2.2.1 List of Special Folders",
+  "2.2.2 Identifiers for Special Folders",
+  "2.2.3 Binary Identification Properties",
+  "2.2.4 PidTagAdditionalRenEntryIds Property",
+  "2.2.5 PidTagAdditionalRenEntryIdsEx Property",
+  "2.2.6 PidTagFreeBusyEntryIds Property",
+  "2.2.7 Inbox Identification",
+  "2.2.8 PidTagContainerClass Property",
+  "3.1.1.2 Search Criteria for Search Special Folders",
+  "3.1.4.1 Folder Creation",
+]
+
+[[protocol]]
+id = "MS-OXBBODY"
+title = "Best Body Retrieval Algorithm"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxbbody/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXBBODY/%5bMS-OXBBODY%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXBBODY.pdf"
+sha256 = "7dc48bc2b675d9f78a9ef236c77b3e57afa9dded613ac74c249021a44cf33c2c"
+used_for = [
+  "Message body format selection across MAPI, ActiveSync, and IMAP projections",
+  "PidTagHtml NotEnoughMemory fallback before stream retrieval",
+]
+sections = [
+  "2.1 Best Body Determination Algorithm Details",
+  "2.1.3.1 Best Body Algorithm",
+  "2.1.3.2 Determining Whether Plain Text or HTML Was Converted to RTF",
+  "2.1.3.3 Special Considerations for S/MIME Secure Messages",
+  "2.1.3.4 Special Considerations for Rights-Managed Secure Messages",
+]
+
+[[protocol]]
+id = "MS-OXCMAIL"
+title = "MIME Conversion Algorithm"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmail/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCMAIL/%5bMS-OXCMAIL%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCMAIL.pdf"
+sha256 = "e60151f56a6a48dce36cd7244357fc713c51ce8fe49680efc6dca548ef029b40"
+used_for = [
+  "MIME generation and canonical mail object projection across ActiveSync, MAPI submission, and IMAP fetch",
+]
+sections = [
+  "2.1 MIME Generation Algorithm Details",
+  "2.1.3.1 Address Elements",
+  "2.1.3.2 Envelope Elements",
+  "2.1.3.3 Body Text",
+  "2.1.3.4 Attachments",
+]
+
+[[protocol]]
+id = "MS-OXCICAL"
+title = "iCalendar to Appointment Object Conversion Algorithm"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcical/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCICAL/%5bMS-OXCICAL%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCICAL.pdf"
+sha256 = "27029ae5f860e29e283e2d88cf40bf82bb304c611fe7af8ce387f010612e104d"
+used_for = [
+  "Internet calendar projection across DAV, ActiveSync, and MAPI calendar views",
+  "Zero-length Calendar subject semantics after PidTagSubject is deleted",
+]
+sections = [
+  "2.1 Common Algorithm Details",
+  "2.1.3.1 Hierarchy of Components, Properties, and Parameters",
+  "2.1.3.1.1 Component: VCALENDAR",
+  "2.1.3.1.1.19 Component: VTIMEZONE",
+  "2.1.3.1.1.20 Component: VEVENT",
+  "2.1.3.1.1.20.24 Property: SUMMARY",
+]
+
+[[protocol]]
+id = "MS-OXDISCO"
+title = "Autodiscover Publishing and Lookup Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxdisco/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXDISCO/%5bMS-OXDISCO%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXDISCO.pdf"
+sha256 = "fd0b54e1224f3f346006014c4cc907816fe3e3a37ca138c32d0e877ceb46f491"
+used_for = [
+  "Autodiscover publication, lookup, endpoint gating, and LPE-CT edge routing behavior",
+]
+sections = [
+  "2.2.1 Service Connection Point Publication Service Objects",
+  "2.2.2 DNS SRV Queries",
+  "2.2.3 HTTP 302 Redirection",
+  "2.2.4 Email Addresses",
+  "2.2.5 Autodiscover Server URI Results",
+  "3.1.5.1 Query a Well-Known LDAP Server for Service Connection Point Objects",
+  "3.1.5.2 Locations Found Directly From the Email Domain",
+  "3.1.5.3 Locations Found from SRV DNS Records",
+  "3.1.5.4 Locations Found by an HTTP Redirect",
+  "3.2.3.3 Locations Published in DNS as Autodiscover.<Domain> and <Domain>",
+  "3.2.3.4 Locations Published in DNS By Using SRV Records",
+  "3.2.3.5 Locations Published Through an HTTP GET",
+]
+
+[[protocol]]
+id = "MS-OXDSCLI"
+title = "Autodiscover Client Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxdscli/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXDSCLI/%5bMS-OXDSCLI%5d.pdf"
+published_version = "2025-08-19"
+local_cache = "docs/microsoft/cache/MS-OXDSCLI.pdf"
+sha256 = "7518d8564b462de6c892fb729a199c0a7cf2718485713bede36a516774f2f6ce"
+used_for = [
+  "POX Autodiscover response shape and gated Exchange-compatible profile metadata",
+  "LegacyDN, IMAP, optional SMTP, ActiveSync, EWS, EXCH/EXPR, WEB/OWAUrl, and MAPIHTTP publication decisions",
+]
+sections = [
+  "2.2.2.1 X-MapiHttpCapability",
+  "2.2.2.2 X-AnchorMailbox",
+  "2.2.2.3 X-ClientCanHandle",
+  "2.2.3.1.1.1 AcceptableResponseSchema",
+  "2.2.3.1.1.2 EMailAddress",
+  "2.2.3.1.1.3 LegacyDN",
+  "2.2.4.1.1.1 User",
+  "2.2.4.1.1.1.1 AutoDiscoverSMTPAddress",
+  "2.2.4.1.1.1.5 LegacyDN",
+  "2.2.4.1.1.2 Account",
+  "2.2.4.1.1.2.6 Protocol",
+  "2.2.4.1.1.2.6.2 ASUrl",
+  "2.2.4.1.1.2.6.23 EmwsUrl",
+  "2.2.4.1.1.2.6.24 EwsUrl",
+  "2.2.4.1.1.2.6.25 External",
+  "2.2.4.1.1.2.6.27.1 OWAUrl",
+  "2.2.4.1.1.2.6.29 MailStore",
+  "2.2.4.1.1.2.6.46 Type",
+  "4.1 Autodiscover Request",
+  "4.3 Autodiscover Configuration",
+  "4.4 MapiHttp Response",
+]
+
+[[protocol]]
+id = "MS-OXCRPC"
+title = "Wire Format Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcrpc/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCRPC/%5bMS-OXCRPC%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCRPC.pdf"
+sha256 = "1cd9c508a8a8b9c2db749c2744c8c12d673539ebda9e21b50322b64da71519ae"
+used_for = [
+  "Outlook Anywhere RPC proxy behavior for authenticated RPC_IN_DATA/RPC_OUT_DATA probes and bounded EMSMDB/NSPI in-channel compatibility",
+  "EcDoRpcExt2 return values underlying the MAPI/HTTP Execute failure StatusCode boundary",
+  "RPC_HEADER_EXT framing of extended ROP request and response payloads",
+]
+sections = [
+  "2.2.2.1 RPC_HEADER_EXT Structure",
+  "2.2.2.2 AUX_HEADER Structure",
+  "2.2.2.2.19 AUX_SERVER_CAPABILITIES",
+  "2.2.2.2.20 AUX_ENDPOINT_CAPABILITIES",
+  "2.2.2.2.23 AUX_PROTOCOL_DEVICE_IDENTIFICATION",
+  "3.1.4.1 EcDoConnectEx Method",
+  "3.1.4.1.1 Extended Buffer Handling",
+  "3.1.4.1.1.2 Compression Algorithm",
+  "3.1.4.1.1.3 Obfuscation Algorithm",
+  "3.1.4.2 EcDoRpcExt2 Method",
+  "3.1.4.2.1 Extended Buffer Handling",
+  "3.1.4.2.1.1 Extended Buffer Format",
+  "3.1.4.2.1.1.2 rgbOut Output Buffer",
+  "3.1.4.3 EcDoDisconnect Method",
+  "4.1 Connect to the Server",
+  "4.2 Issue ROP Commands",
+  "4.3 Receive Packed ROP Responses",
+  "4.4 Disconnect from the Server",
+]
+
+[[protocol]]
+id = "MS-OXIMAP4"
+title = "Internet Message Access Protocol Version 4 (IMAP4) Extensions"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oximap4/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXIMAP4/%5bMS-OXIMAP4%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXIMAP4.pdf"
+sha256 = "1d4e27e000872e439f5dfe586edf557e2e095970ea949968e11d7ce996d4bea4"
+used_for = [
+  "Exchange-specific IMAP4 extension audit for LPE's IMAP compatibility layer and explicit unsupported NTLM/delegate behavior",
+]
+sections = [
+  "2.2.1 IMAP4 NTLM Extension Messages",
+  "2.2.2 IMAP4 Delegate Access Extension Messages",
+  "2.2.3 IMAP UIDPLUS Extension Messages",
+  "3.2.5.1 Receiving an IMAP4 NTLM Extension Message",
+  "3.2.5.2 Receiving an IMAP4 Delegate Access Extension Message",
+  "3.2.5.3 Receiving an IMAP UIDPLUS Extension Message",
+  "4.1 IMAP4 NTLM Extension",
+  "4.2 IMAP4 Delegate Access Extension",
+  "4.3 IMAP UIDPLUS Extension",
+]
+
+[[protocol]]
+id = "MS-OXPOP3"
+title = "Post Office Protocol - Version 3 (POP3) Extensions"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxpop3/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXPOP3/%5bMS-OXPOP3%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXPOP3.pdf"
+sha256 = "78168b118156b871e47673729aeedc2c399f3160d26671c8fe02d064c60211e4"
+used_for = [
+  "Explicit POP3 non-implementation and non-advertisement boundary for LPE client protocols",
+]
+sections = [
+  "2.2.1 AUTH Extensions",
+  "2.2.2 POP3 Delegate Access",
+  "3.2.5.1 Receiving a POP3_AUTH_NTLM_Initiation_Command Message",
+  "3.2.5.2 Receiving a POP3_AUTH_NTLM_Blob_Command Message",
+  "4.1 POP3 Client Successfully Authenticating to a POP3 Server",
+  "4.2 POP3 Client Unsuccessfully Authenticating to a POP3 Server",
+]
+
+[[protocol]]
+id = "MS-OXSMTP"
+title = "Simple Mail Transfer Protocol (SMTP) AUTH Extension"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxsmtp/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXSMTP/%5bMS-OXSMTP%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXSMTP.pdf"
+sha256 = "628309bf03ca8fc2cb76e1807eb6b77f19fe7035b7c44f7b25ca5dee0de9f0bc"
+used_for = [
+  "LPE-CT SMTP ingress and authenticated submission SASL behavior boundaries",
+]
+sections = [
+  "2.2.1 SASL_Mechanism_Supported",
+  "3.2.5.1 Sending a SASL_Mechanism_Supported Message",
+  "4 Protocol Examples",
+]
+
+[[protocol]]
+id = "MS-OXOMSG"
+title = "E-Mail Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxomsg/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOMSG/%5bMS-OXOMSG%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOMSG.pdf"
+sha256 = "30b42f33ee5e6c8650b1a7e772ec3be37881ff5262990c8038852ee57bcbab78"
+used_for = [
+  "Bounded Outlook mail item property projection, message create/open/save/sync behavior, recipient visibility, and follow-up field boundaries",
+  "PidTagReplyRecipientEntries relationship to PidTagReplyRecipientNames",
+]
+sections = [
+  "2.2.1 E-Mail Object Properties",
+  "2.2.1.2 PidTagConversationId Property",
+  "2.2.1.3 PidTagConversationIndex Property",
+  "2.2.1.7 PidTagDisplayBcc Property",
+  "2.2.1.8 PidTagDisplayCc Property",
+  "2.2.1.9 PidTagDisplayTo Property",
+  "2.2.1.12 PidTagInternetMessageId Property",
+  "2.2.1.16 PidTagMessageClass Property",
+  "2.2.1.29 PidTagReadReceiptRequested Property",
+  "2.2.1.43 PidTagReplyRecipientEntries Property",
+  "2.2.1.48 PidTagSenderAddressType Property",
+  "2.2.1.53 PidTagSenderSmtpAddress Property",
+  "2.2.1.61 PidTagTransportMessageHeaders Property",
+  "2.2.1.67 Attachments",
+  "2.2.1.68 Categories and Keywords",
+  "2.2.1.70 Flags",
+  "2.2.1.71 Reminders",
+  "2.2.1.72 Recipients",
+]
+
+[[protocol]]
+id = "MS-OXOFLAG"
+title = "Informational Flagging Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxoflag/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOFLAG/%5bMS-OXOFLAG%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOFLAG.pdf"
+sha256 = "ab7acf895dd625423db41b615dda76d02a6a81545f2c19e6f1e09efcaa2e60f1"
+used_for = [
+  "Outlook follow-up flag property projection and canonical message flag boundaries",
+]
+sections = [
+  "2.2.1 Properties Specific to the Informational Flagging Protocol",
+  "2.2.1.1 PidTagFlagStatus Property",
+  "2.2.1.2 PidTagFollowupIcon Property",
+  "2.2.1.3 PidTagFlagCompleteTime Property",
+  "2.2.1.6 PidTagToDoItemFlags Property",
+  "2.2.1.9 PidLidFlagRequest Property",
+  "2.2.1.12 PidLidToDoTitle Property",
+  "2.2.2 Properties Shared with the Task-Related Object Protocol",
+  "2.2.3.1 PidTagReplyTime Property",
+  "3.1.4.1 Flagging a Message Object",
+  "3.1.4.2 Clearing a Flag on a Message Object",
+  "4.1 Color-Flagged Object",
+  "4.2 Time Flagged Object",
+  "4.3 Completed Object",
+]
+
+[[protocol]]
+id = "MS-OXORULE"
+title = "E-Mail Rules Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxorule/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXORULE/%5bMS-OXORULE%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXORULE.pdf"
+sha256 = "5838e619e78a337bf17267c5f517c0d9326613961261f4b016de1a6826c830df"
+used_for = [
+  "Bounded RopGetRulesTable/RopModifyRules mapping to canonical Sieve rules and explicit rejection of Exchange-only rule blobs",
+]
+sections = [
+  "2.2.1 RopModifyRules ROP",
+  "2.2.1.3 RuleData Structure",
+  "2.2.1.3.1 Properties of a Standard Rule",
+  "2.2.2 RopGetRulesTable ROP",
+  "2.2.3 RopUpdateDeferredActionMessages ROP",
+  "2.2.4 Extended Rules Message Syntax",
+  "2.2.5 RuleAction Structure",
+  "2.2.6 DAM Syntax",
+  "2.2.7 DEM Syntax",
+  "2.2.8 Rules-Related Folder Properties",
+  "2.2.9 Rules-Related Message Properties",
+  "3.1.4.1 Retrieving Existing Rules",
+  "3.1.4.2 Adding, Modifying, or Deleting Rules",
+]
+
+[[protocol]]
+id = "MS-OXOCAL"
+title = "Appointment and Meeting Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxocal/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOCAL/%5bMS-OXOCAL%5d.pdf"
+published_version = "2025-08-19"
+local_cache = "docs/microsoft/cache/MS-OXOCAL.pdf"
+sha256 = "1883d4e7de5c8b14dd65bb5759b01a26814a782a6d5a87387ec1cb61d67f1518"
+used_for = [
+  "Bounded Outlook calendar appointment and meeting property projection over canonical event state",
+  "Binary recurrence mapping and explicit rejection or hiding of unsupported Outlook calendar payloads",
+  "Stable canonical preservation of Outlook GlobalObjectId and CleanGlobalObjectId during appointment creation",
+  "Per-event canonical UID fallback when Outlook omits GlobalObjectId and CleanGlobalObjectId during appointment creation",
+  "Outlook meeting creation property sequence including binary timezone definitions, object IDs, best-body stream, and save",
+  "Mailbox-assigned Calendar named-property aliases, persisted TZDEFINITION key names, and canonical reminder projection",
+  "Windows TZDEFINITION wire keys at the canonical IANA calendar-storage boundary",
+  "Existing appointment update property set including start, end, ClipStart, ClipEnd, and common start/end values",
+]
+sections = [
+  "2.2.1 Common Properties",
+  "2.2.1.4 PidLidLocation Property",
+  "2.2.1.5 PidLidAppointmentStartWhole Property",
+  "2.2.1.6 PidLidAppointmentEndWhole Property",
+  "2.2.1.7 PidLidAppointmentDuration Property",
+  "2.2.1.14 PidLidClipStart Property",
+  "2.2.1.15 PidLidClipEnd Property",
+  "2.2.1.27 PidLidGlobalObjectId Property",
+  "2.2.1.28 PidLidCleanGlobalObjectId Property",
+  "2.2.1.30 PidTagStartDate Property",
+  "2.2.1.31 PidTagEndDate Property",
+  "2.2.1.32 PidLidCommonStart Property",
+  "2.2.1.33 PidLidCommonEnd Property",
+  "2.2.1.39 PidLidTimeZoneStruct Property",
+  "2.2.1.40 PidLidTimeZoneDescription Property",
+  "2.2.1.41 PidLidAppointmentTimeZoneDefinitionRecur Property",
+  "2.2.1.42 PidLidAppointmentTimeZoneDefinitionStartDisplay Property",
+  "2.2.1.43 PidLidAppointmentTimeZoneDefinitionEndDisplay Property",
+  "2.2.1.44 PidLidAppointmentRecur Property",
+  "2.2.1.44.1 RecurrencePattern Structure",
+  "2.2.1.44.2 ExceptionInfo Structure",
+  "2.2.1.44.5 AppointmentRecurrencePattern Structure",
+  "2.2.2 Calendar Object",
+  "2.2.3 Appointment Object",
+  "4.2.2.1 Creating the Meeting",
+]
+
+[[protocol]]
+id = "MS-OXOCNTC"
+title = "Contact Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxocntc/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOCNTC/%5bMS-OXOCNTC%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOCNTC.pdf"
+sha256 = "5edd26c9d7cfc6edad754f21c92bf885c4eec48cf4fd49d239cf0844ed4d1229"
+used_for = [
+  "Bounded Outlook contact property projection, CRUD, contact search, and NSPI contact detail behavior over canonical contacts",
+]
+sections = [
+  "2.2.1 Contact Object Properties",
+  "2.2.1.1 Contact Name Properties",
+  "2.2.1.2 Electronic Address Properties",
+  "2.2.1.2.11 PidLidAddressBookProviderEmailList Property",
+  "2.2.1.2.12 PidLidAddressBookProviderArrayType Property",
+  "2.2.1.3 Physical Address Properties",
+  "2.2.1.4 Telephone Properties",
+  "2.2.1.5 Event Properties",
+  "2.2.1.6 Professional Properties",
+  "2.2.1.7 Business Card Properties",
+  "2.2.1.8 Contact Photo Properties",
+]
+
+[[protocol]]
+id = "MS-OXOTASK"
+title = "Task-Related Objects Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxotask/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOTASK/%5bMS-OXOTASK%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOTASK.pdf"
+sha256 = "d47f8ba81e531c54b6e247864debb3cbf6b8212feae3b401c474fe8476728089"
+used_for = [
+  "Bounded task object projection through DAV VTODO and MAPI folder/table/view compatibility",
+]
+sections = [
+  "2.2.1 Folder Properties",
+  "2.2.2 Task Object Properties",
+  "2.2.2.1 Additional Property Constraints",
+  "2.2.2.2 Task Object Specific Properties",
+  "2.2.3 Task Communications Properties",
+  "3.1.4.1 Creating a Task Object and a Task Communication",
+  "3.1.4.2 Modifying a Task Object and a Task Communication",
+  "3.1.4.6 Generating Instances of Recurring Tasks",
+  "4.1 Sending a Task Request",
+  "4.2 Processing a Task Update",
+]
+
+[[protocol]]
+id = "MS-OXONOTE"
+title = "Note Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxonote/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXONOTE/%5bMS-OXONOTE%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXONOTE.pdf"
+sha256 = "86f5bdca54ec439100ad02525ce1e7e0aaefcbc159036df2f3ce863072e2d7aa"
+used_for = [
+  "Bounded Outlook sticky-note projection, canonical note storage, and explicit geometry/attachment gaps",
+]
+sections = [
+  "2.2.1 Note Object Properties",
+  "2.2.1.1 PidLidNoteColor Property",
+  "2.2.1.2 PidLidNoteWidth Property",
+  "2.2.1.3 PidLidNoteHeight Property",
+  "2.2.1.4 PidLidNoteX Property",
+  "2.2.1.5 PidLidNoteY Property",
+  "2.2.2 Additional Property Constraints",
+  "2.2.2.1 Best Body Properties",
+  "2.2.2.2 PidTagIconIndex Property",
+  "2.2.2.3 PidTagMessageClass Property",
+  "2.2.2.4 PidTagNormalizedSubject Property",
+  "2.2.2.5 Recipients",
+  "2.2.2.6 Attachment Objects",
+  "3.1.4.1 Creating a Note Object",
+  "3.1.4.2 Modifying a Note Object",
+  "3.1.4.3 Deleting a Note Object",
+  "4.1 Sample Note Object",
+]
+
+[[protocol]]
+id = "MS-OXOJRNL"
+title = "Journal Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxojrnl/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOJRNL/%5bMS-OXOJRNL%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOJRNL.pdf"
+sha256 = "1dddccb120b4f81cec2dc7f667d3ee4ced328843f2bbfe17e4151b60672e86d9"
+used_for = [
+  "Bounded Outlook journal entry projection, canonical journal storage, and explicit activity-tracking gaps",
+]
+sections = [
+  "2.2.1 Journal Object Properties",
+  "2.2.1.1 PidLidLogType Property",
+  "2.2.1.2 PidLidLogTypeDesc Property",
+  "2.2.1.3 PidLidLogStart Property",
+  "2.2.1.4 PidLidLogEnd Property",
+  "2.2.1.5 PidLidLogDuration Property",
+  "2.2.1.6 PidLidLogFlags Property",
+  "2.2.1.7 PidLidLogDocumentPrinted Property",
+  "2.2.1.8 PidLidLogDocumentSaved Property",
+  "2.2.1.9 PidLidLogDocumentRouted Property",
+  "2.2.1.10 PidLidLogDocumentPosted Property",
+  "2.2.2 Additional Property Constraints",
+  "2.2.2.1 PidTagMessageClass Property",
+  "2.2.2.2 Best Body Properties",
+  "2.2.2.4 PidLidCompanies Property",
+  "2.2.2.5 Recipients",
+  "2.2.2.6 Journal-Associated Attachments",
+  "4.1 Journal Object for a Telephone Call Example",
+]
+
+[[protocol]]
+id = "MS-OXORMDR"
+title = "Reminder Settings Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxormdr/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXORMDR/%5bMS-OXORMDR%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXORMDR.pdf"
+sha256 = "ea7519fdd4d61194845e32e883e113357afcc22fc189b0589bf5141596a4d270"
+used_for = [
+  "Canonical reminder computation and MAPI/EWS reminder projection boundaries",
+]
+sections = [
+  "2.2.1 Properties Used to Specify and/or Decode Reminders",
+  "2.2.1.1 PidLidReminderSet Property",
+  "2.2.1.2 PidLidReminderSignalTime Property",
+  "2.2.1.3 PidLidReminderDelta Property",
+  "2.2.1.4 PidLidReminderTime Property",
+  "2.2.1.5 PidLidReminderOverride Property",
+  "2.2.1.6 PidLidReminderPlaySound Property",
+  "2.2.1.7 PidLidReminderFileParameter Property",
+  "2.2.1.8 PidTagReplyTime Property",
+  "2.2.1.9 PidLidReminderType Property",
+  "2.2.2 Shared Properties",
+  "3.1.3.1 Scope of the Search for Active Reminders",
+  "3.1.3.2 Loading and Processing Reminders",
+  "3.1.4.1 Setting a Reminder",
+  "3.1.4.1.3 Reminders on Calendar Objects",
+  "3.1.4.4 Removing a Reminder",
+  "3.1.4.4.1 Single Instance Objects",
+  "3.1.4.5 When a Reminder Becomes Overdue",
+]
+
+[[protocol]]
+id = "MS-OXOPOST"
+title = "Post Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxopost/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOPOST/%5bMS-OXOPOST%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOPOST.pdf"
+sha256 = "3fb7c613fdc323c2e88e03e514e09a1e11481a5675c3ecc080de4955f1399e68"
+used_for = [
+  "Bounded public-folder IPM.Post item projection and canonical post-item lifecycle",
+]
+sections = [
+  "2.2.1 Post Object Properties",
+  "2.2.2 Additional Property Constraints",
+  "2.2.2.1 PidTagConversationIndex Property",
+  "2.2.2.2 PidTagConversationTopic Property",
+  "2.2.2.3 PidTagIconIndex Property",
+  "2.2.2.4 PidTagMessageClass Property",
+  "2.2.2.5 Sender Properties",
+  "2.2.2.6 Recipients",
+  "3.1.4.1 Creating the Initial Post Object",
+  "3.1.4.2 Modifying a Post Object",
+  "3.1.4.3 Deleting a Post Object",
+  "3.1.4.4 Replying to a Post Object",
+]
+
+[[protocol]]
+id = "MS-OXORSS"
+title = "RSS Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxorss/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXORSS/%5bMS-OXORSS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXORSS.pdf"
+sha256 = "070468122c6618e3223ce797fb65b83c9707be2c8fd57fddb8f1a5f6a47c5f0b"
+used_for = [
+  "Explicit RSS object non-implementation boundary for LPE item classes",
+]
+sections = [
+  "2.2.1 RSS Object-Specific Properties",
+  "2.2.1.1 PidLidPostRssChannelLink Property",
+  "2.2.1.2 PidLidPostRssItemLink Property",
+  "2.2.1.3 PidLidPostRssItemHash Property",
+  "2.2.1.4 PidLidPostRssItemGuid Property",
+  "2.2.1.5 PidLidPostRssChannel Property",
+  "2.2.1.6 PidLidPostRssItemXml Property",
+  "2.2.1.7 PidLidPostRssSubscription Property",
+  "2.2.2 Additional Property Constraints",
+  "2.2.3 Additional Object Constraints",
+  "2.2.3.1 Attachment Objects",
+  "3.1.4.1 Creation of an RSS Object",
+]
+
+[[protocol]]
+id = "MS-OXODOC"
+title = "Document Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxodoc/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXODOC/%5bMS-OXODOC%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXODOC.pdf"
+sha256 = "76ea330d170fef2b5acb7dd1fe422625fd1ed6b23fc9f9c5060a4e3f69ea8f8f"
+used_for = [
+  "Explicit Exchange document object non-implementation boundary and attachment/document indexing distinction",
+]
+sections = [
+  "2.2.1 Document-Specific Properties",
+  "2.2.1.1 PidNameTitle Property",
+  "2.2.1.3 PidNameAuthor Property",
+  "2.2.1.8 PidNameRevisionNumber Property",
+  "2.2.1.14 PidNamePageCount Property",
+  "2.2.1.17 PidNameSecurity Property",
+  "2.2.1.33 PidNameThumbnail Property",
+  "2.2.2 Additional Property Constraints",
+  "2.2.2.1 PidTagMessageClass Property",
+  "2.2.2.3 Attachment to the Message Object",
+]
+
+[[protocol]]
+id = "MS-OXOPFFB"
+title = "Public Folder-Based Free/Busy Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxopffb/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOPFFB/%5bMS-OXOPFFB%5d.pdf"
+published_version = "2016-09-14"
+local_cache = "docs/microsoft/cache/MS-OXOPFFB.pdf"
+sha256 = "76e9d9ce03d4ca282b1ac7fa9c0687a761c34178bcf5076dc4354b8bef4602bd"
+used_for = [
+  "Bounded Outlook free/busy compatibility projection from canonical calendar and delegate/free-busy state",
+  "RopSaveChangesMessage example labeling combined SaveFlags 0x0A as KeepOpenReadWrite DelayedCall",
+]
+sections = [
+  "2.2.1 Free/Busy Message",
+  "2.2.1.1 Common Properties",
+  "2.2.1.2 Free/Busy Properties",
+  "2.2.1.2.1 PidTagScheduleInfoMonthsTentative Property",
+  "2.2.1.2.2 PidTagScheduleInfoFreeBusyTentative Property",
+  "2.2.1.2.3 PidTagScheduleInfoMonthsBusy Property",
+  "2.2.1.2.4 PidTagScheduleInfoFreeBusyBusy Property",
+  "2.2.1.2.7 PidTagScheduleInfoMonthsMerged Property",
+  "2.2.1.2.8 PidTagScheduleInfoFreeBusyMerged Property",
+  "2.2.1.2.9 PidTagFreeBusyPublishStart Property",
+  "2.2.1.2.12 PidTagFreeBusyMessageEmailAddress Property",
+  "2.2.1.3 Delegate Information Properties",
+  "2.2.2 Public Folder Free/Busy Related Properties",
+  "3.1.4.1 Publishing Free/Busy Data",
+  "4.1 Updating the Free/Busy Message",
+  "4.2 Finding Free/Busy Messages by Using Email Addresses",
+]
+
+[[protocol]]
+id = "MS-OXODLGT"
+title = "Delegate Access Configuration Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxodlgt/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXODLGT/%5bMS-OXODLGT%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXODLGT.pdf"
+sha256 = "0511b5479a9823944db7246046aa61af208d7cdac8cd298abba04706a5eddde5"
+used_for = [
+  "Bounded delegate access projection through canonical mailbox delegation, calendar grants, sender rights, and free/busy objects",
+  "RopSaveChangesMessage example labeling combined SaveFlags 0x0A as KeepOpenReadWrite DelayedCall",
+]
+sections = [
+  "2.2.1 Delegate Data Folder",
+  "2.2.2 Delegate Information Object",
+  "2.2.2.2 Delegate Information Properties",
+  "2.2.2.2.1 PidTagScheduleInfoDelegatorWantsCopy Property",
+  "2.2.2.2.3 PidTagScheduleInfoDelegateNames Property",
+  "2.2.2.2.5 PidTagScheduleInfoDelegateEntryIds Property",
+  "2.2.2.2.6 PidTagDelegateFlags Property",
+  "2.2.3 Delegate Rule",
+  "3.1.4.1 Creating a Delegate Data Folder",
+  "3.1.4.2 Creating a Delegate Information Object",
+  "3.1.4.3 Creating a Delegation Relationship",
+  "4.1 Create Delegation Relationship with Multiple Delegates",
+  "4.1.3.2 Update the Delegator Information Object Properties",
+]
+
+[[protocol]]
+id = "MS-OXWSCDATA"
+title = "Common Data Types"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwscdata/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSCDATA/%5bMS-OXWSCDATA%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSCDATA.pdf"
+sha256 = "5754d0f397e48dc0d23668af20a536da7132634bb3cb883d6044839c8793134e"
+used_for = [
+  "Bounded EWS common SOAP data types, response messages, field paths, and simple enum projection",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.3 Elements",
+  "2.2.3.4 t:FieldURI Element",
+  "2.2.3.5 t:IndexedFieldURI Element",
+  "2.2.3.9 t:RequestServerVersion Element",
+  "2.2.3.10 t:ServerVersionInfo Element",
+  "2.2.4 Complex Types",
+  "2.2.4.11 t:ArrayOfRecipientsType Complex Type",
+  "2.2.4.12 m:ArrayOfResponseMessagesType Complex Type",
+  "2.2.4.16 t:BasePathToElementType Complex Type",
+]
+
+[[protocol]]
+id = "MS-OXWSITEMID"
+title = "Item Identifier Conversion"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsitemid/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSITEMID/%5bMS-OXWSITEMID%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSITEMID.pdf"
+sha256 = "8a93a8b59a89873f83b82e39d325238863290402a941613da62c4a7ee9b2d0b8"
+used_for = [
+  "Stateless LPE EWS id conversion and explicit non-support for arbitrary Exchange opaque ids",
+]
+sections = [
+  "4.1 Security Considerations for Implementers",
+  "4.2 Index of Security Parameters",
+]
+
+[[protocol]]
+id = "MS-OXWSFOLD"
+title = "Folder Operations"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsfold/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSFOLD/%5bMS-OXWSFOLD%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSFOLD.pdf"
+sha256 = "f61a95984beccd02196c21544c58b21d907acd7de670b450a8a87ef151b4952e"
+used_for = [
+  "EWS folder discovery, create/delete/update/move/copy boundaries over canonical mailbox and public-folder state",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.4.2 t:ArrayOfFoldersType",
+  "2.2.4.4 t:BaseFolderIdType",
+  "2.2.4.5 t:BaseFolderType",
+  "2.2.4.6 m:BaseMoveCopyFolderType",
+  "2.2.4.9 t:FolderChangeDescriptionType",
+  "2.2.4.12 t:FolderType",
+  "2.2.4.14 t:PermissionSetType",
+  "2.2.4.16 t:TargetFolderIdType",
+  "2.2.5.1 t:FolderClassType",
+  "3.1 ExchangeServicePortType Server Details",
+]
+
+[[protocol]]
+id = "MS-OXWSMSG"
+title = "Message Operations"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsmsg/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSMSG/%5bMS-OXWSMSG%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSMSG.pdf"
+sha256 = "b0807c05d784be65f041ec879a5f3c91c710e4442ae94508814b5bc95cb612b9"
+used_for = [
+  "EWS message create/get/update/delete/move/copy/send behavior over canonical messages and submission",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.4.3 t:MessageType Complex Type",
+  "2.2.5.1 t:MessageDispositionType Simple Type",
+  "3.1.4.1 CopyItem",
+  "3.1.4.2 CreateItem",
+  "3.1.4.3 DeleteItem",
+  "3.1.4.4 GetItem",
+  "3.1.4.5 MoveItem",
+  "3.1.4.6 SendItem",
+  "3.1.4.7 UpdateItem",
+  "4.1 Create Message Example",
+  "4.7 Send Message Example",
+]
+
+[[protocol]]
+id = "MS-OXWSATT"
+title = "Attachment Operations"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsatt/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSATT/%5bMS-OXWSATT%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSATT.pdf"
+sha256 = "eb2f64ff3cfa31e75943b87ad7ca95986132601f1687c11a0e719a1aae1ea089"
+used_for = [
+  "EWS attachment create/get/delete boundaries over canonical validated attachments",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.4.1 t:ArrayOfAttachmentsType Complex Type",
+  "2.2.4.2 t:AttachmentIdType Complex Type",
+  "2.2.4.4 t:AttachmentType Complex Type",
+  "2.2.4.5 t:FileAttachmentType Complex Type",
+  "2.2.4.6 t:ItemAttachmentType Complex Type",
+  "2.2.4.8 t:ReferenceAttachmentType Complex Type",
+  "3.1.4.1 CreateAttachment Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSSYNC"
+title = "Synchronization Operations"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwssync/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSSYNC/%5bMS-OXWSSYNC%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSSYNC.pdf"
+sha256 = "e4da9a1f723f30cd0e33ae8cb69b821796ba03f0d4d1132068660a0122ba22ee"
+used_for = [
+  "EWS SyncFolderHierarchy and SyncFolderItems behavior over canonical change state",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.9 Common Data Structures",
+  "3.1.4.1 SyncFolderHierarchy",
+  "3.1.4.1.3.1 t:SyncFolderHierarchyChangesType Complex Type",
+  "3.1.4.1.3.2 t:SyncFolderHierarchyCreateOrUpdateType Complex Type",
+  "3.1.4.1.3.3 t:SyncFolderHierarchyDeleteType Complex Type",
+  "3.1.4.1.3.6 m:SyncFolderHierarchyType Complex Type",
+]
+
+[[protocol]]
+id = "MS-OXWSRULES"
+title = "Inbox Rules Operations"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsrules/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSRULES/%5bMS-OXWSRULES%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSRULES.pdf"
+sha256 = "4c60ae3abead4e2ac5d5b26056a662ec7848ac38857ff4884b0b327e1f53fc1d"
+used_for = [
+  "EWS inbox rule projection and bounded mutation over canonical Sieve-backed rules",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.4.1 t:RuleActionsType Complex Type",
+  "2.2.4.4 t:RulePredicatesType Complex Type",
+  "2.2.4.5 t:RuleType Complex Type",
+  "2.2.5.1 t:FlaggedForActionType Simple Type",
+  "3.1.4.1 GetInboxRules",
+]
+
+[[protocol]]
+id = "MS-OXWSTASK"
+title = "Task Operations"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwstask/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSTASK/%5bMS-OXWSTASK%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSTASK.pdf"
+sha256 = "326d9eb56c1b38f38bd09131d06448f73544e76fb992af2b9dd96b0d7c34b427"
+used_for = [
+  "EWS task SOAP type projection and bounded task create/update/delete/sync behavior",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.4.4 t:TaskRecurrenceType Complex Type",
+  "2.2.4.5 t:TasksFolderType Complex Type",
+  "2.2.4.6 t:TaskType Complex Type",
+  "2.2.5.1 t:TaskDelegateStateType Simple Type",
+  "2.2.5.2 t:TaskStatusType Simple Type",
+  "3.1.4.1 CopyItem Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSXPROP"
+title = "Extended Properties"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsxprop/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSXPROP/%5bMS-OXWSXPROP%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSXPROP.pdf"
+sha256 = "c311cebc2e00aeff4d5e70c3032fc04a9a1bf5daaf390353a478190e430cf0e9"
+used_for = [
+  "Bounded EWS extended-property parsing/projection boundary over canonical objects",
+]
+sections = [
+  "3.1 Creating Extended Properties",
+  "4.1 Security Considerations for Implementers",
+  "4.2 Index of Security Fields",
+]
+
+[[protocol]]
+id = "MS-OXWSCORE"
+title = "Core Exchange Web Services"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwscore/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSCORE/%5bMS-OXWSCORE%5d.pdf"
+published_version = "2025-08-19"
+local_cache = "docs/microsoft/cache/MS-OXWSCORE.pdf"
+sha256 = "a2b5145234ee768016ec3772d5c5b913ef740e3928d976a29c9ad2bffc33ef63"
+used_for = [
+  "EWS core item, contact, calendar, and operation catalog routing over canonical LPE state",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.4.8 t:ArrayOfItemIdsType Complex Type",
+  "2.2.4.16 m:BaseMoveCopyItemType Complex Type",
+  "2.2.4.18 t:ContactType Complex Type",
+  "2.2.4.23 t:FlagType Complex Type",
+  "2.2.4.24 t:ItemType Complex Type",
+  "2.2.4.25 t:ItemIdType Complex Type",
+]
+
+[[protocol]]
+id = "MS-OXWSADISC"
+title = "Autodiscover Publishing and Lookup SOAP-Based Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsadisc/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSADISC/%5bMS-OXWSADISC%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSADISC.pdf"
+sha256 = "04ac43019f54ecc126775dfaaccff9719029e2be8c15e79b7ad34433d7106543"
+used_for = [
+  "SOAP Autodiscover operation boundary and LPE endpoint-publication gap classification",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.3.3 tns:RequestedSettings Element",
+  "2.2.4.3 tns:RequestedSettings Complex Type",
+  "3.1.4.1 GetDomainSettings",
+  "3.1.4.2 GetFederationInformation",
+  "3.1.4.3 GetOrganizationRelationshipSettings",
+  "3.1.4.4 GetUserSettings",
+]
+
+[[protocol]]
+id = "MS-OXWSARCH"
+title = "Archiving Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsarch/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSARCH/%5bMS-OXWSARCH%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSARCH.pdf"
+sha256 = "16719959935a7a4db42a082723f3f49388594302465de935b74e9f9263c04500"
+used_for = [
+  "EWS ArchiveItem and CreateFolderPath behavior boundaries over canonical archive mailbox state",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 ArchiveItem",
+  "3.1.4.2 CreateFolderPath",
+]
+
+[[protocol]]
+id = "MS-OXWSBTRF"
+title = "Bulk Transfer Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsbtrf/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSBTRF/%5bMS-OXWSBTRF%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSBTRF.pdf"
+sha256 = "44c2465a04d4a7ff47a6908513de3a5c646475d3eb25b7fc1ef24151b6ce6a70"
+used_for = [
+  "EWS ExportItems and UploadItems bulk transfer boundaries over canonical item export/import scope",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 ExportItems",
+  "3.1.4.2 UploadItems",
+]
+
+[[protocol]]
+id = "MS-OXWSCEXT"
+title = "Client Extension Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwscext/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSCEXT/%5bMS-OXWSCEXT%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSCEXT.pdf"
+sha256 = "402ec63fe7c2df9bd900f4ab3d28880cccf023ec498e60aa2939e4f1be747919"
+used_for = [
+  "EWS mail app catalog, installation, marketplace, disable, and client-access-token operation boundaries",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 DisableApp",
+  "3.1.4.2 GetAppManifests",
+  "3.1.4.3 GetAppMarketplaceUrl",
+  "3.1.4.4 GetClientAccessToken",
+  "3.1.4.5 InstallApp",
+  "3.1.4.6 UninstallApp",
+]
+
+[[protocol]]
+id = "MS-OXWSCONT"
+title = "Contacts Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwscont/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSCONT/%5bMS-OXWSCONT%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSCONT.pdf"
+sha256 = "5a99f7d9e9f45640b5c403156b0dcd46105206dcecb2a3a85ff863fbf24b9791"
+used_for = [
+  "EWS contact item shape and contact/user-photo operation boundaries over canonical contacts",
+]
+sections = [
+  "2.2.4.3 t:ContactItemType Complex Type",
+  "2.2.5.1 t:ContactSourceType Simple Type",
+  "3.1.4.1 GetItem",
+  "3.1.4.2 DeleteItem",
+  "3.1.4.3 UpdateItem",
+  "3.1.4.4 MoveItem",
+  "3.1.4.5 CopyItem",
+  "3.1.4.6 CreateItem",
+  "3.1.4.7 GetUserPhoto",
+  "3.1.4.8 SetUserPhoto",
+]
+
+[[protocol]]
+id = "MS-OXWSCONV"
+title = "Conversations Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsconv/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSCONV/%5bMS-OXWSCONV%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSCONV.pdf"
+sha256 = "e276f589526a42b7d7ceca692de9a529b2760c9d9731f6409e5bb689e910417f"
+used_for = [
+  "EWS ApplyConversationAction, FindConversation, and GetConversationItems boundaries over canonical thread state",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 ApplyConversationAction",
+  "3.1.4.2 FindConversation",
+  "3.1.4.3 GetConversationItems",
+]
+
+[[protocol]]
+id = "MS-OXWSCOS"
+title = "Unified Contact Store Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwscos/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSCOS/%5bMS-OXWSCOS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSCOS.pdf"
+sha256 = "136831b43e24ccdb5f736da09d990d203e6dcb03846086db11afc98e3dbfbee1"
+used_for = [
+  "EWS Unified Contact Store IM group/member operation boundaries over canonical contact groups",
+]
+sections = [
+  "2.2.4.1 ArrayOfImGroupType",
+  "2.2.4.2 ImGroupType",
+  "2.2.4.3 ImItemListType",
+  "3.1.4.1 AddDistributionGroupToImList",
+  "3.1.4.2 AddImContactToGroup",
+  "3.1.4.3 AddImGroup",
+  "3.1.4.4 AddNewImContactToGroup",
+  "3.1.4.5 AddNewTelUriContactToGroup",
+  "3.1.4.6 GetImItemList",
+  "3.1.4.7 GetImItems",
+  "3.1.4.8 RemoveContactFromImList",
+  "3.1.4.9 RemoveDistributionGroupFromImList",
+  "3.1.4.10 RemoveImContactFromGroup",
+  "3.1.4.11 RemoveImGroup",
+  "3.1.4.12 SetImGroup",
+  "3.1.4.13 SetImListMigrationCompleted",
+]
+
+[[protocol]]
+id = "MS-OXWSCVTID"
+title = "Convert Item Identifier Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwscvtid/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSCVTID/%5bMS-OXWSCVTID%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSCVTID.pdf"
+sha256 = "76cdf07d71dc5f278386f4ce7c117c5895c5b5fff138baef8eff0c58e3429a98"
+used_for = [
+  "EWS ConvertId alternate-id boundaries over deterministic LPE canonical ids",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.9 Common Data Structures",
+  "3.1.4.1 ConvertId",
+]
+
+[[protocol]]
+id = "MS-OXWSDLGM"
+title = "Delegate Access Management Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsdlgm/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSDLGM/%5bMS-OXWSDLGM%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSDLGM.pdf"
+sha256 = "3558c46f99314694d4a238c3624830f30030d7cb7701412cabc30728bdad42cb"
+used_for = [
+  "EWS delegate permission, delivery preference, add/get/update/remove operation boundaries",
+]
+sections = [
+  "2.2.4.7 t:DelegatePermissionsType Complex Type",
+  "2.2.4.8 t:DelegateUserType Complex Type",
+  "2.2.5.1 t:DelegateFolderPermissionLevelType Simple Type",
+  "2.2.5.2 t:DeliverMeetingRequestsType Simple Type",
+  "3.1.4.1 AddDelegate Operation",
+  "3.1.4.2 GetDelegate Operation",
+  "3.1.4.3 RemoveDelegate Operation",
+  "3.1.4.4 UpdateDelegate Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSDLIST"
+title = "Distribution List Creation and Usage Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsdlist/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSDLIST/%5bMS-OXWSDLIST%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSDLIST.pdf"
+sha256 = "a068c0b4f3f257e240a5c83931804f7623f9e2a94e486595d0647eac66c0c290"
+used_for = [
+  "EWS ExpandDL and distribution-list item operation boundaries over canonical directory/group state",
+]
+sections = [
+  "2.2.4.1 t:DistributionListType Complex Type",
+  "2.2.4.2 t:MembersListType Complex Type",
+  "2.2.4.3 t:MemberType Complex Type",
+  "2.2.5.1 t:MemberStatusType Simple Type",
+  "3.1.4.1 ExpandDL",
+  "3.1.4.2 GetItem",
+  "3.1.4.3 DeleteItem",
+  "3.1.4.4 UpdateItem",
+  "3.1.4.5 MoveItem",
+  "3.1.4.6 CopyItem",
+  "3.1.4.7 CreateItem",
+]
+
+[[protocol]]
+id = "MS-OXWSEDISC"
+title = "Electronic Discovery Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsedisc/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSEDISC/%5bMS-OXWSEDISC%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSEDISC.pdf"
+sha256 = "f20685ef1a6bae52ee50ca27555768924310c61e7d53a9b4e29718a5c4dc00d3"
+used_for = [
+  "EWS eDiscovery configuration, searchable mailbox, hold, and mailbox search boundaries over canonical compliance/search state",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 GetDiscoverySearchConfiguration",
+  "3.1.4.2 GetHoldOnMailboxes",
+  "3.1.4.3 GetSearchableMailboxes",
+  "3.1.4.4 SearchMailboxes",
+  "3.1.4.5 SetHoldOnMailboxes",
+]
+
+[[protocol]]
+id = "MS-OXWSGNI"
+title = "Nonindexable Item Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsgni/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSGNI/%5bMS-OXWSGNI%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSGNI.pdf"
+sha256 = "33806482c3ef7e1bfae0c24d73862d86e599453fa19b558cd463c69ce896b59b"
+used_for = [
+  "EWS non-indexable item details/statistics boundaries over canonical indexing diagnostics",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 GetNonIndexableItemDetails",
+  "3.1.4.2 GetNonIndexableItemStatistics",
+]
+
+[[protocol]]
+id = "MS-OXWSGTRM"
+title = "Get Rooms List Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsgtrm/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSGTRM/%5bMS-OXWSGTRM%5d.pdf"
+published_version = "2025-08-19"
+local_cache = "docs/microsoft/cache/MS-OXWSGTRM.pdf"
+sha256 = "b321b4d67ed226ce73d6ce3589c0a17a3054d479fefe0d1a6d9bd1bd250cf136"
+used_for = [
+  "EWS GetRoomLists and GetRooms behavior over canonical room/resource directory projection",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 GetRoomLists Operation",
+  "3.1.4.2 GetRooms Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSGTZ"
+title = "Get Server Time Zone Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsgtz/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSGTZ/%5bMS-OXWSGTZ%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSGTZ.pdf"
+sha256 = "373f7521d1a2a280d8ab9b54b90d8dc86e635770ca1e946333a9cf63f28eb248"
+used_for = [
+  "EWS GetServerTimeZones compatibility response boundary",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 GetServerTimeZones",
+]
+
+[[protocol]]
+id = "MS-OXWSLVID"
+title = "Federated Internet Authentication Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwslvid/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSLVID/%5bMS-OXWSLVID%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSLVID.pdf"
+sha256 = "bf18c09803eb70999389f44b39710e3f036ebd35913161c0e1ebbe3a4c94bd0e"
+used_for = [
+  "Explicit non-implementation of Live ID federated domain/application management operations",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 AddUri Operation",
+  "3.1.4.2 CreateAppId Operation",
+  "3.1.4.3 GetDomainInfo Operation",
+  "3.1.4.4 ReleaseDomain Operation",
+  "3.1.4.5 RemoveUri Operation",
+  "3.1.4.6 ReserveDomain Operation",
+  "3.1.4.7 UpdateAppIdCertificate Operation",
+  "3.1.4.8 UpdateAppIdProperties Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSMSHR"
+title = "Folder Sharing Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsmshr/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSMSHR/%5bMS-OXWSMSHR%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSMSHR.pdf"
+sha256 = "12e354c399de5d19a971823a6f0776169b607f552e95e99c56fb052f0177120b"
+used_for = [
+  "EWS folder sharing metadata, sharing folder, refresh, and invitation behavior over canonical grants",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 CreateItem Operation",
+  "3.1.4.2 GetFolder Operation",
+  "3.1.4.3 GetSharingFolder Operation",
+  "3.1.4.4 GetSharingMetadata Operation",
+  "3.1.4.5 RefreshSharingFolder Operation",
+  "3.1.4.6 UpdateFolder Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSMTGS"
+title = "Calendaring Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsmtgs/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSMTGS/%5bMS-OXWSMTGS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSMTGS.pdf"
+sha256 = "45e49063cdc76f78aa4d70dfa412a876439038cf403ec07907d109cc2f240ecb"
+used_for = [
+  "EWS calendar item and reminder operation boundaries over canonical calendar events and availability",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 CopyItem Operation",
+  "3.1.4.2 CreateItem Operation",
+  "3.1.4.3 DeleteItem Operation",
+  "3.1.4.4 GetItem Operation",
+  "3.1.4.6 MoveItem Operation",
+  "3.1.4.8 UpdateItem Operation",
+  "3.1.4.5.2.1 m:GetReminders Element",
+  "3.1.4.5.2.2 m:GetRemindersResponse Element",
+  "3.1.4.7.2.1 m:PerformReminderAction Element",
+  "3.1.4.7.2.2 m:PerformReminderActionResponse Element",
+]
+
+[[protocol]]
+id = "MS-OXWSMTRK"
+title = "Message Tracking Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsmtrk/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSMTRK/%5bMS-OXWSMTRK%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSMTRK.pdf"
+sha256 = "9413c93e353cc49ba9ffce06718ff797d769185e7530636a157f2973e0a6a417"
+used_for = [
+  "EWS message tracking report boundaries over canonical submission and LPE-CT traceability state",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 FindMessageTrackingReport Operation",
+  "3.1.4.2 GetMessageTrackingReport Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSNTIF"
+title = "Notifications Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsntif/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSNTIF/%5bMS-OXWSNTIF%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSNTIF.pdf"
+sha256 = "0a5cf7e18d63c8434849bc1510349f498f7c28c4bd1beab2c209ab7aa0ccc2fb"
+used_for = [
+  "EWS pull and streaming notification boundaries over canonical mail change-log replay",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 GetEvents",
+  "3.1.4.2 GetStreamingEvents",
+  "3.1.4.3 Subscribe",
+  "3.1.4.4 Unsubscribe",
+]
+
+[[protocol]]
+id = "MS-OXWSOLPS"
+title = "Online Personal Search Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsolps/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSOLPS/%5bMS-OXWSOLPS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSOLPS.pdf"
+sha256 = "add73d1eff228a1c5cd731112c8b01761b6b62d274e3e5c42ade6c8caef30238"
+used_for = [
+  "Explicit non-implementation of EWS online personal search sessions",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 EndSearchSession Operation",
+  "3.1.4.2 ExecuteSearch Operation",
+  "3.1.4.3 GetSearchSuggestions Operation",
+  "3.1.4.4 StartSearchSession Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSPED"
+title = "Password Expiration Date Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsped/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSPED/%5bMS-OXWSPED%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSPED.pdf"
+sha256 = "83ec2e1e1a93ec0d182f542b81a7d6452fd9930b5a2bb647f859c84329db02d4"
+used_for = [
+  "EWS GetPasswordExpirationDate boundary over canonical credential expiry state",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 GetPasswordExpirationDate Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSPERS"
+title = "Persona Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwspers/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSPERS/%5bMS-OXWSPERS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSPERS.pdf"
+sha256 = "ba7b0a5f0bb84304d8ec78471fcf8c8f48499d99ff0a65638ad14f37ea22c313"
+used_for = [
+  "EWS FindPeople and GetPersona boundaries over stateless canonical account/contact personas",
+]
+sections = [
+  "2.2.4.19 PersonaType",
+  "2.2.5.1 LocationSourceType",
+  "3.1.4.1 FindPeople",
+  "3.1.4.2 GetPersona",
+]
+
+[[protocol]]
+id = "MS-OXWSPHOTO"
+title = "Photo Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsphoto/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSPHOTO/%5bMS-OXWSPHOTO%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSPHOTO.pdf"
+sha256 = "581bc910f3505f2e52aa8afe4eea45e4a2c207c17ed818b06996792a0fcc08e8"
+used_for = [
+  "EWS photo retrieval boundary and explicit canonical profile-photo gap classification",
+]
+sections = [
+  "2 Messages",
+  "3.1.4 Higher-Layer Triggered Events",
+]
+
+[[protocol]]
+id = "MS-OXWSPOST"
+title = "Post Items Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwspost/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSPOST/%5bMS-OXWSPOST%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSPOST.pdf"
+sha256 = "b1eaa7139eb8ffabe26720b663be8c165bf0cef19400b435f5b43d096d25107a"
+used_for = [
+  "EWS post item operation boundaries over canonical public-folder posts",
+]
+sections = [
+  "2.2.4.1 t:PostItemType Complex Type",
+  "2.2.4.2 t:PostReplyItemBaseType Complex Type",
+  "2.2.4.3 t:PostReplyItemType Complex Type",
+  "3.1.4.1 CopyItem Operation",
+  "3.1.4.2 CreateItem Operation",
+  "3.1.4.3 DeleteItem Operation",
+  "3.1.4.4 GetItem Operation",
+  "3.1.4.5 MoveItem Operation",
+  "3.1.4.6 UpdateItem Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSPSNTIF"
+title = "Push Notifications Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwspsntif/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSPSNTIF/%5bMS-OXWSPSNTIF%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSPSNTIF.pdf"
+sha256 = "c0cd8574ca194ed18d3c4a4a608892b4c7f3ae76d0a0fe178547975abedb9442"
+used_for = [
+  "Explicit non-implementation of EWS push notification callback handling",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 SendNotification Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSRSLNM"
+title = "Resolve Recipient Names Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsrslnm/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSRSLNM/%5bMS-OXWSRSLNM%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSRSLNM.pdf"
+sha256 = "d04a972e9f239406420ec1fb4d304300e230ff506c0df12ed6de32b10a41f369"
+used_for = [
+  "EWS ResolveNames behavior over authenticated account, canonical directory, and accessible contacts",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 ResolveNames Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSSMBX"
+title = "Site Mailbox Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwssmbx/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSSMBX/%5bMS-OXWSSMBX%5d.pdf"
+published_version = "2025-08-19"
+local_cache = "docs/microsoft/cache/MS-OXWSSMBX.pdf"
+sha256 = "ccf5e2bda1749f6f512a8ef0dec4a42c86431492a213d7eefd6bf4d6d2616065"
+used_for = [
+  "Explicit non-implementation of EWS site mailbox pinning operations",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "3.1.4.1 SetTeamMailbox",
+  "3.1.4.2 UnpinTeamMailbox",
+]
+
+[[protocol]]
+id = "MS-OXWSSRCH"
+title = "Mailbox Search Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwssrch/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSSRCH/%5bMS-OXWSSRCH%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSSRCH.pdf"
+sha256 = "181be45b628b25d4671575d8295d732b4c3f7ecb7d0daa3f17b9709a5eee6791"
+used_for = [
+  "EWS FindFolder and FindItem search boundaries over canonical mailbox and collaboration state",
+]
+sections = [
+  "2.2.4.27 m:PerformInstantSearchRequest Complex Type",
+  "2.2.4.29 m:QueryStringType Complex Type",
+  "2.2.4.30 t:RestrictionType Complex Type",
+  "3.1.4.1 FindFolder Operation",
+  "3.1.4.2 FindItem Operation",
+]
+
+[[protocol]]
+id = "MS-OXWSURPT"
+title = "Retention Tag Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsurpt/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSURPT/%5bMS-OXWSURPT%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSURPT.pdf"
+sha256 = "81bf9a3a6c86f84c18194a77cff73fc92419093693802820fec1c7f4925ce0a2"
+used_for = [
+  "EWS GetUserRetentionPolicyTags response boundary over canonical retention policy state",
+]
+sections = [
+  "2.2.4.1 RetentionTagType",
+  "2.2.5.1 RetentionType",
+  "3.1.4.1 GetUserRetentionPolicyTags",
+]
+
+[[protocol]]
+id = "MS-OXWSUSRCFG"
+title = "User Configuration Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsusrcfg/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWSUSRCFG/%5bMS-OXWSUSRCFG%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWSUSRCFG.pdf"
+sha256 = "5f7d636cd8a66232da47eee8db47f8ee24c3d2acfdc5301c5827bacfc759324e"
+used_for = [
+  "EWS user configuration create/get/update/delete boundaries over canonical account client configuration storage",
+]
+sections = [
+  "2.2.4.1 t:UserConfigurationDictionaryEntryType Complex Type",
+  "2.2.4.5 t:UserConfigurationType Complex Type",
+  "2.2.5.1 t:UserConfigurationDictionaryObjectTypesType Simple Type",
+  "3.1.4.1 CreateUserConfiguration",
+  "3.1.4.2 DeleteUserConfiguration",
+  "3.1.4.3 GetUserConfiguration",
+  "3.1.4.4 UpdateUserConfiguration",
+]
+
+[[protocol]]
+id = "MS-OXWUMS"
+title = "Voice Mail Settings Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwums/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWUMS/%5bMS-OXWUMS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWUMS.pdf"
+sha256 = "f3262ac6d70faf794993a76a3671f1f09a4b339661a2ce7046dd4fdb8a1c5846"
+used_for = [
+  "EWS Unified Messaging call-state compatibility and explicit voicemail-service gaps",
+]
+sections = [
+  "2.2.4.1 t:PhoneCallIdType Complex Type",
+  "3.1.4.1 Disconnect Operation",
+  "3.1.4.2 DisconnectPhoneCall Operation",
+  "3.1.4.3 GetCallInfo Operation",
+  "3.1.4.4 GetPhoneCallInformation Operation",
+  "3.1.4.5 GetUMProperties Operation",
+  "3.1.4.6 IsUMEnabled Operation",
+  "3.1.4.7 PlayOnPhone2 Operation",
+  "3.1.4.8 PlayOnPhone Operation",
+  "3.1.4.9 PlayOnPhoneGreeting Operation",
+  "3.1.4.10 ResetPIN Operation",
+  "3.1.4.11 SetMissedCallNotificationEnabled Operation",
+  "3.1.4.12 SetOofStatus Operation",
+  "3.1.4.13 SetPlayOnPhoneDialString Operation",
+  "3.1.4.14 SetTelephoneAccessFolderEmail Operation",
+]
+
+[[protocol]]
+id = "MS-OXABREF"
+title = "Address Book Name Service Provider Interface (NSPI) Referral Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxabref/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXABREF/%5bMS-OXABREF%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXABREF.pdf"
+sha256 = "489b92ba72818fb392bc8d7753abd294c355c40d31b4b3b7592f0420bfb3a025"
+used_for = [
+  "RPC proxy referral endpoint compatibility and bounded RFRI opnum audit rows",
+]
+sections = [
+  "2.2 Common Data Types",
+  "3.1.4.1 RfrGetNewDSA (opnum 0)",
+  "3.1.4.2 RfrGetFQDNFromServerDN (opnum 1)",
+]
+
+[[protocol]]
+id = "MS-OXLDAP"
+title = "Lightweight Directory Access Protocol (LDAP) Version 3 Extensions"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxldap/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXLDAP/%5bMS-OXLDAP%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXLDAP.pdf"
+sha256 = "7eff5bbfd06f2e4f3ab238cb8f864168d0a288b16811bb9ccd2818555865b3c0"
+used_for = [
+  "Documenting that LPE does not expose Exchange LDAP extensions or AD SCP discovery",
+]
+sections = [
+  "2.2 Message Syntax",
+  "2.2.1 Extension-Specific Name Attributes",
+  "2.2.3 Extension-Specific E-Mail Attributes",
+  "2.2.4 Extension-Specific Telephone Attributes",
+  "2.2.5 Other Extension-Specific Attributes",
+]
+
+[[protocol]]
+id = "MS-OXOAB"
+title = "Offline Address Book (OAB) File Format and Schema"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxoab/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOAB/%5bMS-OXOAB%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOAB.pdf"
+sha256 = "95fa7c71ea22c8eb99a6fccabc54ab9a5bf69d9e08cfb76b33f7a08f453f480b"
+used_for = [
+  "Classifying OAB file generation and download as not implemented",
+]
+sections = [
+  "1.3 Overview",
+  "1.3.1 OAB Version 2 and OAB Version 3",
+  "1.3.2 OAB Version 4",
+  "2.1 X500 Distinguished Name",
+  "2.2 Uncompressed OAB Display Template File",
+  "2.3 Uncompressed OAB Version 2 and OAB Version 3 Browse File",
+  "2.4 Uncompressed OAB Version 2 and OAB Version 3 RDN Index File",
+  "2.5 Uncompressed OAB Version 2 and OAB Version 3 ANR Index File",
+  "2.6 Uncompressed OAB Version 2 and OAB Version 3 Details File",
+]
+
+[[protocol]]
+id = "MS-OXOABKT"
+title = "Address Book User Interface Templates Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxoabkt/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOABKT/%5bMS-OXOABKT%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOABKT.pdf"
+sha256 = "87e464933e23a1c54fd5bd04f8f1bca9a87f686b5ac7bcb6eadfe1f0a10800ea"
+used_for = [
+  "Classifying bounded NSPI template responses versus full address-book UI template parity",
+]
+sections = [
+  "2.2.1 NspiGetSpecialTable PropertyRowSet_r Format",
+  "2.2.2 NspiGetTemplateInfo PropertyRow_r Format",
+  "2.2.2.1 Template Format",
+  "2.2.2.1.3 Buffer Format of the CNTRL Structure",
+]
+
+[[protocol]]
+id = "MS-OXPFOAB"
+title = "Offline Address Book (OAB) Public Folder Retrieval Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxpfoab/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXPFOAB/%5bMS-OXPFOAB%5d.pdf"
+published_version = "2016-09-14"
+local_cache = "docs/microsoft/cache/MS-OXPFOAB.pdf"
+sha256 = "221f5de9426d839a06c408e22f8702e2892f08b85362f1351f0ea8248aa3ab9f"
+used_for = [
+  "Classifying OAB public-folder retrieval as not implemented",
+]
+sections = [
+  "2.2.1 OAB Messages",
+  "2.2.2 Full OAB Messages",
+  "2.2.2.1 Properties and Attachments",
+  "2.2.2.1.2 Full OAB Message Attachments – Version 2 and Version 3a",
+  "2.2.2.1.3 Full OAB Message Attachments – Version 4",
+]
+
+[[protocol]]
+id = "MS-OXMSG"
+title = "Outlook Item (.msg) File Format"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxmsg/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXMSG/%5bMS-OXMSG%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXMSG.pdf"
+sha256 = "a461c95ea1317f7193d8ce205970d7a427412ba97f7c70f511719f8350cf585f"
+used_for = [
+  "Classifying .msg attachment naming support versus full .msg file import/export",
+]
+sections = [
+  "2.1 Properties",
+  "2.1.2 Fixed Length Properties",
+  "2.1.3 Variable Length Properties",
+  "2.1.4 Multiple-Valued Properties",
+  "2.2 Storages",
+  "2.2.1 Recipient Object Storage",
+  "2.2.2 Attachment Object Storage",
+  "2.2.2.1 Embedded Message Object Storage",
+]
+
+[[protocol]]
+id = "MS-OXTNEF"
+title = "Transport Neutral Encapsulation Format (TNEF) Data Algorithm"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxtnef/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXTNEF/%5bMS-OXTNEF%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXTNEF.pdf"
+sha256 = "acabf539e8e95cebc30bd51f5162405bebc9a9449f808d59a106724e6e296a4a"
+used_for = [
+  "Classifying TNEF generation and parsing as not implemented",
+]
+sections = [
+  "2.1 Common Algorithm Details",
+  "2.1.3 Processing Rules",
+  "2.1.3.2 ABNF Description",
+  "2.1.3.3 Attributes",
+]
+
+[[protocol]]
+id = "MS-OXVCARD"
+title = "vCard to Contact Object Conversion Algorithm"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxvcard/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXVCARD/%5bMS-OXVCARD%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXVCARD.pdf"
+sha256 = "2d46e99537ee49bdacb34c026cf5c7f437d214e648d71a5d28a5c694559c13a2"
+used_for = [
+  "Bounded DAV/JMAP contact and raw vCard/source metadata audit row",
+]
+sections = [
+  "2.1 Common Algorithm Details",
+  "2.1.3 Processing Rules",
+  "2.1.3.1 General Types",
+  "2.1.3.2 Identification Types",
+  "2.1.3.3 Deliverable Addressing Types",
+  "2.1.3.4 Telecommunications Addressing Types",
+]
+
+[[protocol]]
+id = "MS-OXRTFCP"
+title = "Rich Text Format (RTF) Compression Algorithm"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxrtfcp/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXRTFCP/%5bMS-OXRTFCP%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXRTFCP.pdf"
+sha256 = "cf7287b82e512e8408ac349a79c3484e3c521f4a369cb43e2ed57fac67d40ea8"
+used_for = [
+  "Classifying uncompressed RTF container projection versus full LZFu compression/decompression",
+]
+sections = [
+  "2.1 Common Algorithm Details",
+  "2.1.2.1 Dictionary",
+  "2.1.2.2 CRC",
+  "2.1.3.1 RTF Compression Format",
+  "2.2 Decompression Algorithm Details",
+]
+
+[[protocol]]
+id = "MS-OXRTFEX"
+title = "Rich Text Format (RTF) Extensions Algorithm"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxrtfex/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXRTFEX/%5bMS-OXRTFEX%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXRTFEX.pdf"
+sha256 = "73768d8f16e629fe75027b73fc39da325f40e6d0939a3b03884aca5de872b529"
+used_for = [
+  "Classifying simple RTF body projection versus full RTF encapsulation/de-encapsulation",
+]
+sections = [
+  "2.1 Encapsulating RTF Writer Algorithm Details",
+  "2.1.3.1 HTML and Plain Text Specific Encapsulation Syntax",
+  "2.2 De-Encapsulating RTF Reader Algorithm Details",
+  "2.2.3.1 Recognizing RTF Containing Encapsulation",
+]
+
+[[protocol]]
+id = "MS-MCI"
+title = "Microsoft ZIP (MSZIP) Compression and Decompression Data Structure"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-mci/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-MCI/%5bMS-MCI%5d.pdf"
+published_version = "2016-10-17"
+local_cache = "docs/microsoft/cache/MS-MCI.pdf"
+sha256 = "cb097c434e1cfccb368f0d7e9084ab4d47a65809a2eea94bbf41f9722c1a0343"
+used_for = [
+  "Classifying MSZIP compression as not implemented by LPE protocol surfaces",
+]
+sections = [
+  "1.3 Overview",
+  "1.4 Relationship to Protocols and Other Structures",
+  "1.5 Applicability Statement",
+]
+
+[[protocol]]
+id = "MS-PATCH"
+title = "LZX DELTA Compression and Decompression"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-patch/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-PATCH/%5bMS-PATCH%5d.pdf"
+published_version = "2025-08-19"
+local_cache = "docs/microsoft/cache/MS-PATCH.pdf"
+sha256 = "ea17466b97c9a9d4e2c815538387bf442fb2393ed29632c6f58b2c47ef1f29fe"
+used_for = [
+  "Classifying LZX DELTA compression and patch package handling as not implemented",
+]
+sections = [
+  "2.1 Concepts",
+  "2.1.1 Bitstream",
+  "2.1.2 Window Size",
+  "2.1.3 Reference Data",
+  "2.2 Header",
+]
+
+[[protocol]]
+id = "MS-OXGLOS"
+title = "Exchange Server Protocols Master Glossary"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxglos/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXGLOS/%5bMS-OXGLOS%5d.pdf"
+published_version = "2014-10-30"
+local_cache = "docs/microsoft/cache/MS-OXGLOS.pdf"
+sha256 = "06c06c93a62a6cbe7d62588dffb4fdf756a64aa8caeed7a8e93f0b50e6447a88"
+used_for = [
+  "Architecture terminology and protocol-family boundary classification",
+]
+sections = [
+  "Master glossary",
+]
+
+[[protocol]]
+id = "MS-OXREF"
+title = "Exchange Server Protocols Master Reference"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxref/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXREF/%5bMS-OXREF%5d.pdf"
+published_version = "2014-10-30"
+local_cache = "docs/microsoft/cache/MS-OXREF.pdf"
+sha256 = "7b8699e4cdf926c0c61a80744d81890faaf3079639f307f592a8598c2bd79c81"
+used_for = [
+  "Protocol-family reference boundary classification",
+]
+sections = [
+  "Master reference",
+]
+
+[[protocol]]
+id = "MS-OXPROTO"
+title = "Exchange Server Protocols System Overview"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxproto/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXPROTO/%5bMS-OXPROTO%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXPROTO.pdf"
+sha256 = "6e4062abed337fd7026a701957085fb4bacd6000527f5690ca0c71b26ada0766"
+used_for = [
+  "Mapping Exchange protocol-family overview to LPE architecture boundaries",
+]
+sections = [
+  "2.1 Overview",
+  "2.1.1 Message Store",
+  "2.1.2 Message Processing System",
+  "2.1.3 Communications within the System",
+]
+
+[[protocol]]
+id = "MS-OXCEXT"
+title = "Client Extension Message Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcext/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCEXT/%5bMS-OXCEXT%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCEXT.pdf"
+sha256 = "4c67631bc81aa7b10969d6bba80b882a60ade21dcc2bf90548512440eace41fb"
+used_for = [
+  "Classifying client-extension message objects versus canonical EWS app catalog state",
+]
+sections = [
+  "2.1 Transport",
+  "2.2 Message Syntax",
+  "2.2.1 Namespaces",
+  "2.2.2 Known Entity Properties",
+]
+
+[[protocol]]
+id = "MS-OXCSPAM"
+title = "Spam Confidence Level Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcspam/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXCSPAM/%5bMS-OXCSPAM%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXCSPAM.pdf"
+sha256 = "20ff7692fdb89b6e58d6c1d4043fb33a55d65e9dd07f5c9e7379c4dbe69a345a"
+used_for = [
+  "Classifying Exchange SCL/junk rule properties against LPE-CT spam scoring and canonical Junk behavior",
+]
+sections = [
+  "2.2.1 Message Object Properties",
+  "2.2.1.1 PidLidSpamOriginalFolder Property",
+  "2.2.1.3 PidTagContentFilterSpamConfidenceLevel Property",
+  "2.2.2 Junk Email Rule Properties",
+]
+
+[[protocol]]
+id = "MS-OXPHISH"
+title = "Phishing Warning Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxphish/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXPHISH/%5bMS-OXPHISH%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXPHISH.pdf"
+sha256 = "8cfadd045e0829909bf2f8963f2150eeac545609ff666b83fe5ae9fb9276f879"
+used_for = [
+  "Classifying Exchange phishing stamp properties as not canonical LPE message state",
+]
+sections = [
+  "2.2.1 Phishing Warning Protocol Properties",
+  "2.2.1.1 PidNamePhishingStamp",
+]
+
+[[protocol]]
+id = "MS-OXORMMS"
+title = "Rights-Managed Email Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxormms/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXORMMS/%5bMS-OXORMMS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXORMMS.pdf"
+sha256 = "9aebd03ef609b67f532629dfb5655efd99f35b4763f44521ba4279a848a231f6"
+used_for = [
+  "Classifying rights-managed email as an explicit compatibility gap",
+]
+sections = [
+  "2.2.1 Rights-Managed Email Message Property",
+  "2.2.1.1 PidNameRightsManagementLicense Property",
+  "2.2.2 Additional Property Constraints",
+  "2.2.3 Attachment Object",
+]
+
+[[protocol]]
+id = "MS-OXOSMIME"
+title = "S/MIME Email Object Algorithm"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxosmime/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOSMIME/%5bMS-OXOSMIME%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOSMIME.pdf"
+sha256 = "0c5624dd0c87a133fa58161285a52c3586724e01e7ce20ca1a089ba161d162ff"
+used_for = [
+  "Classifying S/MIME conversion as an explicit compatibility gap",
+]
+sections = [
+  "2.1 S/MIME E-Mail Object Conversion Algorithm Details",
+  "2.1.3 Processing Rules",
+  "2.1.3.1 Clear-Signed Message",
+  "2.1.3.2 Opaque-Signed and Encrypted S/MIME Message",
+]
+
+[[protocol]]
+id = "MS-OXOSMMS"
+title = "Short Message Service (SMS) and Multimedia Messaging Service (MMS) Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxosmms/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOSMMS/%5bMS-OXOSMMS%5d.pdf"
+published_version = "2024-08-20"
+local_cache = "docs/microsoft/cache/MS-OXOSMMS.pdf"
+sha256 = "483c437b0e3986a9129c0fb2dbac5a5d37508390219dc4cae0540d2476431e34"
+used_for = [
+  "Classifying SMS/MMS Exchange item classes as not implemented",
+]
+sections = [
+  "2.2.1 Common SMS and MMS Object Properties",
+  "2.2.1.1 PidNameOMSAccountGuid Property",
+  "2.2.1.3 PidNameOMSServiceType Property",
+  "2.2.1.5 PidNameContentClass Property",
+]
+
+[[protocol]]
+id = "MS-OXOUM"
+title = "Voice Mail and Fax Objects Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxoum/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXOUM/%5bMS-OXOUM%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXOUM.pdf"
+sha256 = "ed52467a5dd739dd375042b0cbf26e3cea9f4ade05769b49aff850fbea9518a1"
+used_for = [
+  "Classifying voice mail and fax objects as not implemented beyond bounded EWS UM call-state compatibility",
+]
+sections = [
+  "2.2.2 Voice Message",
+  "2.2.2.1 Message Classes",
+  "2.2.2.2 Attachments",
+  "2.2.2.4 Audio Notes",
+]
+
+[[protocol]]
+id = "MS-OXSHARE"
+title = "Sharing Message Object Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxshare/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXSHARE/%5bMS-OXSHARE%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXSHARE.pdf"
+sha256 = "256b32109351464e3d27de13b3fadc29aa251ec95da2042c216b7295a704ffdc"
+used_for = [
+  "Classifying sharing message object support against canonical EWS sharing grants",
+]
+sections = [
+  "2.2.1 Common Message Object Properties",
+  "2.2.2 Common Sharing Message Object Properties",
+  "2.2.2.1 PidLidSharingCapabilities Property",
+  "2.2.2.3 PidLidSharingConfigurationUrl Property",
+]
+
+[[protocol]]
+id = "MS-OXSHRMSG"
+title = "Sharing Message Attachment Schema"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxshrmsg/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXSHRMSG/%5bMS-OXSHRMSG%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXSHRMSG.pdf"
+sha256 = "4075fe10be34e5e0cf6e6188b2e3f709d49f4751dcf21b9d15c1657d02950977"
+used_for = [
+  "Classifying sharing attachment schema support against canonical EWS sharing grants",
+]
+sections = [
+  "2.1 Sharing Message Schema",
+  "2.1.1 Sharing Message Attachment Namespace",
+  "2.1.3 t:AcceptOfRequestType Complex Type",
+  "2.1.7 t:InvitationType Complex Type",
+]
+
+[[protocol]]
+id = "MS-OXWAVLS"
+title = "Availability Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwavls/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWAVLS/%5bMS-OXWAVLS%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWAVLS.pdf"
+sha256 = "7acefb25b1d7a4900d07b033068da33d0ef9b4adebd6e430cded3913e4b51eeb"
+used_for = [
+  "Bounded EWS GetUserAvailability and canonical free/busy audit row",
+]
+sections = [
+  "2.1 Transport",
+  "2.1.1 X-ClientStatistics Header",
+  "2.2 Common Message Syntax",
+  "2.2.2 Messages",
+  "2.2.4 Complex Types",
+]
+
+[[protocol]]
+id = "MS-OXWCONFIG"
+title = "Web Service Configuration Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwconfig/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWCONFIG/%5bMS-OXWCONFIG%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWCONFIG.pdf"
+sha256 = "3976cdce4d1373192c887f1c0947b28abca1f848b7bcbe8046831bd530d0449b"
+used_for = [
+  "Bounded EWS service configuration audit row",
+]
+sections = [
+  "2.1 Transport",
+  "2.2 Common Message Syntax",
+  "2.2.2 Messages",
+  "2.2.4 Complex Types",
+  "2.2.5 Simple Types",
+]
+
+[[protocol]]
+id = "MS-OXWMT"
+title = "Mail Tips Web Service Extensions"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwmt/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWMT/%5bMS-OXWMT%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWMT.pdf"
+sha256 = "a916be9dbba0d05e7e2b0e02b1e400454de3243202b36f74bf7583e0e82a329f"
+used_for = [
+  "Bounded EWS MailTips audit row",
+]
+sections = [
+  "2.1 Transport",
+  "2.2 Common Message Syntax",
+  "2.2.2 Messages",
+  "2.2.4 Complex Types",
+  "2.2.5 Simple Types",
+]
+
+[[protocol]]
+id = "MS-OXWOAB"
+title = "Offline Address Book (OAB) Retrieval File Format"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwoab/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWOAB/%5bMS-OXWOAB%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWOAB.pdf"
+sha256 = "f7a9c75787180d4a3655ae0458ab9a79071c01b64462d505c6915ba080e90360"
+used_for = [
+  "Classifying OAB web retrieval files as not implemented",
+]
+sections = [
+  "2.1 Transport",
+  "2.2 Message Syntax",
+]
+
+[[protocol]]
+id = "MS-OXWOOF"
+title = "Out of Office (OOF) Web Service Protocol"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwoof/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXWOOF/%5bMS-OXWOOF%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXWOOF.pdf"
+sha256 = "8be81bb326d0b2e5ad94ed457dc5a038de1cd786b2537266d3adc93497194c4e"
+used_for = [
+  "Bounded EWS OOF get/set audit row",
+]
+sections = [
+  "2.2 Common Message Syntax",
+  "2.2.3.1 t:Mailbox Element",
+  "2.2.4.2 t:UserOofSettings Complex Type",
+  "3.1.4.1 GetUserOofSettings Operation",
+  "3.1.4.2 SetUserOofSettings Operation",
+]
+
+[[protocol]]
+id = "MS-XJRNL"
+title = "Journal Record Message File Format"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-xjrnl/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-XJRNL/%5bMS-XJRNL%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-XJRNL.pdf"
+sha256 = "7b9000b7cf8ba41fb875aabb454d373d6ec4252694af61c9a3a1a4f6fd00561a"
+used_for = [
+  "Classifying transport journal record file format as not implemented",
+]
+sections = [
+  "2.1 Envelope-Part Structure",
+  "2.1.1 sender Field",
+  "2.1.4 recipient-specification Field",
+  "2.1.4.3 redirection-type Field",
+]
+
+[[protocol]]
+id = "MS-OXPSVAL"
+title = "Email Postmark Validation Algorithm"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxpsval/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-OXPSVAL/%5bMS-OXPSVAL%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-OXPSVAL.pdf"
+sha256 = "9c248571ab57db84db756c6afa12520957cec739a0f110817886724e9deb8a0c"
+used_for = [
+  "Classifying Exchange postmark validation as not implemented",
+]
+sections = [
+  "2.1 Common Algorithm Details",
+  "2.1.1 Abstract Data Model",
+  "2.1.1.1 Input Parameters for Generating the Puzzle",
+  "2.1.3 Processing Rules",
+]
+
+[[protocol]]
+id = "MS-XLOGIN"
+title = "Simple Mail Transfer Protocol (SMTP) AUTH LOGIN Extension"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-xlogin/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-XLOGIN/%5bMS-XLOGIN%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-XLOGIN.pdf"
+sha256 = "d18baa45c76c73dcfadfb95ceeb3d4b9290c2b735eda718e2a7eb38afc367ac9"
+used_for = [
+  "Bounded LPE-CT authenticated SMTP LOGIN support and publication boundary audit row",
+]
+sections = [
+  "2.1 Transport",
+  "2.2 Message Syntax",
+  "2.2.1 SASL Mechanism Name",
+  "2.2.2 Command and Response ABNF Grammar",
+]
+
+[[protocol]]
+id = "MS-XOAUTH"
+title = "OAuth 2.0 Authorization Protocol Extensions"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-xoauth/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-XOAUTH/%5bMS-XOAUTH%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-XOAUTH.pdf"
+sha256 = "8676338c50d09369d961c538935a84990de5108e6504609f153be96cda5a62cc"
+used_for = [
+  "Classifying Exchange OAuth extension breadth against bounded LPE authentication adapters",
+  "Explicit SMTP XOAUTH rejection boundary for LPE-CT client submission",
+]
+sections = [
+  "2.1 Transport",
+  "2.2 Message Syntax",
+  "3.1 Client Details",
+  "3.2 Server Details",
+]
+
+[[protocol]]
+id = "MS-XWDCAL"
+title = "Web Distributed Authoring and Versioning (WebDAV) Extensions for Calendar Support"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-xwdcal/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-XWDCAL/%5bMS-XWDCAL%5d.pdf"
+published_version = "2017-06-20"
+local_cache = "docs/microsoft/cache/MS-XWDCAL.pdf"
+sha256 = "d2254d7b5720092ab7e664fc7948f8b9f4be8f51598793c823088b481919d2ee"
+used_for = [
+  "Classifying legacy Exchange WebDAV calendar extensions against LPE DAV/CalDAV support",
+]
+sections = [
+  "2.1 Transport",
+  "2.2 Message Syntax",
+  "2.2.1 DAV: Namespace Properties",
+  "2.2.1.1 PidNameContentClass",
+  "2.2.1.2 PidNameDavId",
+]
+
+[[protocol]]
+id = "MS-XWDVSEC"
+title = "Web Distributed Authoring and Versioning (WebDAV) Protocol Security Descriptor Extensions"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-xwdvsec/"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-XWDVSEC/%5bMS-XWDVSEC%5d.pdf"
+published_version = "2017-09-19"
+local_cache = "docs/microsoft/cache/MS-XWDVSEC.pdf"
+sha256 = "7b7ed10bd7e8fa9815a633b72c7dd1d2f0d3ece214febf83da19acf6f00d68a0"
+used_for = [
+  "Classifying legacy Exchange WebDAV security descriptor extensions as not implemented",
+]
+sections = [
+  "2.2.1 Namespaces",
+  "2.2.2 PidTagSecurityDescriptorAsXml Property",
+  "2.2.3 security_descriptor Element",
+  "2.2.4 microsoft.security_descriptor Type",
+]
+
+[[standard]]
+id = "MS-STANOICAL"
+title = "Outlook iCalendar Standards Support Version 2"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_standards/ms-stanoical/84f556c8-fbaa-4642-a59e-6e9961d9e8bc"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-STANOICAL/%5bMS-STANOICAL%5d.pdf"
+published_version = "2024-08-20"
+local_cache = "docs/microsoft/cache/MS-STANOICAL.pdf"
+sha256 = "db092f49385578036514c0a39e5f2715fbafb58cfdcb1459001db6f1f957a20e"
+used_for = [
+  "Outlook iCalendar standards-support reference inventory; not a standalone LPE implementation claim",
+]
+sections = [
+  "Revision Summary",
+]
+
+[[standard]]
+id = "MS-STANOIMAP"
+title = "Outlook Internet Message Access Protocol Version 4 (IMAP4) Standards Support"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_standards/ms-stanoimap/9e26aea5-bb27-40d2-be9a-c82878c7d567"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-STANOIMAP/%5bMS-STANOIMAP%5d.pdf"
+published_version = "2024-08-20"
+local_cache = "docs/microsoft/cache/MS-STANOIMAP.pdf"
+sha256 = "76ac100cedb17177f73ad1f2922c6372a66585811629f5895482df75c368947e"
+used_for = [
+  "Outlook IMAP standards-support reference inventory; not a standalone LPE implementation claim",
+]
+sections = [
+  "Revision Summary",
+]
+
+[[standard]]
+id = "MS-STANOPOP3"
+title = "Outlook Post Office Protocol Version 3 (POP3) Standards Support"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_standards/ms-stanopop3/bc2e3aad-09a6-4ceb-9bf7-ab1f088378b9"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-STANOPOP3/%5bMS-STANOPOP3%5d.pdf"
+published_version = "2024-08-20"
+local_cache = "docs/microsoft/cache/MS-STANOPOP3.pdf"
+sha256 = "0b1a4ac13b2614f3f374033b032a2bd8dd5705d897d7df109d43c75133230363"
+used_for = [
+  "Outlook POP3 standards-support reference inventory; POP3 remains outside LPE's implemented client surface",
+]
+sections = [
+  "Revision Summary",
+]
+
+[[standard]]
+id = "MS-STANXICAL"
+title = "Exchange iCalendar Standards Support Version 2"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_standards/ms-stanxical/9e9b142a-8e07-4e5b-b851-f4874ca44c57"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-STANXICAL/%5bMS-STANXICAL%5d.pdf"
+published_version = "2025-08-19"
+local_cache = "docs/microsoft/cache/MS-STANXICAL.pdf"
+sha256 = "3c7d4190e93052265ea9ea2b88b0912ad324e7965d309d2e4c5ef93ea343a145"
+used_for = [
+  "Exchange iCalendar standards-support reference inventory; not a standalone LPE implementation claim",
+]
+sections = [
+  "Revision Summary",
+]
+
+[[standard]]
+id = "MS-STANXIMAP"
+title = "Exchange Internet Message Access Protocol Version 4 (IMAP4) Standards Support"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_standards/ms-stanximap/7513f9b5-501b-4f96-9fd8-0fdb3432d1e7"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-STANXIMAP/%5bMS-STANXIMAP%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-STANXIMAP.pdf"
+sha256 = "9e35bd5d32fe76953cf4607a96a52618c5070ec703934e37dccd93e660cce505"
+used_for = [
+  "Exchange IMAP standards-support reference inventory; not a standalone LPE implementation claim",
+]
+sections = [
+  "Revision Summary",
+]
+
+[[standard]]
+id = "MS-STANXPOP3"
+title = "Exchange Post Office Protocol Version 3 (POP3) Standards Support"
+learn_url = "https://learn.microsoft.com/en-us/openspecs/exchange_standards/ms-stanxpop3/9a2907ee-0e99-494f-89ed-377e11f923af"
+pdf_url = "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-STANXPOP3/%5bMS-STANXPOP3%5d.pdf"
+published_version = "2025-05-20"
+local_cache = "docs/microsoft/cache/MS-STANXPOP3.pdf"
+sha256 = "c8ec9087c26ab09b7c550ae6e3b64d246f40503a39ae4379677f36758920d931"
+used_for = [
+  "Exchange POP3 standards-support reference inventory; POP3 remains outside LPE's implemented client surface",
+]
+sections = [
+  "Revision Summary",
+]

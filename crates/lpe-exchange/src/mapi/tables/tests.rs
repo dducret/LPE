@@ -5866,7 +5866,7 @@ fn mailbox_backed_quick_contacts_associated_find_row_returns_osc_contact_sync_co
 }
 
 #[test]
-fn empty_conversation_action_settings_find_row_returns_default_action() {
+fn empty_conversation_action_settings_find_row_returns_not_found() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
@@ -5902,12 +5902,11 @@ fn empty_conversation_action_settings_find_row_returns_default_action() {
         rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::FindRow.as_u8());
-    assert_eq!(response[7], 1);
-    let mut encoded_message_class = Vec::new();
-    write_utf16z(&mut encoded_message_class, "IPM.ConversationAction");
-    assert!(response
-        .windows(encoded_message_class.len())
-        .any(|window| window == encoded_message_class.as_slice()));
+    assert_eq!(
+        u32::from_le_bytes(response[2..6].try_into().unwrap()),
+        0x8004_010F
+    );
+    assert_eq!(response.len(), 6);
 }
 
 #[test]

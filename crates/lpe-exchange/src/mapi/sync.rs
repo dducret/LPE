@@ -1164,18 +1164,12 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             let message = message_for_id(*folder_id, *message_id, mailboxes, emails)
                 .or(saved_email.as_ref().map(|saved| &saved.email))?
                 .clone();
-            let folder = folder_row_for_id(*folder_id, mailboxes)
-                .cloned()
-                .into_iter()
-                .collect::<Vec<_>>();
-            let messages = vec![message];
-            let attachment_facts = sync_attachment_facts_for(*folder_id, &messages, snapshot);
+            let attachment_facts =
+                sync_attachment_facts_for(*folder_id, std::slice::from_ref(&message), snapshot);
             Some((
                 *folder_id,
-                mapi_mailstore::fast_transfer_manifest_buffer_with_attachments(
-                    *folder_id,
-                    &folder,
-                    &messages,
+                mapi_mailstore::fast_transfer_message_content_buffer_with_attachments(
+                    &message,
                     &attachment_facts,
                 ),
             ))
@@ -1191,9 +1185,9 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 .filter(|message| message.folder_id == *folder_id)?;
             Some((
                 *folder_id,
-                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &[associated_config_sync_object(&message)],
+                    &associated_config_sync_object(&message),
                 ),
             ))
         }
@@ -1208,9 +1202,9 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             }
             Some((
                 *folder_id,
-                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &[conversation_action_sync_object(&message)],
+                    &conversation_action_sync_object(&message),
                 ),
             ))
         }
@@ -1224,9 +1218,9 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             }
             Some((
                 *folder_id,
-                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &[navigation_shortcut_sync_object(&message, principal)],
+                    &navigation_shortcut_sync_object(&message, principal),
                 ),
             ))
         }
@@ -1234,12 +1228,9 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             let message = snapshot.named_view_message_for_folder_and_id(*folder_id, *view_id)?;
             Some((
                 *folder_id,
-                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &[common_view_named_view_sync_object(
-                        &message,
-                        principal.account_id,
-                    )],
+                    &common_view_named_view_sync_object(&message, principal.account_id),
                 ),
             ))
         }
@@ -1253,9 +1244,9 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             }
             Some((
                 *folder_id,
-                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &[delegate_freebusy_sync_object(&message)],
+                    &delegate_freebusy_sync_object(&message),
                 ),
             ))
         }
@@ -1265,9 +1256,9 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             let item = snapshot.public_folder_item_for_id(*folder_id, *item_id)?;
             Some((
                 *folder_id,
-                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &[public_folder_item_sync_object(&item)],
+                    &public_folder_item_sync_object(&item),
                 ),
             ))
         }

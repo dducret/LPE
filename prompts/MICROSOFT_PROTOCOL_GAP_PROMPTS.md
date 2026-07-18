@@ -213,7 +213,7 @@ Work method:
 Verification:
 - cargo test -p lpe-exchange microsoft_protocol_gap_report_is_current
 - Run any focused tests added or referenced.
-- Confirm no cached protocol PDF in docs/microsoft/exchange_protocols is missing from the report or registry.
+- Confirm every active `[[protocol]]` PDF under `docs/microsoft/cache/` is present in the report and registry, and every `[[standard]]` or `[[reference]]` PDF is present in the registry.
 ```
 
 ## Prompt 8: Final Completion Audit For Gap Closure
@@ -237,8 +237,9 @@ Audit requirements:
   - deferred with a clear architecture rationale
   - still untriaged or weakly evidenced
 - Verify cached protocol coverage:
-  - every docs/microsoft/exchange_protocols/*.pdf has an id in docs/microsoft/protocol-sources.toml
+  - every active PDF under docs/microsoft/cache/ has an id in docs/microsoft/protocol-sources.toml
   - every cached protocol id appears in docs/architecture/microsoft-protocol-constants-gap.md
+  - standards-support and historical reference IDs are explicitly classified outside the generated protocol report
   - no duplicate protocol ids exist in docs/microsoft/protocol-sources.toml
 - Verify report freshness with cargo test -p lpe-exchange microsoft_protocol_gap_report_is_current.
 

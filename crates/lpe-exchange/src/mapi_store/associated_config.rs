@@ -1,10 +1,10 @@
-use lpe_storage::{ConversationAction, DelegateFreeBusyMessageObject};
+use lpe_storage::DelegateFreeBusyMessageObject;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::{
-    MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiConversationActionMessage,
-    MapiDelegateFreeBusyMessage, MapiNavigationShortcutMessage,
+    MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiDelegateFreeBusyMessage,
+    MapiNavigationShortcutMessage,
 };
 use crate::store::{MapiAssociatedConfigRecord, UpsertMapiAssociatedConfigInput};
 
@@ -939,29 +939,6 @@ pub(super) fn outlook_dynamic_contact_link_timestamp_canonical_id(folder_id: u64
     bytes[6] = (bytes[6] & 0x0f) | 0x80;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     Uuid::from_bytes(bytes)
-}
-
-pub(super) fn outlook_default_conversation_action() -> MapiConversationActionMessage {
-    MapiConversationActionMessage {
-        id: OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID,
-        folder_id: crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
-        canonical_id: Uuid::from_u128(0x6d617069_6361_4466_8000_000000000001),
-        action: ConversationAction {
-            id: Uuid::from_u128(0x6d617069_6361_4466_8000_000000000001),
-            conversation_id: Uuid::nil(),
-            subject: "IPM.ConversationAction".to_string(),
-            categories_json: "[]".to_string(),
-            move_folder_entry_id: None,
-            move_store_entry_id: None,
-            move_target_mailbox_id: None,
-            max_delivery_time: None,
-            last_applied_time: None,
-            version: lpe_storage::CONVERSATION_ACTION_VERSION,
-            processed: 0,
-            created_at: "1970-01-01T00:00:00Z".to_string(),
-            updated_at: "1970-01-01T00:00:00Z".to_string(),
-        },
-    }
 }
 
 pub(super) fn virtual_local_freebusy_message() -> MapiDelegateFreeBusyMessage {

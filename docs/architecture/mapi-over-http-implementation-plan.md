@@ -127,6 +127,15 @@ before it is advertised.
   lexical value sizes such as two-byte `PtypBoolean` values. A full normal or
   FAI `messageChange` ends when the following grammar marker begins; LPE must
   not insert a null property tag as an object terminator.
+- `RopFastTransferSourceCopyTo` and `RopFastTransferSourceCopyProperties` on a
+  Message object return `messageContent` directly. `StartMessage` and
+  `StartFAIMsg` are `message`-element wrappers and must not surround that root.
+  This follows `[MS-OXCFXICS]` sections 2.2.3.1.1.1, 2.2.3.1.1.2, 2.2.4.2,
+  2.2.4.3.16, and 2.2.4.4. The separate Folder-object `folderContent` root
+  remains outside the currently validated CopyTo/CopyProperties surface.
+  Full `Level`, CopyTo exclusion-list, CopyProperties inclusion-list, and
+  complete transmittable-property projection remain explicit gaps; the captured
+  Contacts request uses `Level=0`, `BestBody`, and an empty exclusion list.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
@@ -264,6 +273,14 @@ non-canonical LPE state.
   Outlook's initial Calendar FAI parser. Fresh-profile Calendar FAI content sync
   is therefore allowed to be state-only until Outlook creates real associated
   configuration messages that LPE can persist and replay.
+- Conversation Action Settings exposes only FAI rows projected from canonical
+  `conversation_actions` records. With no canonical action, its
+  associated-contents table is empty and its ICS stream is state-only; LPE must
+  not invent a default
+  `IPM.ConversationAction` with a nil conversation identity. `[MS-OXOCFG]`
+  sections 2.2.8, 2.2.8.8, and 2.2.8.10 describe the FAI's shared conversation
+  ID and correlating subject, while section 3.1.5.1 specifies that no action is
+  processed when no matching FAI exists.
 - Content synchronization emits long-term `PidTagEntryId` values for message
   and FAI rows using the documented private mailbox Message EntryID shape:
   mailbox account GUID as provider UID, canonical store replica GUIDs, and the
@@ -627,9 +644,10 @@ not by itself authorize broad client publication.
   `[MS-OXCFOLD]` sections 2.2.2.2.1.9, 2.2.2.2.1.13, and
   2.2.2.2.1.14.
 - Contents synchronization emits canonical message-change rows, folder-associated
-  information rows for the bounded bootstrap surface, conversation action FAI
-  rows, destroyed conversation actions as `IncrSyncDel`, tombstones, read-state
-  changes, and final state.
+  information rows for the bounded bootstrap surface, canonical conversation
+  action FAI rows, destroyed conversation actions as `IncrSyncDel`, tombstones,
+  read-state changes, and final state. It emits no conversation action row when
+  canonical `conversation_actions` is empty.
 - A Calendar `RopSynchronizationImportMessageChange` creates a pending canonical
   Event. Its following property/stream writes and `RopSaveChangesMessage` commit
   that Event with the imported SourceKey, ChangeKey, and PCL while allocating a
@@ -663,7 +681,9 @@ not by itself authorize broad client publication.
 - Content and hierarchy manifests are selected from canonical folder membership
   and canonical change tracking rather than from primary mailbox fields alone.
 - FastTransfer source buffering emits parseable transfer chunks and validates
-  strict ICS/FastTransfer value encoding.
+  strict ICS/FastTransfer value encoding. Message-object CopyTo/CopyProperties
+  buffering starts with the first `messageContent` property and contains no
+  outer message marker.
 
 ### Canonical Projection Coverage
 

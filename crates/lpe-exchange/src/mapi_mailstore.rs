@@ -71,7 +71,6 @@ const END_FOLDER: u32 = FastTransferMarker::EndFolder.as_u32();
 const START_MESSAGE: u32 = FastTransferMarker::StartMessage.as_u32();
 const END_MESSAGE: u32 = FastTransferMarker::EndMessage.as_u32();
 const END_ATTACH: u32 = FastTransferMarker::EndAttach.as_u32();
-const START_FAI_MSG: u32 = FastTransferMarker::StartFAIMsg.as_u32();
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 const PID_TAG_EMAIL_ADDRESS_W: u32 = 0x3003_001F;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
@@ -619,13 +618,34 @@ pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
     for email in messages {
         let attachments = attachments_for_message(email.id, attachment_facts);
         write_u32(&mut buffer, START_MESSAGE);
-        write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &email.subject);
-        write_utf16_property(&mut buffer, PID_TAG_BODY_W, &email.body_text);
-        write_fast_transfer_visible_recipients(&mut buffer, email);
-        write_fast_transfer_attachments(&mut buffer, attachments);
+        write_fast_transfer_message_content(&mut buffer, email, attachments);
         write_u32(&mut buffer, END_MESSAGE);
     }
     buffer
+}
+
+pub(crate) fn fast_transfer_message_content_buffer_with_attachments(
+    email: &JmapEmail,
+    attachment_facts: &[MessageAttachmentSyncFacts],
+) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    write_fast_transfer_message_content(
+        &mut buffer,
+        email,
+        attachments_for_message(email.id, attachment_facts),
+    );
+    buffer
+}
+
+fn write_fast_transfer_message_content(
+    buffer: &mut Vec<u8>,
+    email: &JmapEmail,
+    attachments: &[AttachmentSyncFact],
+) {
+    write_utf16_property(buffer, PID_TAG_SUBJECT_W, &email.subject);
+    write_utf16_property(buffer, PID_TAG_BODY_W, &email.body_text);
+    write_fast_transfer_visible_recipients(buffer, email);
+    write_fast_transfer_attachments(buffer, attachments);
 }
 
 pub(crate) fn fast_transfer_top_folder_buffer_with_attachments(
@@ -804,59 +824,51 @@ fn fast_transfer_email_matches_folder(
         })
 }
 
-pub(crate) fn fast_transfer_manifest_buffer_with_special_objects(
+pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
     folder_id: u64,
-    objects: &[SpecialMessageSyncFact],
+    object: &SpecialMessageSyncFact,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
-    let mut objects = objects.iter().collect::<Vec<_>>();
-    objects.sort_by(|left, right| {
-        left.last_modified_filetime
-            .cmp(&right.last_modified_filetime)
-            .then(left.subject.cmp(&right.subject))
-            .then(left.canonical_id.cmp(&right.canonical_id))
-    });
-    for object in objects {
-        let source_key = manifest::special_message_source_key(object);
-        let change_key = manifest::special_message_change_key(object);
-        let predecessor_change_list = manifest::special_message_predecessor_change_list(object);
-        write_u32(&mut buffer, START_FAI_MSG);
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_PARENT_SOURCE_KEY,
-            &source_key_for_store_id(folder_id),
-        );
-        write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
-        write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
-        write_i64(&mut buffer, object.last_modified_filetime as i64);
-        write_binary_property(&mut buffer, PID_TAG_CHANGE_KEY, &change_key);
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_PREDECESSOR_CHANGE_LIST,
-            &predecessor_change_list,
-        );
-        write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, object.associated);
-        write_u32(&mut buffer, PID_TAG_MID);
-        write_object_id(&mut buffer, object.item_id);
-        write_i32_property(&mut buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_READ as i32);
-        write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &object.subject);
-        write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
-        write_utf16_property(&mut buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
-        write_utf16_property(&mut buffer, PID_TAG_BODY_W, &object.body_text);
-        write_i32_property(
-            &mut buffer,
-            PID_TAG_MESSAGE_SIZE,
-            object.message_size as i32,
-        );
-        for (tag, value) in &object.named_properties {
-            if !manifest::special_message_property_is_sync_identity(*tag) {
-                write_special_message_property(&mut buffer, *tag, value);
-            }
-        }
-        write_u32(&mut buffer, END_MESSAGE);
-    }
-
+    write_fast_transfer_special_message_content(&mut buffer, folder_id, object);
     buffer
+}
+
+fn write_fast_transfer_special_message_content(
+    buffer: &mut Vec<u8>,
+    folder_id: u64,
+    object: &SpecialMessageSyncFact,
+) {
+    let source_key = manifest::special_message_source_key(object);
+    let change_key = manifest::special_message_change_key(object);
+    let predecessor_change_list = manifest::special_message_predecessor_change_list(object);
+    write_binary_property(
+        buffer,
+        PID_TAG_PARENT_SOURCE_KEY,
+        &source_key_for_store_id(folder_id),
+    );
+    write_binary_property(buffer, PID_TAG_SOURCE_KEY, &source_key);
+    write_u32(buffer, PID_TAG_LAST_MODIFICATION_TIME);
+    write_i64(buffer, object.last_modified_filetime as i64);
+    write_binary_property(buffer, PID_TAG_CHANGE_KEY, &change_key);
+    write_binary_property(
+        buffer,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &predecessor_change_list,
+    );
+    write_bool_property(buffer, PID_TAG_ASSOCIATED, object.associated);
+    write_u32(buffer, PID_TAG_MID);
+    write_object_id(buffer, object.item_id);
+    write_i32_property(buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_READ as i32);
+    write_utf16_property(buffer, PID_TAG_SUBJECT_W, &object.subject);
+    write_string8_property(buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
+    write_utf16_property(buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
+    write_utf16_property(buffer, PID_TAG_BODY_W, &object.body_text);
+    write_i32_property(buffer, PID_TAG_MESSAGE_SIZE, object.message_size as i32);
+    for (tag, value) in &object.named_properties {
+        if !manifest::special_message_property_is_sync_identity(*tag) {
+            write_special_message_property(buffer, *tag, value);
+        }
+    }
 }
 
 pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {

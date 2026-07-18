@@ -1917,6 +1917,74 @@ async fn mapi_over_http_conversation_action_content_sync_exports_fai_rows() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_empty_conversation_action_sync_is_state_only() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, // Contents
+        0x1D, // Unicode | RecoverMode | ForceUnicode | PartialItem
+    ]);
+    rops.extend_from_slice(&0xA139u16.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes()); // RestrictionDataSize
+    rops.extend_from_slice(&0x0000_000Du32.to_le_bytes());
+    let excluded_tags: [u32; 9] = [
+        0x1000_001F,
+        0x1006_0003,
+        0x1007_0003,
+        0x1008_001F,
+        0x1010_0003,
+        0x1011_0003,
+        0x3FF8_001F,
+        0x3FF9_0102,
+        0x300F_0102,
+    ];
+    rops.extend_from_slice(&(excluded_tags.len() as u16).to_le_bytes());
+    for tag in excluded_tags {
+        rops.extend_from_slice(&tag.to_le_bytes());
+    }
+    rops.extend_from_slice(&[0x4E, 0x00, 0x02]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert!(
+        stream.message_changes.is_empty(),
+        "an empty canonical store must not synthesize an IPM.ConversationAction FAI"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_conversation_action_content_sync_exports_deletes() {
     let action_id = Uuid::parse_str("abababab-abab-4bab-8bab-abababababac").unwrap();
     let conversation_action_checkpoint_id = mapi_mailstore::virtual_special_mailbox(
@@ -4648,7 +4716,7 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
 }
 
 #[tokio::test]
-async fn mapi_over_http_fast_transfer_copy_to_message_returns_canonical_manifest_without_bcc() {
+async fn mapi_over_http_fast_transfer_copy_to_message_returns_message_content_without_bcc() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let message_id = "43434343-4343-4343-4343-434343434343";
     let mut email = FakeStore::email(message_id, inbox_id, "inbox", "CopyTo message");
@@ -4705,16 +4773,17 @@ async fn mapi_over_http_fast_transfer_copy_to_message_returns_canonical_manifest
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x4D, 0x03, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, b"LPE-MAPI-FASTTRANSFER\0"));
-    assert!(contains_bytes(&response_rops, b"CopyTo message"));
+    let chunks = mapi_fast_transfer_chunks(&response_rops);
+    assert_eq!(chunks.len(), 1, "{response_rops:02x?}");
+    let transfer = &chunks[0].1;
+    assert!(transfer.starts_with(&PID_TAG_SUBJECT_W.to_le_bytes()));
+    assert!(!contains_bytes(transfer, b"LPE-MAPI-FASTTRANSFER\0"));
+    assert!(contains_bytes(transfer, &utf16z("CopyTo message")));
     assert!(contains_bytes(
-        &response_rops,
-        b"CopyTo body from canonical mail"
+        transfer,
+        &utf16z("CopyTo body from canonical mail")
     ));
-    assert!(!contains_bytes(
-        &response_rops,
-        b"hidden-copyto@example.test"
-    ));
+    assert!(!contains_bytes(transfer, b"hidden-copyto@example.test"));
 }
 
 #[tokio::test]
@@ -4805,8 +4874,8 @@ async fn mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manif
 }
 
 #[tokio::test]
-async fn mapi_over_http_fast_transfer_copy_properties_message_returns_canonical_manifest_without_bcc(
-) {
+async fn mapi_over_http_fast_transfer_copy_properties_message_returns_message_content_without_bcc()
+{
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let message_id = "47474747-4747-4747-4747-474747474747";
     let mut email = FakeStore::email(message_id, inbox_id, "inbox", "CopyProperties message");
@@ -4865,16 +4934,17 @@ async fn mapi_over_http_fast_transfer_copy_properties_message_returns_canonical_
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x69, 0x03, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, b"LPE-MAPI-FASTTRANSFER\0"));
-    assert!(contains_bytes(&response_rops, b"CopyProperties message"));
+    let chunks = mapi_fast_transfer_chunks(&response_rops);
+    assert_eq!(chunks.len(), 1, "{response_rops:02x?}");
+    let transfer = &chunks[0].1;
+    assert!(transfer.starts_with(&PID_TAG_SUBJECT_W.to_le_bytes()));
+    assert!(!contains_bytes(transfer, b"LPE-MAPI-FASTTRANSFER\0"));
+    assert!(contains_bytes(transfer, &utf16z("CopyProperties message")));
     assert!(contains_bytes(
-        &response_rops,
-        b"CopyProperties body from canonical mail"
+        transfer,
+        &utf16z("CopyProperties body from canonical mail")
     ));
-    assert!(!contains_bytes(
-        &response_rops,
-        b"hidden-copyprops@example.test"
-    ));
+    assert!(!contains_bytes(transfer, b"hidden-copyprops@example.test"));
 }
 
 #[tokio::test]
@@ -8039,24 +8109,19 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x4D, 0x03, 0, 0, 0, 0]));
+    let chunks = mapi_fast_transfer_chunks(&response_rops);
+    assert_eq!(chunks.len(), 1, "{response_rops:02x?}");
+    let transfer = &chunks[0].1;
+    assert!(transfer.starts_with(&PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()));
+    assert!(!contains_bytes(transfer, &0x4010_0003u32.to_le_bytes()));
+    assert!(!contains_bytes(transfer, &0x400D_0003u32.to_le_bytes()));
+    assert!(!contains_bytes(transfer, b"LPE-MAPI-FASTTRANSFER\0"));
     assert!(contains_bytes(
-        &response_rops,
-        &0x4010_0003u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x400D_0003u32.to_le_bytes()
-    ));
-    assert!(!contains_bytes(&response_rops, b"LPE-MAPI-FASTTRANSFER\0"));
-    assert!(contains_bytes(
-        &response_rops,
+        transfer,
         &utf16z("Outlook Inbox view state")
     ));
-    assert!(contains_bytes(
-        &response_rops,
-        &utf16z("Client view payload")
-    ));
-    assert!(contains_bytes(&response_rops, b"view-extra"));
+    assert!(contains_bytes(transfer, &utf16z("Client view payload")));
+    assert!(contains_bytes(transfer, b"view-extra"));
 }
 
 #[tokio::test]

@@ -14,5 +14,7 @@
 /.codex
 /tmp
 /logs
-/docs/microsoft/
+/docs/microsoft/*
+!/docs/microsoft/README.md
+!/docs/microsoft/protocol-sources.toml
 

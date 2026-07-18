@@ -1348,27 +1348,13 @@ fn modeled_virtual_associated_config_identity_opens_via_dynamic_id() {
 }
 
 #[test]
-fn empty_conversation_action_settings_exposes_default_table_row_only() {
+fn empty_conversation_action_settings_exposes_no_synthetic_rows() {
     let snapshot = MapiMailStoreSnapshot::empty();
 
     assert!(snapshot.conversation_action_messages().is_empty());
-
-    let messages = snapshot.conversation_action_table_messages();
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].id, OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID);
-    assert_eq!(
-        messages[0].folder_id,
-        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID
-    );
-    assert_eq!(messages[0].action.subject, "IPM.ConversationAction");
-    assert_eq!(
-        snapshot
-            .conversation_action_table_message_for_id(OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID)
-            .map(|message| message.action.subject),
-        Some("IPM.ConversationAction".to_string())
-    );
+    assert!(snapshot.conversation_action_table_messages().is_empty());
     assert!(snapshot
-        .conversation_action_message_for_id(OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID)
+        .conversation_action_table_message_for_id(OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID)
         .is_none());
 }
 

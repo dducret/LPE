@@ -1250,11 +1250,7 @@ impl MapiMailStoreSnapshot {
     }
 
     pub(crate) fn conversation_action_table_messages(&self) -> Vec<MapiConversationActionMessage> {
-        if self.conversation_actions.is_empty() {
-            vec![outlook_default_conversation_action()]
-        } else {
-            self.conversation_actions.clone()
-        }
+        self.conversation_actions.clone()
     }
 
     pub(crate) fn conversation_action_message_for_id(
@@ -1270,13 +1266,7 @@ impl MapiMailStoreSnapshot {
         &self,
         item_id: u64,
     ) -> Option<MapiConversationActionMessage> {
-        self.conversation_action_message_for_id(item_id)
-            .cloned()
-            .or_else(|| {
-                (self.conversation_actions.is_empty()
-                    && item_id == OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID)
-                    .then(outlook_default_conversation_action)
-            })
+        self.conversation_action_message_for_id(item_id).cloned()
     }
 
     pub(crate) fn delegate_freebusy_messages(&self) -> &[MapiDelegateFreeBusyMessage] {

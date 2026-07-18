@@ -22,15 +22,16 @@ surface area, or change runtime behavior.
 
 ## Audit Result
 
-Status as of 2026-07-09:
+Status as of 2026-07-18:
 
 | Check | Result |
 | --- | --- |
 | Generated report freshness | Passed: `cargo test -p lpe-exchange microsoft_protocol_gap_report_is_current` |
 | Report rows classified in this backlog | Passed: 120 of 120 generated rows are referenced after expanding row ranges |
 | Duplicate protocol IDs in `docs/microsoft/protocol-sources.toml` | Passed: none found |
-| Cached PDF has a protocol-source entry | Passed: `MS-OXCFXICS`, `MS-OXCMAPIHTTP`, and `MS-OXNSPI` source entries point to the cached `docs/microsoft/exchange_protocols/` PDFs used by the audit |
+| Cached PDF has a protocol-source entry | Passed: all active protocol source entries point to refreshed PDFs under `docs/microsoft/cache/`; the historical documentation-set readme is retained under `docs/microsoft/cache/archive/` |
 | Cached protocol ID appears in the generated constants gap report | Passed: protocol entries map to generated report rows; the Exchange documentation-set readme is recorded as a non-protocol `[[reference]]` and is intentionally outside the constants gap report |
+| Outlook/Exchange standards-support cache | Passed: the six legacy 2016 iCalendar, IMAP, and POP3 documents were replaced by current Microsoft publications and classified as non-protocol `[[standard]]` entries |
 
 Final row status counts for the generated report:
 

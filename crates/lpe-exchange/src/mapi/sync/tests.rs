@@ -387,9 +387,9 @@ fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
         &sync_principal(account_id),
     );
     let buffer = associated_content_sync_buffer(account_id, CALENDAR_FOLDER_ID, &objects);
-    let copy_buffer = mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+    let copy_buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
         CALENDAR_FOLDER_ID,
-        &objects,
+        &objects[0],
     );
 
     for transfer in [&buffer, &copy_buffer] {

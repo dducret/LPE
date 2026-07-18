@@ -1,6 +1,72 @@
 use super::*;
 
 #[tokio::test]
+async fn mapi_over_http_contact_link_copy_to_uses_message_content_root() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CONTACTS_FOLDER_ID);
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+        crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEC),
+    );
+    rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]);
+    rops.push(0); // Level: include subobjects.
+    rops.extend_from_slice(&0x0000_2000u32.to_le_bytes()); // BestBody.
+    rops.push(0x09); // Unicode | ForceUnicode, as sent by Outlook.
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let chunks = mapi_fast_transfer_chunks(&response_rops);
+    assert_eq!(chunks.len(), 1, "{response_rops:02x?}");
+    let transfer = &chunks[0].1;
+
+    // [MS-OXCFXICS] 2.2.4.2 and 2.2.4.4: CopyTo on a Message object
+    // produces messageContent, not a message wrapped in StartFAIMsg/EndMessage.
+    assert!(
+        transfer.starts_with(&PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()),
+        "unexpected messageContent root: {transfer:02x?}"
+    );
+    assert!(!contains_bytes(transfer, &0x4010_0003u32.to_le_bytes()));
+    assert!(!contains_bytes(transfer, &0x400D_0003u32.to_le_bytes()));
+    assert!(contains_bytes(
+        transfer,
+        &utf16z("IPM.Microsoft.ContactLink.TimeStamp")
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

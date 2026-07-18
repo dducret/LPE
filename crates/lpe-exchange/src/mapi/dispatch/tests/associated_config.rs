@@ -195,7 +195,7 @@ fn conversation_action_open_rejects_default_action_from_wrong_folder() {
 }
 
 #[test]
-fn virtual_default_conversation_action_set_properties_stages_pending_row() {
+fn unadvertised_default_conversation_action_set_properties_is_rejected() {
     let mut session = test_mapi_session();
     let action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
     session.handles.insert(
@@ -223,16 +223,11 @@ fn virtual_default_conversation_action_set_properties_stages_pending_row() {
         )],
     );
 
-    assert!(matches!(result, Some(Ok(()))));
-    match session.handles.get(&1) {
-        Some(MapiObject::PendingConversationAction { properties, .. }) => {
-            assert_eq!(
-                properties.get(&PID_TAG_SUBJECT_W),
-                Some(&MapiValue::String("Conversation Action Update".to_string()))
-            );
-        }
-        other => panic!("expected pending conversation action, got {other:?}"),
-    }
+    assert!(matches!(result, Some(Err(_))));
+    assert!(matches!(
+        session.handles.get(&1),
+        Some(MapiObject::ConversationAction { .. })
+    ));
 }
 
 #[test]
@@ -272,7 +267,7 @@ fn virtual_default_conversation_action_set_rejects_wrong_folder() {
 }
 
 #[test]
-fn virtual_default_conversation_action_delete_properties_stages_pending_row() {
+fn unadvertised_default_conversation_action_delete_properties_is_rejected() {
     let mut session = test_mapi_session();
     let action_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
     session.handles.insert(
@@ -297,13 +292,11 @@ fn virtual_default_conversation_action_delete_properties_stages_pending_row() {
         &[PID_TAG_SUBJECT_W],
     );
 
-    assert!(matches!(result, Some(Ok(()))));
-    match session.handles.get(&1) {
-        Some(MapiObject::PendingConversationAction { properties, .. }) => {
-            assert!(!properties.contains_key(&PID_TAG_SUBJECT_W));
-        }
-        other => panic!("expected pending conversation action, got {other:?}"),
-    }
+    assert!(matches!(result, Some(Err(_))));
+    assert!(matches!(
+        session.handles.get(&1),
+        Some(MapiObject::ConversationAction { .. })
+    ));
 }
 
 #[test]

@@ -687,7 +687,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
 }
 
 #[test]
-fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_fai_message_marker() {
+fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999990").unwrap();
     let item_id = crate::mapi::identity::mapi_store_id(90);
     crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
@@ -707,15 +707,14 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_fai_message_marker() {
             SpecialMessagePropertyValue::Binary(b"view-extra".to_vec()),
         )],
     };
-    let buffer = fast_transfer_manifest_buffer_with_special_objects(
+    let buffer = fast_transfer_message_content_buffer_with_special_object(
         crate::mapi::identity::INBOX_FOLDER_ID,
-        &[special],
+        &special,
     );
 
     assert_tag_sequence(
         &buffer,
         &[
-            START_FAI_MSG,
             PID_TAG_PARENT_SOURCE_KEY,
             PID_TAG_SOURCE_KEY,
             PID_TAG_ASSOCIATED,
@@ -723,9 +722,15 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_fai_message_marker() {
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_BODY_W,
             0x7C08_0102,
-            END_MESSAGE,
         ],
     );
+    assert!(buffer.starts_with(&PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()));
+    assert!(!buffer
+        .windows(4)
+        .any(|window| window == FastTransferMarker::StartFAIMsg.as_u32().to_le_bytes()));
+    assert!(!buffer
+        .windows(4)
+        .any(|window| window == END_MESSAGE.to_le_bytes()));
     assert!(!buffer.starts_with(b"LPE-MAPI-FASTTRANSFER\0"));
     assert_bool_property(&buffer, PID_TAG_ASSOCIATED, true);
     assert_variable_property_present(
