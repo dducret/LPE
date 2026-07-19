@@ -311,6 +311,10 @@ non-canonical LPE state.
   still receives no implicit descriptor sort; the start-time descriptor sort
   becomes table state only through an explicit client operation. Common Views
   still owns the bounded Common Views `Sent To` row and navigation shortcuts.
+  The folder-local `Contacts` NamedView is also exported by FAI content
+  synchronization, so a cached-mode OST receives the same view object that the
+  live associated-contents table exposes. This follows `[MS-OXOCFG]` sections
+  2.2.6 and 3.1.4.3 and `[MS-OXCFXICS]` sections 2.2.3.2.1.1.1 and 3.2.5.3.
   Outlook-created or imported associated configuration rows remain durable, but
   Inbox startup enumeration does not replay broad persisted `IPM.Configuration.*`
   rows or `IPM.ExtendedRule.Message` rows; only the modeled

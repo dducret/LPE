@@ -7755,6 +7755,100 @@ async fn mapi_over_http_inbox_fai_sync_exports_folder_local_default_view() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_contacts_fai_sync_exports_folder_local_default_view() {
+    // [MS-OXOCFG] sections 2.2.6 and 3.1.4.3 place a view definition in
+    // the displayed folder's FAI table. [MS-OXCFXICS] sections
+    // 2.2.3.2.1.1.1 and 3.2.5.3 require an unseen FAI message to be emitted
+    // when the client requests FAI content synchronization.
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-4555-9555-555555555501",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CONTACTS_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x10, 0x00, // content sync, FAI only
+        0x00, 0x00, // RestrictionDataSize
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
+        0x00, 0x00, // PropertyTagCount
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&16384u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops)
+        .unwrap_or_else(|error| panic!("{error}: {response_rops:02x?}"));
+    assert!(stream
+        .message_changes
+        .iter()
+        .all(|message| message.associated));
+
+    let view = stream
+        .message_changes
+        .iter()
+        .find(|message| message.subject == "Contacts")
+        .expect("Contacts default named-view FAI change");
+    let expected_view_id = crate::mapi_store::outlook_default_folder_named_view_id(
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+    );
+    assert!(view.mid.is_some());
+    assert_eq!(
+        view.source_key,
+        mapi_mailstore::source_key_for_store_id(expected_view_id)
+    );
+    assert_eq!(
+        view.parent_source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CONTACTS_FOLDER_ID)
+    );
+    assert_eq!(view.entry_id.len(), 70);
+    assert_eq!(&view.entry_id[4..20], account.account_id.as_bytes());
+    assert!(contains_bytes(&view.entry_id, &view.source_key[16..22]));
+    assert!(strict_replguid_globset_contains_counter(
+        &stream.idset_given,
+        &view.source_key[16..22]
+    )
+    .unwrap());
+    let change_number = view.change_number.expect("Contacts FAI change number");
+    assert!(strict_replguid_globset_contains_counter(
+        &stream.cnset_seen_fai,
+        &globcnt_bytes(change_number)
+    )
+    .unwrap());
+
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Microsoft.FolderDesign.NamedView")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Contacts")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_open_associated_message_by_imported_source_key_id() {
     let associated_object_id = crate::mapi::identity::mapi_store_id(
         crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 42,

@@ -832,6 +832,7 @@ used_for = [
   "View descriptor ulFlags and sorted ColumnPacket VCDF_SORTDESCENDING direction consistency",
   "FolderDesign.NamedView property requirements contrasted with configuration-data FAI lookup columns",
   "FolderDesign.NamedView selection contract contrasted with Outlook's additional registered view CLSID requirement",
+  "Contacts folder-local NamedView parity between the live FAI table and cached-mode synchronization",
   "Conversation Action Settings FAI projection only from canonical conversation action rows",
 ]
 sections = [
@@ -944,6 +945,7 @@ used_for = [
   "Existing canonical-folder hierarchy uploads, duplicate detection, and conflict responses without advancing CnsetSeen",
   "Upload state ignores MetaTagIdsetGiven and returns only applicable CN sets",
   "RopFastTransferSourceCopyTo and CopyProperties Message-object messageContent root without StartMessage or StartFAIMsg wrappers",
+  "FAI-flagged content synchronization of the advertised folder-local Contacts NamedView",
 ]
 sections = [
   "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",

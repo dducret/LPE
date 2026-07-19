@@ -378,6 +378,7 @@ fn default_folder_named_view_sync_supported(folder_id: u64) -> bool {
             | JUNK_FOLDER_ID
             | ARCHIVE_FOLDER_ID
             | CONVERSATION_HISTORY_FOLDER_ID
+            | CONTACTS_FOLDER_ID
     )
 }
 
