@@ -17,7 +17,7 @@ use crate::mapi::permissions::{
     MapiFolderPermission,
 };
 use crate::store::ExchangeStore;
-use crate::store::MapiAssociatedConfigRecord;
+use crate::store::{MapiAssociatedConfigRecord, MapiNamedPropertyMapping};
 use crate::store::{
     MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiNavigationShortcutRecord,
 };
@@ -46,6 +46,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     navigation_shortcuts: Vec<MapiNavigationShortcutMessage>,
     associated_configs: Vec<MapiAssociatedConfigMessage>,
     associated_config_identity_ids: Vec<MapiAssociatedConfigIdentity>,
+    named_property_mappings: HashMap<u16, crate::mapi::properties::MapiNamedProperty>,
     conversation_actions: Vec<MapiConversationActionMessage>,
     delegate_freebusy_messages: Vec<MapiDelegateFreeBusyMessage>,
     recoverable_items: Vec<MapiRecoverableItemMessage>,
@@ -473,6 +474,8 @@ impl<T: ExchangeStore> MapiStore for T {
             let search_folder_definitions = self.fetch_search_folders(account_id).await?;
             let rules = self.list_mailbox_rules(account_id).await?;
             let navigation_shortcuts = self.fetch_mapi_navigation_shortcuts(account_id).await?;
+            let named_property_mappings =
+                self.fetch_mapi_named_properties(account_id, None).await?;
             let mut associated_configs = self.fetch_mapi_associated_configs(account_id).await?;
             let dropped_empty_synthetic_inbox_configs = associated_configs
                 .iter()
@@ -672,6 +675,7 @@ impl<T: ExchangeStore> MapiStore for T {
             .map(|snapshot| snapshot.with_search_folder_definitions(search_folder_definitions))
             .map(|snapshot| snapshot.with_rules(rules))
             .map(|snapshot| snapshot.with_navigation_shortcuts(navigation_shortcuts))
+            .map(|snapshot| snapshot.with_named_property_mappings(named_property_mappings))
             .map(|snapshot| snapshot.with_associated_configs(associated_configs))
             .map(|snapshot| snapshot.with_conversation_actions(conversation_actions))
             .map(|snapshot| snapshot.with_delegate_freebusy_messages(delegate_freebusy_messages))

@@ -533,6 +533,7 @@ fn calendar_configuration_debug_contract_uses_roaming_properties() {
                 mapi_mailstore::SpecialMessagePropertyValue::Binary(Vec::new()),
             ),
         ],
+        named_property_definitions: Default::default(),
     };
 
     assert!(is_calendar_configuration_object(&object));

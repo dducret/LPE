@@ -13,25 +13,49 @@ pub(crate) enum MapiNamedPropertyKind {
 }
 
 pub(in crate::mapi) fn well_known_named_property_id(property: &MapiNamedProperty) -> Option<u16> {
-    if let Some(property_id) = well_known_lid_family_property_id(property) {
+    if let Some(property_id) = well_known_named_properties()
+        .into_iter()
+        .find_map(|(property_id, candidate)| (candidate == *property).then_some(property_id))
+    {
         return Some(property_id);
     }
 
-    well_known_named_properties()
-        .into_iter()
-        .find_map(|(property_id, candidate)| (candidate == *property).then_some(property_id))
+    let property_id = well_known_lid_family_property_id(property)?;
+    if property.guid == OUTLOOK_VIEW_8F07_GUID
+        && property.kind == MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_APPOINTMENT_8F07)
+    {
+        return Some(property_id);
+    }
+    explicit_well_known_named_property_for_id(property_id)
+        .is_none()
+        .then_some(property_id)
 }
 
 pub(in crate::mapi) fn well_known_named_property_for_id(
     property_id: u16,
 ) -> Option<MapiNamedProperty> {
-    if let Some(property) = well_known_lid_family_property_for_id(property_id) {
-        return Some(property);
-    }
+    explicit_well_known_named_property_for_id(property_id)
+        .or_else(|| well_known_lid_family_property_for_id(property_id))
+}
 
+fn explicit_well_known_named_property_for_id(property_id: u16) -> Option<MapiNamedProperty> {
     well_known_named_properties()
         .into_iter()
         .find_map(|(candidate_id, property)| (candidate_id == property_id).then_some(property))
+}
+
+pub(crate) fn fast_transfer_named_property_for_message_tag(
+    _message_class: &str,
+    property_tag: u32,
+) -> Option<MapiNamedProperty> {
+    let property_id = MapiPropertyTag::new(property_tag).property_id();
+    if property_id < 0x8000 {
+        return None;
+    }
+
+    // [MS-OXCFXICS] section 2.2.4.1 requires the same mailbox-level named
+    // property definition used by RopGetNamesFromPropertyIds.
+    well_known_named_property_for_id(property_id)
 }
 
 pub(crate) fn is_reserved_named_property_id(property_id: u16) -> bool {

@@ -9881,7 +9881,8 @@ fn strict_parse_fast_transfer_property(
 ) -> Result<StrictFastTransferProperty, String> {
     let tag = read_strict_u32(bytes, offset)?;
     let property_type = tag & 0x0000_FFFF;
-    let value_start = offset + 4;
+    let value_start =
+        crate::mapi_mailstore::fast_transfer_property_value_start(bytes, tag, offset + 4)?;
     let (value_start, value_len) = match property_type {
         _ if tag == META_TAG_IDSET_GIVEN => {
             let len = read_strict_u32(bytes, value_start)? as usize;

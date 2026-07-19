@@ -234,6 +234,24 @@ impl MapiMailStoreSnapshot {
         self
     }
 
+    pub(crate) fn with_named_property_mappings(
+        mut self,
+        mappings: Vec<MapiNamedPropertyMapping>,
+    ) -> Self {
+        self.named_property_mappings = mappings
+            .into_iter()
+            .map(|mapping| (mapping.property_id, mapping.property))
+            .collect();
+        self
+    }
+
+    pub(crate) fn named_property_for_id(
+        &self,
+        property_id: u16,
+    ) -> Option<&crate::mapi::properties::MapiNamedProperty> {
+        self.named_property_mappings.get(&property_id)
+    }
+
     pub(crate) fn with_reminders(mut self, reminders: Vec<ClientReminder>) -> Self {
         self.reminders = reminders;
         self

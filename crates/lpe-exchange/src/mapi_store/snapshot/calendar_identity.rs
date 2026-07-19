@@ -400,6 +400,7 @@ impl MapiMailStoreSnapshot {
             navigation_shortcuts: Vec::new(),
             associated_configs: Vec::new(),
             associated_config_identity_ids: Vec::new(),
+            named_property_mappings: HashMap::new(),
             conversation_actions: Vec::new(),
             delegate_freebusy_messages: Vec::new(),
             recoverable_items: Vec::new(),

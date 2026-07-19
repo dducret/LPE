@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use lpe_domain::{
     crypto::hex_lower, days_from_civil, windows_filetime_from_signed_unix_seconds,
@@ -48,7 +48,10 @@ pub(crate) use diagnostics::{
 };
 
 pub(crate) use crate::mapi::identity::STORE_REPLICA_GUID;
-use crate::mapi::properties::canonical_property_storage_tag;
+use crate::mapi::properties::{
+    canonical_property_storage_tag, fast_transfer_named_property_for_message_tag,
+    MapiNamedPropertyKind,
+};
 use crate::mapi::wire::{FastTransferMarker, MapiSyncType};
 
 const INCR_SYNC_CHG: u32 = FastTransferMarker::IncrSyncChg.as_u32();
@@ -865,8 +868,8 @@ fn write_fast_transfer_special_message_content(
     write_utf16_property(buffer, PID_TAG_BODY_W, &object.body_text);
     write_i32_property(buffer, PID_TAG_MESSAGE_SIZE, object.message_size as i32);
     for (tag, value) in &object.named_properties {
-        if !manifest::special_message_property_is_sync_identity(*tag) {
-            write_special_message_property(buffer, *tag, value);
+        if !manifest::special_message_property_is_copy_identity(*tag) {
+            write_special_message_property(buffer, object, *tag, value);
         }
     }
 }
@@ -1207,59 +1210,142 @@ fn write_string8_property(buffer: &mut Vec<u8>, property_tag: u32, value: &str) 
     buffer.extend_from_slice(&bytes);
 }
 
-fn write_multi_string_property(buffer: &mut Vec<u8>, property_tag: u32, values: &[String]) {
-    write_u32(buffer, property_tag);
-    write_u32(buffer, values.len().min(u32::MAX as usize) as u32);
-    for value in values.iter().take(u32::MAX as usize) {
-        let mut bytes = value
-            .encode_utf16()
-            .flat_map(u16::to_le_bytes)
-            .collect::<Vec<_>>();
-        bytes.extend_from_slice(&0u16.to_le_bytes());
-        write_u32(buffer, bytes.len().min(u32::MAX as usize) as u32);
-        buffer.extend_from_slice(&bytes);
-    }
-}
-
 fn write_special_message_property(
     buffer: &mut Vec<u8>,
+    object: &SpecialMessageSyncFact,
     property_tag: u32,
     value: &SpecialMessagePropertyValue,
 ) {
+    if !write_fast_transfer_property_info(buffer, object, property_tag) {
+        return;
+    }
     match value {
         SpecialMessagePropertyValue::Binary(value) => {
-            write_binary_property(buffer, property_tag, value)
-        }
-        SpecialMessagePropertyValue::Bool(value) => {
-            write_bool_property(buffer, property_tag, *value)
-        }
-        SpecialMessagePropertyValue::Guid(value) => {
-            write_u32(buffer, property_tag);
+            write_u32(buffer, value.len().min(u32::MAX as usize) as u32);
             buffer.extend_from_slice(value);
         }
-        SpecialMessagePropertyValue::I32(value) => write_i32_property(buffer, property_tag, *value),
-        SpecialMessagePropertyValue::I64(value) => {
-            write_u32(buffer, property_tag);
-            write_i64(buffer, *value);
+        SpecialMessagePropertyValue::Bool(value) => {
+            buffer.extend_from_slice(&(*value as u16).to_le_bytes());
         }
-        SpecialMessagePropertyValue::U32(value) => {
-            write_u32(buffer, property_tag);
-            write_u32(buffer, *value);
-        }
-        SpecialMessagePropertyValue::U64(value) => {
-            write_u32(buffer, property_tag);
-            write_i64(buffer, *value as i64);
-        }
+        SpecialMessagePropertyValue::Guid(value) => buffer.extend_from_slice(value),
+        SpecialMessagePropertyValue::I32(value) => write_i32(buffer, *value),
+        SpecialMessagePropertyValue::I64(value) => write_i64(buffer, *value),
+        SpecialMessagePropertyValue::U32(value) => write_u32(buffer, *value),
+        SpecialMessagePropertyValue::U64(value) => write_i64(buffer, *value as i64),
         SpecialMessagePropertyValue::String(value) => {
-            write_utf16_property(buffer, property_tag, value)
+            let mut bytes = value
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>();
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+            write_u32(buffer, bytes.len().min(u32::MAX as usize) as u32);
+            buffer.extend_from_slice(&bytes);
         }
         SpecialMessagePropertyValue::MultiString(values) => {
-            write_multi_string_property(buffer, property_tag, values)
+            write_u32(buffer, values.len().min(u32::MAX as usize) as u32);
+            for value in values.iter().take(u32::MAX as usize) {
+                let mut bytes = value
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes)
+                    .collect::<Vec<_>>();
+                bytes.extend_from_slice(&0u16.to_le_bytes());
+                write_u32(buffer, bytes.len().min(u32::MAX as usize) as u32);
+                buffer.extend_from_slice(&bytes);
+            }
         }
         SpecialMessagePropertyValue::Time(value) => {
-            write_u32(buffer, property_tag);
-            write_i64(buffer, filetime_from_rfc3339_utc(value) as i64);
+            write_i64(buffer, filetime_from_rfc3339_utc(value) as i64)
         }
+    }
+}
+
+fn write_fast_transfer_property_info(
+    buffer: &mut Vec<u8>,
+    object: &SpecialMessageSyncFact,
+    property_tag: u32,
+) -> bool {
+    let property_id = (property_tag >> 16) as u16;
+    if property_id < 0x8000 {
+        write_u32(buffer, property_tag);
+        return true;
+    }
+
+    let property = object
+        .named_property_definitions
+        .get(&property_id)
+        .cloned()
+        .or_else(|| {
+            fast_transfer_named_property_for_message_tag(&object.message_class, property_tag)
+        });
+    let Some(property) = property else {
+        tracing::error!(
+            adapter = "mapi",
+            message_class = %object.message_class,
+            property_tag = format_args!("0x{property_tag:08x}"),
+            "cannot encode FastTransfer named property without its mailbox mapping"
+        );
+        return false;
+    };
+
+    // [MS-OXCFXICS] section 2.2.4.1: a named property is serialized as
+    // the property tag, property-set GUID and its LID/name definition.
+    write_u32(buffer, property_tag);
+    buffer.extend_from_slice(&property.guid);
+    match property.kind {
+        MapiNamedPropertyKind::Lid(lid) => {
+            buffer.push(0x00);
+            write_u32(buffer, lid);
+        }
+        MapiNamedPropertyKind::Name(name) => {
+            buffer.push(0x01);
+            buffer.extend(name.encode_utf16().flat_map(u16::to_le_bytes));
+            buffer.extend_from_slice(&0u16.to_le_bytes());
+        }
+    }
+    true
+}
+
+pub(crate) fn fast_transfer_property_value_start(
+    bytes: &[u8],
+    property_tag: u32,
+    offset_after_tag: usize,
+) -> Result<usize, String> {
+    if (property_tag >> 16) < 0x8000 {
+        return Ok(offset_after_tag);
+    }
+
+    // [MS-OXCFXICS] section 2.2.4.1: namedPropInfo follows every named
+    // property tag before the property value.
+    let mut cursor = offset_after_tag;
+    bytes
+        .get(cursor..cursor.saturating_add(16))
+        .ok_or_else(|| {
+            format!("FastTransfer named property 0x{property_tag:08x} is missing its GUID")
+        })?;
+    cursor += 16;
+    let kind = *bytes.get(cursor).ok_or_else(|| {
+        format!("FastTransfer named property 0x{property_tag:08x} is missing its kind")
+    })?;
+    cursor += 1;
+    match kind {
+        0x00 => {
+            bytes.get(cursor..cursor.saturating_add(4)).ok_or_else(|| {
+                format!("FastTransfer named property 0x{property_tag:08x} has a truncated LID")
+            })?;
+            Ok(cursor + 4)
+        }
+        0x01 => loop {
+            let code_unit = bytes.get(cursor..cursor.saturating_add(2)).ok_or_else(|| {
+                format!("FastTransfer named property 0x{property_tag:08x} has an unterminated name")
+            })?;
+            cursor += 2;
+            if code_unit == [0, 0] {
+                return Ok(cursor);
+            }
+        },
+        _ => Err(format!(
+            "FastTransfer named property 0x{property_tag:08x} has invalid kind 0x{kind:02x}"
+        )),
     }
 }
 

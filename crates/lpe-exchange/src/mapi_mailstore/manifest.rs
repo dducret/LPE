@@ -39,6 +39,7 @@ pub(crate) struct SpecialMessageSyncFact {
     pub(crate) message_size: i64,
     pub(crate) read_state: Option<bool>,
     pub(crate) named_properties: Vec<(u32, SpecialMessagePropertyValue)>,
+    pub(crate) named_property_definitions: HashMap<u16, crate::mapi::properties::MapiNamedProperty>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -214,6 +215,19 @@ pub(crate) fn special_message_source_key(object: &SpecialMessageSyncFact) -> Vec
         .unwrap_or_else(|| source_key_for_store_id(object.item_id))
 }
 
+fn special_message_parent_source_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
+    special_message_binary_property(object, PID_TAG_PARENT_SOURCE_KEY)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| source_key_for_store_id(object.folder_id))
+}
+
+fn special_message_search_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
+    // [MS-OXCPRPT] section 2.2.1.9: SearchKey is a read-only search identity.
+    special_message_binary_property(object, PID_TAG_SEARCH_KEY)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| source_key_for_store_id(object.item_id))
+}
+
 pub(super) fn special_message_change_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
     special_message_binary_property(object, PID_TAG_CHANGE_KEY)
         .map(ToOwned::to_owned)
@@ -237,10 +251,25 @@ fn special_message_change_number(object: &SpecialMessageSyncFact) -> u64 {
         .unwrap_or_else(|| change_number_for_store_id(object.item_id))
 }
 
-pub(super) fn special_message_property_is_sync_identity(property_tag: u32) -> bool {
+pub(super) fn special_message_property_is_ics_identity(property_tag: u32) -> bool {
     matches!(
         property_tag,
         PID_TAG_SOURCE_KEY
+            | PID_TAG_PARENT_SOURCE_KEY
+            | PID_TAG_RECORD_KEY
+            | PID_TAG_SEARCH_KEY
+            | PID_TAG_CHANGE_KEY
+            | PID_TAG_PREDECESSOR_CHANGE_LIST
+            | PID_TAG_CHANGE_NUMBER
+    )
+}
+
+pub(super) fn special_message_property_is_copy_identity(property_tag: u32) -> bool {
+    matches!(
+        property_tag,
+        PID_TAG_SOURCE_KEY
+            | PID_TAG_PARENT_SOURCE_KEY
+            | PID_TAG_RECORD_KEY
             | PID_TAG_CHANGE_KEY
             | PID_TAG_PREDECESSOR_CHANGE_LIST
             | PID_TAG_CHANGE_NUMBER
@@ -902,7 +931,20 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
     for object in &special_objects {
         let attachments = attachments_for_message(object.canonical_id, attachment_facts);
         let change_number = special_message_change_number(object);
-        let source_key = special_message_source_key(object);
+        // [MS-OXCFXICS] section 3.2.5.9.1.1: NoForeignIdentifiers requires
+        // local replica identifiers even when the canonical object retains an
+        // imported SourceKey for a synchronization without that flag.
+        let no_foreign_identifiers = sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0;
+        let source_key = if no_foreign_identifiers {
+            source_key_for_store_id(object.item_id)
+        } else {
+            special_message_source_key(object)
+        };
+        let parent_source_key = if no_foreign_identifiers {
+            source_key_for_store_id(object.folder_id)
+        } else {
+            special_message_parent_source_key(object)
+        };
         let change_key = special_message_change_key(object);
         let predecessor_change_list = special_message_predecessor_change_list(object);
         if sync_type == SYNC_TYPE_CONTENTS && sync_flags & SYNC_FLAG_PROGRESS != 0 {
@@ -939,11 +981,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             write_change_number(&mut buffer, change_number);
         }
         write_u32(&mut buffer, INCR_SYNC_MESSAGE);
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_PARENT_SOURCE_KEY,
-            &source_key_for_store_id(object.folder_id),
-        );
+        write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_ENTRY_ID) {
             if let Some(entry_id) = crate::mapi::identity::message_entry_id_from_object_ids(
                 mailbox_guid,
@@ -978,7 +1016,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             write_binary_property(
                 &mut buffer,
                 PID_TAG_SEARCH_KEY,
-                &source_key_for_store_id(object.item_id),
+                &special_message_search_key(object),
             );
         }
         if content_property_in_scope(
@@ -1033,10 +1071,10 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             );
         }
         for (tag, value) in &object.named_properties {
-            if !special_message_property_is_sync_identity(*tag)
+            if !special_message_property_is_ics_identity(*tag)
                 && content_property_in_scope(sync_type, sync_flags, sync_property_tags, *tag)
             {
-                write_special_message_property(&mut buffer, *tag, value);
+                write_special_message_property(&mut buffer, object, *tag, value);
             }
         }
         if subject_in_scope && (sync_type != SYNC_TYPE_CONTENTS || sync_property_tags.is_empty()) {

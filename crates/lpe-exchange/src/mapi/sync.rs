@@ -270,6 +270,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
                             mapi_mailstore::SpecialMessagePropertyValue::I32(80),
                         ),
                     ],
+                    named_property_definitions: HashMap::new(),
                 })
                 .collect(),
             JOURNAL_FOLDER_ID => snapshot
@@ -308,7 +309,44 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .iter()
             .map(associated_config_sync_object),
     );
+    for object in &mut objects {
+        populate_special_message_named_property_definitions(object, snapshot);
+    }
     objects
+}
+
+fn populate_special_message_named_property_definitions(
+    object: &mut mapi_mailstore::SpecialMessageSyncFact,
+    snapshot: &MapiMailStoreSnapshot,
+) {
+    object.named_property_definitions = object
+        .named_properties
+        .iter()
+        .filter_map(|(property_tag, _value)| {
+            let property_id = MapiPropertyTag::new(*property_tag).property_id();
+            if property_id < 0x8000 {
+                return None;
+            }
+            snapshot
+                .named_property_for_id(property_id)
+                .cloned()
+                .or_else(|| {
+                    fast_transfer_named_property_for_message_tag(
+                        &object.message_class,
+                        *property_tag,
+                    )
+                })
+                .map(|property| (property_id, property))
+        })
+        .collect();
+}
+
+fn special_message_with_named_property_definitions(
+    mut object: mapi_mailstore::SpecialMessageSyncFact,
+    snapshot: &MapiMailStoreSnapshot,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    populate_special_message_named_property_definitions(&mut object, snapshot);
+    object
 }
 
 fn common_views_sync_messages(
@@ -428,6 +466,7 @@ fn public_folder_item_sync_object(
                 mapi_mailstore::SpecialMessagePropertyValue::Bool(item.item.is_read),
             ),
         ],
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -472,6 +511,7 @@ fn contact_sync_object(
         message_size: contact_size(&contact.contact),
         read_state: None,
         named_properties: properties,
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -519,6 +559,7 @@ fn task_sync_object(
         message_size: task_size(&task.task),
         read_state: None,
         named_properties: properties,
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -624,6 +665,7 @@ fn journal_sync_object(
         message_size: journal_entry_size(&entry.entry),
         read_state: None,
         named_properties,
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -667,6 +709,7 @@ fn navigation_shortcut_sync_object(
         message_size: 128,
         read_state: None,
         named_properties,
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -694,6 +737,7 @@ fn common_views_sync_object(
                 message_size: 0,
                 read_state: None,
                 named_properties: Vec::new(),
+                named_property_definitions: HashMap::new(),
             }
         }
     }
@@ -739,6 +783,7 @@ fn common_view_named_view_sync_object(
         message_size: 128,
         read_state: None,
         named_properties,
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -782,6 +827,7 @@ fn conversation_action_sync_object(
         message_size,
         read_state: None,
         named_properties,
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -813,6 +859,7 @@ fn delegate_freebusy_sync_object(
         message_size,
         read_state: None,
         named_properties: Vec::new(),
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -862,6 +909,7 @@ fn associated_config_sync_object(
         message_size,
         read_state: None,
         named_properties,
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -902,8 +950,7 @@ fn associated_config_default_sync_tags(
 fn associated_config_standard_sync_tag(tag: u32) -> bool {
     matches!(
         canonical_property_storage_tag(tag),
-        PID_TAG_PARENT_SOURCE_KEY
-            | PID_TAG_CHANGE_NUMBER
+        PID_TAG_CHANGE_NUMBER
             | PID_TAG_FOLDER_ID
             | PID_TAG_MID
             | PID_TAG_INST_ID
@@ -1031,6 +1078,7 @@ fn calendar_sync_object(
         message_size: event_size(&event.event),
         read_state: None,
         named_properties: properties,
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -1187,7 +1235,10 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &associated_config_sync_object(&message),
+                    &special_message_with_named_property_definitions(
+                        associated_config_sync_object(&message),
+                        snapshot,
+                    ),
                 ),
             ))
         }
@@ -1204,7 +1255,10 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &conversation_action_sync_object(&message),
+                    &special_message_with_named_property_definitions(
+                        conversation_action_sync_object(&message),
+                        snapshot,
+                    ),
                 ),
             ))
         }
@@ -1220,7 +1274,10 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &navigation_shortcut_sync_object(&message, principal),
+                    &special_message_with_named_property_definitions(
+                        navigation_shortcut_sync_object(&message, principal),
+                        snapshot,
+                    ),
                 ),
             ))
         }
@@ -1230,7 +1287,10 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &common_view_named_view_sync_object(&message, principal.account_id),
+                    &special_message_with_named_property_definitions(
+                        common_view_named_view_sync_object(&message, principal.account_id),
+                        snapshot,
+                    ),
                 ),
             ))
         }
@@ -1246,7 +1306,10 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &delegate_freebusy_sync_object(&message),
+                    &special_message_with_named_property_definitions(
+                        delegate_freebusy_sync_object(&message),
+                        snapshot,
+                    ),
                 ),
             ))
         }
@@ -1258,7 +1321,10 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
                     *folder_id,
-                    &public_folder_item_sync_object(&item),
+                    &special_message_with_named_property_definitions(
+                        public_folder_item_sync_object(&item),
+                        snapshot,
+                    ),
                 ),
             ))
         }

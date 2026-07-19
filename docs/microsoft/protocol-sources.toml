@@ -555,6 +555,7 @@ sha256 = "ccaeed20d67551bba60d670e6a7040f67d7345a6f3b91057973a00081fc6df09"
 used_for = [
   "Named-property ID mapping behavior for RopGetPropertyIdsFromNames and RopGetNamesFromPropertyIds",
   "Post-calendar Outlook view diagnostics for named-property mapping batches",
+  "Single PidTagRecordKey and PidTagSearchKey identity properties in each folder-associated message FastTransfer property list",
   "Outlook appointment PidTagHtml stream opening, writing, and save-time persistence",
   "Existing Calendar Event Body and HTML stream staging, CommitStream visibility, Release discard, and parent-Message persistence",
   "Property mutation and deletion semantics for an existing Outlook Calendar Message object",
@@ -562,6 +563,8 @@ used_for = [
   "RopGetPropertiesSpecific response-buffer budgeting, per-property NotEnoughMemory, and stream fallback for oversized Outlook Calendar HTML",
 ]
 sections = [
+  "2.2.1.8 PidTagRecordKey Property",
+  "2.2.1.9 PidTagSearchKey Property",
   "2.2.2 RopGetPropertiesSpecific ROP",
   "2.2.2.1 RopGetPropertiesSpecific ROP Request Buffer",
   "2.2.2.2 RopGetPropertiesSpecific ROP Response Buffer",
@@ -900,6 +903,7 @@ sha256 = "140dcc7aa7d8313b6257d2827f36405480f74de62d3b63f2dd8aeb56ea5bb5c5"
 used_for = [
   "Outlook cached-mode hierarchy and content synchronization",
   "ICS state, FastTransfer streams, and sync progress behavior",
+  "FastTransfer namedPropInfo encoding for property identifiers greater than or equal to 0x8000",
   "folderChange conditional FolderId and ParentFolderId identity properties",
   "Unicode and ForceUnicode FastTransfer string-property encoding",
   "RopFastTransferSourceCopyFolder topFolder root and folderContent marker behavior",
@@ -909,7 +913,8 @@ used_for = [
   "Partial item upload example using OpenCollector, UploadStateStream, existing-message property changes, and GetTransferState",
   "PredecessorChangeList conflict detection examples for FailOnConflict content uploads",
   "Imported message and hierarchy deletion flags and PtypMultipleBinary GID list semantics",
-  "Preservation of persisted FAI SourceKey, ChangeKey, and PredecessorChangeList across ICS upload and download",
+  "Preservation of persisted FAI SourceKey, ChangeKey, and PredecessorChangeList across ICS upload and download when NoForeignIdentifiers is absent",
+  "NoForeignIdentifiers projection of local SourceKey and ParentSourceKey values instead of persisted foreign identifiers",
   "Post-save retrieval of PidTagChangeKey on a Message object kept open by the client",
   "Durable Calendar Event ChangeNumber, ChangeKey, PredecessorChangeList, and stable SourceKey projection across direct reads and ICS",
   "Calendar identity-material repair that distinguishes immutable object identity from the current or imported version ChangeKey",
@@ -949,6 +954,10 @@ sections = [
   "2.2.3.2.4.3.1 RopSynchronizationImportHierarchyChange ROP Request Buffer",
   "2.2.3.2.4.3.2 RopSynchronizationImportHierarchyChange ROP Response Buffer",
   "2.2.3.2.4.7.2 RopGetLocalReplicaIds ROP Response Buffer",
+  "2.2.4.1 Lexical structure",
+  "2.2.4.1.1 fixedPropType, varPropType, mvPropType Property Types",
+  "2.2.4.1.2 propValue Lexical Element",
+  "2.2.4.1.3 Serialization of Simple Types",
   "2.2.4.1.4 Markers",
   "2.2.4.1.5.4 MetaTagIncrSyncGroupId Meta-Property",
   "2.2.4.1.5.5 MetaTagIncrementalSyncMessagePartial Meta-Property",

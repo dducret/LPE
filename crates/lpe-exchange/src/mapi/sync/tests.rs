@@ -69,10 +69,19 @@ fn associated_content_sync_buffer(
     folder_id: u64,
     objects: &[mapi_mailstore::SpecialMessageSyncFact],
 ) -> Vec<u8> {
+    associated_content_sync_buffer_with_flags(account_id, folder_id, 0x0010, objects)
+}
+
+fn associated_content_sync_buffer_with_flags(
+    account_id: Uuid,
+    folder_id: u64,
+    sync_flags: u16,
+    objects: &[mapi_mailstore::SpecialMessageSyncFact],
+) -> Vec<u8> {
     mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
         account_id,
         0x01,
-        0x0010,
+        sync_flags,
         0x0000_0001 | 0x0000_0002 | 0x0000_0004,
         &[],
         folder_id,
@@ -412,6 +421,264 @@ fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
             );
         }
     }
+}
+
+#[test]
+fn associated_config_fai_content_sync_emits_valid_property_definitions() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let persisted_search_key = [
+        0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
+        0x00,
+    ];
+    let cases = [
+        (
+            INBOX_FOLDER_ID,
+            Uuid::from_u128(0x6d617069_6163_6350_8000_000000000201),
+            crate::mapi::identity::mapi_store_id(0x7a00),
+            "IPM.Configuration.AccountPrefs",
+        ),
+        (
+            CALENDAR_FOLDER_ID,
+            Uuid::from_u128(0x6d617069_6361_6c50_8000_000000000201),
+            crate::mapi::identity::mapi_store_id(0x7a01),
+            "IPM.Configuration.AvailabilityOptions",
+        ),
+        (
+            CONTACTS_FOLDER_ID,
+            Uuid::from_u128(0x6d617069_636f_6e50_8000_000000000201),
+            crate::mapi::identity::mapi_store_id(0x7a02),
+            "IPM.Configuration.ContactPrefs",
+        ),
+    ];
+
+    for (folder_id, canonical_id, item_id, message_class) in cases {
+        crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+        let snapshot = MapiMailStoreSnapshot::empty()
+            .with_named_property_mappings(vec![crate::store::MapiNamedPropertyMapping {
+                property_id: 0x9001,
+                property: MapiNamedProperty {
+                    guid: PS_PUBLIC_STRINGS_GUID,
+                    kind: MapiNamedPropertyKind::Name("OutlookConfigToken".to_string()),
+                },
+            }])
+            .with_associated_configs(vec![crate::store::MapiAssociatedConfigRecord {
+                id: canonical_id,
+                account_id,
+                folder_id,
+                message_class: message_class.to_string(),
+                subject: message_class.to_string(),
+                properties_json: serde_json::json!({
+                    "0x300b0102": {
+                        "type": "binary",
+                        "value": "ffeeddccbbaa99887766554433221100"
+                    },
+                    "0x7c060003": {"type": "i32", "value": 4},
+                    "0x7c070102": {"type": "binary", "value": "3c2f3e"},
+                    "0x9001001f": {"type": "string", "value": "enabled"}
+                }),
+            }]);
+        let objects =
+            special_sync_objects_for(folder_id, 0x01, &snapshot, &sync_principal(account_id));
+        let buffer = associated_content_sync_buffer(account_id, folder_id, &objects);
+        let object = objects
+            .iter()
+            .find(|object| object.message_class == message_class)
+            .unwrap();
+        let copy_buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
+            folder_id, object,
+        );
+        let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
+        let item = summary
+            .fai_items
+            .iter()
+            .find(|item| item.message_class == message_class)
+            .unwrap();
+
+        let item_payload = &buffer[item.item_start_offset..item.item_end_offset];
+        let server_record_key = mapi_mailstore::source_key_for_store_id(item_id);
+        for (tag, expected_value) in [
+            (PID_TAG_RECORD_KEY, server_record_key.as_slice()),
+            (PID_TAG_SEARCH_KEY, persisted_search_key.as_slice()),
+        ] {
+            assert_eq!(
+                item.property_tags
+                    .iter()
+                    .filter(|property_tag| **property_tag == tag)
+                    .count(),
+                1,
+                "duplicate 0x{tag:08x} on {message_class}"
+            );
+            let mut expected_property = tag.to_le_bytes().to_vec();
+            expected_property.extend_from_slice(&(expected_value.len() as u32).to_le_bytes());
+            expected_property.extend_from_slice(expected_value);
+            assert!(
+                item_payload
+                    .windows(expected_property.len())
+                    .any(|window| window == expected_property),
+                "wrong 0x{tag:08x} value on {message_class}"
+            );
+        }
+        let mut copy_search_key = PID_TAG_SEARCH_KEY.to_le_bytes().to_vec();
+        copy_search_key.extend_from_slice(&(persisted_search_key.len() as u32).to_le_bytes());
+        copy_search_key.extend_from_slice(&persisted_search_key);
+        assert_eq!(
+            copy_buffer
+                .windows(copy_search_key.len())
+                .filter(|window| *window == copy_search_key)
+                .count(),
+            1,
+            "CopyTo must preserve exactly one PidTagSearchKey on {message_class}"
+        );
+        for (tag, guid, name) in [
+            (
+                PID_NAME_CONTENT_CLASS_W_TAG,
+                PS_INTERNET_HEADERS_GUID,
+                "content-class",
+            ),
+            (
+                PID_NAME_CONTENT_TYPE_W_TAG,
+                PS_INTERNET_HEADERS_GUID,
+                "content-type",
+            ),
+            (0x9001_001F, PS_PUBLIC_STRINGS_GUID, "OutlookConfigToken"),
+        ] {
+            let mut expected_property_info = tag.to_le_bytes().to_vec();
+            expected_property_info.extend_from_slice(&guid);
+            expected_property_info.push(0x01);
+            expected_property_info.extend(name.encode_utf16().flat_map(u16::to_le_bytes));
+            expected_property_info.extend_from_slice(&0u16.to_le_bytes());
+            for (transfer_kind, transfer) in
+                [("ICS", item_payload), ("CopyTo", copy_buffer.as_slice())]
+            {
+                assert!(
+                    transfer
+                        .windows(expected_property_info.len())
+                        .any(|window| window == expected_property_info),
+                    "missing FastTransfer named property information for 0x{tag:08x} on {message_class} in {transfer_kind}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn associated_config_fai_no_foreign_identifiers_uses_local_source_key() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let canonical_id = Uuid::from_u128(0x6d617069_6361_6c50_8000_000000000301);
+    let item_id = crate::mapi::identity::mapi_store_id(0x65a);
+    crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+    let imported_source_key = [
+        0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f,
+        0x10, 0x01, 0x08, 0x89, 0x00, 0x00, 0x00,
+    ];
+    let imported_parent_source_key = [
+        0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f,
+        0x10, 0x02, 0x08, 0x89, 0x00, 0x00, 0x00,
+    ];
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: canonical_id,
+            account_id,
+            folder_id: CALENDAR_FOLDER_ID,
+            message_class: "IPM.Configuration.AvailabilityOptions".to_string(),
+            subject: "IPM.Configuration.AvailabilityOptions".to_string(),
+            properties_json: serde_json::json!({
+                "0x65e00102": {
+                    "type": "binary",
+                    "value": "741f6fd38e1a654f9d422dfb451c8f10010889000000"
+                },
+                "0x65e10102": {
+                    "type": "binary",
+                    "value": "741f6fd38e1a654f9d422dfb451c8f10020889000000"
+                },
+                "0x7c060003": {"type": "i32", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "3c2f3e"}
+            }),
+        },
+    ]);
+    let objects = special_sync_objects_for(
+        CALENDAR_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
+    let buffer =
+        associated_content_sync_buffer_with_flags(account_id, CALENDAR_FOLDER_ID, 0xa139, &objects);
+    let buffer_without_no_foreign_identifiers =
+        associated_content_sync_buffer_with_flags(account_id, CALENDAR_FOLDER_ID, 0xa039, &objects);
+
+    let local_source_key = mapi_mailstore::source_key_for_store_id(item_id);
+    let local_parent_source_key = mapi_mailstore::source_key_for_store_id(CALENDAR_FOLDER_ID);
+    for (tag, local_value, imported_value) in [
+        (
+            PID_TAG_SOURCE_KEY,
+            local_source_key.as_slice(),
+            imported_source_key.as_slice(),
+        ),
+        (
+            PID_TAG_PARENT_SOURCE_KEY,
+            local_parent_source_key.as_slice(),
+            imported_parent_source_key.as_slice(),
+        ),
+    ] {
+        for (transfer, value, expected) in [
+            (&buffer, local_value, true),
+            (&buffer, imported_value, false),
+            (&buffer_without_no_foreign_identifiers, local_value, false),
+            (&buffer_without_no_foreign_identifiers, imported_value, true),
+        ] {
+            let mut encoded = tag.to_le_bytes().to_vec();
+            encoded.extend_from_slice(&(value.len() as u32).to_le_bytes());
+            encoded.extend_from_slice(value);
+            assert_eq!(
+                transfer
+                    .windows(encoded.len())
+                    .any(|window| window == encoded),
+                expected,
+                "unexpected 0x{tag:08x} projection for NoForeignIdentifiers={}",
+                std::ptr::eq(transfer, &buffer)
+            );
+        }
+    }
+}
+
+#[test]
+fn appointment_fast_transfer_named_lid_includes_property_definition() {
+    let canonical_id = Uuid::from_u128(0x6d617069_6361_6c50_8000_000000000401);
+    let item_id = crate::mapi::identity::mapi_store_id(0x7a10);
+    crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+    let object = mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: CALENDAR_FOLDER_ID,
+        item_id,
+        canonical_id,
+        associated: false,
+        subject: "Protocol review".to_string(),
+        body_text: String::new(),
+        message_class: "IPM.Appointment".to_string(),
+        last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc("2026-07-18T10:00:00Z"),
+        message_size: 128,
+        read_state: None,
+        named_properties: vec![(
+            PID_LID_BUSY_STATUS_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::I32(2),
+        )],
+        named_property_definitions: Default::default(),
+    };
+    let buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
+        CALENDAR_FOLDER_ID,
+        &object,
+    );
+    let mut expected = PID_LID_BUSY_STATUS_TAG.to_le_bytes().to_vec();
+    expected.extend_from_slice(&PSETID_APPOINTMENT_GUID);
+    expected.push(0x00);
+    expected.extend_from_slice(&PID_LID_BUSY_STATUS.to_le_bytes());
+
+    assert!(
+        buffer
+            .windows(expected.len())
+            .any(|window| window == expected),
+        "PidLidBusyStatus is missing its FastTransfer LID definition"
+    );
 }
 
 #[test]

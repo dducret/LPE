@@ -88,6 +88,10 @@ where
         .fetch_mapi_associated_configs(account_id)
         .await
         .context("fetch MAPI associated config messages")?;
+    let named_property_mappings = store
+        .fetch_mapi_named_properties(account_id, None)
+        .await
+        .context("fetch MAPI named property mappings")?;
     let associated_config_ids = associated_configs
         .iter()
         .map(|config| config.id)
@@ -790,6 +794,7 @@ where
     .with_search_folder_definitions(search_folder_definitions)
     .with_conversation_actions(conversation_actions)
     .with_navigation_shortcuts(navigation_shortcuts)
+    .with_named_property_mappings(named_property_mappings)
     .with_associated_configs(associated_configs)
     .with_associated_config_identity_ids(associated_config_identity_ids)
     .with_delegate_freebusy_messages(delegate_freebusy_messages)

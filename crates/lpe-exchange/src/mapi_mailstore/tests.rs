@@ -706,6 +706,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
             0x7C08_0102,
             SpecialMessagePropertyValue::Binary(b"view-extra".to_vec()),
         )],
+        named_property_definitions: Default::default(),
     };
     let buffer = fast_transfer_message_content_buffer_with_special_object(
         crate::mapi::identity::INBOX_FOLDER_ID,
@@ -1747,6 +1748,7 @@ fn content_sync_manifest_includes_special_folder_message_objects() {
         message_size: 19,
         read_state: None,
         named_properties: vec![(0x8B00_0003, SpecialMessagePropertyValue::I32(3))],
+        named_property_definitions: Default::default(),
     };
     let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
         Uuid::nil(),
@@ -1871,6 +1873,7 @@ fn content_sync_manifest_starts_fai_message_before_item_properties() {
         message_size: 0,
         read_state: None,
         named_properties: Vec::new(),
+        named_property_definitions: Default::default(),
     };
     let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
         Uuid::nil(),
@@ -1923,7 +1926,7 @@ fn microsoft_oxcfxics_fai_content_sync_does_not_insert_null_property_before_next
     let second_item_id = crate::mapi::identity::mapi_store_id(396);
     crate::mapi::identity::remember_mapi_identity(first_canonical_id, first_item_id);
     crate::mapi::identity::remember_mapi_identity(second_canonical_id, second_item_id);
-    let final_property_tag = 0x8B00_0003;
+    let final_property_tag = 0x7C06_0003;
     let first_property_value = 3i32;
     let second_property_value = 4i32;
     let specials = [
@@ -1942,6 +1945,7 @@ fn microsoft_oxcfxics_fai_content_sync_does_not_insert_null_property_before_next
                 final_property_tag,
                 SpecialMessagePropertyValue::I32(first_property_value),
             )],
+            named_property_definitions: Default::default(),
         },
         SpecialMessageSyncFact {
             folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
@@ -1958,6 +1962,7 @@ fn microsoft_oxcfxics_fai_content_sync_does_not_insert_null_property_before_next
                 final_property_tag,
                 SpecialMessagePropertyValue::I32(second_property_value),
             )],
+            named_property_definitions: Default::default(),
         },
     ];
     let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
@@ -2024,6 +2029,7 @@ fn content_sync_manifest_unicode_fai_uses_unicode_subject_and_fai_message_flag()
         message_size: 128,
         read_state: None,
         named_properties: Vec::new(),
+        named_property_definitions: Default::default(),
     };
     let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
         Uuid::nil(),
@@ -2074,6 +2080,7 @@ fn content_sync_manifest_applies_property_excludes_to_special_objects() {
         message_size: 19,
         read_state: None,
         named_properties: vec![(0x8205_0003, SpecialMessagePropertyValue::I32(2))],
+        named_property_definitions: Default::default(),
     };
     let excluded_property_tags = [
         PID_TAG_MESSAGE_CLASS_W,
@@ -2130,6 +2137,7 @@ fn content_sync_manifest_applies_string8_property_excludes_to_special_objects() 
         message_size: 19,
         read_state: None,
         named_properties: Vec::new(),
+        named_property_definitions: Default::default(),
     };
     let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
         Uuid::nil(),
@@ -2174,6 +2182,7 @@ fn content_sync_manifest_applies_string8_property_includes_to_special_objects() 
         message_size: 19,
         read_state: None,
         named_properties: Vec::new(),
+        named_property_definitions: Default::default(),
     };
     let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
         Uuid::nil(),
@@ -2221,6 +2230,7 @@ fn content_sync_manifest_respects_normal_and_fai_scope_flags() {
         message_size: 19,
         read_state: None,
         named_properties: Vec::new(),
+        named_property_definitions: Default::default(),
     };
     let associated_object = SpecialMessageSyncFact {
         folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
@@ -2234,6 +2244,7 @@ fn content_sync_manifest_respects_normal_and_fai_scope_flags() {
         message_size: 19,
         read_state: None,
         named_properties: Vec::new(),
+        named_property_definitions: Default::default(),
     };
     let email = test_email();
     crate::mapi::identity::remember_mapi_identity(
@@ -2610,6 +2621,7 @@ fn special_message_headers_and_final_cnsets_share_durable_change_numbers() {
                 SpecialMessagePropertyValue::Binary(predecessor_change_list(normal_change_number)),
             ),
         ],
+        named_property_definitions: Default::default(),
     };
     let fai = SpecialMessageSyncFact {
         folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
@@ -2638,6 +2650,7 @@ fn special_message_headers_and_final_cnsets_share_durable_change_numbers() {
                 SpecialMessagePropertyValue::Binary(predecessor_change_list(fai_change_number)),
             ),
         ],
+        named_property_definitions: Default::default(),
     };
     let special_objects = [normal.clone(), fai];
     let buffer = sync_manifest_buffer_with_special_objects_and_final_state(

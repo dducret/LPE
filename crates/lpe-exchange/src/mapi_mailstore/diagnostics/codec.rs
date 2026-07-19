@@ -966,7 +966,7 @@ pub(super) fn parse_debug_fast_transfer_property(
 ) -> Result<FastTransferDebugProperty, String> {
     let tag = read_debug_u32(bytes, offset)?;
     let property_type = tag & 0x0000_FFFF;
-    let value_start = offset + 4;
+    let value_start = fast_transfer_property_value_start(bytes, tag, offset + 4)?;
     let (value_start, value_len) = match property_type {
         _ if tag == META_TAG_IDSET_GIVEN => {
             let len = read_debug_u32(bytes, value_start)? as usize;

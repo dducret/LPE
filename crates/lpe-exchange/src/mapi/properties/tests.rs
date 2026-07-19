@@ -6012,6 +6012,77 @@ fn outlook_contact_link_probe_named_properties_map_to_stable_ids() {
 }
 
 #[test]
+fn overlapping_named_property_ids_have_one_round_trip_definition() {
+    let cases = [
+        (
+            0x8001,
+            MapiNamedProperty {
+                guid: PSETID_MEETING_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_GLOBAL_OBJECT_ID),
+            },
+        ),
+        (
+            0x801f,
+            MapiNamedProperty {
+                guid: PS_INTERNET_HEADERS_GUID,
+                kind: MapiNamedPropertyKind::Name("content-class".to_string()),
+            },
+        ),
+        (
+            0x8002,
+            MapiNamedProperty {
+                guid: PSETID_MEETING_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_CLEAN_GLOBAL_OBJECT_ID),
+            },
+        ),
+        (
+            0x80e1,
+            MapiNamedProperty {
+                guid: PS_PUBLIC_STRINGS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1),
+            },
+        ),
+        (
+            0x80ea,
+            MapiNamedProperty {
+                guid: PS_PUBLIC_STRINGS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA),
+            },
+        ),
+        (
+            0x80ec,
+            MapiNamedProperty {
+                guid: PS_PUBLIC_STRINGS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC),
+            },
+        ),
+        (
+            0x80ed,
+            MapiNamedProperty {
+                guid: PS_PUBLIC_STRINGS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED),
+            },
+        ),
+    ];
+
+    for (property_id, property) in cases {
+        assert_eq!(well_known_named_property_id(&property), Some(property_id));
+        assert_eq!(
+            well_known_named_property_for_id(property_id),
+            Some(property)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_ADDRESS_GUID,
+                kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
+            }),
+            None,
+            "0x{property_id:04x} must not be assigned to two property definitions"
+        );
+    }
+}
+
+#[test]
 fn outlook_contact_source_probe_named_properties_map_to_stable_ids() {
     for lid in [
         PID_LID_OUTLOOK_CONTACT_SOURCE_80E0,
