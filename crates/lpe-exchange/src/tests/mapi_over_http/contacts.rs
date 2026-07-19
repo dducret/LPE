@@ -1,6 +1,115 @@
 use super::*;
 
 #[tokio::test]
+async fn mapi_over_http_outlook_contacts_open_resolves_standard_named_properties_without_create() {
+    // Outlook trace 202607190710, request :152 opens the Contacts contents table
+    // and resolves this exact 38-property set with CreateFlag=0. [MS-OXCPRPT]
+    // sections 3.2.5.9 and 3.2.5.10 require stable mailbox mappings in both
+    // directions; NoCreate must not allocate protocol state.
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let psetid_address = [
+        0x04, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let psetid_common = [
+        0x08, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let address_lids = [
+        0x80C3u32, 0x80D3, 0x80B3, 0x8080, 0x8090, 0x80A0, 0x80C2, 0x80D2, 0x80B2, 0x8084, 0x8094,
+        0x80A4, 0x80C4, 0x80D4, 0x80B4, 0x8085, 0x8095, 0x80A5, 0x80C5, 0x80D5, 0x80B5, 0x8086,
+        0x8096, 0x80A6, 0x80C6, 0x80D6, 0x80B6, 0x8005, 0x8029, 0x8028, 0x802C, 0x802D, 0x802E,
+        0x8055, 0x8054, 0x804C, 0x8064,
+    ];
+
+    let existing_email1_display_name = MapiNamedProperty {
+        guid: psetid_address,
+        kind: MapiNamedPropertyKind::Lid(0x8080),
+    };
+    let existing_email1_display_name_id = crate::mapi::properties::DYNAMIC_NAMED_PROPERTY_ID_START;
+    {
+        let mut mappings = store.mapi_named_properties.lock().unwrap();
+        mappings.by_property.insert(
+            (account.account_id, existing_email1_display_name.clone()),
+            existing_email1_display_name_id,
+        );
+        mappings.by_id.insert(
+            (account.account_id, existing_email1_display_name_id),
+            existing_email1_display_name,
+        );
+    }
+
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CONTACTS_FOLDER_ID);
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // RopGetContentsTable.
+    rops.extend_from_slice(&[0x56, 0x00, 0x01, 0x00]); // NoCreate on Contacts.
+    rops.extend_from_slice(&38u16.to_le_bytes());
+    for lid in address_lids {
+        rops.push(0x00);
+        rops.extend_from_slice(&psetid_address);
+        rops.extend_from_slice(&lid.to_le_bytes());
+    }
+    rops.push(0x00);
+    rops.extend_from_slice(&psetid_common);
+    rops.extend_from_slice(&0x8552u32.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(&response_rops[..8], &[0x02, 0x01, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&response_rops[8..18], &[0x05, 0x02, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let named = &response_rops[18..];
+    assert_eq!(&named[..6], &[0x56, 0x01, 0, 0, 0, 0], "{named:02x?}");
+    assert_eq!(u16::from_le_bytes(named[6..8].try_into().unwrap()), 38);
+    let property_ids = named[8..]
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes(bytes.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(property_ids.len(), 38);
+    assert!(property_ids.iter().all(|property_id| *property_id != 0));
+    assert_eq!(property_ids[3], existing_email1_display_name_id);
+    let mut unique_ids = property_ids.clone();
+    unique_ids.sort_unstable();
+    unique_ids.dedup();
+    assert_eq!(unique_ids.len(), property_ids.len());
+    assert_eq!(
+        store
+            .fetch_mapi_named_properties(account.account_id, None)
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "NoCreate must not persist additional named-property mappings"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_contact_link_copy_to_uses_message_content_root() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

@@ -3319,14 +3319,37 @@ async fn mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_
         title: "Test 08:35".to_string(),
         ..older.clone()
     };
+    let appointment_guid = [
+        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let named_properties = [
+        (appointment_guid, 0x8223u32), // [MS-OXPROPS] 2.216 PidLidRecurring
+        (appointment_guid, 0x820Eu32), // [MS-OXPROPS] 2.14 PidLidAppointmentEndWhole
+    ];
     let store = FakeStore {
-        session: Some(account),
+        session: Some(account.clone()),
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
             "default", "calendar", "Calendar",
         )])),
         events: Arc::new(Mutex::new(vec![older, newer])),
         ..Default::default()
     };
+    {
+        let mut mappings = store.mapi_named_properties.lock().unwrap();
+        for ((guid, lid), property_id) in named_properties.into_iter().zip([0x9001, 0x9002]) {
+            let property = MapiNamedProperty {
+                guid,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            };
+            mappings
+                .by_property
+                .insert((account.account_id, property.clone()), property_id);
+            mappings
+                .by_id
+                .insert((account.account_id, property_id), property);
+        }
+    }
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -3338,14 +3361,6 @@ async fn mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let appointment_guid = [
-        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x46,
-    ];
-    let named_properties = [
-        (appointment_guid, 0x8223u32), // [MS-OXPROPS] 2.216 PidLidRecurring
-        (appointment_guid, 0x820Eu32), // [MS-OXPROPS] 2.14 PidLidAppointmentEndWhole
-    ];
     let mut named_rops = vec![0x56, 0x00, 0x00, 0x02];
     named_rops.extend_from_slice(&(named_properties.len() as u16).to_le_bytes());
     for (guid, lid) in named_properties {
@@ -3562,7 +3577,7 @@ async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collectio
     let response_rops = response_rops_from_execute_response(response).await;
     assert_eq!(&response_rops[..8], &[0x56, 0x00, 0, 0, 0, 0, 1, 0]);
     let location_property_id = u16::from_le_bytes(response_rops[8..10].try_into().unwrap());
-    assert!(location_property_id >= crate::mapi::properties::DYNAMIC_NAMED_PROPERTY_ID_START);
+    assert_eq!(location_property_id, 0x8208);
     let location_tag = (u32::from(location_property_id) << 16) | 0x001F;
     renew_mapi_request_id(&mut execute_headers);
 
@@ -8607,8 +8622,8 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
     assert!(first_property_id > 0x8000 && first_property_id != 0xffff);
     assert!(second_property_id > 0x8000 && second_property_id != 0xffff);
     assert_ne!(first_property_id, second_property_id);
-    assert_eq!(first_property_id, 0x9001);
-    assert_eq!(second_property_id, 0x9002);
+    assert_eq!(first_property_id, 0x8580);
+    assert_eq!(second_property_id, 0x8581);
 
     let mut bootstrap_headers = mapi_headers("Execute");
     bootstrap_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());

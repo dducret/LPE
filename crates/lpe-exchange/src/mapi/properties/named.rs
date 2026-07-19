@@ -12,7 +12,7 @@ pub(crate) enum MapiNamedPropertyKind {
     Name(String),
 }
 
-pub(in crate::mapi) fn well_known_named_property_id(property: &MapiNamedProperty) -> Option<u16> {
+pub(crate) fn well_known_named_property_id(property: &MapiNamedProperty) -> Option<u16> {
     if let Some(property_id) = well_known_named_properties()
         .into_iter()
         .find_map(|(property_id, candidate)| (candidate == *property).then_some(property_id))
@@ -21,13 +21,7 @@ pub(in crate::mapi) fn well_known_named_property_id(property: &MapiNamedProperty
     }
 
     let property_id = well_known_lid_family_property_id(property)?;
-    if property.guid == OUTLOOK_VIEW_8F07_GUID
-        && property.kind == MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_APPOINTMENT_8F07)
-    {
-        return Some(property_id);
-    }
-    explicit_well_known_named_property_for_id(property_id)
-        .is_none()
+    (well_known_named_property_for_id(property_id).as_ref() == Some(property))
         .then_some(property_id)
 }
 
@@ -85,7 +79,6 @@ fn well_known_lid_family_property_id(property: &MapiNamedProperty) -> Option<u16
         {
             Some(property_id)
         }
-        OUTLOOK_VIEW_8F07_GUID if lid == PID_LID_OUTLOOK_APPOINTMENT_8F07 => Some(property_id),
         PSETID_LOG_GUID if (0x8700..=0x87ff).contains(&lid) => Some(property_id),
         PSETID_SHARING_GUID if (0x8a00..=0x8aff).contains(&lid) => Some(property_id),
         PSETID_NOTE_GUID if (0x8b00..=0x8bff).contains(&lid) => Some(property_id),
@@ -97,6 +90,10 @@ fn well_known_lid_family_property_for_id(property_id: u16) -> Option<MapiNamedPr
     match property_id {
         0x8000..=0x80ff => Some(MapiNamedProperty {
             guid: PSETID_ADDRESS_GUID,
+            kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
+        }),
+        0x8219 | 0x822c | 0x822d => Some(MapiNamedProperty {
+            guid: PSETID_COMMON_GUID,
             kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
         }),
         0x8200..=0x82ff => Some(MapiNamedProperty {
@@ -123,7 +120,7 @@ fn well_known_lid_family_property_for_id(property_id: u16) -> Option<MapiNamedPr
     }
 }
 
-fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
+pub(super) fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
     [
         (
             PID_LID_GLOBAL_OBJECT_ID_NAMED_ID,
@@ -134,6 +131,11 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             PID_LID_CLEAN_GLOBAL_OBJECT_ID_NAMED_ID,
             PID_LID_CLEAN_GLOBAL_OBJECT_ID,
             PSETID_MEETING_GUID,
+        ),
+        (
+            0x8017,
+            PID_LID_OUTLOOK_APPOINTMENT_8F07,
+            OUTLOOK_VIEW_8F07_GUID,
         ),
     ]
     .into_iter()

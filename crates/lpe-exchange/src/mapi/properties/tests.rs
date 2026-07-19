@@ -6114,7 +6114,7 @@ fn outlook_contact_source_probe_named_properties_map_to_stable_ids() {
 #[test]
 fn outlook_address_probe_lid_family_maps_to_stable_ids() {
     for lid in [
-        0x800c, 0x8017, 0x8018, 0x8026, 0x804f, 0x8050, 0x8051, 0x8052, 0x80d8, 0x80de, 0x80df,
+        0x800c, 0x8018, 0x8026, 0x804f, 0x8050, 0x8051, 0x8052, 0x80d8, 0x80de, 0x80df,
     ] {
         assert_eq!(
             well_known_named_property_id(&MapiNamedProperty {
@@ -6206,15 +6206,26 @@ fn outlook_common_probe_lid_family_maps_to_stable_ids() {
             "PSETID_Common lid 0x{lid:04x} should not allocate a transient id"
         );
         assert!(is_reserved_named_property_id(lid as u16));
-        if (0x8500..=0x85ff).contains(&lid) {
-            assert_eq!(
-                well_known_named_property_for_id(lid as u16),
-                Some(MapiNamedProperty {
-                    guid: PSETID_COMMON_GUID,
-                    kind: MapiNamedPropertyKind::Lid(lid),
-                })
-            );
-        }
+        assert_eq!(
+            well_known_named_property_for_id(lid as u16),
+            Some(MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            })
+        );
+    }
+}
+
+#[test]
+fn overlapping_appointment_lids_do_not_alias_common_fixed_mappings() {
+    for lid in [0x8219, 0x822c, 0x822d] {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_APPOINTMENT_GUID,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            }),
+            None
+        );
     }
 }
 
@@ -6291,7 +6302,14 @@ fn appointment_color_named_property_maps_to_stable_id() {
 }
 
 #[test]
-fn outlook_visible_inbox_probe_named_property_maps_to_stable_id() {
+fn outlook_visible_inbox_probe_named_property_has_one_stable_inverse() {
+    assert_eq!(
+        well_known_named_property_id(&MapiNamedProperty {
+            guid: PSETID_ADDRESS_GUID,
+            kind: MapiNamedPropertyKind::Lid(0x8017),
+        }),
+        None
+    );
     assert_eq!(
         well_known_named_property_id(&MapiNamedProperty {
             guid: PSETID_COMMON_GUID,
@@ -6304,8 +6322,58 @@ fn outlook_visible_inbox_probe_named_property_maps_to_stable_id() {
             guid: OUTLOOK_VIEW_8F07_GUID,
             kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_APPOINTMENT_8F07),
         }),
-        Some(PID_LID_OUTLOOK_APPOINTMENT_8F07 as u16)
+        Some(0x8017)
     );
+    assert_eq!(
+        well_known_named_property_for_id(PID_LID_OUTLOOK_APPOINTMENT_8F07 as u16),
+        Some(MapiNamedProperty {
+            guid: PSETID_COMMON_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_APPOINTMENT_8F07),
+        })
+    );
+    assert_eq!(
+        well_known_named_property_for_id(0x8017),
+        Some(MapiNamedProperty {
+            guid: OUTLOOK_VIEW_8F07_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_APPOINTMENT_8F07),
+        })
+    );
+}
+
+#[test]
+fn well_known_named_property_mappings_are_bijective() {
+    for (property_id, property) in well_known_named_properties() {
+        assert_eq!(well_known_named_property_id(&property), Some(property_id));
+        assert_eq!(
+            well_known_named_property_for_id(property_id),
+            Some(property)
+        );
+    }
+
+    for guid in [
+        PSETID_ADDRESS_GUID,
+        PSETID_APPOINTMENT_GUID,
+        PSETID_COMMON_GUID,
+        OUTLOOK_VIEW_8F07_GUID,
+        PSETID_LOG_GUID,
+        PSETID_SHARING_GUID,
+        PSETID_NOTE_GUID,
+    ] {
+        for lid in 0x8000..=u32::from(MAX_NAMED_PROPERTY_ID) {
+            let property = MapiNamedProperty {
+                guid,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            };
+            let Some(property_id) = well_known_named_property_id(&property) else {
+                continue;
+            };
+            assert_eq!(
+                well_known_named_property_for_id(property_id),
+                Some(property),
+                "well-known property ID 0x{property_id:04x} has no unique inverse"
+            );
+        }
+    }
 }
 
 #[test]

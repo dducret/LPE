@@ -1189,7 +1189,7 @@ async fn mapi_over_http_named_property_bootstrap_maps_session_property_ids() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_named_property_no_create_missing_returns_not_found() {
+async fn mapi_over_http_named_property_no_create_missing_returns_zero_mapping() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -1230,14 +1230,94 @@ async fn mapi_over_http_named_property_no_create_missing_returns_not_found() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
+    // [MS-OXCPRPT] sections 2.2.12.2 and 3.2.5.10 require a successful
+    // response with a 0x0000 entry when NoCreate cannot map a named property.
     assert!(contains_bytes(
-        &response_rops,
-        &[0x56, 0x00, 0x0f, 0x01, 0x04, 0x80]
-    ));
-    assert!(!contains_bytes(
         &response_rops,
         &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0, 0]
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_named_property_create_keeps_colliding_property_sets_bijective() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let psetid_appointment = [
+        0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let psetid_common = [
+        0x08, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+
+    let mut rops = vec![
+        0xFE, 0x00, 0x00, 0x01, // RopLogon
+    ];
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x56, 0x00, 0x00, 0x02, // RopGetPropertyIdsFromNames, create missing
+    ]);
+    rops.extend_from_slice(&2u16.to_le_bytes());
+    for guid in [psetid_appointment, psetid_common] {
+        rops.push(0x00);
+        rops.extend_from_slice(&guid);
+        rops.extend_from_slice(&0x8219u32.to_le_bytes());
+    }
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let response_start = response_rops
+        .windows(8)
+        .position(|window| window == [0x56, 0x00, 0, 0, 0, 0, 2, 0])
+        .expect("RopGetPropertyIdsFromNames success response");
+    let named = &response_rops[response_start..];
+    let property_ids = [
+        u16::from_le_bytes(named[8..10].try_into().unwrap()),
+        u16::from_le_bytes(named[10..12].try_into().unwrap()),
+    ];
+
+    // [MS-OXCPRPT] sections 2.2.12.2 and 3.2.5.10 require the response
+    // order to match the request and each distinct registered name to have a
+    // unique property ID, even when both LIDs have the same numeric value.
+    assert!(property_ids.iter().all(|property_id| *property_id != 0));
+    assert_ne!(property_ids[0], property_ids[1]);
+    assert!(property_ids[0] >= crate::mapi::properties::DYNAMIC_NAMED_PROPERTY_ID_START);
+    assert_eq!(property_ids[1], 0x8219);
+
+    let persisted = store
+        .fetch_mapi_named_properties(account.account_id, None)
+        .await
+        .unwrap();
+    assert_eq!(persisted.len(), 1);
+    assert_eq!(persisted[0].property_id, property_ids[0]);
+    assert_eq!(persisted[0].property.guid, psetid_appointment);
+    assert_eq!(
+        persisted[0].property.kind,
+        MapiNamedPropertyKind::Lid(0x8219)
+    );
 }
 
 #[tokio::test]

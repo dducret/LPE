@@ -1216,18 +1216,18 @@ fn table_columns_normalize_outlook_contact_view_email_alias() {
 }
 
 #[test]
-fn table_columns_normalize_outlook_visible_inbox_appointment_alias() {
+fn table_columns_normalize_outlook_visible_inbox_view_property() {
     let mut session = test_mapi_session();
     session.cache_named_property(
-        0x8017,
+        0x9001,
         MapiNamedProperty {
-            guid: PSETID_APPOINTMENT_GUID,
+            guid: OUTLOOK_VIEW_8F07_GUID,
             kind: MapiNamedPropertyKind::Lid(PID_LID_OUTLOOK_APPOINTMENT_8F07),
         },
     );
 
     let columns =
-        normalize_table_property_tags_for_session(&session, vec![0x8017_000b, PID_TAG_SUBJECT_W]);
+        normalize_table_property_tags_for_session(&session, vec![0x9001_000b, PID_TAG_SUBJECT_W]);
 
     assert_eq!(columns, vec![0x8017_000B, PID_TAG_SUBJECT_W]);
 }

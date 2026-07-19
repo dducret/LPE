@@ -240,22 +240,28 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
             Ok(mappings) => {
                 for (missing_index, (index, _property)) in missing.into_iter().enumerate() {
                     let mapping = mappings.get(missing_index).cloned().flatten();
-                    let property_id = mapping.map(|mapping| {
-                        cache_named_property_mapping_and_return_property_id(
-                            session,
-                            mapping.property_id,
-                            mapping.property,
-                        )
-                    });
-                    property_ids[index] = property_id.unwrap_or(0);
-                    property_id_sources[index] = if property_id.is_some() {
-                        if post_calendar_query_position_probe {
+                    let (property_id, source) = mapping.map_or((0, "unresolved"), |mapping| {
+                        let source = if well_known_named_property_id(&mapping.property)
+                            == Some(mapping.property_id)
+                        {
+                            "well_known"
+                        } else if post_calendar_query_position_probe {
                             "newly_allocated"
                         } else {
                             "store_existing_or_allocated"
-                        }
-                    } else {
+                        };
+                        let property_id = cache_named_property_mapping_and_return_property_id(
+                            session,
+                            mapping.property_id,
+                            mapping.property,
+                        );
+                        (property_id, source)
+                    });
+                    property_ids[index] = property_id;
+                    property_id_sources[index] = if property_id == 0 {
                         "unresolved"
+                    } else {
+                        source
                     };
                 }
             }
@@ -270,41 +276,8 @@ pub(super) async fn append_get_property_ids_from_names_response<S>(
             Err(_) => {}
         }
     }
-    if !request.named_property_create() && property_ids.contains(&0) {
-        let duplicate_summary = summarize_named_property_id_duplicates(&properties, &property_ids);
-        let property_family_summary = format_named_property_family_summary(&properties);
-        tracing::info!(
-            rca_debug = true,
-            adapter = "mapi",
-            endpoint = "emsmdb",
-            mailbox = %principal.email,
-            request_type = "Execute",
-            request_rop_id = "0x56",
-            input_handle_index = request.input_handle_index().unwrap_or(0),
-            response_handle_index = request.response_handle_index(),
-            object_kind = mapi_object_debug_kind(input_object(session, handle_slots, request)),
-            create_missing = request.named_property_create(),
-            requested_named_property_count = properties.len(),
-            requested_named_properties = %requested_named_properties,
-            requested_named_property_family_summary = %property_family_summary,
-            missing_named_property_count = missing_properties.len(),
-            missing_named_properties = %format_debug_named_properties(&missing_properties),
-            returned_property_id_count = property_ids.len(),
-            returned_property_ids = %format_debug_property_ids(&property_ids),
-            duplicate_requested_named_property_count = duplicate_summary.0,
-            duplicate_returned_property_id_count = duplicate_summary.1,
-            returned_property_id_collision_count = duplicate_summary.2,
-            returned_property_id_collisions = %duplicate_summary.3,
-            rop_return_value = "0x8004010f",
-            message = "rca debug mapi get property ids from names",
-        );
-        responses.extend_from_slice(&rop_error_response(
-            0x56,
-            request.response_handle_index(),
-            0x8004_010F,
-        ));
-        return;
-    }
+    // [MS-OXCPRPT] sections 2.2.12.2 and 3.2.5.10 require a successful
+    // response whose entry is 0x0000 when NoCreate cannot map a name.
     let duplicate_summary = summarize_named_property_id_duplicates(&properties, &property_ids);
     let unresolved_properties = unresolved_named_properties(&properties, &property_ids);
     let unresolved_named_property_count = unresolved_properties.len();

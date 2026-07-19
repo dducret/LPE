@@ -488,6 +488,16 @@ macro_rules! store_impl_mapi_metadata {
                         mappings.push(Some(mapping));
                         continue;
                     }
+                    // A durable mailbox registration has priority over LPE's
+                    // built-in mapping; otherwise Create and NoCreate must
+                    // resolve the same standard property to the same ID.
+                    if let Some(property_id) = well_known_named_property_id(&property) {
+                        mappings.push(Some(MapiNamedPropertyMapping {
+                            property_id,
+                            property,
+                        }));
+                        continue;
+                    }
                     if !create {
                         mappings.push(None);
                         continue;

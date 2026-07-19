@@ -5103,6 +5103,15 @@ impl ExchangeStore for FakeStore {
                     }));
                     continue;
                 }
+                if let Some(property_id) =
+                    crate::mapi::properties::well_known_named_property_id(&property)
+                {
+                    mappings.push(Some(MapiNamedPropertyMapping {
+                        property_id,
+                        property,
+                    }));
+                    continue;
+                }
                 if !create {
                     mappings.push(None);
                     continue;

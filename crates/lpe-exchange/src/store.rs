@@ -43,7 +43,8 @@ pub enum MapiFolderHierarchyCommitOutcome {
 use crate::mapi::notifications::{MapiNotificationEvent, MapiNotificationKind};
 use crate::mapi::permissions::{owner_permission, rights_from_grant, MapiFolderPermission};
 use crate::mapi::properties::{
-    is_reserved_named_property_id, MapiNamedProperty, MapiNamedPropertyKind,
+    is_reserved_named_property_id, well_known_named_property_id, MapiNamedProperty,
+    MapiNamedPropertyKind,
 };
 
 const MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS: [i64; 6] = [
