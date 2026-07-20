@@ -9,7 +9,7 @@ use lpe_storage::{
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
     MailboxFolderDelegationGrantInput, MailboxRule, ManagedRetentionFolderCreateInput,
-    MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
+    MapiContactCreateInput, MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
     MapiEventImportedMoveIdentity, MapiEventVersion, MoveAccessibleEventToDeletedItemsResult,
     PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
     PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
@@ -658,6 +658,11 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         input: MapiEventCreateInput,
     ) -> StoreFuture<'a, MapiEventCreateOutcome>;
+
+    fn create_mapi_contact<'a>(
+        &'a self,
+        input: MapiContactCreateInput,
+    ) -> StoreFuture<'a, MapiContactCreateOutcome>;
 
     fn commit_mapi_event_update<'a>(
         &'a self,

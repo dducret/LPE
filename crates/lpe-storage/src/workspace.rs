@@ -1032,7 +1032,7 @@ impl Storage {
     }
 }
 
-fn contact_emails_json(input: &UpsertClientContactInput) -> Result<Value> {
+pub(crate) fn contact_emails_json(input: &UpsertClientContactInput) -> Result<Value> {
     if let Some(value) = input.emails_json.clone() {
         return contact_array_json(Some(value));
     }
@@ -1043,7 +1043,7 @@ fn contact_emails_json(input: &UpsertClientContactInput) -> Result<Value> {
     }]))
 }
 
-fn contact_phones_json(input: &UpsertClientContactInput) -> Result<Value> {
+pub(crate) fn contact_phones_json(input: &UpsertClientContactInput) -> Result<Value> {
     if let Some(value) = input.phones_json.clone() {
         return contact_array_json(Some(value));
     }
@@ -1056,7 +1056,7 @@ fn contact_phones_json(input: &UpsertClientContactInput) -> Result<Value> {
     }]))
 }
 
-fn contact_array_json(value: Option<Value>) -> Result<Value> {
+pub(crate) fn contact_array_json(value: Option<Value>) -> Result<Value> {
     match value {
         Some(array @ Value::Array(_)) => Ok(array),
         Some(_) => bail!("contact JSON field must be an array"),
@@ -1064,14 +1064,14 @@ fn contact_array_json(value: Option<Value>) -> Result<Value> {
     }
 }
 
-fn contact_source_payload_json(value: Value) -> Result<Value> {
+pub(crate) fn contact_source_payload_json(value: Value) -> Result<Value> {
     match value {
         Value::Object(_) => Ok(value),
         _ => bail!("contact source payload must be an object"),
     }
 }
 
-fn contact_primary_email(value: &Value) -> String {
+pub(crate) fn contact_primary_email(value: &Value) -> String {
     value
         .as_array()
         .and_then(|items| {

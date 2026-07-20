@@ -13,17 +13,18 @@ use lpe_storage::{
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, ManagedRetentionFolderCreateInput,
-    MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput,
-    MapiEventCreateResult, MapiEventIdentityMove, MapiEventImportedMoveIdentity,
-    MapiEventReminderState, MapiEventVersion, MoveAccessibleEventToDeletedItemsResult,
-    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights,
-    PublicFolderTree, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
-    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
-    UpdatePublicFolderInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
-    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    MapiContactCreateInput, MapiContactCreateResult, MapiContactVersion, MapiEventCommitInput,
+    MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput, MapiEventCreateResult,
+    MapiEventIdentityMove, MapiEventImportedMoveIdentity, MapiEventReminderState, MapiEventVersion,
+    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights, PublicFolderTree,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
+    SenderDelegationRight, SieveScriptDocument, Storage, StoredAccountAppPassword,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
+    UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{PgPool, Row};
@@ -63,13 +64,13 @@ use crate::{
         EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration, EwsUserConfigurationKey,
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
         ExchangeAddressBookEntryDetails, ExchangeAddressBookEntryKind, ExchangeStore,
-        MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
-        MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
-        MapiEventCreateOutcome, MapiFolderHierarchyCommitOutcome, MapiFolderProfilePropertyValue,
-        MapiFolderVersion, MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord,
-        MapiIdentityRequest, MapiNamedPropertyMapping, MapiNotificationPoll,
-        MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
-        UpsertEwsUserConfigurationInput,
+        MapiCheckpointKind, MapiContactCreateOutcome, MapiContentTableQuery,
+        MapiContentTableQueryResult, MapiContentTableSortField, MapiCustomPropertyObjectKind,
+        MapiCustomPropertyValue, MapiEventCreateOutcome, MapiFolderHierarchyCommitOutcome,
+        MapiFolderProfilePropertyValue, MapiFolderVersion, MapiIdentityLookupRecord,
+        MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping,
+        MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint,
+        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -2394,6 +2395,35 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
         )
         .await
         .unwrap();
+    // These deterministic UUID fixtures intentionally do not use
+    // `virtual_special_mailbox_ids`, whose enumeration this regression exercises.
+    let virtual_checkpoint_mailboxes = [
+        (
+            "calendar",
+            Uuid::parse_str("4c50455f-4d41-5049-0000-000000100001").unwrap(),
+        ),
+        (
+            "common_views",
+            Uuid::parse_str("4c50455f-4d41-5049-0000-000000090001").unwrap(),
+        ),
+        (
+            "shortcuts",
+            Uuid::parse_str("4c50455f-4d41-5049-0000-0000000d0001").unwrap(),
+        ),
+    ];
+    for (offset, (source, mailbox_id)) in virtual_checkpoint_mailboxes.iter().enumerate() {
+        storage
+            .store_mapi_sync_checkpoint(
+                account_id,
+                Some(*mailbox_id),
+                MapiCheckpointKind::Content,
+                13 + offset as u64,
+                4 + offset as u64,
+                serde_json::json!({"source": source}),
+            )
+            .await
+            .unwrap();
+    }
     storage
         .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
             account_id,
@@ -2757,7 +2787,7 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
     .await
     .unwrap();
 
-    assert_eq!(checkpoint_count, 1);
+    assert_eq!(checkpoint_count, 4);
     assert_eq!(config_count, 1);
     assert_eq!(orphaned_config_identity_count, 0);
     assert!(storage
@@ -2765,6 +2795,17 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
         .await
         .unwrap()
         .is_some());
+    for (source, mailbox_id) in virtual_checkpoint_mailboxes {
+        let checkpoint = storage
+            .fetch_mapi_sync_checkpoint(account_id, Some(mailbox_id), MapiCheckpointKind::Content)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            checkpoint.cursor_json,
+            serde_json::json!({"source": source})
+        );
+    }
     let associated_configs = storage
         .fetch_mapi_associated_configs(account_id)
         .await
@@ -2804,6 +2845,162 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
         .changed_associated_config_ids
         .iter()
         .any(|change| change.config_id == associated_configs[0].id));
+
+    fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
+async fn mapi_identity_repair_keeps_delegated_contact_until_read_grant_is_removed() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let storage = fixture.storage.clone();
+    let owner_account_id = fixture.account_id;
+    let (tenant_id, domain_id) = sqlx::query_as::<_, (Uuid, Uuid)>(
+        r#"
+        SELECT tenant_id, primary_domain_id
+        FROM accounts
+        WHERE id = $1
+        "#,
+    )
+    .bind(owner_account_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    let delegate_account_id = Uuid::parse_str("20000000-0000-0000-0000-00000000000a").unwrap();
+    let contact_book_id = Uuid::parse_str("20000000-0000-0000-0000-00000000000b").unwrap();
+    let contact_id = Uuid::parse_str("20000000-0000-0000-0000-00000000000c").unwrap();
+    let grant_id = Uuid::parse_str("20000000-0000-0000-0000-00000000000d").unwrap();
+
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (
+            id, tenant_id, primary_domain_id, primary_email, display_name
+        )
+        VALUES ($1, $2, $3, 'delegate@example.test', 'Delegate Contacts')
+        "#,
+    )
+    .bind(delegate_account_id)
+    .bind(tenant_id)
+    .bind(domain_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO contact_books (
+            id, tenant_id, owner_account_id, display_name, role
+        )
+        VALUES ($1, $2, $3, 'Contacts', 'contacts')
+        "#,
+    )
+    .bind(contact_book_id)
+    .bind(tenant_id)
+    .bind(owner_account_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO contacts (
+            id, tenant_id, owner_account_id, contact_book_id,
+            uid, display_name, emails_json
+        )
+        VALUES (
+            $1, $2, $3, $4,
+            'delegated-contact', 'René Delegated',
+            '[{"email":"rene.delegate@example.test","isDefault":true}]'::jsonb
+        )
+        "#,
+    )
+    .bind(contact_id)
+    .bind(tenant_id)
+    .bind(owner_account_id)
+    .bind(contact_book_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO contact_book_grants (
+            id, tenant_id, contact_book_id, owner_account_id,
+            grantee_account_id, may_read
+        )
+        VALUES ($1, $2, $3, $4, $5, TRUE)
+        "#,
+    )
+    .bind(grant_id)
+    .bind(tenant_id)
+    .bind(contact_book_id)
+    .bind(owner_account_id)
+    .bind(delegate_account_id)
+    .execute(storage.pool())
+    .await
+    .unwrap();
+
+    let identity = storage
+        .fetch_or_allocate_mapi_identities(
+            delegate_account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::Contact,
+                canonical_id: contact_id,
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await
+        .unwrap()
+        .remove(0);
+    storage
+        .fetch_or_allocate_mapi_identities(delegate_account_id, &[])
+        .await
+        .unwrap();
+    let active_with_grant = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT deleted_at IS NULL
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'contact'
+          AND canonical_id = $3
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(delegate_account_id)
+    .bind(contact_id)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    assert!(active_with_grant);
+
+    sqlx::query("DELETE FROM contact_book_grants WHERE id = $1")
+        .bind(grant_id)
+        .execute(storage.pool())
+        .await
+        .unwrap();
+    storage
+        .fetch_or_allocate_mapi_identities(delegate_account_id, &[])
+        .await
+        .unwrap();
+    let stale_without_grant = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT deleted_at IS NOT NULL
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'contact'
+          AND canonical_id = $3
+          AND mapi_object_id = $4
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(delegate_account_id)
+    .bind(contact_id)
+    .bind(identity.object_id as i64)
+    .fetch_one(storage.pool())
+    .await
+    .unwrap();
+    assert!(stale_without_grant);
 
     fixture.cleanup().await.unwrap();
 }
@@ -7263,6 +7460,376 @@ impl ExchangeStore for FakeStore {
                 version,
                 reminder,
                 attachments,
+            }))
+        })
+    }
+
+    fn create_mapi_contact<'a>(
+        &'a self,
+        input: MapiContactCreateInput,
+    ) -> StoreFuture<'a, MapiContactCreateOutcome> {
+        let collection = self
+            .contact_collections
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|collection| collection.id == input.collection_id)
+            .cloned();
+        let Some(collection) = collection else {
+            return Box::pin(async { Ok(MapiContactCreateOutcome::NotFound) });
+        };
+        if !collection.rights.may_write {
+            return Box::pin(async { Ok(MapiContactCreateOutcome::AccessDenied) });
+        }
+
+        let imported_identity = input.imported_identity.clone();
+        let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+        if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+            *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
+        }
+        let source_object_id = match imported_identity.as_ref() {
+            Some(identity) => {
+                let Some(object_id) =
+                    crate::mapi::identity::object_id_from_source_key(&identity.source_key)
+                else {
+                    return Box::pin(async {
+                        Err(anyhow::anyhow!("invalid imported Contact SourceKey"))
+                    });
+                };
+                let source_counter =
+                    crate::mapi::identity::global_counter_from_store_id(object_id).unwrap();
+                let reserved = self.mapi_local_replica_ranges.lock().unwrap().iter().any(
+                    |(account_id, first, end)| {
+                        *account_id == input.principal_account_id
+                            && *first <= source_counter
+                            && source_counter < *end
+                    },
+                );
+                if !reserved {
+                    return Box::pin(async {
+                        Err(anyhow::anyhow!(
+                            "imported Contact SourceKey was not locally reserved"
+                        ))
+                    });
+                }
+                let deleted = self
+                    .mapi_local_replica_deleted_ranges
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|(account_id, folder_id, range)| {
+                        *account_id == input.principal_account_id
+                            && *folder_id == input.mapi_folder_id
+                            && range.min_global_counter <= source_counter
+                            && source_counter <= range.max_global_counter
+                    });
+                if deleted {
+                    return Box::pin(async {
+                        Err(lpe_storage::MapiContactImportObjectDeleted.into())
+                    });
+                }
+                object_id
+            }
+            None => crate::mapi::identity::mapi_store_id(*next_counter),
+        };
+        let existing_contact_id =
+            self.mapi_identities
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|(contact_id, object_id)| {
+                    (*object_id == source_object_id).then_some(*contact_id)
+                });
+        if let (Some(contact_id), Some(imported_identity)) =
+            (existing_contact_id, imported_identity.as_ref())
+        {
+            let current_change_key = self
+                .mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .get(&contact_id)
+                .cloned()
+                .unwrap();
+            let current_predecessor_change_list = self
+                .mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .get(&contact_id)
+                .cloned()
+                .unwrap();
+            let current_last_modification_time =
+                self.mapi_identity_last_modification_times.lock().unwrap()[&contact_id];
+            let current_change_number =
+                self.mapi_identity_change_numbers.lock().unwrap()[&contact_id];
+            let current_includes_imported = test_merge_mapi_predecessor_change_lists(
+                &current_predecessor_change_list,
+                &imported_identity.predecessor_change_list,
+            )
+            .as_deref()
+                == Some(current_predecessor_change_list.as_slice());
+            if current_includes_imported
+                && test_mapi_pcl_includes_change_key(
+                    &current_predecessor_change_list,
+                    &imported_identity.change_key,
+                )
+            {
+                let contact = self
+                    .contacts
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|contact| contact.id == contact_id)
+                    .cloned()
+                    .unwrap();
+                return Box::pin(async move {
+                    Ok(MapiContactCreateOutcome::Created(MapiContactCreateResult {
+                        contact,
+                        mapi_object_id: source_object_id,
+                        version: MapiContactVersion {
+                            change_number: current_change_number,
+                            change_key: current_change_key,
+                            predecessor_change_list: current_predecessor_change_list,
+                            last_modification_time: current_last_modification_time,
+                        },
+                        import_disposition:
+                            lpe_storage::MapiContactImportDisposition::IgnoredOlderOrSame,
+                    }))
+                });
+            }
+            let imported_includes_current = test_merge_mapi_predecessor_change_lists(
+                &imported_identity.predecessor_change_list,
+                &current_predecessor_change_list,
+            )
+            .as_deref()
+                == Some(imported_identity.predecessor_change_list.as_slice());
+            let conflict = !imported_includes_current;
+            if conflict && input.fail_on_conflict {
+                return Box::pin(async { Err(lpe_storage::MapiContactImportConflict.into()) });
+            }
+            let predecessor_change_list = match test_merge_mapi_predecessor_change_lists(
+                &current_predecessor_change_list,
+                &imported_identity.predecessor_change_list,
+            ) {
+                Some(value) => value,
+                None => {
+                    return Box::pin(async {
+                        Err(anyhow::anyhow!("invalid imported Contact PCL"))
+                    });
+                }
+            };
+            let imported_wins = !conflict
+                || imported_identity.last_modification_time > current_last_modification_time
+                || (imported_identity.last_modification_time == current_last_modification_time
+                    && imported_identity.change_key[..16] >= current_change_key[..16]);
+            if *next_counter
+                == crate::mapi::identity::global_counter_from_store_id(source_object_id).unwrap()
+            {
+                *next_counter = next_counter.saturating_add(1);
+            }
+            let change_number = *next_counter;
+            *next_counter = next_counter.saturating_add(1);
+            drop(next_counter);
+            let (change_key, last_modification_time) = if imported_wins {
+                (
+                    imported_identity.change_key.clone(),
+                    imported_identity.last_modification_time,
+                )
+            } else {
+                (current_change_key, current_last_modification_time)
+            };
+            let contact = if imported_wins {
+                let mut contacts = self.contacts.lock().unwrap();
+                let contact = contacts
+                    .iter_mut()
+                    .find(|contact| contact.id == contact_id)
+                    .unwrap();
+                contact.name = input.contact.name;
+                contact.role = input.contact.role;
+                contact.email = input.contact.email;
+                contact.phone = input.contact.phone;
+                contact.team = input.contact.team;
+                contact.notes = input.contact.notes;
+                contact.structured_name = input.contact.structured_name;
+                contact.emails_json = input.contact.emails_json.unwrap_or_default();
+                contact.phones_json = input.contact.phones_json.unwrap_or_default();
+                contact.addresses_json = input.contact.addresses_json.unwrap_or_default();
+                contact.urls_json = input.contact.urls_json.unwrap_or_default();
+                contact.organization_name = input.contact.organization_name;
+                contact.job_title = input.contact.job_title;
+                contact.raw_vcard = input.contact.raw_vcard;
+                contact.source = input.contact.source;
+                contact.clone()
+            } else {
+                self.contacts
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|contact| contact.id == contact_id)
+                    .cloned()
+                    .unwrap()
+            };
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(contact_id, change_number);
+            self.mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .insert(contact_id, change_key.clone());
+            self.mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .insert(contact_id, predecessor_change_list.clone());
+            self.mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .insert(contact_id, last_modification_time);
+            for value in input.custom_property_upserts {
+                self.mapi_custom_property_values.lock().unwrap().insert(
+                    (
+                        input.principal_account_id,
+                        MapiCustomPropertyObjectKind::Contact,
+                        contact_id,
+                        value.property_tag,
+                        value.property_type,
+                    ),
+                    value.property_value,
+                );
+            }
+            self.contact_versions
+                .lock()
+                .unwrap()
+                .entry(contact_id)
+                .and_modify(|version| *version += 1);
+            return Box::pin(async move {
+                Ok(MapiContactCreateOutcome::Created(MapiContactCreateResult {
+                    contact,
+                    mapi_object_id: source_object_id,
+                    version: MapiContactVersion {
+                        change_number,
+                        change_key,
+                        predecessor_change_list,
+                        last_modification_time,
+                    },
+                    import_disposition: if conflict {
+                        lpe_storage::MapiContactImportDisposition::ConflictResolved {
+                            imported_wins,
+                        }
+                    } else {
+                        lpe_storage::MapiContactImportDisposition::Applied
+                    },
+                }))
+            });
+        }
+        let source_counter =
+            crate::mapi::identity::global_counter_from_store_id(source_object_id).unwrap();
+        let change_number = if imported_identity.is_some() {
+            if *next_counter == source_counter {
+                *next_counter = next_counter.saturating_add(1);
+            }
+            let change_number = *next_counter;
+            *next_counter = next_counter.saturating_add(1);
+            change_number
+        } else {
+            *next_counter = next_counter.saturating_add(1);
+            source_counter
+        };
+        drop(next_counter);
+
+        let contact_id = input
+            .contact
+            .id
+            .unwrap_or_else(|| Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap());
+        let contact = AccessibleContact {
+            id: contact_id,
+            collection_id: input.collection_id,
+            owner_account_id: collection.owner_account_id,
+            owner_email: collection.owner_email,
+            owner_display_name: collection.owner_display_name,
+            rights: collection.rights,
+            name: input.contact.name,
+            role: input.contact.role,
+            email: input.contact.email,
+            phone: input.contact.phone,
+            team: input.contact.team,
+            notes: input.contact.notes,
+            structured_name: input.contact.structured_name,
+            emails_json: input.contact.emails_json.unwrap_or_default(),
+            phones_json: input.contact.phones_json.unwrap_or_default(),
+            addresses_json: input.contact.addresses_json.unwrap_or_default(),
+            urls_json: input.contact.urls_json.unwrap_or_default(),
+            organization_name: input.contact.organization_name,
+            job_title: input.contact.job_title,
+            raw_vcard: input.contact.raw_vcard,
+            source: input.contact.source,
+        };
+        let source_key = imported_identity
+            .as_ref()
+            .map(|identity| identity.source_key.clone())
+            .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(source_object_id));
+        let change_key = imported_identity
+            .as_ref()
+            .map(|identity| identity.change_key.clone())
+            .unwrap_or_else(|| mapi_mailstore::change_key_for_change_number(change_number));
+        let predecessor_change_list = imported_identity
+            .as_ref()
+            .map(|identity| identity.predecessor_change_list.clone())
+            .unwrap_or_else(|| mapi_mailstore::predecessor_change_list(change_number));
+        let last_modification_time = imported_identity
+            .as_ref()
+            .map(|identity| identity.last_modification_time)
+            .unwrap_or_else(|| mapi_mailstore::filetime_from_change_number(change_number));
+
+        self.mapi_identities
+            .lock()
+            .unwrap()
+            .insert(contact_id, source_object_id);
+        self.mapi_identity_source_keys
+            .lock()
+            .unwrap()
+            .insert(contact_id, source_key);
+        self.mapi_identity_change_numbers
+            .lock()
+            .unwrap()
+            .insert(contact_id, change_number);
+        self.mapi_identity_change_keys
+            .lock()
+            .unwrap()
+            .insert(contact_id, change_key.clone());
+        self.mapi_identity_predecessor_change_lists
+            .lock()
+            .unwrap()
+            .insert(contact_id, predecessor_change_list.clone());
+        self.mapi_identity_last_modification_times
+            .lock()
+            .unwrap()
+            .insert(contact_id, last_modification_time);
+        for value in input.custom_property_upserts {
+            self.mapi_custom_property_values.lock().unwrap().insert(
+                (
+                    input.principal_account_id,
+                    MapiCustomPropertyObjectKind::Contact,
+                    contact_id,
+                    value.property_tag,
+                    value.property_type,
+                ),
+                value.property_value,
+            );
+        }
+        self.contact_versions.lock().unwrap().insert(contact_id, 1);
+        self.contacts.lock().unwrap().push(contact.clone());
+        let version = MapiContactVersion {
+            change_number,
+            change_key,
+            predecessor_change_list,
+            last_modification_time,
+        };
+        Box::pin(async move {
+            Ok(MapiContactCreateOutcome::Created(MapiContactCreateResult {
+                contact,
+                mapi_object_id: source_object_id,
+                version,
+                import_disposition: lpe_storage::MapiContactImportDisposition::Applied,
             }))
         })
     }
@@ -13331,6 +13898,16 @@ fn append_mapi_trailing_replid_wire_id(buffer: &mut Vec<u8>, global_counter: u64
 
 fn mapi_wire_id_bytes(object_id: u64) -> [u8; 8] {
     crate::mapi::identity::wire_id_bytes_from_object_id(object_id).unwrap()
+}
+
+fn saved_message_id_from_response(response_rops: &[u8], response_handle_index: u8) -> Option<u64> {
+    // [MS-OXCMSG] section 2.2.3.3: follow the MessageId returned by
+    // RopSaveChangesMessage instead of reconstructing one from canonical data.
+    let marker = [0x0C, response_handle_index, 0, 0, 0, 0];
+    let offset = response_rops
+        .windows(marker.len())
+        .position(|window| window == marker)?;
+    crate::mapi::identity::object_id_from_wire_id(response_rops.get(offset + 7..offset + 15)?)
 }
 
 fn append_rop_open_folder(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: u64) {

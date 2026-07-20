@@ -394,6 +394,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         Some(MapiObject::DelegateFreeBusyMessage {
             folder_id,
             message_id,
+            pending_appointment_tombstone: pending,
         }) => {
             let Some(message) = snapshot
                 .delegate_freebusy_message_for_id(*message_id)
@@ -405,7 +406,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                     0x8004_010F,
                 );
             };
-            serialize_delegate_freebusy_row(message, &columns)
+            serialize_freebusy_row_staged(message, &columns, pending.as_deref())
         }
         Some(MapiObject::RecoverableItem { folder_id, item_id }) => {
             let Some(item) = snapshot.recoverable_item_for_id(*folder_id, *item_id) else {
@@ -1149,7 +1150,7 @@ pub(in crate::mapi) fn serialize_object_property(
         }) => snapshot
             .contact_for_id(*folder_id, *contact_id)
             .map(|contact| {
-                serialize_contact_row(&contact.contact, contact.id, contact.folder_id, &[tag])
+                serialize_mapi_contact_row(contact, contact.folder_id, principal.account_id, &[tag])
             })
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
@@ -1282,10 +1283,11 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::DelegateFreeBusyMessage {
             folder_id,
             message_id,
+            pending_appointment_tombstone: pending,
         }) => snapshot
             .delegate_freebusy_message_for_id(*message_id)
             .filter(|message| message.folder_id == *folder_id)
-            .map(|message| serialize_delegate_freebusy_row(message, &[tag]))
+            .map(|message| serialize_freebusy_row_staged(message, &[tag], pending.as_deref()))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);

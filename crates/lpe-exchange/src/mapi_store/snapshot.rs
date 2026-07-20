@@ -35,11 +35,32 @@ fn navigation_shortcut_message(
         .as_ref()
         .map(|identity| identity.object_id)
         .unwrap_or_else(|| mapi_item_id(&shortcut.id));
-    let group_header_id = Some(
-        shortcut
-            .group_header_id
-            .unwrap_or_else(crate::mapi::properties::default_wlink_group_uuid),
-    );
+    // Preserve an explicitly group-less Mail favorite across reconnect;
+    // [MS-OXOCFG] sections 2.2.9.12-2.2.9.13 group properties are not
+    // synthesized when neither value exists in canonical state.
+    let is_group_less_mail_favorite = shortcut.shortcut_type == 0
+        && shortcut.section == 1
+        && shortcut.target_folder_id.is_some()
+        && shortcut.group_header_id.is_none()
+        && shortcut.group_name.trim().is_empty();
+    let group_header_id = if is_group_less_mail_favorite {
+        None
+    } else {
+        Some(
+            shortcut
+                .group_header_id
+                .unwrap_or_else(crate::mapi::properties::default_wlink_group_uuid),
+        )
+    };
+    let group_name = if is_group_less_mail_favorite {
+        String::new()
+    } else {
+        normalize_navigation_shortcut_group_name(
+            shortcut.section,
+            group_header_id,
+            &shortcut.group_name,
+        )
+    };
     Ok(MapiNavigationShortcutMessage {
         id,
         folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
@@ -53,11 +74,7 @@ fn navigation_shortcut_message(
         section: shortcut.section,
         ordinal: shortcut.ordinal,
         group_header_id,
-        group_name: normalize_navigation_shortcut_group_name(
-            shortcut.section,
-            group_header_id,
-            &shortcut.group_name,
-        ),
+        group_name,
         client_properties: shortcut.client_properties,
     })
 }
@@ -237,6 +254,28 @@ impl MapiMailStoreSnapshot {
             })?;
             shortcut.id = identity.object_id;
             shortcut.durable_identity = Some((*identity).clone());
+        }
+        Ok(self)
+    }
+
+    pub(crate) fn with_contact_identities(
+        mut self,
+        identity_records: &[MapiIdentityRecord],
+    ) -> Result<Self> {
+        let identities = identity_records
+            .iter()
+            .filter(|identity| identity.object_kind == MapiIdentityObjectKind::Contact)
+            .map(|identity| (identity.canonical_id, identity))
+            .collect::<HashMap<_, _>>();
+        for contact in &mut self.contacts {
+            let identity = identities.get(&contact.canonical_id).ok_or_else(|| {
+                anyhow!(
+                    "durable MAPI Contact identity is missing for {}",
+                    contact.canonical_id
+                )
+            })?;
+            contact.id = identity.object_id;
+            contact.durable_identity = Some((*identity).clone());
         }
         Ok(self)
     }
@@ -444,6 +483,41 @@ impl MapiMailStoreSnapshot {
             event,
             version,
             attachments: calendar_mapi_attachments(&attachments),
+        });
+        if let Some(folder) = self
+            .collaboration_folders
+            .iter_mut()
+            .find(|folder| folder.id == folder_id)
+        {
+            folder.item_count = folder.item_count.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn remember_created_contact(
+        &mut self,
+        folder_id: u64,
+        contact: AccessibleContact,
+        identity: MapiIdentityRecord,
+    ) {
+        debug_assert_eq!(identity.object_kind, MapiIdentityObjectKind::Contact);
+        debug_assert_eq!(identity.canonical_id, contact.id);
+        let contact_id = identity.object_id;
+        if let Some(current) = self
+            .contacts
+            .iter_mut()
+            .find(|current| current.folder_id == folder_id && current.id == contact_id)
+        {
+            current.canonical_id = contact.id;
+            current.durable_identity = Some(identity);
+            current.contact = contact;
+            return;
+        }
+        self.contacts.push(MapiContact {
+            id: contact_id,
+            folder_id,
+            canonical_id: contact.id,
+            durable_identity: Some(identity),
+            contact,
         });
         if let Some(folder) = self
             .collaboration_folders

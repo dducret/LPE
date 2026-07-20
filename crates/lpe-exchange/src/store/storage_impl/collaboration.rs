@@ -172,6 +172,28 @@ macro_rules! store_impl_collaboration {
         })
     }
 
+    fn create_mapi_contact<'a>(
+        &'a self,
+        input: MapiContactCreateInput,
+    ) -> StoreFuture<'a, MapiContactCreateOutcome> {
+        Box::pin(async move {
+            let collection = self
+                .fetch_accessible_contact_collections(input.principal_account_id)
+                .await?
+                .into_iter()
+                .find(|collection| collection.id == input.collection_id);
+            let Some(collection) = collection else {
+                return Ok(MapiContactCreateOutcome::NotFound);
+            };
+            if !collection.rights.may_write {
+                return Ok(MapiContactCreateOutcome::AccessDenied);
+            }
+            self.create_mapi_contact(input)
+                .await
+                .map(MapiContactCreateOutcome::Created)
+        })
+    }
+
     fn commit_mapi_event_update<'a>(
         &'a self,
         input: MapiEventCommitInput,

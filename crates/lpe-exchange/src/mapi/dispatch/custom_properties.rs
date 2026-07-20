@@ -102,6 +102,26 @@ pub(super) fn mapi_event_custom_property_values_from_map(
     values
 }
 
+pub(super) fn mapi_contact_custom_property_values_from_map(
+    properties: &HashMap<u32, MapiValue>,
+) -> Vec<MapiContactCustomPropertyValue> {
+    let mut values = properties
+        .iter()
+        .filter(|(tag, _)| is_custom_property_tag(**tag))
+        .map(|(property_tag, value)| {
+            let mut property_value = Vec::new();
+            write_mapi_value(&mut property_value, *property_tag, value);
+            MapiContactCustomPropertyValue {
+                property_tag: *property_tag,
+                property_type: MapiPropertyTag::new(*property_tag).property_type_code(),
+                property_value,
+            }
+        })
+        .collect::<Vec<_>>();
+    values.sort_by_key(|value| value.property_tag);
+    values
+}
+
 pub(super) async fn fetch_custom_property_values_for_request<S>(
     store: &S,
     principal: &AccountPrincipal,

@@ -1169,7 +1169,7 @@ fn common_views_shortcut_sync_uses_account_bound_entry_ids() {
     assert_eq!(
         property(PID_TAG_WLINK_FOLDER_TYPE),
         &crate::mapi_mailstore::SpecialMessagePropertyValue::Binary(vec![
-            0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x46,
         ])
     );
@@ -1808,6 +1808,7 @@ fn fast_transfer_manifest_rejects_delegate_freebusy_from_wrong_folder() {
     let object = MapiObject::DelegateFreeBusyMessage {
         folder_id: INBOX_FOLDER_ID,
         message_id: snapshot.delegate_freebusy_messages()[0].id,
+        pending_appointment_tombstone: None,
     };
 
     let manifest = fast_transfer_manifest_for_object(

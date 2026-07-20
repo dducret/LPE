@@ -155,8 +155,8 @@ fn validated_navigation_shortcut_from_mapi_properties(
     properties: &HashMap<u32, MapiValue>,
 ) -> Result<crate::mapi_store::MapiNavigationShortcutMessage> {
     // [MS-OXOCFG] sections 2.2.9.1 through 2.2.9.14 and 3.1.4.10:
-    // a WLink is a complete FAI Message. Reject incomplete or malformed state
-    // instead of inventing a shortcut type, section, ordinal, group, or target.
+    // validate the complete WLink FAI state, while preserving an explicitly
+    // ungrouped Mail favorite without inventing group properties.
     let subject = properties
         .get(&PID_TAG_SUBJECT_W)
         .or_else(|| properties.get(&PID_TAG_NORMALIZED_SUBJECT_W))
@@ -185,19 +185,12 @@ fn validated_navigation_shortcut_from_mapi_properties(
         }
         _ => return Err(anyhow!("required WLink ordinal is missing or malformed")),
     };
-    let group_name = if shortcut_type == 4 {
-        subject
-    } else {
-        navigation_shortcut_property_by_id(properties, PID_TAG_WLINK_GROUP_NAME_W)
-            .and_then(MapiValue::as_text)
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| anyhow!("required WLink group name is missing"))?
-    };
-    let group_id = if shortcut_type == 4 {
+    let folder_type =
+        required_navigation_shortcut_binary_16(properties, PID_TAG_WLINK_FOLDER_TYPE)?;
+    if shortcut_type == 4 {
         if navigation_shortcut_property_by_id(properties, PID_TAG_WLINK_ENTRY_ID).is_some() {
             return Err(anyhow!("a WLink group header cannot target a folder"));
         }
-        required_navigation_shortcut_binary_16(properties, PID_TAG_WLINK_GROUP_HEADER_ID)?
     } else {
         match navigation_shortcut_property_by_id(properties, PID_TAG_WLINK_ENTRY_ID) {
             Some(MapiValue::Binary(value)) if !value.is_empty() => {}
@@ -207,18 +200,55 @@ fn validated_navigation_shortcut_from_mapi_properties(
                 ))
             }
         }
-        required_navigation_shortcut_binary_16(properties, PID_TAG_WLINK_GROUP_CLSID)?
-    };
-    let folder_type =
-        required_navigation_shortcut_binary_16(properties, PID_TAG_WLINK_FOLDER_TYPE)?;
+    }
 
-    let shortcut = navigation_shortcut_from_mapi_properties(account_id, id, properties);
+    let mut shortcut = navigation_shortcut_from_mapi_properties(account_id, id, properties);
+    let ungrouped_mail_favorite = shortcut_type == 0
+        && section == 1
+        && folder_type == wlink_mail_folder_type_guid()
+        && shortcut.target_folder_id.is_some()
+        && !properties.keys().any(|property_tag| {
+            (*property_tag & 0xFFFF_0000) == (PID_TAG_WLINK_GROUP_NAME_W & 0xFFFF_0000)
+        })
+        && !properties.keys().any(|property_tag| {
+            (*property_tag & 0xFFFF_0000) == (PID_TAG_WLINK_GROUP_CLSID & 0xFFFF_0000)
+        });
+    // [MS-OXOCFG] sections 2.2.9.11-2.2.9.14 and 3.1.4.10.2 describe
+    // PidTagWlinkGroupClsid and PidTagWlinkGroupName on grouped shortcuts.
+    // If both are absent, retain that absence only when the remaining protocol
+    // properties unambiguously describe a normal Mail favorite. This rule is
+    // independent of client version, session, and captured identifiers, and
+    // avoids fabricating an associated group that the client did not send.
+    let (group_name, group_id) = if shortcut_type == 4 {
+        (
+            subject.to_string(),
+            Some(Uuid::from_bytes(required_navigation_shortcut_binary_16(
+                properties,
+                PID_TAG_WLINK_GROUP_HEADER_ID,
+            )?)),
+        )
+    } else if ungrouped_mail_favorite {
+        shortcut.group_name.clear();
+        (String::new(), None)
+    } else {
+        (
+            navigation_shortcut_property_by_id(properties, PID_TAG_WLINK_GROUP_NAME_W)
+                .and_then(MapiValue::as_text)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| anyhow!("required WLink group name is missing"))?
+                .to_string(),
+            Some(Uuid::from_bytes(required_navigation_shortcut_binary_16(
+                properties,
+                PID_TAG_WLINK_GROUP_CLSID,
+            )?)),
+        )
+    };
     if shortcut.subject != subject
         || shortcut.shortcut_type != shortcut_type
         || shortcut.section != section
         || shortcut.ordinal.as_slice() != ordinal.as_slice()
         || shortcut.group_name != group_name
-        || shortcut.group_header_id != Some(Uuid::from_bytes(group_id))
+        || shortcut.group_header_id != group_id
         || wlink_folder_type_guid(&shortcut) != folder_type
         || (shortcut_type != 4 && shortcut.target_folder_id.is_none())
     {

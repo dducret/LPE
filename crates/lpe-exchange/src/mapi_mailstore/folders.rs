@@ -304,6 +304,13 @@ pub(crate) fn virtual_special_mailbox_id(folder_id: u64) -> Uuid {
     Uuid::from_u128(VIRTUAL_SPECIAL_MAILBOX_UUID_PREFIX | u128::from(folder_id))
 }
 
+pub(crate) fn virtual_special_mailbox_ids() -> impl Iterator<Item = Uuid> {
+    (1..crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER)
+        .map(crate::mapi::identity::mapi_store_id)
+        .filter(|folder_id| virtual_special_folder_metadata(*folder_id).is_some())
+        .map(virtual_special_mailbox_id)
+}
+
 pub(crate) fn virtual_special_folder_metadata(
     folder_id: u64,
 ) -> Option<(&'static str, &'static str, i32, u64, &'static str)> {

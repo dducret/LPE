@@ -106,9 +106,29 @@ pub(in crate::mapi) fn serialize_delegate_freebusy_row(
     message: &MapiDelegateFreeBusyMessage,
     columns: &[u32],
 ) -> Vec<u8> {
+    serialize_freebusy_row_staged(message, columns, None)
+}
+
+pub(in crate::mapi) fn serialize_freebusy_row_staged(
+    message: &MapiDelegateFreeBusyMessage,
+    columns: &[u32],
+    pending_appointment_tombstone: Option<&[u8]>,
+) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
-        match delegate_freebusy_property_value(message, *column) {
+        let value = if crate::mapi_store::is_outlook_local_freebusy_message_id(message.id)
+            && canonical_property_storage_tag(*column)
+                == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE
+        {
+            Some(MapiValue::Binary(
+                pending_appointment_tombstone
+                    .unwrap_or(&EMPTY_APPOINTMENT_TOMBSTONE)
+                    .to_vec(),
+            ))
+        } else {
+            delegate_freebusy_property_value(message, *column)
+        };
+        match value {
             Some(value) => write_mapi_value(&mut row, *column, &value),
             None => write_property_default(&mut row, *column),
         }

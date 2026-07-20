@@ -117,6 +117,7 @@ pub(crate) struct MapiContact {
     pub(crate) id: u64,
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
+    pub(crate) durable_identity: Option<MapiIdentityRecord>,
     pub(crate) contact: AccessibleContact,
 }
 
@@ -647,6 +648,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 folder_permissions,
                 &identity_records,
             )
+            .and_then(|snapshot| snapshot.with_contact_identities(&identity_records))
             .map(|snapshot| snapshot.with_calendar_attachments(calendar_attachments))
             .and_then(|snapshot| snapshot.with_event_versions(event_versions))
             .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))

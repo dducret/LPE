@@ -352,10 +352,10 @@ fn rop_query_rows_response_inner(
                         sort_contacts(&mut rows, sort_orders);
                         rows.into_iter()
                             .map(|contact| {
-                                serialize_contact_row(
-                                    &contact.contact,
-                                    contact.id,
+                                serialize_mapi_contact_row(
+                                    contact,
                                     contact.folder_id,
+                                    mailbox_guid,
                                     &columns,
                                 )
                             })
@@ -394,10 +394,10 @@ fn rop_query_rows_response_inner(
                 sort_contacts(&mut rows, sort_orders);
                 rows.into_iter()
                     .map(|contact| {
-                        serialize_contact_row(
-                            &contact.contact,
-                            contact.id,
+                        serialize_mapi_contact_row(
+                            contact,
                             contact.folder_id,
+                            mailbox_guid,
                             &columns,
                         )
                     })
@@ -414,10 +414,10 @@ fn rop_query_rows_response_inner(
                 sort_contacts(&mut rows, sort_orders);
                 rows.into_iter()
                     .map(|contact| {
-                        serialize_contact_row(
-                            &contact.contact,
-                            contact.id,
+                        serialize_mapi_contact_row(
+                            contact,
                             CONTACTS_SEARCH_FOLDER_ID,
+                            mailbox_guid,
                             &columns,
                         )
                     })

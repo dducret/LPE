@@ -12,10 +12,10 @@ use crate::{
 };
 use imported_identity::{allocate_mapi_event_identity_in_tx, validate_imported_identity};
 
-const MAX_MAPI_GLOBAL_COUNTER: u64 = 0x7FFF_FFFF_FFFF;
-const FIRST_RESERVED_HIGH_GLOBAL_COUNTER: u64 = 0x7FFF_FE00_0000;
-const FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER: u64 = 43;
-const MAPI_STORE_REPLICA_GUID: [u8; 16] = [
+pub(crate) const MAX_MAPI_GLOBAL_COUNTER: u64 = 0x7FFF_FFFF_FFFF;
+pub(crate) const FIRST_RESERVED_HIGH_GLOBAL_COUNTER: u64 = 0x7FFF_FE00_0000;
+pub(crate) const FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER: u64 = 43;
+pub(crate) const MAPI_STORE_REPLICA_GUID: [u8; 16] = [
     0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f, 0x10,
 ];
 

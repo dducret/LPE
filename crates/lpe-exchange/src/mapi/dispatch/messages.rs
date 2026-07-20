@@ -127,6 +127,8 @@ pub(super) fn append_create_message_response(
             Some(MapiCollaborationFolderKind::Contacts) => MapiObject::PendingContact {
                 folder_id,
                 properties: initial_message_properties(),
+                imported_identity: None,
+                fail_on_conflict: false,
             },
             Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
                 folder_id,
@@ -257,6 +259,36 @@ pub(super) fn restore_save_changes_containing_folder_response_handle(
         );
     }
     Some(folder_handle)
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum SaveChangesResponseHandleTarget {
+    ContainingFolder(u64),
+    EmbeddedMessage(u32),
+}
+
+pub(super) fn restore_save_changes_response_handle(
+    session: &MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    target: SaveChangesResponseHandleTarget,
+) -> Option<u32> {
+    match target {
+        SaveChangesResponseHandleTarget::ContainingFolder(folder_id) => {
+            restore_save_changes_containing_folder_response_handle(
+                session,
+                handle_slots,
+                request,
+                folder_id,
+            )
+        }
+        SaveChangesResponseHandleTarget::EmbeddedMessage(handle) => {
+            session.handles.contains_key(&handle).then(|| {
+                set_handle_slot(handle_slots, Some(request.response_handle_index()), handle);
+                handle
+            })
+        }
+    }
 }
 
 fn folder_handle_for_id(

@@ -6,8 +6,28 @@ pub(in crate::mapi) fn contact_property_value(
     folder_id: u64,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    contact_property_value_with_identity(
+        contact,
+        item_id,
+        folder_id,
+        contact.owner_account_id,
+        None,
+        property_tag,
+    )
+}
+
+pub(in crate::mapi) fn contact_property_value_with_identity(
+    contact: &AccessibleContact,
+    item_id: u64,
+    folder_id: u64,
+    mailbox_guid: Uuid,
+    identity: Option<&crate::store::MapiIdentityRecord>,
+    property_tag: u32,
+) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
-    let change_number = mapi_mailstore::change_number_for_store_id(item_id);
+    let change_number = identity
+        .map(|identity| identity.change_number)
+        .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(item_id));
     match property_tag {
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder_id)),
         PID_TAG_MID => Some(MapiValue::U64(item_id)),
@@ -138,22 +158,41 @@ pub(in crate::mapi) fn contact_property_value(
         PID_TAG_MESSAGE_SIZE_EXTENDED => {
             Some(mapi_message_size_extended_value(contact_size(contact)))
         }
-        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
-            crate::mapi::identity::instance_key_for_object_id(item_id),
+        // [MS-OXCDATA] section 2.2.4.2: a private Message EntryID carries
+        // the mailbox provider, parent Folder ID, and Message ID.
+        PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
+            mailbox_guid,
+            folder_id,
+            item_id,
+        )
+        .map(MapiValue::Binary),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            identity
+                .map(|identity| identity.source_key.clone())
+                .unwrap_or_else(|| crate::mapi::identity::instance_key_for_object_id(item_id)),
         )),
-        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
-            &contact.id,
-        ))),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(
+            identity
+                .map(|identity| identity.source_key.clone())
+                .unwrap_or_else(|| mapi_mailstore::source_key_for_uuid(&contact.id)),
+        )),
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(folder_id),
         )),
         PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
-            mapi_mailstore::change_key_for_change_number(change_number),
+            identity
+                .map(|identity| identity.change_key.clone())
+                .unwrap_or_else(|| mapi_mailstore::change_key_for_change_number(change_number)),
         )),
         PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
-            mapi_mailstore::predecessor_change_list(change_number),
+            identity
+                .map(|identity| identity.predecessor_change_list.clone())
+                .unwrap_or_else(|| mapi_mailstore::predecessor_change_list(change_number)),
         )),
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
+            identity.map(|identity| MapiValue::U64(identity.last_modification_time))
+        }
         _ => None,
     }
 }

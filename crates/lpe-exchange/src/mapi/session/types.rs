@@ -230,6 +230,7 @@ pub(in crate::mapi) enum StreamWriteTarget {
     EventProperty { handle: u32, property_tag: u32 },
     PendingAssociatedMessageProperty { handle: u32, property_tag: u32 },
     AssociatedConfigProperty { handle: u32, property_tag: u32 },
+    DelegateFreeBusyAppointmentTombstone { handle: u32 },
     PublicFolderItemProperty { handle: u32, property_tag: u32 },
     VolatileProperty,
 }
@@ -363,6 +364,7 @@ pub(in crate::mapi) enum MapiObject {
     DelegateFreeBusyMessage {
         folder_id: u64,
         message_id: u64,
+        pending_appointment_tombstone: Option<Vec<u8>>,
     },
     RecoverableItem {
         folder_id: u64,
@@ -387,6 +389,8 @@ pub(in crate::mapi) enum MapiObject {
     PendingContact {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
+        imported_identity: Option<MapiContactImportedIdentity>,
+        fail_on_conflict: bool,
     },
     PendingEvent {
         folder_id: u64,

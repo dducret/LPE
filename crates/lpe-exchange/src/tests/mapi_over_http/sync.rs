@@ -1735,7 +1735,7 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
     )
     .unwrap();
     let mail_folder_type = [
-        0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x46,
     ];
     let mut property_values = Vec::new();
@@ -1984,7 +1984,7 @@ async fn mapi_over_http_common_views_online_create_ignores_client_source_key_in_
     )
     .unwrap();
     let mail_folder_type = [
-        0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x46,
     ];
     let mut property_values = Vec::new();
@@ -3719,6 +3719,209 @@ async fn mapi_over_http_common_views_fai_table_open_and_ics_share_canonical_iden
         assert_eq!(message.predecessor_change_list, identity.3);
         assert_eq!(message.change_number, Some(identity.4));
     }
+}
+
+#[tokio::test]
+async fn mapi_over_http_outlook_mail_favorite_import_without_group_properties_persists() {
+    // Outlook 16.0.20131.20044 trace 202607201648 imported this exact
+    // type=0, section=1 Mail-folder WLink without PidTagWlinkGroupClsid or
+    // PidTagWlinkGroupName. [MS-OXOCFG] sections 2.2.9.11-2.2.9.14 and
+    // 3.1.4.10.2 still describe those group properties; this fixture records
+    // the observed omission without treating it as normative permission.
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    *store.next_mapi_global_counter.lock().unwrap() = 0x0200_AF;
+    store
+        .reserve_mapi_local_replica_ids(account.account_id, 0x0001_0000)
+        .await
+        .unwrap();
+    let shortcuts = store.navigation_shortcuts.clone();
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (collector_response, collector_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &collector_response,
+        &[0x7E, 0x02, 0, 0, 0, 0]
+    ));
+
+    let message_id = crate::mapi::identity::mapi_store_id(0x0206_B4);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let change_key = vec![
+        0xA2, 0xD1, 0xCC, 0x5A, 0x17, 0xAB, 0x87, 0x4F, 0xB7, 0x18, 0xA2, 0xE4, 0xB8, 0xAB, 0x0A,
+        0xC2, 0x00, 0x00, 0x08, 0x20,
+    ];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+    let mut identity_values = Vec::new();
+    append_mapi_binary_property(&mut identity_values, PID_TAG_SOURCE_KEY, &source_key);
+    append_mapi_i64_property(
+        &mut identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        test_filetime("2026-07-20", "16:48"),
+    );
+    append_mapi_binary_property(&mut identity_values, PID_TAG_CHANGE_KEY, &change_key);
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &predecessor_change_list,
+    );
+    let mut import_rops = vec![
+        0x72, 0x00, 0x00, 0x01, 0x10, // ImportMessageChange, associated FAI.
+    ];
+    import_rops.extend_from_slice(&4u16.to_le_bytes());
+    import_rops.extend_from_slice(&identity_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_rops, &[collector_handles[2], u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (import_response, import_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]));
+    assert!(shortcuts.lock().unwrap().is_empty());
+
+    let inbox_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    )
+    .unwrap();
+    let mail_folder_type = [
+        0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let mut first_batch = Vec::new();
+    append_mapi_utf16_property(
+        &mut first_batch,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
+    append_mapi_utf16_property(&mut first_batch, PID_TAG_NORMALIZED_SUBJECT_W, "Inbox");
+    append_mapi_i32_property(
+        &mut first_batch,
+        0x6847_0003, // PidTagWlinkSaveStamp.
+        1_537_819_608,
+    );
+    let mut second_batch = Vec::new();
+    append_mapi_i32_property(&mut second_batch, PID_TAG_WLINK_TYPE, 0);
+    append_mapi_i32_property(
+        &mut second_batch,
+        0x684A_0003, // PidTagWlinkFlags.
+        0x0010_8000,
+    );
+    append_mapi_binary_property(&mut second_batch, PID_TAG_WLINK_ORDINAL, &[0x7F]);
+    let mut third_batch = Vec::new();
+    append_mapi_binary_property(&mut third_batch, PID_TAG_WLINK_ENTRY_ID, &inbox_entry_id);
+    append_mapi_binary_property(
+        &mut third_batch,
+        0x684F_0102, // PidTagWlinkFolderType.
+        &mail_folder_type,
+    );
+    append_mapi_i32_property(
+        &mut third_batch,
+        0x6852_0003, // PidTagWlinkSection.
+        1,
+    );
+
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 1, 3, &first_batch);
+    append_rop_set_properties(&mut save_rops, 1, 3, &second_batch);
+    append_rop_set_properties(&mut save_rops, 1, 3, &third_batch);
+    append_rop_save_changes_message_with_flags(&mut save_rops, 0, 1, 0x08);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &import_handles)),
+        )
+        .await
+        .unwrap();
+    let save_response = response_rops_from_execute_response(response).await;
+    let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
+    expected_save.extend_from_slice(&mapi_wire_id_bytes(message_id));
+    assert!(
+        contains_bytes(&save_response, &expected_save),
+        "Outlook's group-less Mail favorite must retain its imported MID: {save_response:02x?}"
+    );
+
+    let stored = shortcuts.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].subject, "Inbox");
+    assert_eq!(
+        stored[0].target_folder_id,
+        Some(crate::mapi::identity::INBOX_FOLDER_ID)
+    );
+    assert_eq!(stored[0].shortcut_type, 0);
+    assert_eq!(stored[0].section, 1);
+    assert_eq!(stored[0].group_name, "");
+    assert_eq!(stored[0].group_header_id, None);
+    let canonical_id = stored[0].id;
+    drop(stored);
+
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let reconstructed = snapshot
+        .navigation_shortcut_messages()
+        .into_iter()
+        .find(|shortcut| shortcut.canonical_id == canonical_id)
+        .expect("saved Mail favorite after snapshot reconstruction");
+    assert_eq!(reconstructed.group_header_id, None);
+    assert_eq!(reconstructed.group_name, "");
+
+    let sync_response = content_sync_response_rops_for_store_with_flags(
+        store,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        &[],
+        0x0010,
+    )
+    .await;
+    let sync = strict_content_sync_transfer_from_response(&sync_response).unwrap();
+    let downloaded = sync
+        .message_changes
+        .iter()
+        .find(|message| message.subject == "Inbox")
+        .expect("saved Mail favorite in reconstructed Common Views FAI sync");
+    assert!(downloaded.body_tags.contains(&0x684F_0102));
+    assert!(!downloaded.body_tags.contains(&PID_TAG_WLINK_GROUP_CLSID));
+    assert!(!downloaded.body_tags.contains(&PID_TAG_WLINK_GROUP_NAME_W));
 }
 
 #[tokio::test]

@@ -1826,7 +1826,7 @@ async fn mapi_over_http_microsoft_open_embedded_message_accepts_read_only_mode()
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
     rops.push(0x00);
     append_rop_set_properties(&mut rops, 4, 1, &embedded_properties);
-    append_rop_save_changes_message(&mut rops, 4, 4);
+    append_rop_save_changes_message(&mut rops, 5, 4);
     rops.extend_from_slice(&[
         0x25, 0x00, 0x03, 0x03, 0x0A, // RopSaveChangesAttachment KeepOpenReadWrite
     ]);
@@ -1839,22 +1839,27 @@ async fn mapi_over_http_microsoft_open_embedded_message_accepts_read_only_mode()
             &execute_headers,
             &execute_body(&rop_buffer(
                 &rops,
-                &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+                &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
             )),
         )
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let response_rops = response_rops_from_execute_response(response).await;
+    let body = response_bytes(response).await;
+    let (response_rops, response_handles) = response_rops_and_handles_from_execute_body(&body);
     assert!(contains_bytes(&response_rops, &[0x46, 0x04, 0, 0, 0, 0, 0]));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x0C, 0x04, 0, 0, 0, 0, 0x04]
-    ));
+    assert!(
+        contains_bytes(&response_rops, &[0x0C, 0x05, 0, 0, 0, 0, 0x04]),
+        "{response_rops:02x?}"
+    );
     assert!(
         contains_bytes(&response_rops, &[0x25, 0x03, 0, 0, 0, 0]),
         "{response_rops:02x?}"
+    );
+    assert_eq!(
+        response_handles[5], response_handles[4],
+        "SaveChangesMessage must place the embedded Message in its distinct response slot"
     );
     let canonical = canonical_emails.lock().unwrap();
     assert_eq!(canonical.len(), 1);
@@ -2540,7 +2545,7 @@ async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_r
 
     let group_id = [0x22; 16];
     let mail_folder_type = [
-        0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x46,
     ];
     let mut group_values = Vec::new();

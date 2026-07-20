@@ -808,6 +808,8 @@ async fn repair_stale_mapi_object_identities(
     account_id: Uuid,
     preserved_mailbox_identity_ids: &[Uuid],
 ) -> Result<()> {
+    let mut preserved_checkpoint_mailbox_ids = preserved_mailbox_identity_ids.to_vec();
+    preserved_checkpoint_mailbox_ids.extend(crate::mapi_mailstore::virtual_special_mailbox_ids());
     let contact_count = sqlx::query(
         r#"
         UPDATE mapi_object_identities identity
@@ -821,8 +823,19 @@ async fn repair_stale_mapi_object_identities(
               SELECT 1
               FROM contacts contact
               WHERE contact.tenant_id = identity.tenant_id
-                AND contact.owner_account_id = identity.account_id
                 AND contact.id = identity.canonical_id
+                AND (
+                    contact.owner_account_id = identity.account_id
+                    OR EXISTS (
+                        SELECT 1
+                        FROM contact_book_grants grant_row
+                        WHERE grant_row.tenant_id = contact.tenant_id
+                          AND grant_row.owner_account_id = contact.owner_account_id
+                          AND grant_row.contact_book_id = contact.contact_book_id
+                          AND grant_row.grantee_account_id = identity.account_id
+                          AND grant_row.may_read
+                    )
+                )
           )
         "#,
     )
@@ -944,6 +957,7 @@ async fn repair_stale_mapi_object_identities(
         WHERE checkpoint.tenant_id = $1
           AND checkpoint.account_id = $2
           AND checkpoint.mailbox_id IS NOT NULL
+          AND NOT (checkpoint.mailbox_id = ANY($3::uuid[]))
           AND NOT EXISTS (
               SELECT 1
               FROM mailboxes mailbox
@@ -955,6 +969,7 @@ async fn repair_stale_mapi_object_identities(
     )
     .bind(tenant_id)
     .bind(account_id)
+    .bind(&preserved_checkpoint_mailbox_ids)
     .execute(&mut **tx)
     .await?
     .rows_affected();

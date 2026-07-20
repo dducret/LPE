@@ -10,8 +10,8 @@ use super::*;
 use crate::mapi::wire::RopId;
 use crate::mapi_store::MapiAssociatedConfigMessage;
 use lpe_storage::{
-    AttachmentUploadInput, JmapEmail, MapiEventAttachmentChanges, MapiEventImportedIdentity,
-    SearchFolderDefinition,
+    AttachmentUploadInput, JmapEmail, MapiContactImportedIdentity, MapiEventAttachmentChanges,
+    MapiEventImportedIdentity, SearchFolderDefinition,
 };
 
 const MAX_POST_HIERARCHY_ROP_IDS: usize = 64;

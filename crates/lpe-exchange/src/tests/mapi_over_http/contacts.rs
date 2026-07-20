@@ -267,6 +267,8 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
                 .any(|window| window == 0x8004_010Fu32.to_le_bytes()),
         "Outlook contact create returned an error: {response_rops:02x?}"
     );
+    let contact_mapi_id = saved_message_id_from_response(&response_rops, 1)
+        .expect("RopSaveChangesMessage returned the created Contact MID");
 
     let stored = contacts.lock().unwrap();
     assert_eq!(stored.len(), 1);
@@ -281,7 +283,6 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
         .emails_json
         .to_string()
         .contains("e.mueller@example.test"));
-    let contact_id = stored[0].id;
     drop(stored);
 
     let mut update_values = Vec::new();
@@ -294,7 +295,7 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
         1,
         2,
         test_mapi_folder_id(15),
-        test_mapi_uuid_id(&contact_id),
+        contact_mapi_id,
     );
     append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
     renew_mapi_request_id(&mut execute_headers);
@@ -316,6 +317,499 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
         .emails_json
         .to_string()
         .contains("e.updated@example.test"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
+    // Outlook trace 202607201648, requests :256 and :259.
+    // [MS-OXCFXICS] sections 2.2.3.2.4.2.1, 3.3.4.3.3.2.2.1, and
+    // 3.3.5.8.7 require SourceKey/LastModificationTime/ChangeKey/PCL followed
+    // by SetProperties and SaveChangesMessage. [MS-OXCMSG] sections 2.2.3.3
+    // and 3.2.5.3 require the successful Save to return the imported MID.
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        next_mapi_global_counter: Arc::new(Mutex::new(0x0000_0003_0b19)),
+        ..Default::default()
+    };
+    let imported_global_counter = store
+        .reserve_mapi_local_replica_ids(account.account_id, 1)
+        .await
+        .unwrap();
+    let imported_message_id = crate::mapi::identity::mapi_store_id(imported_global_counter);
+    let imported_source_key = crate::mapi::identity::source_key_for_object_id(imported_message_id);
+    let change_key = vec![
+        0xc7, 0x66, 0xe6, 0xaf, 0x10, 0x7e, 0x2e, 0x4b, 0xa1, 0x95, 0x4a, 0x22, 0xd0, 0xe3, 0x13,
+        0xff, 0x00, 0x00, 0x04, 0x5f,
+    ];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+    let imported_last_modification_time = test_filetime("2026-07-20", "14:46");
+    let contacts = store.contacts.clone();
+    let emails = store.emails.clone();
+    let mapi_identities = store.mapi_identities.clone();
+    let identity_source_keys = store.mapi_identity_source_keys.clone();
+    let identity_change_numbers = store.mapi_identity_change_numbers.clone();
+    let identity_change_keys = store.mapi_identity_change_keys.clone();
+    let identity_predecessor_change_lists = store.mapi_identity_predecessor_change_lists.clone();
+    let identity_last_modification_times = store.mapi_identity_last_modification_times.clone();
+    let restart_store = store.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7e, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (collector_response, collector_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &collector_response,
+        &[0x7e, 0x02, 0, 0, 0, 0]
+    ));
+
+    let mut identity_values = Vec::new();
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_SOURCE_KEY,
+        &imported_source_key,
+    );
+    append_mapi_i64_property(
+        &mut identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time,
+    );
+    append_mapi_binary_property(&mut identity_values, PID_TAG_CHANGE_KEY, &change_key);
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &predecessor_change_list,
+    );
+    let mut import_rops = vec![0x72, 0x00, 0x00, 0x01, 0x00];
+    import_rops.extend_from_slice(&4u16.to_le_bytes());
+    import_rops.extend_from_slice(&identity_values);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_rops, &[collector_handles[2], u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (import_response, import_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(
+        contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]),
+        "RopSynchronizationImportMessageChange failed: {import_response:02x?}"
+    );
+    assert!(contacts.lock().unwrap().is_empty());
+
+    let mut contact_values = Vec::new();
+    append_mapi_utf16_property(&mut contact_values, PID_TAG_MESSAGE_CLASS_W, "IPM.Contact");
+    append_mapi_utf16_property(
+        &mut contact_values,
+        PID_TAG_DISPLAY_NAME_W,
+        "René Maguaretaz",
+    );
+    append_mapi_utf16_property(
+        &mut contact_values,
+        0x39FE_001F,
+        "rene.maguaretaz@example.test",
+    );
+    append_mapi_utf16_property(&mut contact_values, 0x3A16_001F, "Maison");
+    append_mapi_utf16_property(&mut contact_values, 0x3A08_001F, "+41 22 555 01 02");
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 1, 5, &contact_values);
+    append_rop_save_changes_message_with_flags(&mut save_rops, 1, 1, 0x08);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &import_handles)),
+        )
+        .await
+        .unwrap();
+    let save_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&save_response, &[0x0a, 0x01, 0, 0, 0, 0]));
+    let mut expected_save = vec![0x0c, 0x01, 0, 0, 0, 0, 0x01];
+    expected_save.extend_from_slice(&mapi_wire_id_bytes(imported_message_id));
+    assert!(
+        contains_bytes(&save_response, &expected_save),
+        "RopSaveChangesMessage must commit the imported Contact MID; expected {expected_save:02x?}, got {save_response:02x?}"
+    );
+
+    let stored_contacts = contacts.lock().unwrap();
+    assert_eq!(stored_contacts.len(), 1);
+    assert_eq!(stored_contacts[0].collection_id, "default");
+    assert_eq!(stored_contacts[0].name, "René Maguaretaz");
+    assert_eq!(stored_contacts[0].email, "rene.maguaretaz@example.test");
+    assert_eq!(stored_contacts[0].organization_name, "Maison");
+    assert_eq!(stored_contacts[0].phone, "+41 22 555 01 02");
+    let contact_id = stored_contacts[0].id;
+    drop(stored_contacts);
+    assert!(emails.lock().unwrap().is_empty());
+    assert_eq!(
+        mapi_identities.lock().unwrap()[&contact_id],
+        imported_message_id
+    );
+    assert_eq!(
+        identity_source_keys.lock().unwrap()[&contact_id],
+        imported_source_key
+    );
+    assert_eq!(
+        identity_change_keys.lock().unwrap()[&contact_id],
+        change_key
+    );
+    assert_eq!(
+        identity_predecessor_change_lists.lock().unwrap()[&contact_id],
+        predecessor_change_list
+    );
+    assert_eq!(
+        identity_last_modification_times.lock().unwrap()[&contact_id],
+        imported_last_modification_time as u64
+    );
+    let server_change_number = identity_change_numbers.lock().unwrap()[&contact_id];
+    assert_ne!(server_change_number, imported_global_counter);
+
+    // Outlook can retry the same ImportMessageChange + Save after losing the
+    // acknowledgement. [MS-OXCFXICS] sections 3.1.5.6.1 and 3.2.5.9.4.2
+    // require the server PCL to make that replay a successful no-op.
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_rops, &[collector_handles[2], u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (retry_import_response, retry_import_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(
+        contains_bytes(&retry_import_response, &[0x72, 0x01, 0, 0, 0, 0]),
+        "retried RopSynchronizationImportMessageChange failed: {retry_import_response:02x?}"
+    );
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &retry_import_handles)),
+        )
+        .await
+        .unwrap();
+    let retry_save_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &retry_save_response,
+        &[0x0a, 0x01, 0, 0, 0, 0]
+    ));
+    assert!(
+        contains_bytes(&retry_save_response, &expected_save),
+        "retried RopSaveChangesMessage must acknowledge the existing Contact MID; expected {expected_save:02x?}, got {retry_save_response:02x?}"
+    );
+    assert_eq!(contacts.lock().unwrap().len(), 1);
+    assert_eq!(
+        identity_change_numbers.lock().unwrap()[&contact_id],
+        server_change_number
+    );
+
+    // A later cached-mode edit keeps the same MID/SourceKey but uploads a
+    // successor CK/PCL and changed content. The server must update the one
+    // canonical Contact and issue a distinct server CN.
+    let successor_change_key = vec![
+        0xc7, 0x66, 0xe6, 0xaf, 0x10, 0x7e, 0x2e, 0x4b, 0xa1, 0x95, 0x4a, 0x22, 0xd0, 0xe3, 0x13,
+        0xff, 0x00, 0x00, 0x04, 0x60,
+    ];
+    let mut successor_predecessor_change_list = vec![successor_change_key.len() as u8];
+    successor_predecessor_change_list.extend_from_slice(&successor_change_key);
+    let successor_last_modification_time = test_filetime("2026-07-20", "14:48");
+    let mut successor_identity_values = Vec::new();
+    append_mapi_binary_property(
+        &mut successor_identity_values,
+        PID_TAG_SOURCE_KEY,
+        &imported_source_key,
+    );
+    append_mapi_i64_property(
+        &mut successor_identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        successor_last_modification_time,
+    );
+    append_mapi_binary_property(
+        &mut successor_identity_values,
+        PID_TAG_CHANGE_KEY,
+        &successor_change_key,
+    );
+    append_mapi_binary_property(
+        &mut successor_identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &successor_predecessor_change_list,
+    );
+    let mut successor_import_rops = vec![0x72, 0x00, 0x00, 0x01, 0x00];
+    successor_import_rops.extend_from_slice(&4u16.to_le_bytes());
+    successor_import_rops.extend_from_slice(&successor_identity_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &successor_import_rops,
+                &[collector_handles[2], u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (successor_import_response, successor_import_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &successor_import_response,
+        &[0x72, 0x01, 0, 0, 0, 0]
+    ));
+
+    let mut successor_contact_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut successor_contact_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Contact",
+    );
+    append_mapi_utf16_property(
+        &mut successor_contact_values,
+        PID_TAG_DISPLAY_NAME_W,
+        "René Maguaretaz modifié",
+    );
+    append_mapi_utf16_property(
+        &mut successor_contact_values,
+        0x39FE_001F,
+        "rene.updated@example.test",
+    );
+    append_mapi_utf16_property(&mut successor_contact_values, 0x3A16_001F, "LPE");
+    append_mapi_utf16_property(
+        &mut successor_contact_values,
+        0x3A08_001F,
+        "+41 22 555 01 03",
+    );
+    let mut successor_save_rops = Vec::new();
+    append_rop_set_properties(&mut successor_save_rops, 1, 5, &successor_contact_values);
+    append_rop_save_changes_message_with_flags(&mut successor_save_rops, 1, 1, 0x08);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&successor_save_rops, &successor_import_handles)),
+        )
+        .await
+        .unwrap();
+    let successor_save_response = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&successor_save_response, &expected_save),
+        "successor RopSaveChangesMessage must retain the Contact MID: {successor_save_response:02x?}"
+    );
+    let stored_contacts = contacts.lock().unwrap();
+    assert_eq!(stored_contacts.len(), 1);
+    assert_eq!(stored_contacts[0].id, contact_id);
+    assert_eq!(stored_contacts[0].name, "René Maguaretaz modifié");
+    assert_eq!(stored_contacts[0].email, "rene.updated@example.test");
+    drop(stored_contacts);
+    let successor_server_change_number = identity_change_numbers.lock().unwrap()[&contact_id];
+    assert_ne!(successor_server_change_number, server_change_number);
+    assert_eq!(
+        identity_change_keys.lock().unwrap()[&contact_id],
+        successor_change_key
+    );
+    assert_eq!(
+        identity_predecessor_change_lists.lock().unwrap()[&contact_id],
+        successor_predecessor_change_list
+    );
+
+    // Rebuild the MAPI snapshot as a fresh Outlook connection would. The
+    // imported identity must survive outside the session handle and remain
+    // the identity advertised by the next content synchronization.
+    let response_rops = content_sync_response_rops_for_store(
+        restart_store,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+        &[],
+    )
+    .await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1, "{response_rops:02x?}");
+    let synchronized = &stream.message_changes[0];
+    assert_eq!(synchronized.mid, Some(imported_message_id));
+    assert_eq!(synchronized.source_key, imported_source_key);
+    assert_eq!(synchronized.change_key, successor_change_key);
+    assert_eq!(
+        synchronized.predecessor_change_list,
+        successor_predecessor_change_list
+    );
+    assert_eq!(
+        synchronized.change_number,
+        Some(successor_server_change_number)
+    );
+    assert_eq!(
+        synchronized.last_modification_time,
+        Some(successor_last_modification_time as u64)
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_contact_sync_import_save_reports_deleted_source_key() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        next_mapi_global_counter: Arc::new(Mutex::new(0x0000_0003_0b19)),
+        ..Default::default()
+    };
+    let imported_global_counter = store
+        .reserve_mapi_local_replica_ids(account.account_id, 1)
+        .await
+        .unwrap();
+    store
+        .add_mapi_local_replica_deleted_ranges(
+            account.account_id,
+            crate::mapi::identity::CONTACTS_FOLDER_ID,
+            &[crate::store::MapiLocalReplicaDeletedRange {
+                replica_guid: Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID),
+                min_global_counter: imported_global_counter,
+                max_global_counter: imported_global_counter,
+            }],
+        )
+        .await
+        .unwrap();
+    let imported_message_id = crate::mapi::identity::mapi_store_id(imported_global_counter);
+    let imported_source_key = crate::mapi::identity::source_key_for_object_id(imported_message_id);
+    let change_key = vec![
+        0xc7, 0x66, 0xe6, 0xaf, 0x10, 0x7e, 0x2e, 0x4b, 0xa1, 0x95, 0x4a, 0x22, 0xd0, 0xe3, 0x13,
+        0xff, 0x00, 0x00, 0x04, 0x60,
+    ];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+
+    let contacts = store.contacts.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[0x7e, 0x00, 0x01, 0x02, 0x01]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (_, collector_handles) = response_rops_and_handles_from_execute_body(&body);
+
+    let mut identity_values = Vec::new();
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_SOURCE_KEY,
+        &imported_source_key,
+    );
+    append_mapi_i64_property(
+        &mut identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        test_filetime("2026-07-20", "14:47"),
+    );
+    append_mapi_binary_property(&mut identity_values, PID_TAG_CHANGE_KEY, &change_key);
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &predecessor_change_list,
+    );
+    let mut import_rops = vec![0x72, 0x00, 0x00, 0x01, 0x00];
+    import_rops.extend_from_slice(&4u16.to_le_bytes());
+    import_rops.extend_from_slice(&identity_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_rops, &[collector_handles[2], u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (import_response, import_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]));
+
+    let mut contact_values = Vec::new();
+    append_mapi_utf16_property(&mut contact_values, PID_TAG_MESSAGE_CLASS_W, "IPM.Contact");
+    append_mapi_utf16_property(
+        &mut contact_values,
+        PID_TAG_DISPLAY_NAME_W,
+        "Contact supprimé",
+    );
+    append_mapi_utf16_property(&mut contact_values, 0x39FE_001F, "deleted@example.test");
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 1, 3, &contact_values);
+    append_rop_save_changes_message_with_flags(&mut save_rops, 1, 1, 0x08);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &import_handles)),
+        )
+        .await
+        .unwrap();
+    let save_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &save_response,
+        &[0x0C, 0x01, 0x0A, 0x01, 0x04, 0x80]
+    ), "[MS-OXCFXICS] section 3.3.4.3.3.2.2.1 and [MS-OXCDATA] section 2.4 require ecObjectDeleted on RopSaveChangesMessage: {save_response:02x?}");
+    assert!(contacts.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -369,7 +863,9 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         )
         .await
         .unwrap();
-    let _response_rops = response_rops_from_execute_response(response).await;
+    let response_rops = response_rops_from_execute_response(response).await;
+    let contact_mapi_id = saved_message_id_from_response(&response_rops, 1)
+        .expect("RopSaveChangesMessage returned the created Contact MID");
     {
         let stored = contacts.lock().unwrap();
         assert_eq!(stored.len(), 1);
@@ -392,7 +888,7 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         1,
         2,
         test_mapi_folder_id(15),
-        test_mapi_uuid_id(&contact_id),
+        contact_mapi_id,
     );
     append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
     renew_mapi_request_id(&mut execute_headers);
@@ -421,7 +917,7 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         1,
         2,
         test_mapi_folder_id(15),
-        test_mapi_uuid_id(&contact_id),
+        contact_mapi_id,
     );
     append_rop_get_properties_specific(&mut read_rops, 2, &[0x3001_001F, 0x39FE_001F]);
     renew_mapi_request_id(&mut execute_headers);
@@ -445,7 +941,7 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
 
     let mut delete_rops = Vec::new();
     append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(15));
-    append_rop_delete_messages(&mut delete_rops, 1, &[test_mapi_uuid_id(&contact_id)]);
+    append_rop_delete_messages(&mut delete_rops, 1, &[contact_mapi_id]);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(

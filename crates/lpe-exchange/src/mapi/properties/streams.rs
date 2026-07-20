@@ -1,5 +1,15 @@
 use super::*;
 
+// [MS-OXOCAL] sections 2.2.12.5 and 2.2.12.5.1. This is the only
+// appointment-tombstone value that has no canonical deleted-meeting state.
+pub(in crate::mapi) const EMPTY_APPOINTMENT_TOMBSTONE: [u8; 20] = [
+    0xCD, 0xAF, 0xDE, 0xBE, // Identifier = 0xBEDEAFCD.
+    0x14, 0x00, 0x00, 0x00, // HeaderSize = 0x14.
+    0x03, 0x00, 0x00, 0x00, // Version = 3.
+    0x00, 0x00, 0x00, 0x00, // RecordsCount = 0.
+    0x14, 0x00, 0x00, 0x00, // RecordsSize = 0x14.
+];
+
 pub(in crate::mapi) async fn attachment_stream_data<S: ExchangeStore>(
     store: &S,
     principal: &AccountPrincipal,
@@ -123,11 +133,21 @@ pub(super) fn property_stream_data(
             1 | 2
         )
     );
+    let writable_local_freebusy_tombstone = matches!(
+        (object, open_mode),
+        (
+            MapiObject::DelegateFreeBusyMessage { message_id, .. },
+            1 | 2
+        ) if crate::mapi_store::is_outlook_local_freebusy_message_id(*message_id)
+            && canonical_property_storage_tag(property_tag)
+                == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE
+    );
     if open_mode != 0
         && !writable_associated_config
         && !writable_common_view_named_view
         && !writable_pending_event
         && !writable_pending_associated_message
+        && !writable_local_freebusy_tombstone
     {
         return None;
     }
@@ -185,6 +205,22 @@ pub(super) fn property_stream_data(
                 .get(&canonical_property_storage_tag(property_tag))
                 .cloned(),
         },
+        MapiObject::DelegateFreeBusyMessage {
+            message_id,
+            pending_appointment_tombstone,
+            ..
+        } if crate::mapi_store::is_outlook_local_freebusy_message_id(*message_id)
+            && canonical_property_storage_tag(property_tag)
+                == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE =>
+        {
+            (open_mode != 2).then(|| {
+                MapiValue::Binary(
+                    pending_appointment_tombstone
+                        .clone()
+                        .unwrap_or_else(|| EMPTY_APPOINTMENT_TOMBSTONE.to_vec()),
+                )
+            })
+        }
         MapiObject::Event {
             folder_id,
             event_id,
@@ -229,9 +265,33 @@ pub(super) fn property_stream_data(
             handle: input_handle,
             property_tag,
         })
+    } else if writable_local_freebusy_tombstone {
+        // [MS-OXOCAL] sections 2.2.12.5 and 2.2.12.5.1 define this optional
+        // client-maintained tombstone stream on delegate information. LPE's
+        // LocalFreebusy object is computed from canonical calendar state. The
+        // stream remains transactional until SaveChangesMessage validates
+        // that it contains the empty structure and no deleted-meeting state.
+        Some(StreamWriteTarget::DelegateFreeBusyAppointmentTombstone {
+            handle: input_handle,
+        })
     } else {
         None
     };
+    if open_mode == 2 {
+        if let Some(StreamWriteTarget::DelegateFreeBusyAppointmentTombstone { handle }) = target {
+            let MapiObject::DelegateFreeBusyMessage {
+                pending_appointment_tombstone,
+                ..
+            } = session.handles.get_mut(&handle)?
+            else {
+                return None;
+            };
+            // Create truncates the property. Record that zero-length staged
+            // value so SaveChangesMessage rejects it unless subsequent stream
+            // writes produce the complete valid empty structure.
+            *pending_appointment_tombstone = Some(Vec::new());
+        }
+    }
     Some((stream, target))
 }
 
@@ -688,6 +748,18 @@ pub(in crate::mapi) fn sync_stream_target(
                 let mut properties = mapi_properties_from_json(&message.properties_json);
                 properties.insert(canonical_property_storage_tag(property_tag), value);
                 message.properties_json = mapi_properties_to_json(&properties);
+                Some(())
+            } else {
+                None
+            }
+        }
+        StreamWriteTarget::DelegateFreeBusyAppointmentTombstone { handle } => {
+            if let Some(MapiObject::DelegateFreeBusyMessage {
+                pending_appointment_tombstone,
+                ..
+            }) = session.handles.get_mut(&handle)
+            {
+                *pending_appointment_tombstone = Some(data);
                 Some(())
             } else {
                 None

@@ -278,6 +278,7 @@ pub(super) fn append_open_message_response(
                 MapiObject::DelegateFreeBusyMessage {
                     folder_id,
                     message_id,
+                    pending_appointment_tombstone: None,
                 },
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);

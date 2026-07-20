@@ -51,6 +51,32 @@ pub(in crate::mapi) fn serialize_contact_row(
     row
 }
 
+pub(in crate::mapi) fn serialize_mapi_contact_row(
+    contact: &MapiContact,
+    folder_id: u64,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match contact_property_value_with_identity(
+            &contact.contact,
+            contact.id,
+            folder_id,
+            mailbox_guid,
+            contact.durable_identity.as_ref(),
+            *column,
+        )
+        .or_else(|| {
+            outlook_contact_empty_email_table_value(canonical_property_storage_tag(*column))
+        }) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
 pub(super) fn contact_table_property_value(
     contact: &AccessibleContact,
     item_id: u64,

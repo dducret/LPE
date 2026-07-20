@@ -227,7 +227,16 @@ fn navigation_shortcut_property_value_with_store_entry_id(
         // Section 3.1.4.10.1 does not list GroupName on group headers. Their
         // canonical display name is PidTagNormalizedSubject; only child
         // shortcuts carry the redundant group name from section 2.2.9.13.
-        PID_TAG_WLINK_GROUP_NAME_W if message.shortcut_type != 4 => {
+        // The exact Mail-favorite shape retained by snapshot.rs represents
+        // Outlook's observed omission by a missing group UUID and empty name.
+        PID_TAG_WLINK_GROUP_NAME_W
+            if message.shortcut_type != 4
+                && !(message.shortcut_type == 0
+                    && message.section == 1
+                    && message.target_folder_id.is_some()
+                    && message.group_header_id.is_none()
+                    && message.group_name.trim().is_empty()) =>
+        {
             Some(MapiValue::String(wlink_group_name(message)))
         }
         PID_TAG_WLINK_ENTRY_ID if message.shortcut_type != 4 => message

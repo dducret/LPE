@@ -402,6 +402,7 @@ used_for = [
   "Mailbox logon, folder open, property, table, and synchronization ROP behavior",
   "RopSetColumns, RopQueryRows, and RopGetPropertiesSpecific response-shape checks for Outlook Inbox startup",
   "RopSetProperties, RopDeleteProperties, RopDeletePropertiesNoReplicate, and RopSaveChangesMessage response contracts for retained Outlook message handles",
+  "Successful versus failed RopSaveChangesMessage ReturnValue gating for containing-folder response-handle restoration",
   "Calendar named-property registration and SetColumns/QueryPosition/QueryRows wire-contract checks",
   "Outlook Contacts RopGetPropertyIdsFromNames NoCreate request and success-response framing",
   "Released handle table compatibility for mixed ROP batches containing RopRelease",
@@ -579,6 +580,8 @@ used_for = [
   "Existing associated-configuration Message property and stream staging until atomic RopSaveChangesMessage persistence",
   "Property mutation and deletion semantics for an existing Outlook Calendar Message object",
   "Per-handle staging of writable Calendar properties and deletions until RopSaveChangesMessage",
+  "Per-handle Contact property staging after ICS ImportMessageChange until atomic RopSaveChangesMessage persistence",
+  "Same-handle staging and reread of PidTagScheduleInfoAppointmentTombstone through direct properties and writable streams",
   "RopGetPropertiesSpecific response-buffer budgeting, per-property NotEnoughMemory, and stream fallback for oversized Outlook Calendar HTML",
 ]
 sections = [
@@ -747,12 +750,14 @@ used_for = [
   "Deterministic Calendar Subject, NormalizedSubject, and empty SubjectPrefix relationship",
   "Coherent PidTagBodyHtml and PidTagHtml conversion for Calendar Event bodies",
   "Calendar Event PidTagLocalCommitTime update when RopSaveChangesMessage is processed",
+  "Imported Contact PidTagLastModificationTime preservation across RopSaveChangesMessage and reconnect",
   "Releasing Message Object protocol example handle invalidation behavior",
   "Embedded message open response shape and attachment method semantics",
   "Opening the Calendar default-view descriptor by FID and MID",
   "PidTagMessageFlags mfUnsent projection from canonical Draft mailbox state",
   "PidTagMessageFlags mfFAI projection for folder-associated messages",
   "New Message object identity returned by the first RopSaveChangesMessage",
+  "Containing Folder response-handle restoration only after a successful non-embedded RopSaveChangesMessage, while failed and embedded saves retain their Message object handle",
   "Initial property state of newly created folder-associated messages before the client sets configuration properties",
   "FAI Message objects require canonical persistence rather than snapshot-only synthetic identities",
   "Canonical message read-state flags and Outlook standalone rfClearReadFlag interoperability",
@@ -773,6 +778,7 @@ sections = [
   "2.2.1.49 PidTagLocalCommitTime Property",
   "2.2.1.58.3 PidTagBodyHtml Property",
   "2.2.1.58.9 PidTagHtml Property",
+  "2.2.2.2 PidTagLastModificationTime Property",
   "2.2.2.9 PidTagAttachMethod Property",
   "2.2.3.16 RopOpenEmbeddedMessage ROP",
   "2.2.3.1 RopOpenMessage ROP",
@@ -846,6 +852,7 @@ used_for = [
   "Distinct client-created navigation shortcut identity lifecycle without property-based deduplication",
   "Existing navigation shortcut property staging and atomic SaveChangesMessage version update",
   "Contacts Common Views navigation shortcut projection with CLSID_ContactFolder",
+  "Mail Common Views navigation shortcut projection with the exact CLSID_MailFolder and a client- and trace-independent semantic rule preserving absent group properties",
   "Exact persistence of client-written CalendarColor, AddressBookEID, AddressBookStoreEID, ClientID, and ROGroupType values without synthetic fallbacks",
   "Variable-length PidTagWlinkOrdinal preservation and lexicographic binary ordering",
   "Canonical KindString Categories ColumnPacket encoding for PS_PUBLIC_STRINGS/Keywords",
@@ -963,6 +970,7 @@ used_for = [
   "NoForeignIdentifiers projection of local SourceKey and ParentSourceKey values instead of persisted foreign identifiers",
   "Post-save retrieval of PidTagChangeKey on a Message object kept open by the client",
   "Durable Calendar Event ChangeNumber, ChangeKey, PredecessorChangeList, and stable SourceKey projection across direct reads and ICS",
+  "Atomic Contacts ICS import with client-reserved MID validation and durable SourceKey, ChangeKey, PredecessorChangeList, LastModificationTime, and server ChangeNumber projection after reconnect",
   "Calendar identity-material repair that distinguishes immutable object identity from the current or imported version ChangeKey",
   "Final Calendar ICS CnsetSeen and CnsetSeenFAI advancement using each emitted object's durable change number rather than its message identifier",
   "Calendar-to-Deleted-Items move identity replacement, source deletion, and destination creation semantics",
@@ -971,6 +979,7 @@ used_for = [
   "Durable exact GetLocalReplicaIds range registry and folder-scoped local-replica deleted-item list",
   "SynchronizationExtraFlags bit values and conditional messageChangeHeader properties",
   "Hierarchy collector Boolean semantics and upload GetTransferState checkpoint composition",
+  "Preservation of durable ICS checkpoints for virtual special-folder projections during identity repair",
   "Durable special-folder alias reconciliation with a server CN distinct from the client-reserved FID",
   "Durable special-folder identity with distinct folder IDs and server change numbers across properties, hierarchy tables, and ICS state",
   "Existing canonical-folder hierarchy uploads, duplicate detection, and conflict responses without advancing CnsetSeen",
@@ -1059,6 +1068,7 @@ sections = [
   "3.3.4.3.3.2.3 Uploading Deletes",
   "3.3.5.2.1 Client-Assigned Internal Identifiers",
   "3.3.5.2.2 Use Online Mode ROPs",
+  "3.3.5.2.3 Foreign Identifiers",
   "3.3.5.8.7 Sending a RopSynchronizationImportMessageChange ROP Request",
   "3.3.5.8.12 Sending a RopGetLocalReplicaIds ROP Request",
   "3.3.5.8.13 Sending a RopSetLocalReplicaMidsetDeleted ROP Request",
@@ -1673,6 +1683,7 @@ used_for = [
   "Mailbox-assigned Calendar named-property aliases, persisted TZDEFINITION key names, and canonical reminder projection",
   "Windows TZDEFINITION wire keys at the canonical IANA calendar-storage boundary",
   "Existing appointment update property set including start, end, ClipStart, ClipEnd, and common start/end values",
+  "Validation of the exact empty Outlook LocalFreebusy appointment-tombstone stream and rejection of nonempty records without a canonical calendar mapping",
 ]
 sections = [
   "2.2.1 Common Properties",
@@ -1699,6 +1710,8 @@ sections = [
   "2.2.1.44.5 AppointmentRecurrencePattern Structure",
   "2.2.2 Calendar Object",
   "2.2.3 Appointment Object",
+  "2.2.12.5 PidTagScheduleInfoAppointmentTombstone Property",
+  "2.2.12.5.1 Record Structure",
   "4.2.2.1 Creating the Meeting",
 ]
 
@@ -1949,6 +1962,7 @@ local_cache = "docs/microsoft/cache/MS-OXOPFFB.pdf"
 sha256 = "76e9d9ce03d4ca282b1ac7fa9c0687a761c34178bcf5076dc4354b8bef4602bd"
 used_for = [
   "Bounded Outlook free/busy compatibility projection from canonical calendar and delegate/free-busy state",
+  "Filtering the deprecated PidTagScheduleInfoFreeBusy property from every set or delete batch on receipt",
   "RopSaveChangesMessage example labeling combined SaveFlags 0x0A as KeepOpenReadWrite DelayedCall",
 ]
 sections = [
@@ -1964,6 +1978,7 @@ sections = [
   "2.2.1.2.9 PidTagFreeBusyPublishStart Property",
   "2.2.1.2.12 PidTagFreeBusyMessageEmailAddress Property",
   "2.2.1.3 Delegate Information Properties",
+  "2.2.1.4.3 PidTagScheduleInfoFreeBusy Property",
   "2.2.2 Public Folder Free/Busy Related Properties",
   "3.1.4.1 Publishing Free/Busy Data",
   "4.1 Updating the Free/Busy Message",

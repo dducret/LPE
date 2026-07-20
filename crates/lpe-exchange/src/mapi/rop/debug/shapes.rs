@@ -168,6 +168,7 @@ pub(in crate::mapi) fn mapi_object_debug_fields(
         Some(MapiObject::DelegateFreeBusyMessage {
             folder_id,
             message_id,
+            ..
         }) => (
             "delegate_freebusy_message",
             format!("{folder_id:#018x}"),

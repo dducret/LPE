@@ -28,11 +28,12 @@ use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, Outloo
 use lpe_domain::current_windows_filetime;
 use lpe_storage::{
     AuditEntryInput, CreatePublicFolderInput, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, MapiEventAttachmentChanges, MapiEventAttachmentUpsert,
-    MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
-    MapiEventCustomPropertyValue, MapiEventImportedIdentity, MapiEventImportedMoveIdentity,
-    MapiEventReminderPatch, PublicFolderPermissionInput, SearchFolderDefinition,
-    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertPublicFolderItemInput,
+    JmapMailboxUpdateInput, MapiContactCreateInput, MapiContactCustomPropertyValue,
+    MapiEventAttachmentChanges, MapiEventAttachmentUpsert, MapiEventCommitInput,
+    MapiEventCommitOutcome, MapiEventCreateInput, MapiEventCustomPropertyValue,
+    MapiEventImportedIdentity, MapiEventImportedMoveIdentity, MapiEventReminderPatch,
+    PublicFolderPermissionInput, SearchFolderDefinition, SubmittedRecipientInput,
+    UpdatePublicFolderInput, UpsertPublicFolderItemInput,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -41,6 +42,7 @@ use std::cmp::Ordering;
 mod associated_config;
 mod attachments;
 mod calendar_move_copy;
+mod contact_save;
 mod contacts;
 mod conversation_actions;
 mod custom_properties;
@@ -100,6 +102,7 @@ mod unsupported;
 use associated_config::*;
 use attachments::*;
 use calendar_move_copy::*;
+use contact_save::*;
 use contacts::*;
 use conversation_actions::*;
 use custom_properties::*;
@@ -929,6 +932,23 @@ where
             break;
         };
         let typed_request = request.typed();
+        let save_changes_response_handle_target = matches!(
+            RopId::from_u8(typed_request.rop_id()),
+            Some(RopId::SaveChangesMessage)
+        )
+        .then(|| input_handle(&handle_slots, &request))
+        .flatten()
+        .and_then(|handle| {
+            if session.pending_embedded_message_ids.contains_key(&handle) {
+                Some(SaveChangesResponseHandleTarget::EmbeddedMessage(handle))
+            } else {
+                session
+                    .handles
+                    .get(&handle)
+                    .and_then(MapiObject::folder_id)
+                    .map(SaveChangesResponseHandleTarget::ContainingFolder)
+            }
+        });
         let mut completed_hierarchy_sync = None;
         let mut content_sync_configure_observed = false;
         let response_len_before = responses.len();
@@ -1315,18 +1335,16 @@ where
             if matches!(
                 RopId::from_u8(typed_request.rop_id()),
                 Some(RopId::SaveChangesMessage)
-            ) {
-                if let Some(handle) = input_handle(&handle_slots, &request) {
-                    if let Some(folder_id) =
-                        session.handles.get(&handle).and_then(MapiObject::folder_id)
-                    {
-                        restore_save_changes_containing_folder_response_handle(
-                            session,
-                            &mut handle_slots,
-                            &request,
-                            folder_id,
-                        );
-                    }
+            ) && responses.get(response_len_before + 2..response_len_before + 6)
+                == Some(&[0, 0, 0, 0])
+            {
+                if let Some(target) = save_changes_response_handle_target {
+                    restore_save_changes_response_handle(
+                        session,
+                        &mut handle_slots,
+                        &request,
+                        target,
+                    );
                 }
             }
         }

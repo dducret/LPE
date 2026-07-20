@@ -739,16 +739,22 @@ fn format_contact_query_row_summary(
         .take(5)
         .map(|index| {
             let contact = rows[*index];
-            let serialized =
-                serialize_contact_row(&contact.contact, contact.id, contact.folder_id, columns);
+            let serialized = serialize_mapi_contact_row(
+                contact,
+                contact.folder_id,
+                contact.contact.owner_account_id,
+                columns,
+            );
             let standard_row = standard_property_row_bytes(&serialized);
             let values = columns
                 .iter()
                 .map(|tag| {
-                    let value = contact_property_value(
+                    let value = contact_property_value_with_identity(
                         &contact.contact,
                         contact.id,
                         contact.folder_id,
+                        contact.contact.owner_account_id,
+                        contact.durable_identity.as_ref(),
                         *tag,
                     )
                     .map(|value| format_debug_mapi_value(&value))

@@ -15,6 +15,7 @@ pub mod jmap_queries;
 pub mod mail;
 pub mod mail_items;
 pub mod mailboxes;
+pub mod mapi_contacts;
 pub mod mapi_events;
 mod message_ops;
 pub mod models;
@@ -76,6 +77,11 @@ pub use crate::jmap_blobs::{JmapQuota, JmapUploadBlob};
 pub use crate::jmap_queries::{JmapEmailQuery, JmapStoredQueryState, JmapThreadQuery};
 pub use crate::mailboxes::{
     JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, ManagedRetentionFolderCreateInput,
+};
+pub use crate::mapi_contacts::{
+    MapiContactCreateInput, MapiContactCreateResult, MapiContactCustomPropertyValue,
+    MapiContactImportConflict, MapiContactImportDisposition, MapiContactImportObjectDeleted,
+    MapiContactImportedIdentity, MapiContactVersion,
 };
 pub use crate::mapi_events::{
     MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput,

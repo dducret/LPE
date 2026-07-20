@@ -298,6 +298,7 @@ impl MapiMailStoreSnapshot {
                     id: mapi_item_id(&contact.id),
                     folder_id,
                     canonical_id: contact.id,
+                    durable_identity: None,
                     contact,
                 })
             })

@@ -153,6 +153,22 @@ macro_rules! store_impl_mapi_replica_ids {
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("account not found"))?;
                 let mut tx = self.pool().begin().await?;
+                sqlx::query_scalar::<_, i64>(
+                    r#"
+                    SELECT next_global_counter
+                    FROM mapi_mailbox_replicas
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND replica_guid = $3
+                    FOR UPDATE
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("MAPI mailbox replica was not initialized"))?;
 
                 for range in ranges {
                     if range.replica_guid

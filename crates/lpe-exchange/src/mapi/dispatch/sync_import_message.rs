@@ -1,4 +1,5 @@
 use super::*;
+use lpe_storage::MapiContactImportedIdentity;
 
 pub(super) fn imported_fai_identity(
     properties: &HashMap<u32, MapiValue>,
@@ -35,6 +36,22 @@ pub(super) fn imported_fai_identity(
         change_key,
         predecessor_change_list,
         last_modification_time,
+    })
+}
+
+fn imported_contact_identity(
+    properties: &HashMap<u32, MapiValue>,
+    imported_message_id: u64,
+) -> Result<MapiContactImportedIdentity> {
+    // [MS-OXCFXICS] sections 2.2.3.2.4.2.1 and 3.3.5.8.7: the
+    // Message returned by ImportMessageChange carries this identity quartet
+    // until SaveChangesMessage publishes the new Contact.
+    let identity = imported_fai_identity(properties, imported_message_id)?;
+    Ok(MapiContactImportedIdentity {
+        source_key: identity.source_key,
+        change_key: identity.change_key,
+        predecessor_change_list: identity.predecessor_change_list,
+        last_modification_time: identity.last_modification_time,
     })
 }
 
@@ -550,6 +567,26 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             .collaboration_folder_for_id(folder_id)
             .map(|folder| folder.kind)
         {
+            Some(MapiCollaborationFolderKind::Contacts) => {
+                let properties = property_values.into_iter().collect::<HashMap<_, _>>();
+                let imported_identity = match imported_contact_identity(&properties, message_id) {
+                    Ok(identity) => identity,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x72,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        return;
+                    }
+                };
+                MapiObject::PendingContact {
+                    folder_id,
+                    properties,
+                    imported_identity: Some(imported_identity),
+                    fail_on_conflict: import_flag & 0x40 != 0,
+                }
+            }
             Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
                 folder_id,
                 properties: property_values.into_iter().collect(),

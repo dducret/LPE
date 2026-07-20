@@ -162,7 +162,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
             snapshot
                 .contacts_for_folder(folder_id)
                 .into_iter()
-                .map(contact_sync_object),
+                .map(|contact| contact_sync_object(contact, principal.account_id)),
         );
     } else if snapshot
         .collaboration_folder_for_id(folder_id)
@@ -193,7 +193,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 .into_iter()
                 .map(|contact| {
                     sync_object_projected_to_folder(
-                        contact_sync_object(contact),
+                        contact_sync_object(contact, principal.account_id),
                         CONTACTS_SEARCH_FOLDER_ID,
                     )
                 })
@@ -404,6 +404,7 @@ fn public_folder_item_sync_object(
 
 fn contact_sync_object(
     contact: &crate::mapi_store::MapiContact,
+    mailbox_guid: Uuid,
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     let mut properties = Vec::new();
     for property_tag in [
@@ -417,11 +418,18 @@ fn contact_sync_object(
         PID_TAG_TITLE_W,
         PID_TAG_ACCESS,
         PID_TAG_HAS_ATTACHMENTS,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_TAG_LAST_MODIFICATION_TIME,
     ] {
-        if let Some(value) = contact_property_value(
+        if let Some(value) = contact_property_value_with_identity(
             &contact.contact,
             contact.id,
             contact.folder_id,
+            mailbox_guid,
+            contact.durable_identity.as_ref(),
             property_tag,
         )
         .and_then(special_message_property_value)
@@ -429,7 +437,11 @@ fn contact_sync_object(
             properties.push((property_tag, value));
         }
     }
-    let change_number = mapi_mailstore::change_number_for_store_id(contact.id);
+    let change_number = contact
+        .durable_identity
+        .as_ref()
+        .map(|identity| identity.change_number)
+        .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(contact.id));
 
     mapi_mailstore::SpecialMessageSyncFact {
         folder_id: contact.folder_id,
@@ -439,7 +451,11 @@ fn contact_sync_object(
         subject: contact.contact.name.clone(),
         body_text: contact.contact.notes.clone(),
         message_class: "IPM.Contact".to_string(),
-        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        last_modified_filetime: contact
+            .durable_identity
+            .as_ref()
+            .map(|identity| identity.last_modification_time)
+            .unwrap_or_else(|| mapi_mailstore::filetime_from_change_number(change_number)),
         message_size: contact_size(&contact.contact),
         read_state: None,
         named_properties: properties,
@@ -1306,6 +1322,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
         MapiObject::DelegateFreeBusyMessage {
             folder_id,
             message_id,
+            ..
         } => {
             let message = snapshot.delegate_freebusy_message_for_id(*message_id)?;
             if message.folder_id != *folder_id {

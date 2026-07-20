@@ -2428,6 +2428,7 @@ fn delegate_freebusy_getprops_rejects_message_from_wrong_folder() {
     let object = MapiObject::DelegateFreeBusyMessage {
         folder_id: INBOX_FOLDER_ID,
         message_id: snapshot.delegate_freebusy_messages()[0].id,
+        pending_appointment_tombstone: None,
     };
     let mut payload = Vec::new();
     payload.extend_from_slice(&4096u16.to_le_bytes());

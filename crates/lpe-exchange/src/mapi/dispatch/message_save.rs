@@ -67,109 +67,24 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         Some(MapiObject::PendingContact {
             folder_id,
             properties,
+            imported_identity,
+            fail_on_conflict,
         }) => {
-            let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) else {
-                responses.extend_from_slice(&rop_error_response(
-                    0x0C,
-                    request.response_handle_index(),
-                    0x8004_010F,
-                ));
-                return;
-            };
-            let input = contact_input_from_mapi(
-                principal.account_id,
-                None,
-                &default_contact_for_mapping(principal.account_id, &folder.collection.id),
-                &properties,
-            );
-            match store
-                .create_accessible_contact(principal.account_id, Some(&folder.collection.id), input)
-                .await
-            {
-                Ok(contact) => {
-                    let contact_id = match remember_created_mapi_identity(
-                        store,
-                        principal,
-                        MapiIdentityObjectKind::Contact,
-                        contact.id,
-                        None,
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(contact_id) => contact_id,
-                        Err(_) => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x0C,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            ));
-                            return;
-                        }
-                    };
-                    if upsert_custom_property_values_from_map(
-                        store,
-                        principal,
-                        MapiCustomPropertyObjectKind::Contact,
-                        contact.id,
-                        &properties,
-                    )
-                    .await
-                    .is_err()
-                    {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x0C,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        return;
-                    }
-                    session.handles.insert(
-                        handle,
-                        MapiObject::Contact {
-                            folder_id,
-                            contact_id,
-                        },
-                    );
-                    session.record_notification(MapiNotificationEvent::content(
-                        folder_id,
-                        Some(contact_id),
-                    ));
-                    append_save_changes_message_response(
-                        session,
-                        responses,
-                        handle_slots,
-                        &request,
-                        handle,
-                        contact_id,
-                    );
-                }
-                Err(error) => {
-                    let (message_class, subject) = associated_config_class_and_subject(&properties);
-                    let property_tags = properties.keys().copied().collect::<Vec<_>>();
-                    tracing::warn!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        mapi_request_id = %mapi_request_id,
-                        request_rop_id = "0x0c",
-                        folder_id = %format!("{folder_id:#018x}"),
-                        associated_message_class = %message_class,
-                        associated_subject = %subject,
-                        property_tag_count = property_tags.len(),
-                        property_tags = %format_debug_property_tags(&property_tags),
-                        save_error = %error,
-                        "rca debug failed to persist associated config message"
-                    );
-                    responses.extend_from_slice(&rop_error_response(
-                        0x0C,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    ));
-                }
-            }
+            save_pending_contact(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+                handle,
+                folder_id,
+                properties,
+                imported_identity,
+                fail_on_conflict,
+            )
+            .await;
             return;
         }
         Some(MapiObject::PendingEvent {
@@ -859,10 +774,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         | Some(MapiObject::ConversationAction {
             conversation_action_id: contact_id,
             ..
-        })
-        | Some(MapiObject::DelegateFreeBusyMessage {
-            message_id: contact_id,
-            ..
         }) => {
             append_save_changes_message_response(
                 session,
@@ -871,6 +782,43 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 &request,
                 handle,
                 contact_id,
+            );
+            return;
+        }
+        Some(MapiObject::DelegateFreeBusyMessage {
+            message_id,
+            pending_appointment_tombstone,
+            ..
+        }) => {
+            if pending_appointment_tombstone
+                .as_deref()
+                .is_some_and(|value| value != EMPTY_APPOINTMENT_TOMBSTONE)
+            {
+                // [MS-OXOCAL] sections 2.2.12.5 and 2.2.12.5.1: a nonempty
+                // value contains deleted-meeting state. Reject it until that
+                // state has a canonical calendar mapping; never acknowledge
+                // the stream and then discard its records.
+                responses.extend_from_slice(&rop_error_response(
+                    0x0C,
+                    request.response_handle_index(),
+                    0x8007_0057,
+                ));
+                return;
+            }
+            if let Some(MapiObject::DelegateFreeBusyMessage {
+                pending_appointment_tombstone,
+                ..
+            }) = session.handles.get_mut(&handle)
+            {
+                *pending_appointment_tombstone = None;
+            }
+            append_save_changes_message_response(
+                session,
+                responses,
+                handle_slots,
+                &request,
+                handle,
+                message_id,
             );
             return;
         }

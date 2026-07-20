@@ -12,7 +12,7 @@ use crate::mapi::identity::{
 };
 use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiCommonViewsMessage,
-    MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiMessage,
+    MapiContact, MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiMessage,
     MapiNavigationShortcutMessage, MapiTask,
 };
 use lpe_storage::SearchFolderDefinition;
@@ -403,10 +403,10 @@ pub(in crate::mapi) fn rop_find_row_response(
                             response.push(1);
                             write_standard_property_row(
                                 &mut response,
-                                &serialize_contact_row(
-                                    &contact.contact,
-                                    contact.id,
+                                &serialize_mapi_contact_row(
+                                    contact,
                                     contact.folder_id,
+                                    mailbox_guid,
                                     &columns,
                                 ),
                             );
@@ -478,10 +478,10 @@ pub(in crate::mapi) fn rop_find_row_response(
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_contact_row(
-                            &contact.contact,
-                            contact.id,
+                        &serialize_mapi_contact_row(
+                            contact,
                             CONTACTS_SEARCH_FOLDER_ID,
+                            mailbox_guid,
                             &columns,
                         ),
                     );

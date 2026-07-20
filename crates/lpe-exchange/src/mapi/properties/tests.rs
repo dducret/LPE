@@ -1545,6 +1545,64 @@ fn contact_property_projects_outlook_table_identity_columns() {
 }
 
 #[test]
+fn contact_entry_id_is_private_message_entry_id_not_a_sync_key() {
+    let mailbox_guid = Uuid::from_u128(0x77777777_7777_4777_8777_77777777777b);
+    let owner_account_id = Uuid::from_u128(0x77777777_7777_4777_8777_77777777777c);
+    let mut contact = default_contact_for_mapping(owner_account_id, "shared");
+    contact.id = Uuid::from_u128(0x99999999_9999_4999_8999_99999999999b);
+    let item_id = crate::mapi::identity::mapi_store_id(0x047);
+    let source_key = crate::mapi::identity::source_key_for_object_id(item_id);
+    let identity = crate::store::MapiIdentityRecord {
+        object_kind: crate::store::MapiIdentityObjectKind::Contact,
+        canonical_id: contact.id,
+        object_id: item_id,
+        change_number: 0x048,
+        source_key: source_key.clone(),
+        change_key: crate::mapi_mailstore::change_key_for_change_number(0x048),
+        predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(0x048),
+        last_modification_time: crate::mapi_mailstore::filetime_from_change_number(0x048),
+    };
+
+    // [MS-OXCDATA] section 2.2.4.2 defines a private Message EntryID from
+    // the mailbox provider, parent Folder ID, and Message ID.
+    let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        mailbox_guid,
+        CONTACTS_FOLDER_ID,
+        item_id,
+    )
+    .unwrap();
+    let entry_id = contact_property_value_with_identity(
+        &contact,
+        item_id,
+        CONTACTS_FOLDER_ID,
+        mailbox_guid,
+        Some(&identity),
+        PID_TAG_ENTRY_ID,
+    );
+    let instance_key = contact_property_value_with_identity(
+        &contact,
+        item_id,
+        CONTACTS_FOLDER_ID,
+        mailbox_guid,
+        Some(&identity),
+        PID_TAG_INSTANCE_KEY,
+    );
+    let projected_source_key = contact_property_value_with_identity(
+        &contact,
+        item_id,
+        CONTACTS_FOLDER_ID,
+        mailbox_guid,
+        Some(&identity),
+        PID_TAG_SOURCE_KEY,
+    );
+
+    assert_eq!(entry_id, Some(MapiValue::Binary(expected_entry_id.clone())));
+    assert_eq!(expected_entry_id.len(), 70);
+    assert_eq!(instance_key, Some(MapiValue::Binary(source_key.clone())));
+    assert_eq!(projected_source_key, Some(MapiValue::Binary(source_key)));
+}
+
+#[test]
 fn collaboration_item_properties_project_outlook_table_identity_columns() {
     let account_id = Uuid::from_u128(0x77777777_7777_4777_8777_77777777777a);
     let task = default_task_for_mapping(account_id, "default");
@@ -4966,7 +5024,7 @@ fn navigation_shortcuts_use_the_folder_clsid_for_each_navigation_module() {
     // [MS-OXOCFG] section 2.2.9.11 defines the six folder CLSIDs. Targetless
     // group headers use their WlinkSection to select the navigation module.
     let cases = [
-        (1, 0x0C),
+        (1, 0x00),
         (3, 0x02),
         (4, 0x01),
         (5, 0x03),
@@ -6760,7 +6818,7 @@ fn navigation_shortcut_wlink_identifiers_use_exact_binary_tags() {
         navigation_shortcut_property_value(&link, account_id, 0x684F_0102),
         Some(MapiValue::Binary(
             [
-                0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x46,
             ]
             .to_vec()

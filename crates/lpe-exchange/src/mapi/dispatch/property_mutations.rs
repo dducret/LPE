@@ -101,12 +101,25 @@ where
         .iter()
         .map(|(tag, _)| *tag)
         .collect::<Vec<_>>();
-    let values = requested_values
+    let mut values = requested_values
         .into_iter()
         .map(|(tag, value)| (session.normalize_named_property_tag(tag), value))
         .collect::<Vec<_>>();
+    let delegate_freebusy_mutation = matches!(
+        set_properties_object.as_ref(),
+        Some(MapiObject::DelegateFreeBusyMessage { .. })
+    );
+    if delegate_freebusy_mutation {
+        // [MS-OXOPFFB] section 2.2.1.4.3: this deprecated property MUST be
+        // ignored upon receipt, including in mixed SetProperties requests.
+        values.retain(|(tag, _)| {
+            canonical_property_storage_tag(*tag) != PID_TAG_SCHEDULE_INFO_FREE_BUSY
+        });
+    }
     let mut event_property_problems = Vec::new();
-    let set_result = if let Some(result) = stage_virtual_conversation_action_property_values(
+    let set_result = if delegate_freebusy_mutation && values.is_empty() {
+        Ok(())
+    } else if let Some(result) = stage_virtual_conversation_action_property_values(
         session,
         handle_slots,
         request,
@@ -166,13 +179,15 @@ where
                     None => Err(anyhow!("MAPI associated config message was not found")),
                 }
             }
+            Some(MapiObject::DelegateFreeBusyMessage { .. }) => {
+                stage_delegate_freebusy_property_values(session, handle_slots, request, values)
+            }
             Some(
                 object @ (MapiObject::Contact { .. }
                 | MapiObject::Task { .. }
                 | MapiObject::Note { .. }
                 | MapiObject::JournalEntry { .. }
                 | MapiObject::ConversationAction { .. }
-                | MapiObject::DelegateFreeBusyMessage { .. }
                 | MapiObject::PublicFolderItem { .. }
                 | MapiObject::Attachment { .. }),
             ) => {
@@ -318,6 +333,44 @@ where
     PropertyMutationFlow::Continue
 }
 
+fn stage_delegate_freebusy_property_values(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    values: Vec<(u32, MapiValue)>,
+) -> Result<()> {
+    let Some(MapiObject::DelegateFreeBusyMessage {
+        message_id,
+        pending_appointment_tombstone,
+        ..
+    }) = input_object_mut(session, handle_slots, request)
+    else {
+        return Err(anyhow!("MAPI delegate free/busy message was not found"));
+    };
+    if !crate::mapi_store::is_outlook_local_freebusy_message_id(*message_id)
+        || values.iter().any(|(tag, _)| {
+            canonical_property_storage_tag(*tag) != PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE
+        })
+    {
+        return Err(anyhow!(
+            "unsupported delegate free/busy Message property mutation"
+        ));
+    }
+    for (tag, value) in values {
+        if canonical_property_storage_tag(tag) == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE {
+            let MapiValue::Binary(value) = value else {
+                return Err(anyhow!("appointment tombstone must be binary"));
+            };
+            // [MS-OXCPRPT] sections 3.2.5.4 and 3.2.5.13: the new value is
+            // immediately visible through this Message handle, while Save is
+            // the publication boundary. The computed LocalFreebusy object
+            // never stores a second copy outside canonical calendar state.
+            *pending_appointment_tombstone = Some(value);
+        }
+    }
+    Ok(())
+}
+
 pub(super) async fn append_delete_properties_response<S>(
     store: &S,
     principal: &AccountPrincipal,
@@ -332,15 +385,27 @@ pub(super) async fn append_delete_properties_response<S>(
     S: ExchangeStore,
 {
     let requested_property_tags = request.property_tags();
-    let property_tags = requested_property_tags
+    let mut property_tags = requested_property_tags
         .iter()
         .copied()
         .into_iter()
         .map(|tag| session.normalize_named_property_tag(tag))
         .collect::<Vec<_>>();
     let object = input_object(session, handle_slots, request).cloned();
+    let delegate_freebusy_mutation = matches!(
+        object.as_ref(),
+        Some(MapiObject::DelegateFreeBusyMessage { .. })
+    );
+    if delegate_freebusy_mutation {
+        // [MS-OXOPFFB] section 2.2.1.4.3 applies to deletes as well as sets;
+        // filter the deprecated property and process any remaining tags.
+        property_tags
+            .retain(|tag| canonical_property_storage_tag(*tag) != PID_TAG_SCHEDULE_INFO_FREE_BUSY);
+    }
     let mut event_property_problems = Vec::new();
-    let delete_result = if let Some(result) = stage_virtual_conversation_action_property_delete(
+    let delete_result = if delegate_freebusy_mutation && property_tags.is_empty() {
+        Ok(())
+    } else if let Some(result) = stage_virtual_conversation_action_property_delete(
         session,
         handle_slots,
         request,

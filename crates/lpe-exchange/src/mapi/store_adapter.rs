@@ -786,6 +786,7 @@ where
         folder_permissions,
         &snapshot_identities,
     )?
+    .with_contact_identities(&snapshot_identities)?
     .with_event_versions(event_versions)
     .context("apply durable MAPI Event versions to selective snapshot")?
     .with_notes_and_journal(notes, journal_entries)

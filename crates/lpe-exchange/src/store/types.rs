@@ -20,6 +20,13 @@ pub(crate) enum MapiEventCreateOutcome {
     AccessDenied,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum MapiContactCreateOutcome {
+    Created(lpe_storage::MapiContactCreateResult),
+    NotFound,
+    AccessDenied,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MapiIdentityObjectKind {
     Account,
