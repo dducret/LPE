@@ -297,7 +297,7 @@ fn calendar_contract_fingerprint_bounds_large_named_property_registry() {
 }
 
 #[test]
-fn outlook_view_descriptor_named_property_context_reports_requested_folder_lids() {
+fn outlook_view_descriptor_named_property_context_is_empty_without_persisted_view() {
     let session = test_mapi_session();
     let snapshot = MapiMailStoreSnapshot::empty();
 
@@ -316,14 +316,10 @@ fn outlook_view_descriptor_named_property_context_reports_requested_folder_lids(
         &snapshot,
     );
 
-    assert!(contacts.contains("0x8083001f"));
-    assert!(tasks.contains("0x81050040"));
-    assert!(tasks.contains("0x81040040"));
-    assert!(tasks.contains("0x81020005"));
-    assert!(notes.contains("0x8b000003"));
-    assert!(journal.contains("0x87060040"));
-    assert!(journal.contains("0x87070003"));
-    assert!(journal.contains("0x8700001f"));
+    assert!(contacts.is_empty());
+    assert!(tasks.is_empty());
+    assert!(notes.is_empty());
+    assert!(journal.is_empty());
 }
 
 #[test]
@@ -381,7 +377,7 @@ fn smart_input_variant_resets_inbox_fai_cursor_before_query_rows() {
 }
 
 #[test]
-fn inbox_view_handoff_table_contract_reports_folder_local_compact_default_view() {
+fn inbox_view_handoff_table_contract_reports_no_unpersisted_default_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_outlook_view_handoff_table_contract(
         INBOX_FOLDER_ID,
@@ -390,34 +386,24 @@ fn inbox_view_handoff_table_contract_reports_folder_local_compact_default_view()
         &snapshot,
     );
 
-    assert!(contract.contains("folder_local_default_supported=true"));
-    assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
-    assert!(contract.contains(&format!(
-        "advertised_default_view_folder_id=0x{INBOX_FOLDER_ID:016x}"
-    )));
-    assert!(contract.contains(&format!(
-        "expected_view_message_id=0x{:016x}",
-        crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
-    )));
-    assert!(contract.contains("selected_view_name=Compact"));
+    assert!(contract.contains("folder_local_default_supported=false"));
+    assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+    assert!(contract.contains("persisted_default_view_selected=false"));
+    assert!(!contract.contains("advertised_default_view_folder_id="));
+    assert!(!contract.contains("expected_view_message_id="));
 }
 
 #[test]
-fn inbox_folder_local_default_view_visibility_contract_reports_present() {
+fn inbox_folder_local_default_view_visibility_contract_is_absent() {
     let snapshot = MapiMailStoreSnapshot::empty();
-    let contract =
-        format_folder_local_default_view_fai_visibility_contract(INBOX_FOLDER_ID, &snapshot)
-            .expect("inbox folder-local default view");
-
     assert!(
-        contract.contains("expected=true;present=true"),
-        "{contract}"
+        format_folder_local_default_view_fai_visibility_contract(INBOX_FOLDER_ID, &snapshot)
+            .is_none()
     );
-    assert!(contract.contains("name=Compact"), "{contract}");
 }
 
 #[test]
-fn folder_local_default_view_visibility_contract_reports_present_for_special_folders() {
+fn folder_local_default_view_visibility_contract_is_absent_for_special_folders() {
     let snapshot = MapiMailStoreSnapshot::empty();
 
     for folder_id in [
@@ -430,21 +416,15 @@ fn folder_local_default_view_visibility_contract_reports_present_for_special_fol
         NOTES_FOLDER_ID,
         TASKS_FOLDER_ID,
     ] {
-        let contract =
-            format_folder_local_default_view_fai_visibility_contract(folder_id, &snapshot)
-                .unwrap_or_else(|| {
-                    panic!("expected folder-local default view for 0x{folder_id:016x}")
-                });
-
         assert!(
-            contract.contains("expected=true;present=true"),
-            "{contract}"
+            format_folder_local_default_view_fai_visibility_contract(folder_id, &snapshot)
+                .is_none()
         );
     }
 }
 
 #[test]
-fn sent_view_handoff_table_contract_reports_common_views_sent_to_default_view() {
+fn sent_view_handoff_table_contract_reports_no_unpersisted_default_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_outlook_view_handoff_table_contract(
         SENT_FOLDER_ID,
@@ -455,14 +435,9 @@ fn sent_view_handoff_table_contract_reports_common_views_sent_to_default_view() 
 
     assert!(contract.contains("folder_local_default_supported=false"));
     assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
-    assert!(contract.contains(&format!(
-        "advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
-    )));
-    assert!(contract.contains(&format!(
-        "expected_view_message_id=0x{:016x}",
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID
-    )));
-    assert!(contract.contains("selected_view_name=Sent To"));
+    assert!(contract.contains("persisted_default_view_selected=false"));
+    assert!(!contract.contains("advertised_default_view_folder_id="));
+    assert!(!contract.contains("expected_view_message_id="));
 }
 
 #[test]
@@ -658,26 +633,20 @@ fn inbox_fai_handoff_visibility_context_separates_prefix_and_named_view_rows() {
         Uuid::nil(),
     );
 
-    assert!(context.contains(&format!(
-        "advertised_default_view_folder_id=0x{INBOX_FOLDER_ID:016x}"
-    )));
-    assert!(context.contains(&format!(
-        "default_view_id=0x{:016x}",
-        crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
-    )));
+    assert!(context.contains("advertised_default_view_folder_id=none"));
+    assert!(context.contains("default_view_id=none"));
     assert!(context.contains("current_count=1"), "{context}");
-    assert!(context.contains("unfiltered_count=2"), "{context}");
+    assert!(context.contains("unfiltered_count=1"), "{context}");
     assert!(
         context.contains("prefix_ipm_configuration_count=1"),
         "{context}"
     );
-    assert!(context.contains("exact_named_view_count=1"));
-    assert!(context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
-    assert!(context.contains("subject=Compact"));
+    assert!(context.contains("exact_named_view_count=0"));
+    assert!(!context.contains("class=IPM.Microsoft.FolderDesign.NamedView"));
 }
 
 #[test]
-fn junk_view_handoff_table_contract_reports_folder_local_default_view() {
+fn junk_view_handoff_table_contract_reports_no_unpersisted_default_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_outlook_view_handoff_table_contract(
         JUNK_FOLDER_ID,
@@ -686,15 +655,10 @@ fn junk_view_handoff_table_contract_reports_folder_local_default_view() {
         &snapshot,
     );
 
-    assert!(contract.contains("folder_local_default_supported=true"));
-    assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
-    assert!(contract.contains(&format!(
-        "advertised_default_view_folder_id=0x{JUNK_FOLDER_ID:016x}"
-    )));
-    assert!(contract.contains(&format!(
-        "expected_view_message_id=0x{:016x}",
-        crate::mapi_store::outlook_default_folder_named_view_id(JUNK_FOLDER_ID)
-    )));
+    assert!(contract.contains("folder_local_default_supported=false"));
+    assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+    assert!(contract.contains("persisted_default_view_selected=false"));
+    assert!(!contract.contains("expected_view_message_id="));
 }
 
 #[test]
@@ -714,7 +678,7 @@ fn quick_step_view_handoff_table_contract_reports_unsupported_default_view() {
 }
 
 #[test]
-fn contacts_view_handoff_table_contract_reports_contact_default_view() {
+fn contacts_view_handoff_table_contract_reports_no_unpersisted_default_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_outlook_view_handoff_table_contract(
         CONTACTS_FOLDER_ID,
@@ -723,15 +687,10 @@ fn contacts_view_handoff_table_contract_reports_contact_default_view() {
         &snapshot,
     );
 
-    assert!(contract.contains("folder_local_default_supported=true"));
-    assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
-    assert!(contract.contains(
-        "visible_column_tags=0x0e070003,0x0e170003,0x001a001f,0x3001001f,0x8083001f,0x3a1c001f,0x3a16001f,0x3a17001f"
-    ));
-    assert!(contract.contains(&format!(
-        "expected_view_message_id=0x{:016x}",
-        crate::mapi_store::outlook_default_folder_named_view_id(CONTACTS_FOLDER_ID)
-    )));
+    assert!(contract.contains("folder_local_default_supported=false"));
+    assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+    assert!(contract.contains("persisted_default_view_selected=false"));
+    assert!(!contract.contains("expected_view_message_id="));
 }
 
 #[test]
@@ -775,13 +734,11 @@ fn task_note_journal_handoff_contracts_report_standard_visible_columns() {
             &snapshot,
         );
 
-        assert!(contract.contains("folder_local_default_supported=true"));
-        assert!(contract.contains("folder_local_default_visible_in_fai_table=true"));
-        assert!(contract.contains(expected_columns), "{contract}");
-        assert!(contract.contains(&format!(
-            "expected_view_message_id=0x{:016x}",
-            crate::mapi_store::outlook_default_folder_named_view_id(folder_id)
-        )));
+        assert!(contract.contains("folder_local_default_supported=false"));
+        assert!(contract.contains("folder_local_default_visible_in_fai_table=false"));
+        assert!(contract.contains("persisted_default_view_selected=false"));
+        assert!(!contract.contains("expected_view_message_id="));
+        assert!(!contract.contains(expected_columns), "{contract}");
     }
 }
 
@@ -832,7 +789,7 @@ fn calendar_normal_view_handoff_does_not_claim_server_descriptor() {
 }
 
 #[test]
-fn messages_view_handoff_descriptor_matches_observed_drafts_projection() {
+fn messages_view_handoff_does_not_invent_drafts_descriptor() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let columns = [
         PID_TAG_FOLDER_ID,
@@ -853,29 +810,13 @@ fn messages_view_handoff_descriptor_matches_observed_drafts_projection() {
     let contract =
         format_outlook_view_handoff_table_contract(DRAFTS_FOLDER_ID, false, &columns, &snapshot);
 
-    assert!(contract.contains("selected_view_name=Messages"));
-    for tag in [
-        "0x00170003",
-        "0x8503000b",
-        "0x001a001e",
-        "0x10900003",
-        "0x0e1b000b",
-        "0x0042001e",
-        "0x0037001e",
-        "0x0e060040",
-        "0x0e080003",
-        "0x0000101e",
-    ] {
-        assert!(contract.contains(tag), "{contract}");
-    }
-    assert!(
-        contract.contains("selected_missing_descriptor_columns=;descriptor_summary="),
-        "{contract}"
-    );
+    assert!(contract.contains("persisted_default_view_selected=false"));
+    assert!(!contract.contains("selected_view_name="));
+    assert!(contract.ends_with("descriptor_summary="));
 }
 
 #[test]
-fn inbox_view_descriptor_set_columns_contract_matches_observed_columns() {
+fn inbox_view_descriptor_set_columns_contract_requires_persisted_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_inbox_view_descriptor_set_columns_behavior_contract(
         INBOX_FOLDER_ID,
@@ -891,21 +832,11 @@ fn inbox_view_descriptor_set_columns_contract_matches_observed_columns() {
         &snapshot,
     );
 
-    assert!(contract.contains("phase=setcolumns"));
-    assert!(contract.contains("default_view_id=0x7fffffffffe90001"));
-    assert!(contract.contains(
-        "descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x9000101e"
-    ));
-    assert!(!contract.contains("descriptor_columns=0x00040001"));
-    assert!(contract.contains(
-        "selected_columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"
-    ));
-    assert!(contract.contains("selected_missing_descriptor_columns=;"));
-    assert!(contract.contains("default_view_projection_kind=identity_probe_subset"));
+    assert_eq!(contract, "default_view=missing");
 }
 
 #[test]
-fn inbox_compact_descriptor_matches_observed_visible_projection() {
+fn inbox_compact_descriptor_is_missing_without_persisted_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_inbox_view_descriptor_set_columns_behavior_contract(
         INBOX_FOLDER_ID,
@@ -921,15 +852,11 @@ fn inbox_compact_descriptor_matches_observed_visible_projection() {
         &snapshot,
     );
 
-    assert!(contract.contains(
-        "descriptor_columns=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0037001e,0x0e060040,0x0e080003,0x9000101e"
-    ));
-    assert!(contract.contains("selected_missing_descriptor_columns=;"));
-    assert!(contract.contains("default_view_projection_kind=identity_probe_subset"));
+    assert_eq!(contract, "default_view=missing");
 }
 
 #[test]
-fn inbox_compact_table_compatibility_validates_descriptor_support_not_selected_subset() {
+fn inbox_compact_table_compatibility_requires_persisted_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let contract = format_default_view_table_compatibility_contract(
         INBOX_FOLDER_ID,
@@ -950,14 +877,7 @@ fn inbox_compact_table_compatibility_validates_descriptor_support_not_selected_s
         &snapshot,
     );
 
-    assert!(
-        contract.contains("descriptor_columns_missing_from_table=;"),
-        "{contract}"
-    );
-    assert!(contract.contains(
-        "descriptor_columns_not_selected=0x00170003,0x8503000b,0x001a001e,0x10900003,0x0e1b000b,0x0042001e,0x0e080003,0x9000101e"
-    ));
-    assert!(contract.contains("table_sort_matches_descriptor=true"));
+    assert_eq!(contract, "default_view=missing");
 }
 
 #[test]
@@ -990,7 +910,7 @@ fn calendar_table_compatibility_does_not_claim_synthetic_descriptor() {
 }
 
 #[test]
-fn inbox_descriptor_behavior_contract_samples_visible_rows_after_early_release() {
+fn inbox_descriptor_behavior_contract_requires_persisted_view_after_early_release() {
     let inbox_id = Uuid::from_u128(0x5555);
     crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);
     let mailbox = JmapMailbox {
@@ -1079,17 +999,7 @@ fn inbox_descriptor_behavior_contract_samples_visible_rows_after_early_release()
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert!(contract.contains("total_rows=1"), "{contract}");
-    assert!(contract.contains("position=0"), "{contract}");
-    assert!(contract.contains("requested=40"), "{contract}");
-    assert!(contract.contains("sampled=1"), "{contract}");
-    assert!(
-        contract.contains("selected_missing_descriptor_columns=;"),
-        "{contract}"
-    );
-    assert!(contract.contains("0x0037001e:projected=true"), "{contract}");
-    assert!(contract.contains("0x0037001e=Preview target"), "{contract}");
-    assert!(contract.contains("0x0e060040="), "{contract}");
+    assert_eq!(contract, "default_view=missing");
 }
 
 #[test]
@@ -2818,6 +2728,8 @@ fn save_changes_navigation_shortcut_restores_common_views_folder_response_handle
         MapiObject::NavigationShortcut {
             folder_id: COMMON_VIEWS_FOLDER_ID,
             shortcut_id: 0x0000_0000_0358_0001,
+            pending_properties: HashMap::new(),
+            deleted_properties: HashSet::new(),
         },
     );
     let mut response_handle_slots = vec![26, 76];

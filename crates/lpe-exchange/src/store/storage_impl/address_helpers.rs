@@ -344,6 +344,72 @@ fn mapi_notification_event_from_change_row(
                 .with_object_kind("deleted_calendar_event"),
             )
         }
+        "navigation_shortcut" => {
+            let shortcut_id = row.try_get::<Uuid, _>("object_id").ok()?;
+            let message_id = row
+                .try_get::<Option<i64>, _>("navigation_shortcut_mapi_object_id")
+                .ok()
+                .flatten()? as u64;
+            // [MS-OXOCFG] sections 2.2.9 and 3.1.4.9 store WLinks as FAI
+            // messages in Common Views. [MS-OXCNOTIF] sections 2.2.1.1,
+            // 2.2.1.1.1, and 3.1.4.3 make their durable object changes drive
+            // the subscribed associated contents table notification.
+            Some(
+                MapiNotificationEvent::canonical(
+                    MapiNotificationKind::Content,
+                    mapi_notification_event_mask_for_change(&change_kind, false),
+                    crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+                    Some(message_id),
+                    None,
+                    cursor,
+                    modseq,
+                    None,
+                    None,
+                    change_kind,
+                    None,
+                    None,
+                    None,
+                )
+                .with_canonical_ids(None, Some(shortcut_id))
+                .with_object_kind("navigation_shortcut"),
+            )
+        }
+        "associated_config" => {
+            let config_id = row.try_get::<Uuid, _>("object_id").ok()?;
+            let message_id = row
+                .try_get::<Option<i64>, _>("associated_config_mapi_object_id")
+                .ok()
+                .flatten()? as u64;
+            let folder_id = row
+                .try_get::<serde_json::Value, _>("summary_json")
+                .ok()?
+                .get("folderId")?
+                .as_str()?
+                .parse::<u64>()
+                .ok()?;
+            // [MS-OXCFOLD] section 2.2.1.14 stores configuration messages as
+            // FAI rows. [MS-OXCNOTIF] sections 2.2.1.1 and 3.1.4.3 require
+            // their durable changes to drive the subscribed associated table.
+            Some(
+                MapiNotificationEvent::canonical(
+                    MapiNotificationKind::Content,
+                    mapi_notification_event_mask_for_change(&change_kind, false),
+                    folder_id,
+                    Some(message_id),
+                    None,
+                    cursor,
+                    modseq,
+                    None,
+                    None,
+                    change_kind,
+                    None,
+                    None,
+                    None,
+                )
+                .with_canonical_ids(None, Some(config_id))
+                .with_object_kind("associated_config"),
+            )
+        }
         "mailbox_message" | "attachment" => {
             let scope_role = row.try_get::<String, _>("scope_role").ok();
             // [MS-OXCNOTIF] 2.2.1.1 and section 4 distinguish a delivered

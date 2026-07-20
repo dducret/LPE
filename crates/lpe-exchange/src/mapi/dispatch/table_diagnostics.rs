@@ -1237,6 +1237,7 @@ pub(super) fn format_common_views_wlink_target_decoding(
             }
             crate::mapi_store::MapiCommonViewsMessage::NamedView(_) => None,
             crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(_) => None,
+            crate::mapi_store::MapiCommonViewsMessage::AssociatedConfig(_) => None,
         })
         .collect::<Vec<_>>()
         .join("|")

@@ -1106,7 +1106,7 @@ fn get_properties_specific_resolves_unspecified_modeled_message_properties() {
 }
 
 #[test]
-fn common_view_descriptor_getprops_contract_reports_current_inbox_compact_shape() {
+fn common_view_descriptor_getprops_contract_reports_unpersisted_view_missing() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::from_u128(0x9191),
@@ -1132,21 +1132,9 @@ fn common_view_descriptor_getprops_contract_reports_current_inbox_compact_shape(
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert!(contract.contains("found=true"));
-    assert!(contract.contains("view_name=Compact"));
-    assert!(contract.contains("descriptor_column_count=11"));
-    assert!(contract.contains("descriptor_strings_terminators=11"));
-    assert!(contract.contains("descriptor_strings_starts_with_terminator=true"));
-    assert!(contract.contains("descriptor_strings_ends_with_terminator=true"));
-    assert!(contract.contains("descriptor_strings_trailing_nul=false"));
-    assert!(
-        contract.contains("0x68350102:OutlookCommonViewDescriptorBinary6835:binary_bytes=510"),
-        "{contract}"
-    );
-    assert!(
-        contract.contains("0x683c0102:OutlookCommonViewDescriptorStrings683C:binary_bytes=174"),
-        "{contract}"
-    );
+    assert!(contract.contains("found=false"), "{contract}");
+    assert!(contract.contains(&format!("view_id=0x{view_id:016x}")));
+    assert!(!contract.contains("view_name=Compact"));
 }
 
 #[test]
@@ -1651,7 +1639,7 @@ pub(in crate::mapi) fn property_debug_names_cover_recent_outlook_folder_probes()
     );
     assert_eq!(
         property_tag_debug_name(PID_TAG_WLINK_GROUP_HEADER_ID),
-        "PidTagWlinkGroupHeaderId"
+        "PidTagSearchFolderId/PidTagWlinkGroupHeaderId"
     );
     assert_eq!(
         property_tag_debug_name(PID_TAG_WLINK_SAVE_STAMP),
@@ -1755,7 +1743,7 @@ pub(in crate::mapi) fn property_debug_names_cover_recent_outlook_folder_probes()
     );
     assert_eq!(
         property_tag_debug_name(PID_TAG_SEARCH_FOLDER_ID),
-        "PidTagSearchFolderId"
+        "PidTagSearchFolderId/PidTagWlinkGroupHeaderId"
     );
     assert_eq!(
         property_tag_debug_name(PID_TAG_SEARCH_FOLDER_STORAGE_TYPE),
@@ -2042,7 +2030,7 @@ fn associated_config_getprops_rejects_default_from_wrong_folder() {
 }
 
 #[test]
-fn folder_default_named_view_getprops_projects_message_class() {
+fn folder_default_named_view_getprops_rejects_unpersisted_message() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -2076,8 +2064,11 @@ fn folder_default_named_view_getprops_projects_message_class() {
     );
 
     assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
-    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert!(response.windows(2).any(|bytes| bytes == b"I\0"));
+    assert_eq!(
+        u32::from_le_bytes(response[2..6].try_into().unwrap()),
+        0x8004_010F
+    );
+    assert!(!response.windows(2).any(|bytes| bytes == b"I\0"));
 }
 
 fn test_accessible_calendar_event(
@@ -3350,6 +3341,8 @@ fn newly_created_associated_message_getprops_uses_new_message_contract() {
     let object = MapiObject::PendingAssociatedMessage {
         folder_id: INBOX_FOLDER_ID,
         properties: HashMap::from([(PID_TAG_CHANGE_KEY, MapiValue::Binary(change_key.clone()))]),
+        imported_message_id: None,
+        fail_on_conflict: false,
     };
     let columns = [
         PID_TAG_ROAMING_DICTIONARY,
@@ -3468,17 +3461,14 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
             payload: default_view_payload,
         };
 
-        assert_eq!(
-            fallback_default_specific_property(
-                Some(&folder),
-                &principal,
-                &[],
-                &[],
-                &MapiMailStoreSnapshot::empty(),
-                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
-            ),
-            folder_id == CALENDAR_FOLDER_ID
-        );
+        assert!(fallback_default_specific_property(
+            Some(&folder),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+        ));
 
         let response = rop_get_properties_specific_response(
             &default_view_request,
@@ -3489,13 +3479,8 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
             &MapiMailStoreSnapshot::empty(),
         );
 
-        if folder_id == CALENDAR_FOLDER_ID {
-            assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
-            assert_eq!(&response[7..], &[0x0a, 0x0f, 0x01, 0x04, 0x80]);
-        } else {
-            assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
-            assert!(response.len() > 7);
-        }
+        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
+        assert_eq!(&response[7..], &[0x0a, 0x0f, 0x01, 0x04, 0x80]);
     }
 
     let mut default_view_payload = Vec::new();
@@ -5190,4 +5175,42 @@ pub(in crate::mapi) fn reserved_rop_is_terminal_and_uses_common_unsupported_resp
         unsupported_rop_response(0x28, request.response_handle_index()),
         vec![0x28, 0x03, 0x02, 0x01, 0x04, 0x80]
     );
+}
+
+#[test]
+pub(in crate::mapi) fn set_local_replica_midset_deleted_parses_long_term_id_ranges() {
+    let replica_guid = Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID);
+    let minimum = crate::mapi::identity::long_term_id_from_object_id(
+        crate::mapi::identity::mapi_store_id(0x0200_af),
+    )
+    .unwrap();
+    let maximum = crate::mapi::identity::long_term_id_from_object_id(
+        crate::mapi::identity::mapi_store_id(0x0206_b5),
+    )
+    .unwrap();
+    let mut range_data = 1u32.to_le_bytes().to_vec();
+    range_data.extend_from_slice(&minimum);
+    range_data.extend_from_slice(&maximum);
+    let mut wire = vec![
+        0x93, 0x00, 0x03, // RopId, LogonId, InputHandleIndex.
+    ];
+    wire.extend_from_slice(&(range_data.len() as u16).to_le_bytes());
+    wire.extend_from_slice(&range_data);
+
+    let request = read_rop_request(&mut Cursor::new(&wire)).unwrap();
+    assert_eq!(
+        request.local_replica_deleted_ranges(),
+        Some(vec![crate::store::MapiLocalReplicaDeletedRange {
+            replica_guid,
+            min_global_counter: 0x0200_af,
+            max_global_counter: 0x0206_b5,
+        }])
+    );
+
+    // [MS-OXCFXICS] section 2.2.3.2.4.8.1 requires both LongTermIDs in
+    // one range to carry the same REPLGUID.
+    let mut different_replica = wire;
+    different_replica[5 + 4 + 24] ^= 0xff;
+    let request = read_rop_request(&mut Cursor::new(&different_replica)).unwrap();
+    assert_eq!(request.local_replica_deleted_ranges(), None);
 }

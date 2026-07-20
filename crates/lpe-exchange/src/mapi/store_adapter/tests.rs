@@ -1064,6 +1064,8 @@ fn access_plan_does_not_fetch_default_common_views_shortcut_identity() {
         MapiObject::NavigationShortcut {
             folder_id: COMMON_VIEWS_FOLDER_ID,
             shortcut_id,
+            pending_properties: HashMap::new(),
+            deleted_properties: HashSet::new(),
         },
     );
 
@@ -1077,7 +1079,7 @@ fn access_plan_does_not_fetch_default_common_views_shortcut_identity() {
 }
 
 #[test]
-fn access_plan_does_not_fetch_default_common_views_named_view_identity() {
+fn access_plan_fetches_common_views_named_view_identity() {
     let view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
     let mut session = empty_session();
     session.handles.insert(
@@ -1092,13 +1094,13 @@ fn access_plan_does_not_fetch_default_common_views_named_view_identity() {
 
     assert_eq!(
         plan.object_ids,
-        vec![COMMON_VIEWS_FOLDER_ID],
+        vec![COMMON_VIEWS_FOLDER_ID, view_id],
         "plan={plan:?}"
     );
 }
 
 #[test]
-fn access_plan_does_not_fetch_default_folder_named_view_identity() {
+fn access_plan_fetches_folder_named_view_identity() {
     let mut session = empty_session();
     session.handles.insert(
         1,
@@ -1110,7 +1112,14 @@ fn access_plan_does_not_fetch_default_folder_named_view_identity() {
 
     let plan = plan_mapi_store_access(&session, &release_handle_zero_rop_buffer());
 
-    assert_eq!(plan.object_ids, vec![CONTACTS_FOLDER_ID], "plan={plan:?}");
+    assert_eq!(
+        plan.object_ids,
+        vec![
+            CONTACTS_FOLDER_ID,
+            mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
+        ],
+        "plan={plan:?}"
+    );
 }
 
 #[test]
@@ -1151,7 +1160,7 @@ fn access_plan_fetches_non_virtual_quick_step_associated_config_identity() {
 }
 
 #[test]
-fn access_plan_does_not_fetch_virtual_contact_associated_config_identity() {
+fn access_plan_fetches_unbacked_contact_associated_config_identity() {
     let folder_id = crate::mapi::identity::mapi_store_id(0x54);
     let config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FF00_0054);
     let mut session = empty_session();
@@ -1166,7 +1175,7 @@ fn access_plan_does_not_fetch_virtual_contact_associated_config_identity() {
 
     let plan = plan_mapi_store_access(&session, &release_handle_zero_rop_buffer());
 
-    assert_eq!(plan.object_ids, vec![folder_id], "plan={plan:?}");
+    assert_eq!(plan.object_ids, vec![folder_id, config_id], "plan={plan:?}");
 }
 
 #[test]
@@ -1396,7 +1405,7 @@ fn unresolved_mapi_identity_summary_classifies_expected_special_and_invalid_ids(
                 invalid_replid_id
             ]),
             format!(
-                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:virtual_common_view_named_view,{common_view_shortcut_id:#018x}:virtual_common_view_navigation_shortcut,{quick_step_config_id:#018x}:unallocated_store_object,{contact_sync_config_id:#018x}:virtual_contact_associated_config,{conversation_action_id:#018x}:virtual_conversation_action,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
+                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{common_view_named_view_id:#018x}:unallocated_store_object,{common_view_shortcut_id:#018x}:virtual_common_view_navigation_shortcut,{quick_step_config_id:#018x}:unallocated_store_object,{contact_sync_config_id:#018x}:unallocated_store_object,{conversation_action_id:#018x}:virtual_conversation_action,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
             )
         );
 }
@@ -1416,8 +1425,8 @@ fn expected_unbacked_mapi_objects_exclude_non_virtual_quick_step_config() {
     assert!(is_expected_unbacked_mapi_object(ROOT_FOLDER_ID));
     assert!(is_expected_unbacked_mapi_object(inbox_default_config_id));
     assert!(!is_expected_unbacked_mapi_object(quick_step_config_id));
-    assert!(is_expected_unbacked_mapi_object(contact_sync_config_id));
-    assert!(is_expected_unbacked_mapi_object(common_view_named_view_id));
+    assert!(!is_expected_unbacked_mapi_object(contact_sync_config_id));
+    assert!(!is_expected_unbacked_mapi_object(common_view_named_view_id));
     assert!(is_expected_unbacked_mapi_object(common_view_shortcut_id));
     assert!(is_expected_unbacked_mapi_object(conversation_action_id));
     assert!(!is_expected_unbacked_mapi_object(dynamic_id));

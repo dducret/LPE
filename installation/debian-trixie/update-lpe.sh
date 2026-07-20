@@ -220,6 +220,11 @@ if ! command -v psql >/dev/null 2>&1; then
 fi
 
 SCHEMA_FILE="${SRC_DIR}/crates/lpe-storage/sql/schema.sql"
+SCHEMA_UPDATE_FILE="${SRC_DIR}/crates/lpe-storage/sql/updates/0.5.0-sql-v1-outlook-cache-fidelity.sql"
+if [[ ! -f "${SCHEMA_UPDATE_FILE}" ]]; then
+  echo "Required 0.5.0 schema update file not found: ${SCHEMA_UPDATE_FILE}" >&2
+  exit 1
+fi
 EXPECTED_SCHEMA_VERSION="$(
   awk -F"'" '/schema_version TEXT NOT NULL CHECK/ { print $2; exit }' "${SCHEMA_FILE}"
 )"
@@ -238,6 +243,41 @@ INSTALLED_SCHEMA_VERSION="$(
 if [[ "${INSTALLED_SCHEMA_VERSION}" != "${EXPECTED_SCHEMA_VERSION}" ]]; then
   echo "Installed schema version ${INSTALLED_SCHEMA_VERSION} does not match required ${EXPECTED_SCHEMA_VERSION}." >&2
   echo "Upgrades from releases before LPE 0.5.0 are unsupported. Initialize a new empty database with init-schema.sh." >&2
+  exit 1
+fi
+
+if systemctl is-active --quiet "${SERVICE_NAME}"; then
+  systemctl stop "${SERVICE_NAME}"
+else
+  echo "Service ${SERVICE_NAME} is already inactive."
+fi
+
+psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -f "${SCHEMA_UPDATE_FILE}" || {
+  echo "Unable to apply the forward-only ${EXPECTED_SCHEMA_VERSION} schema update ${SCHEMA_UPDATE_FILE}." >&2
+  exit 1
+}
+
+MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK="$(
+  mapi_local_replica_range_shape_ok "${DATABASE_URL}"
+)" || {
+  echo "Unable to inspect MAPI local replica range table shape." >&2
+  exit 1
+}
+if [[ "${MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK}" != "1" ]]; then
+  echo "MAPI local replica range table shape is incomplete despite schema label ${EXPECTED_SCHEMA_VERSION}." >&2
+  echo "Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
+  exit 1
+fi
+
+MAPI_OUTLOOK_CACHE_FIDELITY_SHAPE_OK="$(
+  mapi_outlook_cache_fidelity_shape_ok "${DATABASE_URL}"
+)" || {
+  echo "Unable to inspect MAPI WLink/configuration FAI fidelity shape." >&2
+  exit 1
+}
+if [[ "${MAPI_OUTLOOK_CACHE_FIDELITY_SHAPE_OK}" != "1" ]]; then
+  echo "MAPI WLink/configuration FAI fidelity shape is incomplete despite schema label ${EXPECTED_SCHEMA_VERSION}." >&2
+  echo "Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
   exit 1
 fi
 
@@ -306,7 +346,7 @@ if [[ "${MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK}" != "1" ]]; then
   echo "Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
   exit 1
 fi
-echo "Database schema ${EXPECTED_SCHEMA_VERSION} is current; no compatibility SQL is required."
+echo "Database schema ${EXPECTED_SCHEMA_VERSION} is current; reviewed forward-only 0.5.0 schema updates are applied."
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_IMAP_BIND_ADDRESS="${LPE_IMAP_BIND_ADDRESS:-127.0.0.1:1143}"
 validate_host_port "${LPE_IMAP_BIND_ADDRESS}" \
@@ -324,7 +364,6 @@ install -d -m 0750 -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" \
   "${INSTALL_ROOT}/logs" "${INSTALL_ROOT}/logs/outlook-traces"
 
 cd "${SRC_DIR}"
-systemctl stop "${SERVICE_NAME}" || true
 if rust_build_needed; then
   "${CARGO_BIN}" build --release -p lpe-cli
   install -m 0755 "${SRC_DIR}/target/release/lpe-cli" "${BIN_DIR}/lpe-cli"

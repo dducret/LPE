@@ -1,5 +1,23 @@
 use super::*;
 
+pub(super) fn normalized_get_properties_request(
+    session: &MapiSession,
+    request: &RopRequest,
+) -> RopRequest {
+    let mut normalized = request.clone();
+    for (index, property_tag) in request.property_tags().into_iter().enumerate() {
+        let offset = 4 + index * 4;
+        if let Some(bytes) = normalized.payload.get_mut(offset..offset + 4) {
+            bytes.copy_from_slice(
+                &session
+                    .normalize_named_property_tag(property_tag)
+                    .to_le_bytes(),
+            );
+        }
+    }
+    normalized
+}
+
 pub(super) fn property_ids_match(left: u32, right: u32) -> bool {
     left & 0xffff_0000 == right & 0xffff_0000
 }

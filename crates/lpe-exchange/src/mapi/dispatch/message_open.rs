@@ -256,26 +256,21 @@ pub(super) fn append_open_message_response(
             0,
         ));
         output_handles.push(handle);
-    } else if folder_id == COMMON_VIEWS_FOLDER_ID {
-        if let Some(message) = navigation_shortcut_message_for_open(snapshot, folder_id, message_id)
-        {
-            let handle = session.allocate_output_handle(
-                request.output_handle_index,
-                MapiObject::NavigationShortcut {
-                    folder_id,
-                    shortcut_id: message_id,
-                },
-            );
-            set_handle_slot(handle_slots, request.output_handle_index, handle);
-            responses.extend_from_slice(&rop_open_message_response(request, &message.subject, 0));
-            output_handles.push(handle);
-        } else {
-            responses.extend_from_slice(&rop_error_response(
-                0x03,
-                request.output_handle_index.unwrap_or(0),
-                0x8004_010F,
-            ));
-        }
+    } else if let Some(message) =
+        navigation_shortcut_message_for_open(snapshot, folder_id, message_id)
+    {
+        let handle = session.allocate_output_handle(
+            request.output_handle_index,
+            MapiObject::NavigationShortcut {
+                folder_id,
+                shortcut_id: message_id,
+                pending_properties: HashMap::new(),
+                deleted_properties: HashSet::new(),
+            },
+        );
+        set_handle_slot(handle_slots, request.output_handle_index, handle);
+        responses.extend_from_slice(&rop_open_message_response(request, &message.subject, 0));
+        output_handles.push(handle);
     } else if folder_id == FREEBUSY_DATA_FOLDER_ID {
         if let Some(message) = delegate_freebusy_message_for_open(snapshot, folder_id, message_id) {
             let handle = session.allocate_output_handle(
@@ -416,6 +411,8 @@ pub(super) fn append_open_message_response(
             MapiObject::PendingAssociatedMessage {
                 folder_id,
                 properties: HashMap::new(),
+                imported_message_id: None,
+                fail_on_conflict: false,
             },
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);

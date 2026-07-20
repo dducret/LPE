@@ -411,6 +411,7 @@ pub(super) fn common_views_message_id(message: &MapiCommonViewsMessage) -> u64 {
         MapiCommonViewsMessage::SearchFolderDefinition(message) => {
             crate::mapi::identity::mapped_mapi_object_id(&message.id).unwrap_or_default()
         }
+        MapiCommonViewsMessage::AssociatedConfig(message) => message.id,
     }
 }
 

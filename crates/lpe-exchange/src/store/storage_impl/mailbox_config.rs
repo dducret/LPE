@@ -52,7 +52,9 @@ macro_rules! store_impl_mailbox_config {
             let rows = sqlx::query(
                 r#"
                 SELECT id, account_id, subject, target_folder_id, shortcut_type,
-                       flags, save_stamp, section, ordinal, group_header_id, group_name
+                       flags, save_stamp, section, ordinal, group_header_id, group_name,
+                       calendar_color, address_book_entry_id,
+                       address_book_store_entry_id, client_id, ro_group_type
                 FROM mapi_navigation_shortcuts
                 WHERE tenant_id = $1 AND account_id = $2
                 ORDER BY section, ordinal, subject, updated_at DESC, id
@@ -69,182 +71,97 @@ macro_rules! store_impl_mailbox_config {
         })
     }
 
+    #[cfg(test)]
     fn upsert_mapi_navigation_shortcut<'a>(
         &'a self,
         input: UpsertMapiNavigationShortcutInput,
     ) -> StoreFuture<'a, MapiNavigationShortcutRecord> {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
-            let default_group_header_id = crate::mapi::properties::default_wlink_group_uuid();
             let mut tx = self.pool().begin().await?;
-            let id = match input.id {
-                Some(id) => id,
-                None => {
-                    let target_folder_id = input.target_folder_id.map(|value| value as i64);
-                    if target_folder_id.is_some() {
-                        sqlx::query_scalar::<_, Uuid>(
-                            r#"
-                            SELECT id
-                            FROM mapi_navigation_shortcuts
-                            WHERE tenant_id = $1
-                              AND account_id = $2
-                              AND target_folder_id IS NOT DISTINCT FROM $3
-                              AND shortcut_type = $4
-                              AND section = $5
-                            ORDER BY updated_at DESC, id
-                            LIMIT 1
-                            "#,
-                        )
-                        .bind(tenant_id)
-                        .bind(input.account_id)
-                        .bind(target_folder_id)
-                        .bind(input.shortcut_type as i64)
-                        .bind(input.section as i64)
-                        .fetch_optional(&mut *tx)
-                        .await?
-                    } else {
-                        sqlx::query_scalar::<_, Uuid>(
-                            r#"
-                            SELECT id
-                            FROM mapi_navigation_shortcuts
-                            WHERE tenant_id = $1
-                              AND account_id = $2
-                              AND subject = $3
-                              AND target_folder_id IS NOT DISTINCT FROM $4
-                              AND shortcut_type = $5
-                              AND section = $6
-                              AND COALESCE(group_header_id, $9) = COALESCE($7, $9)
-                              AND group_name = $8
-                            ORDER BY updated_at DESC, id
-                            LIMIT 1
-                            "#,
-                        )
-                        .bind(tenant_id)
-                        .bind(input.account_id)
-                        .bind(&input.subject)
-                        .bind(target_folder_id)
-                        .bind(input.shortcut_type as i64)
-                        .bind(input.section as i64)
-                        .bind(input.group_header_id)
-                        .bind(&input.group_name)
-                        .bind(default_group_header_id)
-                        .fetch_optional(&mut *tx)
-                        .await?
-                    }
-                    .unwrap_or_else(Uuid::new_v4)
-                }
-            };
-            let existed = sqlx::query_scalar::<_, bool>(
-                r#"
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM mapi_navigation_shortcuts
-                    WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-                )
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(input.account_id)
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await?;
-            let row = sqlx::query(
-                r#"
-                INSERT INTO mapi_navigation_shortcuts (
-                    tenant_id, id, account_id, subject, target_folder_id,
-                    shortcut_type, flags, save_stamp, section, ordinal, group_header_id, group_name
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                ON CONFLICT (tenant_id, id)
-                DO UPDATE SET
-                    subject = EXCLUDED.subject,
-                    target_folder_id = EXCLUDED.target_folder_id,
-                    shortcut_type = EXCLUDED.shortcut_type,
-                    flags = EXCLUDED.flags,
-                    save_stamp = EXCLUDED.save_stamp,
-                    section = EXCLUDED.section,
-                    ordinal = EXCLUDED.ordinal,
-                    group_header_id = EXCLUDED.group_header_id,
-                    group_name = EXCLUDED.group_name,
-                    updated_at = NOW()
-                RETURNING id, account_id, subject, target_folder_id, shortcut_type,
-                          flags, save_stamp, section, ordinal, group_header_id, group_name
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(id)
-            .bind(input.account_id)
-            .bind(input.subject)
-            .bind(input.target_folder_id.map(|value| value as i64))
-            .bind(input.shortcut_type as i64)
-            .bind(input.flags as i64)
-            .bind(input.save_stamp as i64)
-            .bind(input.section as i64)
-            .bind(input.ordinal as i64)
-            .bind(input.group_header_id)
-            .bind(input.group_name)
-            .fetch_one(&mut *tx)
-            .await?;
+            let shortcut = upsert_mapi_navigation_shortcut_in_tx(&mut tx, tenant_id, input).await?;
+            tx.commit().await?;
+            Ok(shortcut)
+        })
+    }
 
-            let superseded_ids = sqlx::query_scalar::<_, Uuid>(
-                r#"
-                DELETE FROM mapi_navigation_shortcuts
-                WHERE tenant_id = $1
-                  AND account_id = $2
-                  AND id <> $3
-                  AND (
-                    (
-                      target_folder_id IS NOT NULL
-                      AND target_folder_id IS NOT DISTINCT FROM $5
-                      AND shortcut_type = $6
-                      AND section = $7
-                    )
-                    OR (
-                      target_folder_id IS NULL
-                      AND subject = $4
-                      AND target_folder_id IS NOT DISTINCT FROM $5
-                      AND shortcut_type = $6
-                      AND section = $7
-                      AND COALESCE(group_header_id, $10) = COALESCE($8, $10)
-                      AND group_name = $9
-                    )
-                  )
-                RETURNING id
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(input.account_id)
-            .bind(id)
-            .bind(&row.try_get::<String, _>("subject")?)
-            .bind(row.try_get::<Option<i64>, _>("target_folder_id")?)
-            .bind(row.try_get::<i64, _>("shortcut_type")?)
-            .bind(row.try_get::<i64, _>("section")?)
-            .bind(row.try_get::<Option<Uuid>, _>("group_header_id")?)
-            .bind(&row.try_get::<String, _>("group_name")?)
-            .bind(default_group_header_id)
-            .fetch_all(&mut *tx)
-            .await?;
-            for superseded_id in superseded_ids {
-                insert_mapi_navigation_shortcut_change(
-                    &mut tx,
-                    tenant_id,
-                    input.account_id,
-                    superseded_id,
-                    "destroyed",
-                )
-                .await?;
-            }
-            insert_mapi_navigation_shortcut_change(
+    fn commit_mapi_navigation_shortcut_create<'a>(
+        &'a self,
+        input: CommitMapiNavigationShortcutCreateInput,
+    ) -> StoreFuture<'a, MapiNavigationShortcutCommit> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, input.shortcut.account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            let committed =
+                commit_mapi_navigation_shortcut_create_in_tx(&mut tx, tenant_id, input).await?;
+            tx.commit().await?;
+            Ok(committed)
+        })
+    }
+
+    fn commit_mapi_navigation_shortcut_update<'a>(
+        &'a self,
+        input: UpsertMapiNavigationShortcutInput,
+    ) -> StoreFuture<'a, MapiNavigationShortcutCommit> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            let committed =
+                commit_mapi_navigation_shortcut_update_in_tx(&mut tx, tenant_id, input).await?;
+            tx.commit().await?;
+            Ok(committed)
+        })
+    }
+
+    fn commit_mapi_navigation_shortcut_import<'a>(
+        &'a self,
+        input: CommitMapiNavigationShortcutImportInput,
+    ) -> StoreFuture<'a, MapiNavigationShortcutImportCommit> {
+        Box::pin(async move {
+            let tenant_id =
+                mapi_tenant_id_for_account(self, input.shortcut.account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            let identity_commit = commit_mapi_imported_fai_identity_in_tx(
                 &mut tx,
                 tenant_id,
-                input.account_id,
-                id,
-                if existed { "updated" } else { "created" },
+                input.shortcut.account_id,
+                MapiIdentityObjectKind::NavigationShortcut,
+                crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+                input.shortcut.id,
+                &input.identity,
+                input.fail_on_conflict,
             )
             .await?;
+            let mut shortcut_input = input.shortcut;
+            shortcut_input.id = Some(identity_commit.canonical_id);
+            let shortcut = if identity_commit.apply_imported_content {
+                upsert_mapi_navigation_shortcut_in_tx(&mut tx, tenant_id, shortcut_input).await?
+            } else {
+                let shortcut = fetch_mapi_navigation_shortcut_in_tx(
+                    &mut tx,
+                    tenant_id,
+                    shortcut_input.account_id,
+                    identity_commit.canonical_id,
+                )
+                .await?;
+                if identity_commit.disposition.changes_server_replica() {
+                    insert_mapi_navigation_shortcut_change(
+                        &mut tx,
+                        tenant_id,
+                        shortcut_input.account_id,
+                        identity_commit.canonical_id,
+                        "updated",
+                    )
+                    .await?;
+                }
+                shortcut
+            };
             tx.commit().await?;
-
-            mapi_navigation_shortcut_from_row(row)
+            Ok(MapiNavigationShortcutImportCommit {
+                shortcut,
+                identity: identity_commit.identity,
+                disposition: identity_commit.disposition,
+            })
         })
     }
 
@@ -256,27 +173,57 @@ macro_rules! store_impl_mailbox_config {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
             let mut tx = self.pool().begin().await?;
-            let deleted = sqlx::query_scalar::<_, Uuid>(
-                r#"
-                DELETE FROM mapi_navigation_shortcuts
-                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-                RETURNING id
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(account_id)
-            .bind(shortcut_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-            if deleted.is_none() {
-                anyhow::bail!("MAPI navigation shortcut not found");
-            }
-            insert_mapi_navigation_shortcut_change(
+            delete_mapi_navigation_shortcut_in_tx(
                 &mut tx,
                 tenant_id,
                 account_id,
                 shortcut_id,
-                "destroyed",
+            )
+            .await?;
+            tx.commit().await?;
+            Ok(())
+        })
+    }
+
+    fn preflight_unknown_mapi_navigation_shortcut_deletes<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        source_keys: &'a [Vec<u8>],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            for source_key in source_keys {
+                preflight_unknown_mapi_navigation_shortcut_delete_in_tx(
+                    &mut tx,
+                    tenant_id,
+                    account_id,
+                    folder_id,
+                    source_key,
+                )
+                .await?;
+            }
+            tx.commit().await?;
+            Ok(())
+        })
+    }
+
+    fn tombstone_unknown_mapi_navigation_shortcut<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        source_key: &'a [u8],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            tombstone_unknown_mapi_navigation_shortcut_in_tx(
+                &mut tx,
+                tenant_id,
+                account_id,
+                folder_id,
+                source_key,
             )
             .await?;
             tx.commit().await?;
@@ -304,24 +251,7 @@ macro_rules! store_impl_mailbox_config {
             .fetch_all(self.pool())
             .await?;
 
-            let mut seen = HashSet::new();
-            rows.into_iter()
-                .map(mapi_associated_config_from_row)
-                .filter_map(|result| match result {
-                    Ok(config) => {
-                        if seen.insert((
-                            config.folder_id,
-                            config.message_class.clone(),
-                            config.subject.clone(),
-                        )) {
-                            Some(Ok(config))
-                        } else {
-                            None
-                        }
-                    }
-                    Err(err) => Some(Err(err)),
-                })
-                .collect()
+            rows.into_iter().map(mapi_associated_config_from_row).collect()
         })
     }
 
@@ -332,190 +262,91 @@ macro_rules! store_impl_mailbox_config {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
             let mut tx = self.pool().begin().await?;
-            let message_class = input.message_class;
-            let subject = input.subject;
-            let properties_json = input.properties_json;
-            let explicit_exists = if let Some(id) = input.id {
-                sqlx::query_scalar::<_, bool>(
-                    r#"
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM mapi_associated_config_messages
-                        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-                    )
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(input.account_id)
-                .bind(id)
-                .fetch_one(&mut *tx)
-                .await?
-            } else {
-                false
-            };
-            let logical_id = sqlx::query_scalar::<_, Uuid>(
-                r#"
-                SELECT id
-                FROM mapi_associated_config_messages
-                WHERE tenant_id = $1
-                  AND account_id = $2
-                  AND folder_id = $3
-                  AND message_class = $4
-                  AND subject = $5
-                ORDER BY updated_at DESC, id
-                LIMIT 1
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(input.account_id)
-            .bind(input.folder_id as i64)
-            .bind(&message_class)
-            .bind(&subject)
-            .fetch_optional(&mut *tx)
-            .await?;
-            let id = match input.id {
-                Some(id) => {
-                    if explicit_exists {
-                        id
-                    } else {
-                        logical_id.unwrap_or(id)
-                    }
-                }
-                None => logical_id.unwrap_or_else(Uuid::new_v4),
-            };
-            let has_subject_logical_index = sqlx::query_scalar::<_, bool>(
-                r#"
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM pg_index index_info
-                    JOIN pg_class index_class
-                      ON index_class.oid = index_info.indexrelid
-                    WHERE index_info.indrelid = 'mapi_associated_config_messages'::regclass
-                      AND index_class.relname = 'mapi_associated_config_messages_logical_idx'
-                      AND pg_get_indexdef(index_class.oid) LIKE '%subject%'
-                )
-                "#,
-            )
-            .fetch_one(&mut *tx)
-            .await?;
-            let existed = explicit_exists || logical_id.is_some();
-            let row = if explicit_exists {
-                sqlx::query(
-                    r#"
-                    INSERT INTO mapi_associated_config_messages (
-                        tenant_id, id, account_id, folder_id, message_class, subject, properties_json
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (tenant_id, id)
-                    DO UPDATE SET
-                        folder_id = EXCLUDED.folder_id,
-                        message_class = EXCLUDED.message_class,
-                        subject = EXCLUDED.subject,
-                        properties_json = EXCLUDED.properties_json,
-                        updated_at = NOW()
-                    WHERE mapi_associated_config_messages.account_id = EXCLUDED.account_id
-                    RETURNING id, account_id, folder_id, message_class, subject, properties_json,
-                              to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(id)
-                .bind(input.account_id)
-                .bind(input.folder_id as i64)
-                .bind(&message_class)
-                .bind(&subject)
-                .bind(&properties_json)
-                .fetch_optional(&mut *tx)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?
-            } else if has_subject_logical_index {
-                sqlx::query(
-                    r#"
-                    INSERT INTO mapi_associated_config_messages (
-                        tenant_id, id, account_id, folder_id, message_class, subject, properties_json
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (tenant_id, account_id, folder_id, message_class, subject)
-                    DO UPDATE SET
-                        properties_json = EXCLUDED.properties_json,
-                        updated_at = NOW()
-                    RETURNING id, account_id, folder_id, message_class, subject, properties_json,
-                              to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(id)
-                .bind(input.account_id)
-                .bind(input.folder_id as i64)
-                .bind(&message_class)
-                .bind(&subject)
-                .bind(&properties_json)
-                .fetch_optional(&mut *tx)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?
-            } else {
-                sqlx::query(
-                    r#"
-                    INSERT INTO mapi_associated_config_messages (
-                        tenant_id, id, account_id, folder_id, message_class, subject, properties_json
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    ON CONFLICT (tenant_id, id)
-                    DO UPDATE SET
-                        folder_id = EXCLUDED.folder_id,
-                        message_class = EXCLUDED.message_class,
-                        subject = EXCLUDED.subject,
-                        properties_json = EXCLUDED.properties_json,
-                        updated_at = NOW()
-                    WHERE mapi_associated_config_messages.account_id = EXCLUDED.account_id
-                    RETURNING id, account_id, folder_id, message_class, subject, properties_json,
-                              to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(id)
-                .bind(input.account_id)
-                .bind(input.folder_id as i64)
-                .bind(&message_class)
-                .bind(&subject)
-                .bind(&properties_json)
-                .fetch_optional(&mut *tx)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?
-            };
-            let saved = mapi_associated_config_from_row(row)?;
-            let existed = existed || saved.id != id;
-            sqlx::query(
-                r#"
-                DELETE FROM mapi_associated_config_messages
-                WHERE tenant_id = $1
-                  AND account_id = $2
-                  AND id <> $3
-                  AND folder_id = $4
-                  AND message_class = $5
-                  AND subject = $6
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(input.account_id)
-            .bind(saved.id)
-            .bind(saved.folder_id as i64)
-            .bind(&saved.message_class)
-            .bind(&saved.subject)
-            .execute(&mut *tx)
-            .await?;
-            insert_mapi_associated_config_change(
+            let mut input = input;
+            input.id = Some(input.id.unwrap_or_else(Uuid::new_v4));
+            let saved = upsert_mapi_associated_config_in_tx(&mut tx, tenant_id, input).await?;
+            tx.commit().await?;
+            Ok(saved)
+        })
+    }
+
+    fn commit_mapi_associated_config_create<'a>(
+        &'a self,
+        input: UpsertMapiAssociatedConfigInput,
+    ) -> StoreFuture<'a, MapiAssociatedConfigCommit> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            let committed =
+                commit_mapi_associated_config_create_in_tx(&mut tx, tenant_id, input).await?;
+            tx.commit().await?;
+            Ok(committed)
+        })
+    }
+
+    fn commit_mapi_associated_config_import<'a>(
+        &'a self,
+        input: CommitMapiAssociatedConfigImportInput,
+    ) -> StoreFuture<'a, MapiAssociatedConfigImportCommit> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, input.config.account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            let identity_commit = commit_mapi_imported_fai_identity_in_tx(
                 &mut tx,
                 tenant_id,
-                input.account_id,
-                saved.id,
-                if existed { "updated" } else { "created" },
-                saved.folder_id,
+                input.config.account_id,
+                MapiIdentityObjectKind::AssociatedConfig,
+                input.config.folder_id,
+                input.config.id,
+                &input.identity,
+                input.fail_on_conflict,
             )
             .await?;
+            let mut config_input = input.config;
+            config_input.id = Some(identity_commit.canonical_id);
+            let config = if identity_commit.apply_imported_content {
+                upsert_mapi_associated_config_in_tx(&mut tx, tenant_id, config_input).await?
+            } else {
+                let config = fetch_mapi_associated_config_in_tx(
+                    &mut tx,
+                    tenant_id,
+                    config_input.account_id,
+                    identity_commit.canonical_id,
+                )
+                .await?;
+                if identity_commit.disposition.changes_server_replica() {
+                    insert_mapi_associated_config_change(
+                        &mut tx,
+                        tenant_id,
+                        config_input.account_id,
+                        identity_commit.canonical_id,
+                        "updated",
+                        config.folder_id,
+                    )
+                    .await?;
+                }
+                config
+            };
             tx.commit().await?;
+            Ok(MapiAssociatedConfigImportCommit {
+                config,
+                identity: identity_commit.identity,
+                disposition: identity_commit.disposition,
+            })
+        })
+    }
 
-            Ok(saved)
+    fn commit_mapi_associated_config_update<'a>(
+        &'a self,
+        input: UpsertMapiAssociatedConfigInput,
+    ) -> StoreFuture<'a, MapiAssociatedConfigCommit> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            let committed =
+                commit_mapi_associated_config_update_in_tx(&mut tx, tenant_id, input).await?;
+            tx.commit().await?;
+            Ok(committed)
         })
     }
 
@@ -527,30 +358,7 @@ macro_rules! store_impl_mailbox_config {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
             let mut tx = self.pool().begin().await?;
-            let deleted = sqlx::query_scalar::<_, i64>(
-                r#"
-                DELETE FROM mapi_associated_config_messages
-                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-                RETURNING folder_id
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(account_id)
-            .bind(config_id)
-            .fetch_optional(&mut *tx)
-            .await?;
-            let Some(folder_id) = deleted else {
-                anyhow::bail!("MAPI associated config message not found");
-            };
-            insert_mapi_associated_config_change(
-                &mut tx,
-                tenant_id,
-                account_id,
-                config_id,
-                "destroyed",
-                folder_id as u64,
-            )
-            .await?;
+            delete_mapi_associated_config_in_tx(&mut tx, tenant_id, account_id, config_id).await?;
             tx.commit().await?;
             Ok(())
         })

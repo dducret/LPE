@@ -4,9 +4,25 @@ These installation instructions are aligned with the current repository schema `
 
 LPE `0.5.0` installations initialize an empty SQL database from the canonical
 schema. Databases from releases before 0.5.0 are not upgraded in place.
-`update-lpe.sh` accepts only the current schema version and performs no SQL
-compatibility mutation. Use `LPE_RESET_SCHEMA=true` only for an intentional
-destructive reset. `init-schema.sh` performs its public-schema reset and
+`update-lpe.sh` accepts only the current schema version and can apply explicitly
+reviewed, forward-only, transactional, idempotent updates within
+`0.5.0-sql-v1`. It currently runs
+`crates/lpe-storage/sql/updates/0.5.0-sql-v1-outlook-cache-fidelity.sql`. That
+single ordered update adds the durable MAPI local-replica range tables, keeps
+each valid compact legacy WLink ordinal projection unchanged, and maps only
+integer values ending in the reserved `0x00` or `0xFF` byte to an injective
+five-byte value (four-byte big-endian integer followed by `0x80`). This follows
+the final-byte rule in [MS-OXOCFG] section 2.2.9.7 without collapsing distinct
+legacy integers. The migrated values and subsequent client-written ordinals
+are sorted lexicographically as binary strings; no numeric BIGINT ordering is
+promised. The update also adds
+nullable canonical columns for client-written Calendar shortcut properties,
+and makes the associated-configuration class/subject index non-unique so two
+distinct FAI identities are not collapsed. The SQL file checks the installed
+version itself, runs in one transaction, pins `search_path`, and is safe to
+rerun; it neither changes the schema label nor supports a pre-0.5 database. Use `LPE_RESET_SCHEMA=true`
+only for an intentional destructive reset. `init-schema.sh` refuses to run while
+`lpe.service` (or `SERVICE_NAME`) is active, performs its public-schema reset and
 canonical schema application in one transaction, explicitly pins
 `search_path` to `public`, then validates the installed version and MAPI-column
 shape before announcing success. A failure during reset or schema application
@@ -17,7 +33,12 @@ required durable MAPI identity version columns (`mapi_change_number` and
 `predecessor_change_list`), the Calendar Event lifecycle columns
 (`lifecycle_state` and `deleted_at`), and the
 `mapi_calendar_event_identity_moves` table used to preserve old/new MAPI
-identity lineage for Calendar moves to Deleted Items. They also verify that
+identity lineage for Calendar moves to Deleted Items. They also require
+`mapi_local_replica_id_ranges` and `mapi_local_replica_deleted_ranges`; these
+remain child metadata of `mapi_mailbox_replicas` and never become parallel
+mailbox or collaboration state. They also require the binary WLink ordinal,
+the five nullable WLink client-property columns and their bounds, and the
+non-unique associated-configuration logical lookup index. The scripts also verify that
 the canonical change log and MAPI identity constraints accept the
 `deleted_calendar_event` object kind, that SourceKey and InstanceKey remain
 22-byte GIDs, and that Event identity and move ChangeKeys accept 17- through
@@ -369,13 +390,13 @@ Files:
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
 - `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, rebuilds `lpe-cli`, rebuilds the web assets, redeploys them, restarts `lpe.service`, and reloads `nginx`
-- `update-lpe.sh` requires the exact current 0.5.0 schema version, the required durable MAPI identity version columns, and the complete `mapi_special_folder_aliases` shape; it performs no SQL mutation, rebuilds code/web assets, and refuses pre-0.5 or physically incomplete databases
+- `update-lpe.sh` requires the exact current 0.5.0 schema version, stops an active LPE service before applying the reviewed transactional 0.5.0 SQL update, validates the resulting physical schema, rebuilds code/web assets, and refuses pre-0.5 or unsupported physically incomplete databases
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
-- `init-schema.sh` rejects relations in non-system schemas other than `public`, resets or creates `public`, pins `search_path` to that canonical schema, and applies the canonical `0.5.0-sql-v1` schema, including the platform tenant UUID row and default storage pool/policy metadata, in one transaction; after commit it validates the installed schema version, the durable MAPI identity version columns, and the complete account-scoped special-folder alias shape before reporting success, and it requires an empty public schema unless `LPE_RESET_SCHEMA=true` requests an intentional destructive reset
+- `init-schema.sh` refuses to reset while `lpe.service` (or `SERVICE_NAME`) is active, rejects relations in non-system schemas other than `public`, resets or creates `public`, pins `search_path` to that canonical schema, and applies the canonical `0.5.0-sql-v1` schema, including the platform tenant UUID row and default storage pool/policy metadata, in one transaction; after commit it validates the installed schema version, the durable MAPI identity version columns, and the complete account-scoped special-folder alias shape before reporting success, and it requires an empty public schema unless `LPE_RESET_SCHEMA=true` requests an intentional destructive reset
 - `check-lpe.sh` verifies the installation, PostgreSQL, the exact schema version, required durable MAPI identity version columns, complete account-scoped special-folder alias shape, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
@@ -810,15 +831,17 @@ For later updates:
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
 
-`update-lpe.sh` checks that the installed schema is exactly the current 0.5.0
-baseline and includes the required `mapi_special_folder_aliases` shape, performs
-no SQL mutation, then rebuilds and redeploys code and web assets. Pre-0.5
-databases and physically incomplete 0.5.0 databases are rejected. In
-particular, a database created from an earlier 0.5.0 checkout without the alias
-table cannot be reused merely because it carries the `0.5.0-sql-v1` label. Point
-`DATABASE_URL` at a new empty SQL database and run `init-schema.sh`; for a
-disposable or intentionally rebuilt node, set `LPE_RESET_SCHEMA=true` before
-running `init-schema.sh`. This is destructive and is not an in-place upgrade.
+`update-lpe.sh` first checks that the installed schema is exactly the current
+`0.5.0-sql-v1` baseline. It then stops an active LPE service before running the
+reviewed forward-only Outlook cache fidelity update and enforcing the physical
+schema guards. Running the update repeatedly is safe. Pre-0.5 databases remain
+rejected without stopping LPE or mutating the database. Other physically incomplete 0.5.0 databases are
+also rejected unless an explicit reviewed SQL update covers the missing shape;
+for those databases, point `DATABASE_URL` at a new empty database and run
+`init-schema.sh`. For a disposable or intentionally rebuilt node, set
+`LPE_RESET_SCHEMA=true`, stop `lpe.service`, then run `init-schema.sh`. The
+initializer refuses to run while `lpe.service` (or `SERVICE_NAME`) is active.
+This is destructive; the bounded 0.5.0 update preserves canonical rows.
 
 To keep routine source updates faster, `update-lpe.sh` skips unchanged rebuild
 steps when the installed outputs already exist. It rebuilds the Rust service

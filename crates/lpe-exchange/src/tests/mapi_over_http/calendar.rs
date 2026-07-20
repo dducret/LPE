@@ -455,10 +455,7 @@ async fn mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canon
         .iter()
         .find(|change| change.subject == "Test 08:34")
         .expect("Deleted Items ICS creation for moved appointment");
-    assert_eq!(
-        destination_change.mid,
-        Some(u64::from_le_bytes(mapi_wire_id_bytes(new_mapi_id)))
-    );
+    assert_eq!(destination_change.mid, Some(new_mapi_id));
     assert_eq!(destination_change.source_key, new_source_key);
     assert!(!destination_change.associated);
 }
@@ -9033,20 +9030,8 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
     let common_views_rops = response_rops_from_execute_response(common_views_response).await;
     let common_views_stream =
         strict_content_sync_transfer_from_response(&common_views_rops).unwrap();
-    assert_eq!(common_views_stream.message_changes.len(), 2);
-    assert!(common_views_stream
-        .message_changes
-        .iter()
-        .all(|message| message.associated));
-    assert!(common_views_stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Compact"));
-    assert!(common_views_stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Sent To"));
-    assert!(contains_bytes(
+    assert!(common_views_stream.message_changes.is_empty());
+    assert!(!contains_bytes(
         &common_views_rops,
         &utf16z("IPM.Microsoft.FolderDesign.NamedView")
     ));

@@ -412,7 +412,7 @@ pub(super) fn format_common_views_query_row_window(
                         .unwrap_or_else(|| "none".to_string()),
                     message.shortcut_type,
                     message.section,
-                    message.ordinal
+                    bytes_to_hex(&message.ordinal)
                 ))
             }
             crate::mapi_store::MapiCommonViewsMessage::NamedView(message) => Some(format!(
@@ -425,6 +425,10 @@ pub(super) fn format_common_views_query_row_window(
                     index, message.id, message.display_name, message.role
                 ),
             ),
+            crate::mapi_store::MapiCommonViewsMessage::AssociatedConfig(message) => Some(format!(
+                "index={};id=0x{:016x};subject={};class={}",
+                index, message.id, message.subject, message.message_class
+            )),
         })
         .collect::<Vec<_>>()
         .join("|");
@@ -574,6 +578,21 @@ fn format_outlook_query_row_values_inner(
                         let id = crate::mapi::identity::mapped_mapi_object_id(&definition.id)
                             .unwrap_or_default();
                         format!("index={index};id=0x{id:016x};{values}")
+                    }
+                    crate::mapi_store::MapiCommonViewsMessage::AssociatedConfig(message) => {
+                        let values = columns
+                            .iter()
+                            .map(|tag| {
+                                let value = associated_config_property_value_with_mailbox_guid(
+                                    message, account_id, *tag,
+                                )
+                                .map(|value| format_debug_mapi_value(&value))
+                                .unwrap_or_else(|| "default".to_string());
+                                format!("0x{tag:08x}={value}")
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!("index={};id=0x{:016x};{}", index, message.id, values)
                     }
                 }
             })

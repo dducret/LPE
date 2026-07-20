@@ -239,7 +239,7 @@ fn special_folder_entry_id(mailbox_guid: Uuid, folder_id: u64) -> Vec<u8> {
         .expect("special folders use valid MAPI folder IDs")
 }
 
-pub(in crate::mapi) fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
+pub(crate) fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
     let entry = super::nspi::principal_address_book_entry(principal);
     let legacy_dn = super::nspi::nspi_entry_unprefixed_legacy_dn(&entry);
     let mut value = Vec::with_capacity(28 + legacy_dn.len() + 1);

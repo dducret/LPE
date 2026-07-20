@@ -1,5 +1,69 @@
 use super::*;
 
+pub(super) fn imported_fai_identity(
+    properties: &HashMap<u32, MapiValue>,
+    imported_message_id: u64,
+) -> Result<MapiFaiImportedIdentity> {
+    let source_key = imported_message_source_key(properties)
+        .ok_or_else(|| anyhow!("imported FAI SourceKey is missing or invalid"))?;
+    if crate::mapi::identity::object_id_from_source_key(&source_key) != Some(imported_message_id) {
+        return Err(anyhow!("imported FAI MID does not match its SourceKey"));
+    }
+    let source_counter = crate::mapi::identity::global_counter_from_store_id(imported_message_id)
+        .ok_or_else(|| anyhow!("imported FAI MID is invalid"))?;
+    if !(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+        ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+        .contains(&source_counter)
+    {
+        return Err(anyhow!("imported FAI MID is outside the dynamic range"));
+    }
+    let change_key = match properties.get(&PID_TAG_CHANGE_KEY) {
+        Some(MapiValue::Binary(value)) => value.clone(),
+        _ => return Err(anyhow!("imported FAI ChangeKey is missing or invalid")),
+    };
+    let predecessor_change_list = match properties.get(&PID_TAG_PREDECESSOR_CHANGE_LIST) {
+        Some(MapiValue::Binary(value)) => value.clone(),
+        _ => return Err(anyhow!("imported FAI PCL is missing or invalid")),
+    };
+    let last_modification_time = properties
+        .get(&PID_TAG_LAST_MODIFICATION_TIME)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| anyhow!("imported FAI modification time is missing or invalid"))?;
+    Ok(MapiFaiImportedIdentity {
+        source_key,
+        change_key,
+        predecessor_change_list,
+        last_modification_time,
+    })
+}
+
+fn current_common_views_fai_identity(
+    snapshot: &MapiMailStoreSnapshot,
+    message_id: u64,
+) -> Result<Option<MapiFaiImportedIdentity>> {
+    if let Some(current) = snapshot.navigation_shortcut_message_for_id(message_id) {
+        let identity = current
+            .durable_identity
+            .ok_or_else(|| anyhow!("durable Common Views WLink identity is missing"))?;
+        return Ok(Some(MapiFaiImportedIdentity {
+            source_key: identity.source_key,
+            change_key: identity.change_key,
+            predecessor_change_list: identity.predecessor_change_list,
+            last_modification_time: identity.last_modification_time,
+        }));
+    }
+    snapshot
+        .associated_config_message_for_folder_and_source_key_id(COMMON_VIEWS_FOLDER_ID, message_id)
+        .map(|message| {
+            imported_fai_identity(
+                &mapi_properties_from_json(&message.properties_json),
+                message.id,
+            )
+        })
+        .transpose()
+}
+
 pub(super) async fn append_synchronization_import_message_change_response<S: ExchangeStore>(
     store: &S,
     principal: &AccountPrincipal,
@@ -76,9 +140,75 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
         "rca debug mapi sync import message change"
     );
     if import_flag & 0x10 != 0 && folder_id == COMMON_VIEWS_FOLDER_ID {
+        // [MS-OXCFXICS] sections 3.2.5.9.4.2 and 3.3.5.8.7: the
+        // Message object returned by ImportMessageChange is populated by
+        // subsequent ROPs and MUST NOT be persisted before SaveChangesMessage.
         let properties = property_values.into_iter().collect::<HashMap<_, _>>();
-        let shortcut =
-            navigation_shortcut_from_mapi_properties(principal.account_id, None, &properties);
+        let imported_identity = match imported_fai_identity(&properties, message_id) {
+            Ok(identity) => identity,
+            Err(_) => {
+                responses.extend_from_slice(&rop_error_response(
+                    0x72,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                ));
+                return;
+            }
+        };
+        let current_identity = match current_common_views_fai_identity(snapshot, message_id) {
+            Ok(identity) => identity,
+            Err(_) => {
+                responses.extend_from_slice(&rop_error_response(
+                    0x72,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                ));
+                return;
+            }
+        };
+        if let Some(current_identity) = current_identity {
+            if current_identity.source_key != imported_identity.source_key {
+                responses.extend_from_slice(&rop_error_response(
+                    0x72,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                ));
+                return;
+            }
+            let relation = match sync_import_version_relation(
+                &imported_identity.predecessor_change_list,
+                &current_identity.predecessor_change_list,
+            ) {
+                Ok(relation) => relation,
+                Err(_) => {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x72,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    return;
+                }
+            };
+            // [MS-OXCFXICS] sections 2.2.3.2.4.2.2 and 3.2.5.9.4.2:
+            // FailOnConflict is reported by ImportMessageChange itself, before
+            // a Message handle that could later be saved is returned.
+            if relation == SyncImportVersionRelation::Conflict && import_flag & 0x40 != 0 {
+                responses.extend_from_slice(&rop_error_response(
+                    0x72,
+                    request.response_handle_index(),
+                    0x8004_0802,
+                ));
+                return;
+            }
+        }
+        let pending_object = MapiObject::PendingNavigationShortcut {
+            folder_id,
+            properties,
+            imported_message_id: Some(message_id),
+            fail_on_conflict: import_flag & 0x40 != 0,
+        };
+        let handle = session.allocate_output_handle(request.output_handle_index, pending_object);
+        set_handle_slot(handle_slots, request.output_handle_index, handle);
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -87,72 +217,21 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             request_type = "Execute",
             request_rop_id = "0x72",
             folder_id = format_args!("0x{:016x}", folder_id),
-            decoded_shortcut =
-                %common_views_saved_shortcut_summary(&shortcut, &properties),
-            "rca debug mapi common views navigation shortcut import"
+            imported_message_id = format_args!("0x{message_id:016x}"),
+            "rca debug mapi staged common views navigation shortcut import"
         );
-        match store
-            .upsert_mapi_navigation_shortcut(UpsertMapiNavigationShortcutInput {
-                id: None,
-                account_id: principal.account_id,
-                subject: shortcut.subject,
-                target_folder_id: shortcut.target_folder_id,
-                shortcut_type: shortcut.shortcut_type,
-                flags: shortcut.flags,
-                save_stamp: shortcut.save_stamp,
-                section: shortcut.section,
-                ordinal: shortcut.ordinal,
-                group_header_id: shortcut.group_header_id,
-                group_name: shortcut.group_name,
-            })
-            .await
-        {
-            Ok(saved) => {
-                let shortcut_id = match remember_created_mapi_identity(
-                    store,
-                    principal,
-                    MapiIdentityObjectKind::NavigationShortcut,
-                    saved.id,
-                    None,
-                    None,
-                )
-                .await
-                {
-                    Ok(shortcut_id) => shortcut_id,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x72,
-                            request.response_handle_index(),
-                            0x8004_010F,
-                        ));
-                        return;
-                    }
-                };
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::NavigationShortcut {
-                        folder_id,
-                        shortcut_id,
-                    },
-                );
-                set_handle_slot(handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_synchronization_import_message_change_response(
-                    &request,
-                ));
-                output_handles.push(handle);
-            }
-            Err(_) => responses.extend_from_slice(&rop_error_response(
-                0x72,
-                request.response_handle_index(),
-                0x8004_010F,
-            )),
-        }
+        responses.extend_from_slice(&rop_synchronization_import_message_change_response(
+            &request,
+        ));
+        output_handles.push(handle);
         return;
     }
     if import_flag & 0x10 != 0 {
         let pending_object = MapiObject::PendingAssociatedMessage {
             folder_id,
             properties: property_values.into_iter().collect(),
+            imported_message_id: Some(message_id),
+            fail_on_conflict: import_flag & 0x40 != 0,
         };
         let handle = session.allocate_output_handle(request.output_handle_index, pending_object);
         set_handle_slot(handle_slots, request.output_handle_index, handle);

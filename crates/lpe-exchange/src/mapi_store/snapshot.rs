@@ -21,6 +21,47 @@ fn calendar_mapi_attachments(attachments: &[CalendarEventAttachment]) -> Vec<Map
         .collect()
 }
 
+fn navigation_shortcut_message(
+    shortcut: MapiNavigationShortcutRecord,
+    durable_identity: Option<MapiIdentityRecord>,
+) -> Result<MapiNavigationShortcutMessage> {
+    if durable_identity.as_ref().is_some_and(|identity| {
+        identity.object_kind != MapiIdentityObjectKind::NavigationShortcut
+            || identity.canonical_id != shortcut.id
+    }) {
+        return Err(anyhow!("invalid durable MAPI navigation shortcut identity"));
+    }
+    let id = durable_identity
+        .as_ref()
+        .map(|identity| identity.object_id)
+        .unwrap_or_else(|| mapi_item_id(&shortcut.id));
+    let group_header_id = Some(
+        shortcut
+            .group_header_id
+            .unwrap_or_else(crate::mapi::properties::default_wlink_group_uuid),
+    );
+    Ok(MapiNavigationShortcutMessage {
+        id,
+        folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        canonical_id: shortcut.id,
+        durable_identity,
+        subject: shortcut.subject,
+        target_folder_id: shortcut.target_folder_id,
+        shortcut_type: shortcut.shortcut_type,
+        flags: shortcut.flags,
+        save_stamp: shortcut.save_stamp,
+        section: shortcut.section,
+        ordinal: shortcut.ordinal,
+        group_header_id,
+        group_name: normalize_navigation_shortcut_group_name(
+            shortcut.section,
+            group_header_id,
+            &shortcut.group_name,
+        ),
+        client_properties: shortcut.client_properties,
+    })
+}
+
 impl MapiMailStoreSnapshot {
     pub(crate) fn with_search_folder_definitions(
         mut self,
@@ -131,36 +172,13 @@ impl MapiMailStoreSnapshot {
         let persisted_shortcut_count = navigation_shortcuts.len();
         let persisted_navigation_shortcuts = navigation_shortcuts
             .into_iter()
-            .map(|shortcut| {
-                let group_header_id = Some(
-                    shortcut
-                        .group_header_id
-                        .unwrap_or_else(crate::mapi::properties::default_wlink_group_uuid),
-                );
-                MapiNavigationShortcutMessage {
-                    id: mapi_item_id(&shortcut.id),
-                    folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-                    canonical_id: shortcut.id,
-                    subject: shortcut.subject,
-                    target_folder_id: shortcut.target_folder_id,
-                    shortcut_type: shortcut.shortcut_type,
-                    flags: shortcut.flags,
-                    save_stamp: shortcut.save_stamp,
-                    section: shortcut.section,
-                    ordinal: shortcut.ordinal,
-                    group_header_id,
-                    group_name: normalize_navigation_shortcut_group_name(
-                        shortcut.section,
-                        group_header_id,
-                        &shortcut.group_name,
-                    ),
-                }
-            })
-            .collect::<Vec<_>>();
+            .map(|shortcut| navigation_shortcut_message(shortcut, None))
+            .collect::<Result<Vec<_>>>()
+            .expect("mapped MAPI navigation shortcut identity");
         let persisted_navigation_shortcut_summary =
             format_navigation_shortcut_debug_summary(&persisted_navigation_shortcuts);
         self.navigation_shortcuts = persisted_navigation_shortcuts;
-        let deduped_shortcuts = self.navigation_shortcut_messages();
+        let snapshot_shortcuts = self.navigation_shortcut_messages();
         let table_messages = self.common_views_table_messages().collect::<Vec<_>>();
         let table_shortcut_count = table_messages
             .iter()
@@ -184,7 +202,7 @@ impl MapiMailStoreSnapshot {
                 .unwrap_or_else(|| "unknown".to_string()),
             persisted_navigation_shortcut_count = persisted_shortcut_count,
             materialized_navigation_shortcut_count = table_shortcut_count,
-            deduped_navigation_shortcut_count = deduped_shortcuts.len(),
+            snapshot_navigation_shortcut_count = snapshot_shortcuts.len(),
             common_views_table_shortcut_count = table_shortcut_count,
             common_views_default_table_shortcut_count = default_table_shortcut_count,
             common_views_named_view_count = table_messages.len().saturating_sub(table_shortcut_count),
@@ -192,8 +210,8 @@ impl MapiMailStoreSnapshot {
                 %persisted_navigation_shortcut_summary,
             materialized_navigation_shortcuts =
                 %format_common_views_table_shortcut_debug_summary(&table_messages),
-            deduped_navigation_shortcuts =
-                %format_navigation_shortcut_debug_summary(&deduped_shortcuts),
+            snapshot_navigation_shortcuts =
+                %format_navigation_shortcut_debug_summary(&snapshot_shortcuts),
             common_views_table_shortcuts =
                 %format_common_views_table_shortcut_debug_summary(&table_messages),
             "rca debug mapi navigation shortcut snapshot contract"
@@ -201,28 +219,60 @@ impl MapiMailStoreSnapshot {
         self
     }
 
+    pub(crate) fn with_navigation_shortcut_identities(
+        mut self,
+        identity_records: &[MapiIdentityRecord],
+    ) -> Result<Self> {
+        let identities = identity_records
+            .iter()
+            .filter(|identity| identity.object_kind == MapiIdentityObjectKind::NavigationShortcut)
+            .map(|identity| (identity.canonical_id, identity))
+            .collect::<HashMap<_, _>>();
+        for shortcut in &mut self.navigation_shortcuts {
+            let identity = identities.get(&shortcut.canonical_id).ok_or_else(|| {
+                anyhow!(
+                    "durable MAPI navigation shortcut identity is missing for {}",
+                    shortcut.canonical_id
+                )
+            })?;
+            shortcut.id = identity.object_id;
+            shortcut.durable_identity = Some((*identity).clone());
+        }
+        Ok(self)
+    }
+
+    pub(crate) fn remember_navigation_shortcut(
+        &mut self,
+        shortcut: MapiNavigationShortcutRecord,
+        identity: MapiIdentityRecord,
+    ) -> Result<()> {
+        let message = navigation_shortcut_message(shortcut, Some(identity))?;
+        self.navigation_shortcuts
+            .retain(|existing| existing.canonical_id != message.canonical_id);
+        self.navigation_shortcuts.push(message);
+        Ok(())
+    }
+
     pub(crate) fn with_associated_configs(
         mut self,
         configs: Vec<MapiAssociatedConfigRecord>,
     ) -> Self {
-        self.associated_configs = deduplicate_associated_config_messages(
-            configs
-                .into_iter()
-                .filter(|config| {
-                    !is_empty_synthetic_inbox_associated_config(config)
-                        && !is_empty_outlook_inbox_named_view_placeholder(config)
-                        && !is_stale_outlook_umolk_user_options_placeholder(config)
-                })
-                .map(|config| MapiAssociatedConfigMessage {
-                    id: mapi_item_id(&config.id),
-                    folder_id: config.folder_id,
-                    canonical_id: config.id,
-                    message_class: config.message_class,
-                    subject: config.subject,
-                    properties_json: config.properties_json,
-                })
-                .collect(),
-        );
+        self.associated_configs = configs
+            .into_iter()
+            .filter(|config| {
+                !is_empty_synthetic_inbox_associated_config(config)
+                    && !is_stale_outlook_umolk_user_options_placeholder(config)
+            })
+            .map(|config| MapiAssociatedConfigMessage {
+                id: mapi_item_id(&config.id),
+                folder_id: config.folder_id,
+                canonical_id: config.id,
+                message_class: config.message_class,
+                subject: config.subject,
+                properties_json: config.properties_json,
+            })
+            .collect();
+        self.apply_associated_config_identities();
         self
     }
 
@@ -231,7 +281,68 @@ impl MapiMailStoreSnapshot {
         ids: Vec<MapiAssociatedConfigIdentity>,
     ) -> Self {
         self.associated_config_identity_ids = ids;
+        self.apply_associated_config_identities();
         self
+    }
+
+    fn apply_associated_config_identities(&mut self) {
+        let identities = self
+            .associated_config_identity_ids
+            .iter()
+            .map(|identity| (identity.record.canonical_id, &identity.record))
+            .collect::<HashMap<_, _>>();
+        for message in &mut self.associated_configs {
+            let Some(identity) = identities.get(&message.canonical_id) else {
+                continue;
+            };
+            message.id = identity.object_id;
+            let properties = message
+                .properties_json
+                .as_object_mut()
+                .expect("associated config properties must be a JSON object");
+            // The identity table is canonical. This projection deliberately
+            // removes every property-type variant of a legacy/stale identity
+            // tuple before inserting the canonical values, so tables and ICS
+            // cannot expose parallel FAI state.
+            properties.retain(|tag, _| {
+                tag.strip_prefix("0x")
+                    .and_then(|tag| u32::from_str_radix(tag, 16).ok())
+                    .is_none_or(|tag| !is_associated_config_identity_property_tag(tag))
+            });
+            properties.insert(
+                "0x674a0014".to_string(),
+                serde_json::json!({"type": "u64", "value": identity.object_id}),
+            );
+            properties.insert(
+                "0x65e00102".to_string(),
+                serde_json::json!({
+                    "type": "binary",
+                    "value": lpe_domain::crypto::hex_lower(&identity.source_key)
+                }),
+            );
+            properties.insert(
+                "0x65e20102".to_string(),
+                serde_json::json!({
+                    "type": "binary",
+                    "value": lpe_domain::crypto::hex_lower(&identity.change_key)
+                }),
+            );
+            properties.insert(
+                "0x65e30102".to_string(),
+                serde_json::json!({
+                    "type": "binary",
+                    "value": lpe_domain::crypto::hex_lower(&identity.predecessor_change_list)
+                }),
+            );
+            properties.insert(
+                "0x67a40014".to_string(),
+                serde_json::json!({"type": "u64", "value": identity.change_number}),
+            );
+            properties.insert(
+                "0x30080040".to_string(),
+                serde_json::json!({"type": "i64", "value": identity.last_modification_time}),
+            );
+        }
     }
 
     pub(crate) fn with_named_property_mappings(
@@ -996,28 +1107,27 @@ impl MapiMailStoreSnapshot {
     }
 
     pub(crate) fn navigation_shortcut_messages(&self) -> Vec<MapiNavigationShortcutMessage> {
-        deduplicate_navigation_shortcuts(self.navigation_shortcuts.clone())
+        // [MS-OXCMSG] sections 2.2.3.2 and 2.2.3.3 preserve each saved
+        // Message identity. [MS-OXOCFG] sections 2.2.9 and 4.4.2 define each
+        // WLink as one Common Views FAI Message, even when properties such as
+        // target folder, type, and section match another WLink.
+        self.navigation_shortcuts.clone()
     }
 
     pub(crate) fn common_views_table_messages(
         &self,
     ) -> impl Iterator<Item = MapiCommonViewsMessage> {
-        let shortcuts = self.navigation_shortcut_messages();
-        // [MS-OXOCFG] sections 3.1.4.9 and 3.1.4.10.2: navigation
-        // shortcuts are client-owned Common Views FAI messages. Preserve
-        // their canonical stored identity in the associated table.
-        let mut table_shortcuts = shortcuts;
-        append_missing_default_common_views_shortcuts(&mut table_shortcuts);
-        replace_persisted_default_mail_favorite_shortcuts(&mut table_shortcuts);
-        materialize_default_mail_group_header(&mut table_shortcuts);
-        let messages = table_shortcuts
+        self.canonical_common_views_fai_messages().into_iter()
+    }
+
+    fn canonical_common_views_fai_messages(&self) -> Vec<MapiCommonViewsMessage> {
+        // [MS-OXCFOLD] section 2.2.1.14 and [MS-OXCFXICS] sections 2.2.1.2.1
+        // and 3.2.5.3: the associated table and FAI sync expose the same
+        // Message objects and identities from Common Views.
+        let messages = self
+            .navigation_shortcut_messages()
             .into_iter()
             .map(MapiCommonViewsMessage::NavigationShortcut)
-            .chain(
-                outlook_common_views_default_named_views()
-                    .into_iter()
-                    .map(MapiCommonViewsMessage::NamedView),
-            )
             .chain(
                 self.search_folder_definitions
                     .clone()
@@ -1025,17 +1135,19 @@ impl MapiMailStoreSnapshot {
                     .filter(common_views_search_folder_definition_is_projectable)
                     .map(MapiCommonViewsMessage::SearchFolderDefinition),
             )
+            .chain(
+                self.associated_config_messages_for_folder(
+                    crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+                )
+                .into_iter()
+                .map(MapiCommonViewsMessage::AssociatedConfig),
+            )
             .collect::<Vec<_>>();
-        messages.into_iter()
+        messages
     }
 
     pub(crate) fn common_views_messages(&self) -> impl Iterator<Item = MapiCommonViewsMessage> {
-        let messages = self
-            .navigation_shortcut_messages()
-            .into_iter()
-            .map(MapiCommonViewsMessage::NavigationShortcut)
-            .collect::<Vec<_>>();
-        messages.into_iter()
+        self.canonical_common_views_fai_messages().into_iter()
     }
 
     pub(crate) fn associated_config_sync_messages_for_folder(
@@ -1059,20 +1171,13 @@ impl MapiMailStoreSnapshot {
         item_id: u64,
     ) -> Option<MapiNavigationShortcutMessage> {
         self.navigation_shortcut_message_for_id(item_id)
-            .or_else(|| {
-                outlook_common_views_default_navigation_shortcuts()
-                    .into_iter()
-                    .find(|shortcut| shortcut.section == 1 && shortcut.id == item_id)
-            })
     }
 
     pub(crate) fn common_view_named_view_message_for_id(
         &self,
-        item_id: u64,
+        _item_id: u64,
     ) -> Option<MapiCommonViewNamedViewMessage> {
-        outlook_common_views_default_named_views()
-            .into_iter()
-            .find(|message| message.id == item_id)
+        None
     }
 
     pub(crate) fn named_view_message_for_folder_and_id(
@@ -1087,23 +1192,10 @@ impl MapiMailStoreSnapshot {
 
     pub(crate) fn default_folder_named_view_message(
         &self,
-        folder_id: u64,
-        item_id: u64,
+        _folder_id: u64,
+        _item_id: u64,
     ) -> Option<MapiCommonViewNamedViewMessage> {
-        if folder_id == crate::mapi::identity::SENT_FOLDER_ID {
-            return None;
-        }
-        let view_id = outlook_default_folder_named_view_id(folder_id);
-        (item_id == view_id || item_id == OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID).then(|| {
-            MapiCommonViewNamedViewMessage {
-                id: view_id,
-                folder_id,
-                canonical_id: outlook_default_folder_named_view_canonical_id(folder_id),
-                name: outlook_default_folder_named_view_name(folder_id).to_string(),
-                view_flags: 14_745_605,
-                view_type: 8,
-            }
-        })
+        None
     }
 
     pub(crate) fn associated_config_messages_for_folder(
@@ -1125,17 +1217,8 @@ impl MapiMailStoreSnapshot {
                     messages.push(default_message);
                 }
             }
-        } else if self.contact_sync_default_supported_folder(folder_id) {
-            for default_message in outlook_contact_associated_config_defaults(folder_id) {
-                if !messages
-                    .iter()
-                    .any(|message| message.message_class == default_message.message_class)
-                {
-                    messages.push(default_message);
-                }
-            }
         }
-        deduplicate_associated_config_messages(messages)
+        messages
     }
 
     pub(crate) fn associated_config_message_for_id(
@@ -1159,31 +1242,6 @@ impl MapiMailStoreSnapshot {
                     .find(|message| message.id == item_id)
             })
             .or_else(|| outlook_inbox_exact_virtual_associated_config_for_id(item_id))
-            .or_else(|| {
-                [
-                    crate::mapi::identity::CONTACTS_FOLDER_ID,
-                    crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
-                    crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
-                    crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
-                ]
-                .into_iter()
-                .flat_map(outlook_contact_associated_config_defaults)
-                .find(|message| message.id == item_id)
-            })
-            .or_else(|| {
-                self.collaboration_folders
-                    .iter()
-                    .filter(|folder| folder.kind == MapiCollaborationFolderKind::Contacts)
-                    .flat_map(|folder| outlook_contact_associated_config_defaults(folder.id))
-                    .find(|message| message.id == item_id)
-            })
-            .or_else(|| {
-                self.folders
-                    .iter()
-                    .filter(|folder| mailbox_contact_sync_default_supported(&folder.mailbox))
-                    .flat_map(|folder| outlook_contact_associated_config_defaults(folder.id))
-                    .find(|message| message.id == item_id)
-            })
     }
 
     pub(crate) fn associated_config_message_for_identity_id(
@@ -1193,20 +1251,11 @@ impl MapiMailStoreSnapshot {
         let canonical_id = self
             .associated_config_identity_ids
             .iter()
-            .find(|identity| identity.object_id == item_id)
-            .map(|identity| identity.canonical_id)?;
+            .find(|identity| identity.record.object_id == item_id)
+            .map(|identity| identity.record.canonical_id)?;
         self.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
             .into_iter()
-            .chain(
-                [
-                    crate::mapi::identity::CONTACTS_FOLDER_ID,
-                    crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
-                    crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
-                    crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
-                ]
-                .into_iter()
-                .flat_map(outlook_contact_associated_config_defaults),
-            )
+            .chain(self.associated_configs.iter().cloned())
             .find(|message| message.canonical_id == canonical_id)
     }
 
@@ -1247,20 +1296,6 @@ impl MapiMailStoreSnapshot {
         self.associated_config_message_for_id(item_id)
             .or_else(|| self.associated_config_message_for_identity_id(item_id))
             .is_some_and(|message| message.folder_id == folder_id)
-    }
-
-    fn contact_sync_default_supported_folder(&self, folder_id: u64) -> bool {
-        matches!(
-            folder_id,
-            crate::mapi::identity::CONTACTS_FOLDER_ID
-                | crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID
-                | crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID
-                | crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID
-        ) || self.collaboration_folders.iter().any(|folder| {
-            folder.kind == MapiCollaborationFolderKind::Contacts && folder.id == folder_id
-        }) || self.folders.iter().any(|folder| {
-            folder.id == folder_id && mailbox_contact_sync_default_supported(&folder.mailbox)
-        })
     }
 
     pub(crate) fn conversation_action_messages(&self) -> &[MapiConversationActionMessage] {

@@ -344,6 +344,8 @@ pub(in crate::mapi) enum MapiObject {
     NavigationShortcut {
         folder_id: u64,
         shortcut_id: u64,
+        pending_properties: HashMap<u32, MapiValue>,
+        deleted_properties: HashSet<u32>,
     },
     CommonViewNamedView {
         folder_id: u64,
@@ -379,6 +381,8 @@ pub(in crate::mapi) enum MapiObject {
     PendingAssociatedMessage {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
+        imported_message_id: Option<u64>,
+        fail_on_conflict: bool,
     },
     PendingContact {
         folder_id: u64,
@@ -407,6 +411,8 @@ pub(in crate::mapi) enum MapiObject {
     PendingNavigationShortcut {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
+        imported_message_id: Option<u64>,
+        fail_on_conflict: bool,
     },
     HierarchyTable {
         folder_id: u64,

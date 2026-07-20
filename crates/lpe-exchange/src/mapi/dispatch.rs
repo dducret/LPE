@@ -17,7 +17,9 @@ use crate::mapi::outlook_startup::{
     outlook_startup_gate_summary,
 };
 use crate::store::{
-    MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiEventCreateOutcome,
+    CommitMapiAssociatedConfigImportInput, CommitMapiNavigationShortcutCreateInput,
+    CommitMapiNavigationShortcutImportInput, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
+    MapiEventCreateOutcome, MapiFaiImportDisposition, MapiFaiImportedIdentity,
     MapiFolderHierarchyCommitOutcome, MapiIdentityObjectKind, MapiSpecialFolderAlias,
     MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
     UpsertMapiNavigationShortcutInput,
@@ -51,6 +53,7 @@ mod folder_create;
 mod folder_dispatch;
 mod folder_open;
 mod folders;
+mod local_replica_sync;
 mod logon;
 mod message_dispatch;
 mod message_move_copy;
@@ -59,6 +62,7 @@ mod message_save;
 mod message_state;
 mod messages;
 mod named_properties;
+mod navigation_shortcut_save;
 mod notification_subscriptions;
 mod object_ids;
 mod permissions;
@@ -108,6 +112,7 @@ use folder_create::*;
 use folder_dispatch::*;
 use folder_open::*;
 use folders::*;
+use local_replica_sync::*;
 use logon::*;
 use message_dispatch::*;
 use message_move_copy::*;
@@ -116,6 +121,7 @@ use message_save::*;
 use message_state::*;
 use messages::*;
 use named_properties::*;
+use navigation_shortcut_save::*;
 use notification_subscriptions::*;
 use object_ids::*;
 use permissions::*;

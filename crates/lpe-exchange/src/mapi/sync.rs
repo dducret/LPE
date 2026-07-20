@@ -5,6 +5,7 @@ use super::*;
 
 use crate::mapi::properties::*;
 use crate::mapi::wire::RopId;
+use lpe_storage::SearchFolderDefinition;
 
 pub(in crate::mapi) use super::identity::{
     ARCHIVE_FOLDER_ID, CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, CONFLICTS_FOLDER_ID,
@@ -295,20 +296,14 @@ pub(in crate::mapi) fn special_sync_objects_for(
             _ => Vec::new(),
         });
     }
-    if default_folder_named_view_sync_supported(folder_id) {
-        if let Some(message) = default_folder_named_view_sync_message(snapshot, folder_id) {
-            objects.push(common_view_named_view_sync_object(
-                &message,
-                principal.account_id,
-            ));
-        }
+    if folder_id != COMMON_VIEWS_FOLDER_ID {
+        objects.extend(
+            snapshot
+                .associated_config_sync_messages_for_folder(folder_id)
+                .iter()
+                .map(associated_config_sync_object),
+        );
     }
-    objects.extend(
-        snapshot
-            .associated_config_sync_messages_for_folder(folder_id)
-            .iter()
-            .map(associated_config_sync_object),
-    );
     for object in &mut objects {
         populate_special_message_named_property_definitions(object, snapshot);
     }
@@ -352,71 +347,7 @@ fn special_message_with_named_property_definitions(
 fn common_views_sync_messages(
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<crate::mapi_store::MapiCommonViewsMessage> {
-    let mut messages = snapshot.common_views_messages().collect::<Vec<_>>();
-    for message in [
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
-    ]
-    .into_iter()
-    .filter_map(|id| snapshot.common_view_named_view_message_for_id(id))
-    {
-        messages.push(crate::mapi_store::MapiCommonViewsMessage::NamedView(
-            message,
-        ));
-    }
-    messages
-}
-
-fn default_folder_named_view_sync_supported(folder_id: u64) -> bool {
-    matches!(
-        folder_id,
-        INBOX_FOLDER_ID
-            | OUTBOX_FOLDER_ID
-            | SENT_FOLDER_ID
-            | TRASH_FOLDER_ID
-            | DRAFTS_FOLDER_ID
-            | JUNK_FOLDER_ID
-            | ARCHIVE_FOLDER_ID
-            | CONVERSATION_HISTORY_FOLDER_ID
-            | CONTACTS_FOLDER_ID
-    )
-}
-
-fn default_folder_named_view_sync_message(
-    snapshot: &MapiMailStoreSnapshot,
-    folder_id: u64,
-) -> Option<crate::mapi_store::MapiCommonViewNamedViewMessage> {
-    let container_class = snapshot
-        .collaboration_folder_for_id(folder_id)
-        .map(|folder| collaboration_folder_message_class(folder.kind))
-        .or_else(|| default_view_special_folder_container_class(folder_id))?;
-    if default_view_supported_folder(folder_id, container_class)
-        && !default_view_uses_common_views(container_class, folder_id)
-    {
-        snapshot.default_folder_named_view_message(
-            folder_id,
-            crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
-        )
-    } else {
-        None
-    }
-}
-
-fn default_view_special_folder_container_class(folder_id: u64) -> Option<&'static str> {
-    role_for_folder_id(folder_id)?;
-    Some(match folder_id {
-        CALENDAR_FOLDER_ID => "IPF.Appointment",
-        CONTACTS_FOLDER_ID | SUGGESTED_CONTACTS_FOLDER_ID | CONTACTS_SEARCH_FOLDER_ID => {
-            "IPF.Contact"
-        }
-        QUICK_CONTACTS_FOLDER_ID => "IPF.Contact.MOC.QuickContacts",
-        IM_CONTACT_LIST_FOLDER_ID => "IPF.Contact.MOC.ImContactList",
-        TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => "IPF.Task",
-        NOTES_FOLDER_ID => "IPF.StickyNote",
-        JOURNAL_FOLDER_ID => "IPF.Journal",
-        RSS_FEEDS_FOLDER_ID => "IPF.Note.OutlookHomepage",
-        _ => "IPF.Note",
-    })
+    snapshot.common_views_messages().collect()
 }
 
 fn sync_object_projected_to_folder(
@@ -688,6 +619,18 @@ fn navigation_shortcut_sync_object(
         PID_TAG_WLINK_GROUP_CLSID,
         PID_TAG_WLINK_GROUP_NAME_W,
         PID_TAG_WLINK_SECTION,
+        // [MS-OXOCFG] sections 2.2.9.15 through 2.2.9.19: these
+        // client-written optional values are part of the WLink FAI message
+        // and must use the same canonical projection in ICS and tables.
+        PID_TAG_WLINK_CALENDAR_COLOR,
+        PID_TAG_WLINK_ADDRESS_BOOK_EID,
+        PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+        PID_TAG_WLINK_CLIENT_ID,
+        PID_TAG_WLINK_RO_GROUP_TYPE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
     ] {
         if let Some(value) =
             navigation_shortcut_property_value_for_principal(message, principal, property_tag)
@@ -696,7 +639,11 @@ fn navigation_shortcut_sync_object(
             named_properties.push((property_tag, value));
         }
     }
-    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    let change_number = message
+        .durable_identity
+        .as_ref()
+        .map(|identity| identity.change_number)
+        .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(message.id));
 
     mapi_mailstore::SpecialMessageSyncFact {
         folder_id: message.folder_id,
@@ -706,7 +653,11 @@ fn navigation_shortcut_sync_object(
         subject: message.subject.clone(),
         body_text: String::new(),
         message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
-        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        last_modified_filetime: message
+            .durable_identity
+            .as_ref()
+            .map(|identity| identity.last_modification_time)
+            .unwrap_or_else(|| mapi_mailstore::filetime_from_change_number(change_number)),
         message_size: 128,
         read_state: None,
         named_properties,
@@ -725,22 +676,70 @@ fn common_views_sync_object(
         crate::mapi_store::MapiCommonViewsMessage::NamedView(message) => {
             common_view_named_view_sync_object(&message, principal.account_id)
         }
-        crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(_) => {
-            mapi_mailstore::SpecialMessageSyncFact {
-                folder_id: COMMON_VIEWS_FOLDER_ID,
-                item_id: 0,
-                canonical_id: Uuid::nil(),
-                associated: true,
-                subject: String::new(),
-                body_text: String::new(),
-                message_class: "IPM.Microsoft.WunderBar.SFInfo".to_string(),
-                last_modified_filetime: 0,
-                message_size: 0,
-                read_state: None,
-                named_properties: Vec::new(),
-                named_property_definitions: HashMap::new(),
-            }
+        crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(message) => {
+            search_folder_definition_sync_object(&message, principal.account_id)
         }
+        crate::mapi_store::MapiCommonViewsMessage::AssociatedConfig(message) => {
+            associated_config_sync_object(&message)
+        }
+    }
+}
+
+fn search_folder_definition_sync_object(
+    message: &SearchFolderDefinition,
+    account_id: Uuid,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let item_id = crate::mapi::identity::mapped_mapi_object_id(&message.id)
+        .expect("projected search-folder FAI identity");
+    let mut named_properties = Vec::new();
+    for property_tag in [
+        PID_TAG_SEARCH_FOLDER_ID,
+        PID_TAG_SEARCH_FOLDER_TEMPLATE_ID,
+        PID_TAG_SEARCH_FOLDER_TAG,
+        PID_TAG_SEARCH_FOLDER_LAST_USED,
+        PID_TAG_SEARCH_FOLDER_EXPIRATION,
+        PID_TAG_SEARCH_FOLDER_STORAGE_TYPE,
+        PID_TAG_SEARCH_FOLDER_EFP_FLAGS,
+        PID_TAG_SEARCH_FOLDER_DEFINITION,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ] {
+        if let Some(value) =
+            search_folder_definition_message_property_value(message, account_id, property_tag)
+                .and_then(special_message_property_value)
+        {
+            named_properties.push((property_tag, value));
+        }
+    }
+    let change_number =
+        search_folder_definition_message_property_value(message, account_id, PID_TAG_CHANGE_NUMBER)
+            .and_then(|value| value.as_i64())
+            .and_then(|value| u64::try_from(value).ok())
+            .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(item_id));
+    let last_modified_filetime = search_folder_definition_message_property_value(
+        message,
+        account_id,
+        PID_TAG_LAST_MODIFICATION_TIME,
+    )
+    .and_then(|value| value.as_i64())
+    .and_then(|value| u64::try_from(value).ok())
+    .unwrap_or_else(|| mapi_mailstore::filetime_from_change_number(change_number));
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        item_id,
+        canonical_id: message.id,
+        associated: true,
+        subject: message.display_name.clone(),
+        body_text: String::new(),
+        message_class: "IPM.Microsoft.WunderBar.SFInfo".to_string(),
+        last_modified_filetime,
+        message_size: 128,
+        read_state: None,
+        named_properties,
+        named_property_definitions: HashMap::new(),
     }
 }
 
@@ -890,7 +889,16 @@ fn associated_config_sync_object(
             named_properties.push((tag, value));
         }
     }
-    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    let change_number = stored_properties
+        .get(&PID_TAG_CHANGE_NUMBER)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(message.id));
+    let last_modified_filetime = stored_properties
+        .get(&PID_TAG_LAST_MODIFICATION_TIME)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or_else(|| mapi_mailstore::filetime_from_change_number(change_number));
     let message_size = message
         .subject
         .len()
@@ -906,7 +914,7 @@ fn associated_config_sync_object(
         subject: message.subject.clone(),
         body_text: associated_config_text_property(message, PID_TAG_BODY_W),
         message_class: message.message_class.clone(),
-        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        last_modified_filetime,
         message_size,
         read_state: None,
         named_properties,
@@ -951,8 +959,7 @@ fn associated_config_default_sync_tags(
 fn associated_config_standard_sync_tag(tag: u32) -> bool {
     matches!(
         canonical_property_storage_tag(tag),
-        PID_TAG_CHANGE_NUMBER
-            | PID_TAG_FOLDER_ID
+        PID_TAG_FOLDER_ID
             | PID_TAG_MID
             | PID_TAG_INST_ID
             | PID_TAG_INSTANCE_NUM
@@ -1266,6 +1273,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
         MapiObject::NavigationShortcut {
             folder_id,
             shortcut_id,
+            ..
         } => {
             let message = snapshot.navigation_shortcut_message_for_id(*shortcut_id)?;
             if message.folder_id != *folder_id {

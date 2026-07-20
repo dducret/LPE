@@ -2213,8 +2213,10 @@ async fn mapi_over_http_microsoft_oxcfxics_4_3_2_partial_item_download_uses_full
 #[tokio::test]
 async fn mapi_over_http_microsoft_oxocfg_writing_view_definition_sequence_succeeds() {
     let account = FakeStore::account();
+    let associated_configs = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
         session: Some(account),
+        associated_configs: associated_configs.clone(),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -2283,13 +2285,26 @@ async fn mapi_over_http_microsoft_oxocfg_writing_view_definition_sequence_succee
     rops.extend_from_slice(&[
         0x15, 0x00, 0x02, 0x00, 0x01, 0x01, 0x00, // RopQueryRows, one row.
     ]);
-    append_rop_open_message(
+    append_rop_create_associated_message(
         &mut rops,
-        1,
+        0,
         3,
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
     );
+    let mut view_properties = Vec::new();
+    append_mapi_utf16_property(
+        &mut view_properties,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.FolderDesign.NamedView",
+    );
+    append_mapi_utf16_property(&mut view_properties, PID_TAG_SUBJECT_W, "Compact");
+    append_mapi_i32_property(&mut view_properties, PID_TAG_VIEW_DESCRIPTOR_VERSION, 8);
+    append_mapi_utf16_property(
+        &mut view_properties,
+        PID_TAG_VIEW_DESCRIPTOR_NAME_W,
+        "Compact",
+    );
+    append_rop_set_properties(&mut rops, 3, 4, &view_properties);
     rops.extend_from_slice(&[0x2B, 0x00, 0x03, 0x04]); // RopOpenStream.
     rops.extend_from_slice(&PID_TAG_VIEW_DESCRIPTOR_BINARY.to_le_bytes());
     rops.push(1);
@@ -2327,11 +2342,16 @@ async fn mapi_over_http_microsoft_oxocfg_writing_view_definition_sequence_succee
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(
-        contains_bytes(&response_rops, &[0x4F, 0x02, 0, 0, 0, 0, 0, 1]),
-        "{response_rops:02x?}"
-    );
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x4F, 0x02, 0x0F, 0x01, 0x04, 0x80]
+    ));
     assert!(contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x06, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x03, 0, 0, 0, 0, 0, 0]
+    ));
     assert!(contains_bytes(&response_rops, &[0x2B, 0x04, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,
@@ -2339,16 +2359,26 @@ async fn mapi_over_http_microsoft_oxocfg_writing_view_definition_sequence_succee
     ));
     assert!(contains_bytes(&response_rops, &[0x5D, 0x04, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x2B, 0x05, 0, 0, 0, 0]));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x2D, 0x05, 0, 0, 0, 0, descriptor_strings.len() as u8, 0]
-    ));
+    assert!(
+        contains_bytes(
+            &response_rops,
+            &[0x2D, 0x05, 0, 0, 0, 0, descriptor_strings.len() as u8, 0]
+        ),
+        "{response_rops:02x?}"
+    );
     assert!(contains_bytes(&response_rops, &[0x5D, 0x05, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x0C, 0x03, 0, 0, 0, 0]));
+    let configs = associated_configs.lock().unwrap();
+    assert_eq!(configs.len(), 1, "{response_rops:02x?}");
+    assert_eq!(
+        configs[0].message_class,
+        "IPM.Microsoft.FolderDesign.NamedView"
+    );
+    assert_eq!(configs[0].subject, "Compact");
 }
 
 #[tokio::test]
-async fn mapi_over_http_microsoft_oxocfg_default_named_views_expose_descriptor_columns() {
+async fn mapi_over_http_microsoft_oxocfg_empty_common_views_exposes_no_named_view() {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account),
@@ -2413,27 +2443,15 @@ async fn mapi_over_http_microsoft_oxocfg_default_named_views_expose_descriptor_c
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x14, 0x02, 0, 0, 0, 0]));
     assert!(
-        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x02, 0x02, 0]),
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x02, 0x00, 0]),
         "{response_rops:02x?}"
     );
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.FolderDesign.NamedView")
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("Compact")));
-    assert!(contains_bytes(&response_rops, &utf16z("Sent To")));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00]
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &utf16z("\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n")
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &utf16z("\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nTo\nSubject\nSent\nSize\nCategories\n")
-    ));
+    assert!(!contains_bytes(&response_rops, &utf16z("Compact")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Sent To")));
 }
 
 #[tokio::test]
@@ -2454,9 +2472,10 @@ async fn mapi_over_http_common_views_delete_messages_deletes_navigation_shortcut
                 flags: 0,
                 save_stamp: 0,
                 section: 0,
-                ordinal: 1,
+                ordinal: vec![1],
                 group_header_id: None,
                 group_name: "Mail".to_string(),
+                client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
             },
         ])),
         ..Default::default()
@@ -2520,11 +2539,28 @@ async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_r
     );
 
     let group_id = [0x22; 16];
+    let mail_folder_type = [
+        0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
     let mut group_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut group_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
     append_mapi_utf16_property(&mut group_values, PID_TAG_SUBJECT_W, "Projects");
-    append_mapi_guid_property(&mut group_values, PID_TAG_WLINK_GROUP_HEADER_ID, group_id);
+    append_mapi_binary_property(&mut group_values, PID_TAG_WLINK_GROUP_HEADER_ID, &group_id);
     append_mapi_i32_property(&mut group_values, PID_TAG_WLINK_TYPE, 4);
+    append_mapi_i32_property(&mut group_values, 0x684A_0003, 0);
+    append_mapi_i32_property(&mut group_values, 0x6847_0003, 1_537_819_608);
+    append_mapi_i32_property(&mut group_values, 0x6852_0003, 1);
     append_mapi_binary_property(&mut group_values, PID_TAG_WLINK_ORDINAL, &[0x90]);
+    append_mapi_binary_property(
+        &mut group_values,
+        0x684F_0102, // PidTagWlinkFolderType (PtypBinary).
+        &mail_folder_type,
+    );
 
     let inbox_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
         account.account_id,
@@ -2532,12 +2568,25 @@ async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_r
     )
     .unwrap();
     let mut link_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut link_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
     append_mapi_utf16_property(&mut link_values, PID_TAG_SUBJECT_W, "Project Inbox");
     append_mapi_binary_property(&mut link_values, PID_TAG_WLINK_ENTRY_ID, &inbox_entry_id);
     append_mapi_i32_property(&mut link_values, PID_TAG_WLINK_TYPE, 0);
+    append_mapi_i32_property(&mut link_values, 0x684A_0003, 0);
+    append_mapi_i32_property(&mut link_values, 0x6847_0003, 1_537_819_608);
+    append_mapi_i32_property(&mut link_values, 0x6852_0003, 1);
     append_mapi_binary_property(&mut link_values, PID_TAG_WLINK_ORDINAL, &[0x91]);
-    append_mapi_guid_property(&mut link_values, PID_TAG_WLINK_GROUP_CLSID, group_id);
+    append_mapi_binary_property(&mut link_values, PID_TAG_WLINK_GROUP_CLSID, &group_id);
     append_mapi_utf16_property(&mut link_values, PID_TAG_WLINK_GROUP_NAME_W, "Projects");
+    append_mapi_binary_property(
+        &mut link_values,
+        0x684F_0102, // PidTagWlinkFolderType (PtypBinary).
+        &mail_folder_type,
+    );
 
     let mut rops = Vec::new();
     append_rop_create_associated_message(
@@ -2546,7 +2595,7 @@ async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_r
         1,
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
     );
-    append_rop_set_properties(&mut rops, 1, 4, &group_values);
+    append_rop_set_properties(&mut rops, 1, 9, &group_values);
     rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x01, 0x00]);
     append_rop_create_associated_message(
         &mut rops,
@@ -2554,7 +2603,7 @@ async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_r
         2,
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
     );
-    append_rop_set_properties(&mut rops, 2, 6, &link_values);
+    append_rop_set_properties(&mut rops, 2, 11, &link_values);
     rops.extend_from_slice(&[0x0C, 0x00, 0x02, 0x02, 0x00]);
 
     let response = service
@@ -2567,6 +2616,15 @@ async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_r
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]),
+        "group-header Save failed: {response_rops:02x?}"
+    );
+    assert!(
+        contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]),
+        "shortcut Save failed: {response_rops:02x?}"
+    );
     let stored = shortcuts.lock().unwrap().clone();
     let group = stored
         .iter()
@@ -2598,14 +2656,14 @@ async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_r
 }
 
 #[tokio::test]
-async fn mapi_over_http_microsoft_oxocfg_navigation_shortcut_examples_round_trip() {
+async fn mapi_over_http_microsoft_oxocfg_same_target_wlinks_round_trip_distinctly() {
     let account = FakeStore::account();
-    let superseded_calendar_shortcut_id = Uuid::from_u128(0xd49ca8a0_dc7c_469f_8c82_4ec37f03bdf8);
+    let existing_calendar_shortcut_id = Uuid::from_u128(0xd49ca8a0_dc7c_469f_8c82_4ec37f03bdf8);
     let store = FakeStore {
         session: Some(account.clone()),
         navigation_shortcuts: Arc::new(Mutex::new(vec![
             crate::store::MapiNavigationShortcutRecord {
-                id: superseded_calendar_shortcut_id,
+                id: existing_calendar_shortcut_id,
                 account_id: account.account_id,
                 subject: "Calendar".to_string(),
                 target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
@@ -2613,9 +2671,10 @@ async fn mapi_over_http_microsoft_oxocfg_navigation_shortcut_examples_round_trip
                 flags: 0x0010_0000,
                 save_stamp: 0x4f30_48f7,
                 section: 3,
-                ordinal: 127,
+                ordinal: vec![127],
                 group_header_id: Some(Uuid::from_u128(0xb7f00600_0000_0000_c000_000000000046)),
                 group_name: "My Calendars".to_string(),
+                client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
             },
         ])),
         ..Default::default()
@@ -2659,12 +2718,12 @@ async fn mapi_over_http_microsoft_oxocfg_navigation_shortcut_examples_round_trip
         "IPM.Microsoft.WunderBar.Link",
     );
     append_mapi_utf16_property(&mut group_values, 0x0E1D_001F, "My Work Calendars");
-    append_mapi_guid_property(&mut group_values, PID_TAG_WLINK_GROUP_HEADER_ID, group_id);
+    append_mapi_binary_property(&mut group_values, PID_TAG_WLINK_GROUP_HEADER_ID, &group_id);
     append_mapi_i32_property(&mut group_values, 0x6847_0003, 0x1234_5678);
     append_mapi_i32_property(&mut group_values, PID_TAG_WLINK_TYPE, 4);
     append_mapi_i32_property(&mut group_values, 0x684A_0003, 0);
     append_mapi_binary_property(&mut group_values, PID_TAG_WLINK_ORDINAL, &[0x80]);
-    append_mapi_guid_property(&mut group_values, 0x684F_0048, calendar_folder_type);
+    append_mapi_binary_property(&mut group_values, 0x684F_0102, &calendar_folder_type);
     append_mapi_i32_property(&mut group_values, 0x6852_0003, 3);
 
     let mut link_values = Vec::new();
@@ -2681,8 +2740,8 @@ async fn mapi_over_http_microsoft_oxocfg_navigation_shortcut_examples_round_trip
     append_mapi_binary_property(&mut link_values, PID_TAG_WLINK_ENTRY_ID, &calendar_entry_id);
     append_mapi_binary_property(&mut link_values, 0x684D_0102, &calendar_record_key);
     append_mapi_binary_property(&mut link_values, 0x684E_0102, &store_entry_id);
-    append_mapi_guid_property(&mut link_values, 0x684F_0048, calendar_folder_type);
-    append_mapi_guid_property(&mut link_values, PID_TAG_WLINK_GROUP_CLSID, group_id);
+    append_mapi_binary_property(&mut link_values, 0x684F_0102, &calendar_folder_type);
+    append_mapi_binary_property(&mut link_values, PID_TAG_WLINK_GROUP_CLSID, &group_id);
     append_mapi_utf16_property(
         &mut link_values,
         PID_TAG_WLINK_GROUP_NAME_W,
@@ -2732,27 +2791,31 @@ async fn mapi_over_http_microsoft_oxocfg_navigation_shortcut_examples_round_trip
         .find(|shortcut| shortcut.shortcut_type == 0 && shortcut.subject == "Meetings")
         .expect("MS-OXOCFG navigation shortcut");
     assert_ne!(
-        link.id, superseded_calendar_shortcut_id,
-        "RopCreateMessage must not return the MID of the Common Views row already read by Outlook"
+        link.id, existing_calendar_shortcut_id,
+        "[MS-OXCMSG] sections 2.2.3.2 and 2.2.3.3 require the newly created Message object to retain a distinct identity"
     );
+    let same_target_links = stored
+        .iter()
+        .filter(|shortcut| {
+            shortcut.target_folder_id == Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+                && shortcut.shortcut_type == 0
+                && shortcut.section == 3
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        stored
-            .iter()
-            .filter(|shortcut| {
-                shortcut.target_folder_id == Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
-                    && shortcut.shortcut_type == 0
-                    && shortcut.section == 3
-            })
-            .count(),
-        1,
-        "the new Calendar shortcut supersedes the old logical WLink"
+        same_target_links.len(),
+        2,
+        "[MS-OXOCFG] sections 2.2.9 and 4.4.2 describe WLinks as distinct Common Views FAI Message objects, not a target-keyed set"
     );
+    assert!(same_target_links
+        .iter()
+        .any(|shortcut| shortcut.id == existing_calendar_shortcut_id));
 
     assert_eq!(group.group_header_id, Some(Uuid::from_bytes(group_id)));
     assert_eq!(group.save_stamp, 0x1234_5678);
     assert_eq!(group.flags, 0);
     assert_eq!(group.section, 3);
-    assert_eq!(group.ordinal, 0x80);
+    assert_eq!(group.ordinal, vec![0x80]);
     assert_eq!(group.target_folder_id, None);
     assert_eq!(
         link.target_folder_id,
@@ -2763,7 +2826,7 @@ async fn mapi_over_http_microsoft_oxocfg_navigation_shortcut_examples_round_trip
     assert_eq!(link.save_stamp, 0x1234_5678);
     assert_eq!(link.flags, 0);
     assert_eq!(link.section, 3);
-    assert_eq!(link.ordinal, 0x80);
+    assert_eq!(link.ordinal, vec![0x80]);
 
     let snapshot =
         crate::mapi_store::MapiMailStoreSnapshot::empty().with_navigation_shortcuts(stored);
@@ -2776,6 +2839,23 @@ async fn mapi_over_http_microsoft_oxocfg_navigation_shortcut_examples_round_trip
             && shortcut.subject == "Meetings"
             && shortcut.group_header_id == Some(Uuid::from_bytes(group_id))
     }));
+    let reloaded_same_target_links = reloaded
+        .iter()
+        .filter(|shortcut| {
+            shortcut.target_folder_id == Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+                && shortcut.shortcut_type == 0
+                && shortcut.section == 3
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(reloaded_same_target_links.len(), 2);
+    assert_ne!(
+        reloaded_same_target_links[0].canonical_id,
+        reloaded_same_target_links[1].canonical_id
+    );
+    assert_ne!(
+        reloaded_same_target_links[0].id,
+        reloaded_same_target_links[1].id
+    );
 }
 
 #[tokio::test]

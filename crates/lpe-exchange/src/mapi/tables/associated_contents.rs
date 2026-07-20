@@ -3,7 +3,6 @@ use super::*;
 #[derive(Clone)]
 pub(super) enum AssociatedTableRow {
     Config(MapiAssociatedConfigMessage),
-    NamedView(MapiCommonViewNamedViewMessage),
 }
 
 pub(in crate::mapi) fn serialize_navigation_shortcut_row(
@@ -136,7 +135,6 @@ pub(super) fn has_associated_table_rows(folder_id: u64, snapshot: &MapiMailStore
     !snapshot
         .associated_config_messages_for_folder(folder_id)
         .is_empty()
-        || default_folder_associated_named_view(snapshot, folder_id).is_some()
 }
 
 pub(super) fn should_use_associated_config_table(
@@ -153,7 +151,7 @@ pub(super) fn associated_table_rows(
     restriction: Option<&MapiRestriction>,
     _mailbox_guid: Uuid,
 ) -> Vec<AssociatedTableRow> {
-    let mut rows = snapshot
+    snapshot
         .associated_config_messages_for_folder(folder_id)
         .into_iter()
         .filter(|message| {
@@ -161,52 +159,15 @@ pub(super) fn associated_table_rows(
                 && associated_config_visible_in_table(folder_id, restriction, message)
         })
         .map(AssociatedTableRow::Config)
-        .collect::<Vec<_>>();
-    if let Some(message) = default_folder_associated_named_view(snapshot, folder_id) {
-        if restriction_matches_common_view_named_view(restriction, &message, _mailbox_guid) {
-            rows.push(AssociatedTableRow::NamedView(message));
-        }
-    }
-    rows
-}
-
-fn default_folder_associated_named_view(
-    snapshot: &MapiMailStoreSnapshot,
-    folder_id: u64,
-) -> Option<MapiCommonViewNamedViewMessage> {
-    let container_class = snapshot
-        .collaboration_folder_for_id(folder_id)
-        .map(|folder| collaboration_folder_message_class(folder.kind))
-        .or_else(|| {
-            let (_, _, container_class, _) = special_folder_metadata(folder_id);
-            (!container_class.is_empty()).then_some(container_class)
-        })?;
-    if !default_view_supported_folder(folder_id, container_class)
-        || default_common_views_named_view_id(container_class, folder_id).is_some()
-    {
-        None
-    } else {
-        snapshot.default_folder_named_view_message(
-            folder_id,
-            crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
-        )
-    }
+        .collect()
 }
 
 pub(in crate::mapi) fn associated_config_visible_in_table(
-    folder_id: u64,
+    _folder_id: u64,
     _restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
-    !(folder_id == INBOX_FOLDER_ID && is_inbox_folder_design_default_named_view(message))
-        && !crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
-}
-
-fn is_inbox_folder_design_default_named_view(message: &MapiAssociatedConfigMessage) -> bool {
-    message
-        .message_class
-        .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
-        && message.subject.eq_ignore_ascii_case("Compact")
+    !crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
 }
 
 #[cfg(test)]
@@ -261,9 +222,6 @@ pub(super) fn associated_table_row_property_value(
         AssociatedTableRow::Config(message) => {
             associated_config_property_value_with_mailbox_guid(message, mailbox_guid, property_tag)
         }
-        AssociatedTableRow::NamedView(message) => {
-            common_view_named_view_property_value(message, mailbox_guid, property_tag)
-        }
     }
 }
 
@@ -276,9 +234,6 @@ pub(super) fn associated_table_row_matches(
         AssociatedTableRow::Config(message) => {
             restriction_matches_associated_config(restriction, message)
         }
-        AssociatedTableRow::NamedView(message) => {
-            restriction_matches_common_view_named_view(restriction, message, _mailbox_guid)
-        }
     }
 }
 
@@ -287,14 +242,12 @@ pub(super) fn associated_table_row_config(
 ) -> Option<&MapiAssociatedConfigMessage> {
     match message {
         AssociatedTableRow::Config(message) => Some(message),
-        AssociatedTableRow::NamedView(_) => None,
     }
 }
 
 pub(super) fn associated_table_row_id(message: &AssociatedTableRow) -> u64 {
     match message {
         AssociatedTableRow::Config(message) => message.id,
-        AssociatedTableRow::NamedView(message) => message.id,
     }
 }
 
@@ -319,6 +272,9 @@ pub(in crate::mapi) fn restriction_matches_common_views_message(
                 )
             })
         }
+        MapiCommonViewsMessage::AssociatedConfig(message) => {
+            restriction_matches_associated_config(restriction, message)
+        }
     }
 }
 
@@ -337,6 +293,9 @@ pub(super) fn common_views_message_property_value(
         MapiCommonViewsMessage::SearchFolderDefinition(message) => {
             search_folder_definition_message_property_value(message, mailbox_guid, property_tag)
         }
+        MapiCommonViewsMessage::AssociatedConfig(message) => {
+            associated_config_property_value_with_mailbox_guid(message, mailbox_guid, property_tag)
+        }
     }
 }
 
@@ -354,6 +313,13 @@ fn common_views_message_property_value_for_principal(
         }
         MapiCommonViewsMessage::SearchFolderDefinition(message) => {
             search_folder_definition_message_property_value(
+                message,
+                principal.account_id,
+                property_tag,
+            )
+        }
+        MapiCommonViewsMessage::AssociatedConfig(message) => {
+            associated_config_property_value_with_mailbox_guid(
                 message,
                 principal.account_id,
                 property_tag,
@@ -647,20 +613,6 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 {
                     Some(MapiValue::String("text/xml".to_string()))
                 }
-                PID_TAG_ROAMING_DATATYPES if is_outlook_contacts_helper_config(message) => {
-                    Some(MapiValue::U32(0))
-                }
-                0x685D_0003 if is_outlook_contacts_helper_config(message) => {
-                    Some(MapiValue::U32(outlook_configuration_stamp(message)))
-                }
-                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                    if is_outlook_contacts_helper_config(message) =>
-                {
-                    Some(MapiValue::Binary(Vec::new()))
-                }
-                tag if is_outlook_contacts_helper_config(message) => {
-                    outlook_contact_link_empty_property_value(tag)
-                }
                 PID_TAG_VIEW_DESCRIPTOR_FLAGS
                     if message.message_class
                         == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
@@ -858,32 +810,6 @@ fn is_outlook_virtual_sharing_state_config(message: &MapiAssociatedConfigMessage
         message.message_class.as_str(),
         "IPM.Aggregation" | "IPM.Sharing.Configuration" | "IPM.Sharing.Index"
     )
-}
-
-fn is_outlook_contacts_helper_config(message: &MapiAssociatedConfigMessage) -> bool {
-    matches!(
-        message.message_class.as_str(),
-        "IPM.Microsoft.ContactLink.TimeStamp" | "IPM.Microsoft.OSC.ContactSync"
-    )
-}
-
-fn outlook_contact_link_empty_property_value(property_tag: u32) -> Option<MapiValue> {
-    let tag = MapiPropertyTag::new(property_tag);
-    let property_id = u32::from(tag.property_id());
-    if !matches!(property_id, 0x8450 | 0x80E1 | 0x80EA | 0x80EC | 0x80ED) {
-        return None;
-    }
-    match tag.property_type_code() {
-        0x0003 => Some(MapiValue::U32(0)),
-        0x000B => Some(MapiValue::Bool(false)),
-        0x0040 => Some(MapiValue::I64(0)),
-        0x001E | 0x001F => Some(MapiValue::String(String::new())),
-        0x0102 => Some(MapiValue::Binary(Vec::new())),
-        0x1003 => Some(MapiValue::MultiI32(Vec::new())),
-        0x101E | 0x101F => Some(MapiValue::MultiString(Vec::new())),
-        0x1102 => Some(MapiValue::MultiBinary(Vec::new())),
-        _ => None,
-    }
 }
 
 fn configuration_roaming_datatypes(

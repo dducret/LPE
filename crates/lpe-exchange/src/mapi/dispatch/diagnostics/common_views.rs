@@ -27,7 +27,7 @@ pub(in crate::mapi::dispatch) fn common_views_saved_shortcut_summary(
         shortcut.subject,
         shortcut.shortcut_type,
         shortcut.section,
-        shortcut.ordinal,
+        bytes_to_hex(&shortcut.ordinal),
         shortcut
             .target_folder_id
             .map(|folder_id| format!("0x{folder_id:016x}"))
@@ -202,29 +202,14 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
     let expected_common_views_id = common_views_default_id
         .unwrap_or(crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID);
     if associated && folder_id == COMMON_VIEWS_FOLDER_ID {
-        let view = snapshot.common_view_named_view_message_for_id(expected_common_views_id);
-        let descriptor_summary = view
-            .as_ref()
-            .map(|message| {
-                let definition = outlook_folder_view_definition(message.folder_id, &message.name);
-                let descriptor = view_descriptor_binary(&definition);
-                format_view_descriptor_binary_summary(&descriptor)
-            })
-            .unwrap_or_default();
-        let selected_view_name = view
-            .as_ref()
-            .map(|message| message.name.as_str())
-            .unwrap_or("");
         return format!(
             "folder_local_default_supported=false;\
              folder_local_default_visible_in_fai_table=false;\
              associated_navigation_table=true;\
-             advertised_default_view_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x};\
-             selected_view_name={selected_view_name};\
-             expected_view_message_id=0x{expected_common_views_id:016x};\
+             persisted_default_view_selected=false;\
              selected_property_tag_count={};\
              descriptor_comparison=not_applicable_common_views_associated_table;\
-             descriptor_summary={descriptor_summary}",
+             descriptor_summary=",
             columns.len()
         );
     }
@@ -253,6 +238,17 @@ pub(in crate::mapi::dispatch) fn format_outlook_view_handoff_table_contract(
             debug_default_folder_associated_named_view(snapshot, folder_id),
         )
     };
+    if view.is_none() {
+        return format!(
+            "default_view_supported={default_view_supported};\
+             folder_local_default_supported=false;\
+             folder_local_default_visible_in_fai_table=false;\
+             persisted_default_view_selected=false;\
+             selected_property_tag_count={};\
+             descriptor_summary=",
+            columns.len()
+        );
+    }
     let folder_local_default_view = if folder_id == COMMON_VIEWS_FOLDER_ID {
         None
     } else {
@@ -877,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn common_views_table_contract_reports_common_views_named_view() {
+    fn common_views_table_contract_reports_no_unpersisted_named_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let summary = format_outlook_view_handoff_table_contract(
             COMMON_VIEWS_FOLDER_ID,
@@ -887,18 +883,18 @@ mod tests {
         );
 
         assert!(summary.contains("folder_local_default_supported=false"));
-        assert!(summary.contains("advertised_default_view_folder_id=0x0000000000090001"));
-        assert!(summary.contains("expected_view_message_id=0x7ffffffffff70001"));
         assert!(summary.contains("associated_navigation_table=true"));
+        assert!(summary.contains("persisted_default_view_selected=false"));
         assert!(
             summary.contains("descriptor_comparison=not_applicable_common_views_associated_table")
         );
-        assert!(summary.contains("descriptor_summary=version=8"));
+        assert!(summary.contains("descriptor_summary="));
+        assert!(!summary.contains("descriptor_summary=version=8"));
         assert!(!summary.contains("selected_missing_descriptor_columns="));
     }
 
     #[test]
-    fn default_view_table_compatibility_reports_visible_inbox_contract() {
+    fn default_view_table_compatibility_reports_missing_unpersisted_inbox_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let columns = [
             PID_TAG_IMPORTANCE,
@@ -931,20 +927,11 @@ mod tests {
             &snapshot,
         );
 
-        assert!(summary.contains("view_folder=0x0000000000050001"));
-        assert!(summary.contains("view_name=Compact"));
-        assert!(summary.contains("descriptor_columns_missing_from_table="));
-        assert!(summary.contains("descriptor_sort_tag=0x0e060040"));
-        assert!(summary.contains("descriptor_sort_order=0x01"));
-        assert!(summary.contains("table_primary_sort_tag=0x0e060040"));
-        assert!(summary.contains("table_primary_sort_order=0x01"));
-        assert!(summary.contains("table_sort_matches_descriptor=true"));
-        assert!(summary.contains("table_sort_direction_matches_descriptor=true"));
-        assert!(summary.contains("table_restriction_present=true"));
+        assert_eq!(summary, "default_view=missing");
     }
 
     #[test]
-    fn default_view_table_compatibility_reports_visible_inbox_sort_direction_mismatch() {
+    fn default_view_table_compatibility_does_not_compare_unpersisted_inbox_view() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let columns = [
             PID_TAG_IMPORTANCE,
@@ -972,11 +959,6 @@ mod tests {
             &snapshot,
         );
 
-        assert!(summary.contains("descriptor_sort_tag=0x0e060040"));
-        assert!(summary.contains("descriptor_sort_order=0x01"));
-        assert!(summary.contains("table_primary_sort_tag=0x0e060040"));
-        assert!(summary.contains("table_primary_sort_order=0x00"));
-        assert!(summary.contains("table_sort_matches_descriptor=false"));
-        assert!(summary.contains("table_sort_direction_matches_descriptor=false"));
+        assert_eq!(summary, "default_view=missing");
     }
 }

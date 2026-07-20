@@ -596,7 +596,7 @@ fn advertised_special_mailbox_roles_have_reserved_mapi_counters() {
 }
 
 #[test]
-fn inbox_associated_configs_do_not_emit_synthetic_defaults() {
+fn inbox_associated_configs_do_not_emit_unpersisted_defaults() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let messages =
         snapshot.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
@@ -686,24 +686,20 @@ fn inbox_associated_configs_do_not_emit_synthetic_defaults() {
 
     let persisted_messages =
         persisted.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
+    let mut persisted_subjects = persisted_messages
+        .iter()
+        .filter(|message| message.message_class == OUTLOOK_INBOX_EAS_CONFIG_CLASS)
+        .map(|message| message.subject.as_str())
+        .collect::<Vec<_>>();
+    persisted_subjects.sort_unstable();
     assert_eq!(
-        persisted_messages
-            .iter()
-            .filter(|message| message.message_class == OUTLOOK_INBOX_EAS_CONFIG_CLASS)
-            .count(),
-        1
-    );
-    assert_eq!(
-        persisted_messages
-            .iter()
-            .find(|message| message.message_class == OUTLOOK_INBOX_EAS_CONFIG_CLASS)
-            .map(|message| message.subject.as_str()),
-        Some("Client EAS config")
+        persisted_subjects,
+        vec!["Client EAS config", "Duplicate EAS config"]
     );
 }
 
 #[test]
-fn empty_inbox_compact_named_view_placeholder_is_suppressed() {
+fn empty_persisted_inbox_compact_named_view_remains_canonical() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let stale_id = Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000077);
     crate::mapi::identity::remember_mapi_identity(
@@ -725,15 +721,27 @@ fn empty_inbox_compact_named_view_placeholder_is_suppressed() {
 
     let messages =
         snapshot.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
-    assert!(messages
+    let message = messages
         .iter()
-        .all(|message| { message.message_class != OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS }));
-    assert!(!snapshot.associated_config_identity_matches_folder(
+        .find(|message| message.message_class == OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
+        .expect("persisted Compact named-view FAI");
+    assert_eq!(message.canonical_id, stale_id);
+    assert_eq!(message.subject, "Compact");
+    assert_eq!(message.properties_json, serde_json::json!({}));
+    assert!(snapshot.associated_config_identity_matches_folder(
         crate::mapi::identity::INBOX_FOLDER_ID,
         crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 77,
         )
     ));
+    assert_eq!(
+        snapshot
+            .associated_config_message_for_id(crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 77,
+            ))
+            .map(|message| message.canonical_id),
+        Some(stale_id)
+    );
 }
 
 #[test]
@@ -1025,94 +1033,90 @@ fn quick_step_settings_do_not_invent_custom_action_state() {
 }
 
 #[test]
-fn contacts_include_default_osc_contact_sync_without_duplicate() {
+fn empty_contact_folders_expose_no_synthetic_associated_config() {
+    // [MS-OXCMSG] section 1.3.2 requires FAI messages to be persisted like
+    // Message objects. [MS-OXOCFG] section 3.1.4.1 requires the client to use
+    // defaults when no matching configuration message exists.
     let snapshot = MapiMailStoreSnapshot::empty();
 
-    for (folder_id, sync_message_id, timestamp_message_id) in [(
+    for folder_id in [
         crate::mapi::identity::CONTACTS_FOLDER_ID,
-        OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID,
-        OUTLOOK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
-    )] {
-        let messages = snapshot.associated_config_messages_for_folder(folder_id);
-        assert_eq!(
-            messages
-                .iter()
-                .filter(|message| message.message_class == OUTLOOK_CONTACT_SYNC_CONFIG_CLASS)
-                .count(),
-            1
-        );
-        assert_eq!(
-            messages
-                .iter()
-                .filter(|message| {
-                    message.message_class == OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS
-                })
-                .count(),
-            1
-        );
-        assert_eq!(
-            snapshot
-                .associated_config_message_for_id(sync_message_id)
-                .map(|message| message.message_class),
-            Some(OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string())
-        );
-        assert_eq!(
-            snapshot
-                .associated_config_message_for_id(timestamp_message_id)
-                .map(|message| message.message_class),
-            Some(OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string())
-        );
-        assert_eq!(
-            snapshot
-                .associated_config_message_for_folder_and_source_key_id(
-                    folder_id,
-                    timestamp_message_id
-                )
-                .map(|message| message.message_class),
-            Some(OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string())
-        );
-        assert!(snapshot.associated_config_identity_matches_folder(folder_id, sync_message_id));
-        assert!(snapshot.associated_config_identity_matches_folder(folder_id, timestamp_message_id));
-        assert!(!snapshot.associated_config_identity_matches_folder(
-            crate::mapi::identity::INBOX_FOLDER_ID,
-            timestamp_message_id
-        ));
+        crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+        crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
+        crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
+    ] {
+        assert!(snapshot
+            .associated_config_messages_for_folder(folder_id)
+            .is_empty());
     }
+}
 
-    let messages = snapshot
-        .associated_config_messages_for_folder(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID);
+#[test]
+fn contacts_project_exactly_the_persisted_contact_link_fai() {
+    let account_id = Uuid::from_u128(0xea339446_27b9_4a9c_b0de_873f03a35376);
+    let canonical_id = Uuid::from_u128(0xaabbccdd_0000_0000_0000_000000000201);
+    let object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 0x201,
+    );
+    let change_number = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 0x301;
+    let source_key = crate::mapi::identity::source_key_for_object_id(object_id);
+    crate::mapi::identity::remember_mapi_identity_with_source_key(
+        canonical_id,
+        object_id,
+        Some(source_key.clone()),
+    );
+    let snapshot = MapiMailStoreSnapshot::empty()
+        .with_associated_configs(vec![crate::store::MapiAssociatedConfigRecord {
+            id: canonical_id,
+            account_id,
+            folder_id: crate::mapi::identity::CONTACTS_FOLDER_ID,
+            message_class: "IPM.Microsoft.ContactLink.TimeStamp".to_string(),
+            subject: "IPM.Microsoft.ContactLink.TimeStamp".to_string(),
+            properties_json: serde_json::json!({
+                "0x3001001f": {"type": "string", "value": "Outlook persisted timestamp"},
+                "0x80ec001f": {"type": "string", "value": "2026-07-19T14:00:00Z"}
+            }),
+        }])
+        .with_associated_config_identity_ids(vec![MapiAssociatedConfigIdentity {
+            record: crate::store::MapiIdentityRecord {
+                object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                canonical_id,
+                object_id,
+                change_number,
+                source_key: source_key.clone(),
+                change_key: crate::mapi_mailstore::change_key_for_change_number(change_number),
+                predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(
+                    change_number,
+                ),
+                last_modification_time: crate::mapi_mailstore::filetime_from_change_number(
+                    change_number,
+                ),
+            },
+        }]);
+
+    let messages =
+        snapshot.associated_config_messages_for_folder(crate::mapi::identity::CONTACTS_FOLDER_ID);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].id, object_id);
+    assert_eq!(messages[0].canonical_id, canonical_id);
     assert_eq!(
-        messages
-            .iter()
-            .filter(|message| message.message_class == OUTLOOK_CONTACT_SYNC_CONFIG_CLASS)
-            .count(),
-        0
+        associated_config_source_key(&messages[0].properties_json),
+        Some(source_key)
     );
     assert_eq!(
-        messages
-            .iter()
-            .filter(|message| {
-                message.message_class == OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS
-            })
-            .count(),
-        1
+        messages[0].properties_json["0x80ec001f"]["value"],
+        "2026-07-19T14:00:00Z"
     );
     assert_eq!(
         snapshot
-            .associated_config_message_for_id(OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID)
-            .map(|message| message.message_class),
-        None
-    );
-    assert_eq!(
-        snapshot
-            .associated_config_message_for_id(OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID)
-            .map(|message| message.message_class),
-        Some(OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string())
+            .associated_config_message_for_id(object_id)
+            .map(|message| message.canonical_id),
+        Some(canonical_id)
     );
 }
 
 #[test]
-fn dynamic_contact_folder_includes_default_osc_contact_sync() {
+fn dynamic_contact_folder_exposes_only_persisted_associated_config() {
     let folder_id = crate::mapi::identity::mapi_store_id(0x4e);
     let collection = CollaborationCollection {
         id: "outlook-log-dynamic-contacts".to_string(),
@@ -1149,59 +1153,13 @@ fn dynamic_contact_folder_includes_default_osc_contact_sync() {
         Vec::new(),
         Vec::new(),
     );
-    let message_id = outlook_dynamic_contact_sync_config_id(folder_id).unwrap();
-    let timestamp_message_id = outlook_dynamic_contact_link_timestamp_config_id(folder_id).unwrap();
     let messages = snapshot.associated_config_messages_for_folder(folder_id);
 
-    assert_eq!(
-        messages
-            .iter()
-            .filter(|message| message.message_class == OUTLOOK_CONTACT_SYNC_CONFIG_CLASS)
-            .count(),
-        1
-    );
-    assert_eq!(
-        messages
-            .iter()
-            .filter(|message| message.message_class == OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS)
-            .count(),
-        1
-    );
-    assert_eq!(
-        snapshot
-            .associated_config_message_for_id(message_id)
-            .map(|message| (message.folder_id, message.message_class)),
-        Some((folder_id, OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string()))
-    );
-    assert_eq!(
-        snapshot
-            .associated_config_message_for_id(timestamp_message_id)
-            .map(|message| (message.folder_id, message.message_class)),
-        Some((
-            folder_id,
-            OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string()
-        ))
-    );
-    assert_eq!(
-        snapshot
-            .associated_config_message_for_folder_and_source_key_id(folder_id, message_id)
-            .map(|message| message.message_class),
-        Some(OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string())
-    );
-    assert!(snapshot.associated_config_identity_matches_folder(folder_id, message_id));
-    assert!(snapshot.associated_config_identity_matches_folder(folder_id, timestamp_message_id));
-    assert!(!snapshot.associated_config_identity_matches_folder(
-        crate::mapi::identity::INBOX_FOLDER_ID,
-        timestamp_message_id
-    ));
-    assert!(is_outlook_contact_default_associated_config_id(message_id));
-    assert!(is_outlook_contact_default_associated_config_id(
-        timestamp_message_id
-    ));
+    assert!(messages.is_empty());
 }
 
 #[test]
-fn mailbox_backed_contact_folder_includes_default_osc_contact_sync() {
+fn mailbox_backed_contact_folder_does_not_invent_osc_contact_sync() {
     let folder_id = crate::mapi::identity::mapi_store_id(0x55);
     let mailbox_id = Uuid::parse_str("aaaaaaaa-7777-4111-8111-aaaaaaaaaaaa").unwrap();
     crate::mapi::identity::remember_mapi_identity(mailbox_id, folder_id);
@@ -1228,27 +1186,13 @@ fn mailbox_backed_contact_folder_includes_default_osc_contact_sync() {
         Vec::new(),
         Vec::new(),
     );
-    let message_id = outlook_dynamic_contact_sync_config_id(folder_id).unwrap();
     let messages = snapshot.associated_config_messages_for_folder(folder_id);
 
-    assert_eq!(
-        messages
-            .iter()
-            .filter(|message| message.message_class == OUTLOOK_CONTACT_SYNC_CONFIG_CLASS)
-            .count(),
-        1
-    );
-    assert_eq!(
-        snapshot
-            .associated_config_message_for_id(message_id)
-            .map(|message| (message.folder_id, message.message_class)),
-        Some((folder_id, OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string()))
-    );
-    assert!(snapshot.associated_config_identity_matches_folder(folder_id, message_id));
+    assert!(messages.is_empty());
 }
 
 #[test]
-fn mailbox_backed_suggested_contacts_includes_default_osc_contact_sync() {
+fn mailbox_backed_suggested_contacts_does_not_invent_osc_contact_sync() {
     let folder_id = crate::mapi::identity::mapi_store_id(0x54);
     let mailbox_id = Uuid::parse_str("aaaaaaaa-7777-4111-8111-aaaaaaaaaaab").unwrap();
     crate::mapi::identity::remember_mapi_identity(mailbox_id, folder_id);
@@ -1275,15 +1219,9 @@ fn mailbox_backed_suggested_contacts_includes_default_osc_contact_sync() {
         Vec::new(),
         Vec::new(),
     );
-    let message_id = outlook_dynamic_contact_sync_config_id(folder_id).unwrap();
-
-    assert_eq!(
-        snapshot
-            .associated_config_message_for_id(message_id)
-            .map(|message| (message.folder_id, message.message_class)),
-        Some((folder_id, OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string()))
-    );
-    assert!(snapshot.associated_config_identity_matches_folder(folder_id, message_id));
+    assert!(snapshot
+        .associated_config_messages_for_folder(folder_id)
+        .is_empty());
 }
 
 #[test]
@@ -1293,8 +1231,16 @@ fn associated_config_identity_only_placeholder_does_not_open_without_backing_mes
     );
     let snapshot = MapiMailStoreSnapshot::empty().with_associated_config_identity_ids(vec![
         MapiAssociatedConfigIdentity {
-            canonical_id: Uuid::from_u128(0xaabbccdd_0000_0000_0000_000000000001),
-            object_id,
+            record: crate::store::MapiIdentityRecord {
+                object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                canonical_id: Uuid::from_u128(0xaabbccdd_0000_0000_0000_000000000001),
+                object_id,
+                change_number: 901,
+                source_key: crate::mapi::identity::source_key_for_object_id(object_id),
+                change_key: crate::mapi_mailstore::change_key_for_change_number(901),
+                predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(901),
+                last_modification_time: crate::mapi_mailstore::filetime_from_change_number(901),
+            },
         },
     ]);
 
@@ -1309,6 +1255,81 @@ fn associated_config_identity_only_placeholder_does_not_open_without_backing_mes
 }
 
 #[test]
+fn distinct_associated_fai_with_same_class_and_subject_survive_snapshot_projection() {
+    // [MS-OXCFOLD] section 2.2.1.14: the associated contents table contains
+    // Message objects, so class/subject equality is not message identity.
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let folder_id = crate::mapi::identity::COMMON_VIEWS_FOLDER_ID;
+    let first_canonical_id = Uuid::from_u128(0xaabbccdd_0000_0000_0000_000000000101);
+    let second_canonical_id = Uuid::from_u128(0xaabbccdd_0000_0000_0000_000000000102);
+    let first_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 0x101,
+    );
+    let second_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 0x102,
+    );
+    crate::mapi::identity::remember_mapi_identity(first_canonical_id, first_object_id);
+    crate::mapi::identity::remember_mapi_identity(second_canonical_id, second_object_id);
+    let identity = |canonical_id, object_id, change_number| {
+        let change_key = crate::mapi_mailstore::change_key_for_change_number(change_number);
+        MapiAssociatedConfigIdentity {
+            record: crate::store::MapiIdentityRecord {
+                object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                canonical_id,
+                object_id,
+                change_number,
+                source_key: crate::mapi::identity::source_key_for_object_id(object_id),
+                predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(
+                    change_number,
+                ),
+                change_key,
+                last_modification_time: crate::mapi_mailstore::filetime_from_change_number(
+                    change_number,
+                ),
+            },
+        }
+    };
+    let config = |id| crate::store::MapiAssociatedConfigRecord {
+        id,
+        account_id,
+        folder_id,
+        message_class: "IPM.Configuration.CommonViews".to_string(),
+        subject: "Same logical-looking FAI".to_string(),
+        properties_json: serde_json::json!({
+            "0x7c060003": {"type": "u32", "value": 4},
+            "0x65e2001f": {"type": "string", "value": "stale parallel ChangeKey"}
+        }),
+    };
+    let snapshot = MapiMailStoreSnapshot::empty()
+        .with_associated_configs(vec![
+            config(first_canonical_id),
+            config(second_canonical_id),
+        ])
+        .with_associated_config_identity_ids(vec![
+            identity(first_canonical_id, first_object_id, 0x201),
+            identity(second_canonical_id, second_object_id, 0x202),
+        ]);
+
+    let messages = snapshot.associated_config_messages_for_folder(folder_id);
+    assert_eq!(messages.len(), 2);
+    assert_eq!(
+        messages
+            .iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>(),
+        vec![first_object_id, second_object_id]
+    );
+    assert_ne!(
+        associated_config_source_key(&messages[0].properties_json),
+        associated_config_source_key(&messages[1].properties_json)
+    );
+    assert!(messages.iter().all(|message| {
+        message.properties_json.get("0x65e2001f").is_none()
+            && message.properties_json.get("0x65e20102").is_some()
+    }));
+}
+
+#[test]
 fn modeled_virtual_associated_config_identity_opens_via_dynamic_id() {
     let object_id = crate::mapi::identity::mapi_store_id(
         crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 902,
@@ -1318,8 +1339,16 @@ fn modeled_virtual_associated_config_identity_opens_via_dynamic_id() {
     crate::mapi::identity::remember_mapi_identity(canonical_id, object_id);
     let snapshot = MapiMailStoreSnapshot::empty()
         .with_associated_config_identity_ids(vec![MapiAssociatedConfigIdentity {
-            canonical_id,
-            object_id,
+            record: crate::store::MapiIdentityRecord {
+                object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                canonical_id,
+                object_id,
+                change_number: 902,
+                source_key: crate::mapi::identity::source_key_for_object_id(object_id),
+                change_key: crate::mapi_mailstore::change_key_for_change_number(902),
+                predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(902),
+                last_modification_time: crate::mapi_mailstore::filetime_from_change_number(902),
+            },
         }])
         .with_associated_configs(vec![crate::store::MapiAssociatedConfigRecord {
             id: canonical_id,
@@ -1359,37 +1388,15 @@ fn empty_conversation_action_settings_exposes_no_synthetic_rows() {
 }
 
 #[test]
-fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
+fn empty_common_views_exposes_no_synthetic_fai() {
+    // [MS-OXCFOLD] section 2.2.1.14.1: the associated contents table lists
+    // actual FAI messages. A default client view is not a server Message.
     let snapshot = MapiMailStoreSnapshot::empty();
     assert!(snapshot.navigation_shortcut_messages().is_empty());
     assert_eq!(snapshot.common_views_messages().count(), 0);
     let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
 
-    assert_eq!(messages.len(), 6);
-    let shortcuts = messages
-        .iter()
-        .filter_map(|message| match message {
-            MapiCommonViewsMessage::NavigationShortcut(shortcut) => Some(shortcut),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(shortcuts.len(), 4);
-    assert!(shortcuts.iter().all(|shortcut| shortcut.flags == 0));
-    let named_views = messages
-        .iter()
-        .filter_map(|message| match message {
-            MapiCommonViewsMessage::NamedView(view) => Some(view),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(named_views.len(), 2);
-    assert!(named_views
-        .iter()
-        .any(|view| view.name == "Compact" && view.view_flags == 14_745_605));
-    assert!(named_views
-        .iter()
-        .any(|view| view.name == "Sent To" && view.view_flags == 15_269_893));
-    assert!(named_views.iter().all(|view| view.view_type == 8));
+    assert!(messages.is_empty());
     assert!(snapshot
         .navigation_shortcut_table_message_for_id(0)
         .is_none());
@@ -1397,76 +1404,64 @@ fn common_views_projects_default_named_views_and_shortcuts_for_table_only() {
         .navigation_shortcut_table_message_for_id(
             OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID
         )
-        .is_some());
+        .is_none());
     assert!(snapshot
         .navigation_shortcut_table_message_for_id(
             OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID
         )
-        .is_some());
+        .is_none());
     assert!(snapshot
         .navigation_shortcut_table_message_for_id(
             OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID
         )
-        .is_some());
+        .is_none());
     assert!(snapshot
         .navigation_shortcut_table_message_for_id(
             OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_NAVIGATION_SHORTCUT_ID
         )
         .is_none());
-    for named_view in named_views {
+    for message_id in [
+        OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
+        OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
+    ] {
         assert!(snapshot
-            .common_view_named_view_message_for_id(named_view.id)
-            .is_some());
+            .common_view_named_view_message_for_id(message_id)
+            .is_none());
     }
 }
 
 #[test]
-fn default_folder_named_views_use_folder_family_names() {
+fn empty_folders_do_not_materialize_default_named_views() {
     let snapshot = MapiMailStoreSnapshot::empty();
 
-    for (folder_id, expected_name) in [
-        (crate::mapi::identity::INBOX_FOLDER_ID, "Compact"),
-        (crate::mapi::identity::CALENDAR_FOLDER_ID, "Calendar"),
-        (crate::mapi::identity::TASKS_FOLDER_ID, "Tasks"),
-        (crate::mapi::identity::NOTES_FOLDER_ID, "Notes"),
-        (crate::mapi::identity::JOURNAL_FOLDER_ID, "Journal"),
+    for folder_id in [
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+        crate::mapi::identity::TASKS_FOLDER_ID,
+        crate::mapi::identity::NOTES_FOLDER_ID,
+        crate::mapi::identity::JOURNAL_FOLDER_ID,
     ] {
         let view_id = outlook_default_folder_named_view_id(folder_id);
-        let view = snapshot
+        assert!(snapshot
             .default_folder_named_view_message(folder_id, view_id)
-            .expect("default folder named view");
-        assert_eq!(view.folder_id, folder_id);
-        assert_eq!(view.id, view_id);
-        assert_eq!(view.name, expected_name);
-        assert_eq!(view.view_flags, 14_745_605);
-        assert_eq!(view.view_type, 8);
+            .is_none());
+        assert!(snapshot
+            .named_view_message_for_folder_and_id(folder_id, view_id)
+            .is_none());
     }
 }
 
 #[test]
-fn calendar_default_named_view_uses_folder_local_identity() {
+fn legacy_default_named_view_alias_does_not_materialize_a_message() {
     let snapshot = MapiMailStoreSnapshot::empty();
-    let view_id = outlook_default_folder_named_view_id(crate::mapi::identity::CALENDAR_FOLDER_ID);
 
-    assert_ne!(view_id, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID);
-    let view = snapshot
-        .default_folder_named_view_message(crate::mapi::identity::CALENDAR_FOLDER_ID, view_id)
-        .expect("calendar default view");
-    assert_eq!(view.id, view_id);
-    assert_eq!(view.folder_id, crate::mapi::identity::CALENDAR_FOLDER_ID);
-    assert_eq!(view.name, "Calendar");
-    assert_ne!(
-        view.canonical_id,
-        Uuid::from_u128(0x6d617069_6664_4e76_8000_000000000001)
-    );
-
-    let legacy_alias = snapshot
+    assert!(snapshot
         .default_folder_named_view_message(
             crate::mapi::identity::CALENDAR_FOLDER_ID,
             OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
         )
-        .expect("calendar default view legacy alias");
-    assert_eq!(legacy_alias.id, view_id);
+        .is_none());
 }
 
 #[test]
@@ -1486,32 +1481,23 @@ fn sent_common_views_default_view_does_not_materialize_folder_local_message() {
 }
 
 #[test]
-fn folder_local_default_named_views_use_distinct_ids_and_legacy_alias() {
+fn folder_local_default_named_view_ids_are_not_openable() {
     let snapshot = MapiMailStoreSnapshot::empty();
-    let tasks = snapshot
-        .default_folder_named_view_message(
-            crate::mapi::identity::TASKS_FOLDER_ID,
-            outlook_default_folder_named_view_id(crate::mapi::identity::TASKS_FOLDER_ID),
-        )
-        .expect("tasks default view");
-    let journal = snapshot
-        .default_folder_named_view_message(
-            crate::mapi::identity::JOURNAL_FOLDER_ID,
-            outlook_default_folder_named_view_id(crate::mapi::identity::JOURNAL_FOLDER_ID),
-        )
-        .expect("journal default view");
 
-    assert_ne!(tasks.id, journal.id);
-    assert_ne!(tasks.canonical_id, journal.canonical_id);
-    assert_eq!(
-        snapshot
+    for folder_id in [
+        crate::mapi::identity::TASKS_FOLDER_ID,
+        crate::mapi::identity::JOURNAL_FOLDER_ID,
+    ] {
+        assert!(snapshot
             .default_folder_named_view_message(
-                crate::mapi::identity::JOURNAL_FOLDER_ID,
-                OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+                folder_id,
+                outlook_default_folder_named_view_id(folder_id),
             )
-            .map(|message| message.id),
-        Some(journal.id)
-    );
+            .is_none());
+        assert!(snapshot
+            .default_folder_named_view_message(folder_id, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID)
+            .is_none());
+    }
 }
 
 #[test]
@@ -1573,17 +1559,29 @@ fn common_views_projects_search_folder_definition_with_protocol_blob() {
 }
 
 #[test]
-fn common_views_preserves_persisted_navigation_shortcuts() {
+fn common_views_uses_same_persisted_wlinks_and_durable_ids_for_table_and_ics() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let persisted_id = Uuid::from_u128(0x6d617069_776c_416c_8000_000000000001);
-    crate::mapi::identity::remember_mapi_identity(
+    let global_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 72;
+    let object_id = crate::mapi::identity::mapi_store_id(global_counter);
+    let change_number = global_counter + 1;
+    let identity = MapiIdentityRecord {
+        object_kind: MapiIdentityObjectKind::NavigationShortcut,
+        canonical_id: persisted_id,
+        object_id,
+        change_number,
+        source_key: crate::mapi::identity::source_key_for_object_id(object_id),
+        change_key: crate::mapi::identity::change_key_for_change_number(change_number),
+        predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(change_number),
+        last_modification_time: crate::mapi_mailstore::filetime_from_change_number(change_number),
+    };
+    crate::mapi::identity::remember_mapi_identity_with_source_key(
         persisted_id,
-        crate::mapi::identity::mapi_store_id(
-            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 72,
-        ),
+        object_id,
+        Some(identity.source_key.clone()),
     );
-    let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
-        MapiNavigationShortcutRecord {
+    let snapshot = MapiMailStoreSnapshot::empty()
+        .with_navigation_shortcuts(vec![MapiNavigationShortcutRecord {
             id: persisted_id,
             account_id,
             subject: "Alpha".to_string(),
@@ -1592,38 +1590,48 @@ fn common_views_preserves_persisted_navigation_shortcuts() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 1,
+            ordinal: vec![1],
             group_header_id: None,
             group_name: "Mail".to_string(),
-        },
-    ]);
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
+        }])
+        .with_navigation_shortcut_identities(std::slice::from_ref(&identity))
+        .expect("durable shortcut identity");
 
-    let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
-    let shortcut = messages
+    let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
+    let table_wlinks = table_messages
         .iter()
-        .find_map(|message| match message {
-            MapiCommonViewsMessage::NavigationShortcut(shortcut) if shortcut.subject == "Alpha" => {
-                Some(shortcut)
+        .filter_map(|message| match message {
+            MapiCommonViewsMessage::NavigationShortcut(shortcut) => {
+                Some((shortcut.canonical_id, shortcut.id))
             }
             _ => None,
         })
+        .collect::<std::collections::BTreeSet<_>>();
+    let ics_messages = snapshot.common_views_messages().collect::<Vec<_>>();
+    let ics_wlinks = ics_messages
+        .iter()
+        .filter_map(|message| match message {
+            MapiCommonViewsMessage::NavigationShortcut(shortcut) => {
+                Some((shortcut.canonical_id, shortcut.id))
+            }
+            _ => None,
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(table_wlinks, ics_wlinks);
+    assert_eq!(
+        ics_wlinks,
+        [(persisted_id, object_id)].into_iter().collect()
+    );
+    let shortcut = snapshot
+        .navigation_shortcut_message_for_id(object_id)
         .expect("persisted shortcut");
     assert_eq!(shortcut.subject, "Alpha");
+    assert_eq!(shortcut.durable_identity, Some(identity));
     assert_eq!(shortcut.group_header_id, Some(default_wlink_group_uuid()));
     assert_eq!(shortcut.group_name, OUTLOOK_MAIL_FAVORITES_GROUP_NAME);
-    assert_eq!(messages.len(), 6);
-    assert_eq!(
-        messages
-            .iter()
-            .filter(|message| matches!(
-                message,
-                MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                    if shortcut.shortcut_type == 4
-                        && shortcut.subject == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
-            ))
-            .count(),
-        1
-    );
+    assert_eq!(table_messages.len(), 1);
     assert!(snapshot
         .navigation_shortcut_table_message_for_id(0)
         .is_none());
@@ -1650,9 +1658,10 @@ fn common_views_preserves_persisted_calendar_group_and_shortcut_identity() {
             flags: 0,
             save_stamp: 4_269_340_906,
             section: 3,
-            ordinal: 127,
+            ordinal: vec![127],
             group_header_id: Some(calendar_group_id),
             group_name: "My Calendars".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
         MapiNavigationShortcutRecord {
             id: shortcut_id,
@@ -1663,9 +1672,10 @@ fn common_views_preserves_persisted_calendar_group_and_shortcut_identity() {
             flags: 0x0010_0000,
             save_stamp: 2_095_149_994,
             section: 3,
-            ordinal: 127,
+            ordinal: vec![127],
             group_header_id: Some(calendar_group_id),
             group_name: "My Calendars".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
 
@@ -1697,22 +1707,22 @@ fn common_views_preserves_persisted_calendar_group_and_shortcut_identity() {
 }
 
 #[test]
-fn common_views_deduplicates_repeated_persisted_navigation_shortcuts() {
+fn common_views_preserves_distinct_persisted_navigation_shortcuts_with_matching_properties() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let inbox_first_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000010);
     let inbox_duplicate_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000011);
     let sent_id = Uuid::from_u128(0x6d617069_776c_5365_8000_000000000010);
-    for (offset, id) in [inbox_first_id, inbox_duplicate_id, sent_id]
+    let persisted_ids = [inbox_first_id, inbox_duplicate_id, sent_id]
         .into_iter()
         .enumerate()
-    {
-        crate::mapi::identity::remember_mapi_identity(
-            id,
-            crate::mapi::identity::mapi_store_id(
+        .map(|(offset, id)| {
+            let message_id = crate::mapi::identity::mapi_store_id(
                 crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 80 + offset as u64,
-            ),
-        );
-    }
+            );
+            crate::mapi::identity::remember_mapi_identity(id, message_id);
+            (id, message_id)
+        })
+        .collect::<Vec<_>>();
     let group_uuid = Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);
     let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
         MapiNavigationShortcutRecord {
@@ -1724,9 +1734,10 @@ fn common_views_deduplicates_repeated_persisted_navigation_shortcuts() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 127,
+            ordinal: vec![127],
             group_header_id: Some(group_uuid),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
         MapiNavigationShortcutRecord {
             id: inbox_duplicate_id,
@@ -1737,9 +1748,10 @@ fn common_views_deduplicates_repeated_persisted_navigation_shortcuts() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 127,
+            ordinal: vec![127],
             group_header_id: Some(group_uuid),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
         MapiNavigationShortcutRecord {
             id: sent_id,
@@ -1750,15 +1762,33 @@ fn common_views_deduplicates_repeated_persisted_navigation_shortcuts() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 191,
+            ordinal: vec![191],
             group_header_id: Some(group_uuid),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
 
     let shortcuts = snapshot.navigation_shortcut_messages();
-    assert_eq!(shortcuts.len(), 2);
-    assert_eq!(shortcuts[0].canonical_id, inbox_first_id);
+    assert_eq!(shortcuts.len(), 3);
+    for (canonical_id, message_id) in &persisted_ids {
+        assert!(shortcuts
+            .iter()
+            .any(|shortcut| shortcut.canonical_id == *canonical_id && shortcut.id == *message_id));
+    }
+    let inbox_shortcuts = shortcuts
+        .iter()
+        .filter(|shortcut| {
+            shortcut.subject == "Pinned Inbox"
+                && shortcut.target_folder_id == Some(crate::mapi::identity::INBOX_FOLDER_ID)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(inbox_shortcuts.len(), 2);
+    assert_ne!(inbox_shortcuts[0].id, inbox_shortcuts[1].id);
+    assert_ne!(
+        inbox_shortcuts[0].canonical_id,
+        inbox_shortcuts[1].canonical_id
+    );
     assert!(!shortcuts.iter().any(|shortcut| {
         shortcut.shortcut_type == 4
             && shortcut.subject == "Mail"
@@ -1776,12 +1806,19 @@ fn common_views_deduplicates_repeated_persisted_navigation_shortcuts() {
                             == Some(crate::mapi::identity::INBOX_FOLDER_ID)
             ))
             .count(),
-        1
+        2
     );
+    for (canonical_id, message_id) in &persisted_ids[..2] {
+        assert!(table_messages.iter().any(|message| matches!(
+            message,
+            MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                if shortcut.canonical_id == *canonical_id && shortcut.id == *message_id
+        )));
+    }
 }
 
 #[test]
-fn common_views_materializes_mail_group_header_for_custom_persisted_favorite_links() {
+fn common_views_does_not_materialize_mail_group_header_for_persisted_favorite_links() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let inbox_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000020);
     crate::mapi::identity::remember_mapi_identity(
@@ -1801,9 +1838,10 @@ fn common_views_materializes_mail_group_header_for_custom_persisted_favorite_lin
             flags: 0x0010_8000,
             save_stamp: 0,
             section: 1,
-            ordinal: 127,
+            ordinal: vec![127],
             group_header_id: Some(group_uuid),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
 
@@ -1820,7 +1858,7 @@ fn common_views_materializes_mail_group_header_for_custom_persisted_favorite_lin
             if shortcut.shortcut_type == 4
                 && shortcut.subject == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
     )));
-    assert!(snapshot
+    assert!(!snapshot
         .common_views_table_messages()
         .any(|message| matches!(
             message,
@@ -1838,7 +1876,7 @@ fn common_views_materializes_mail_group_header_for_custom_persisted_favorite_lin
                         && shortcut.subject == OUTLOOK_MAIL_FAVORITES_GROUP_NAME
             ))
             .count(),
-        1
+        0
     );
 }
 
@@ -1866,9 +1904,10 @@ fn common_views_projects_persisted_default_mail_favorites_in_startup_table() {
             flags: 0x0010_8000,
             save_stamp: 0,
             section: 1,
-            ordinal: 127,
+            ordinal: vec![127],
             group_header_id: None,
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
         MapiNavigationShortcutRecord {
             id: sent_id,
@@ -1879,9 +1918,10 @@ fn common_views_projects_persisted_default_mail_favorites_in_startup_table() {
             flags: 0x0010_8000,
             save_stamp: 0,
             section: 1,
-            ordinal: 191,
+            ordinal: vec![191],
             group_header_id: None,
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
         MapiNavigationShortcutRecord {
             id: trash_id,
@@ -1892,21 +1932,22 @@ fn common_views_projects_persisted_default_mail_favorites_in_startup_table() {
             flags: 0x0010_8000,
             save_stamp: 0,
             section: 1,
-            ordinal: 223,
+            ordinal: vec![223],
             group_header_id: None,
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
 
     assert_eq!(snapshot.navigation_shortcut_messages().len(), 3);
     let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
-    assert_eq!(table_messages.len(), 6);
+    assert_eq!(table_messages.len(), 3);
     assert_eq!(
         table_messages
             .iter()
             .filter(|message| matches!(message, MapiCommonViewsMessage::NavigationShortcut(_)))
             .count(),
-        4
+        3
     );
     assert!(!table_messages.iter().any(|message| matches!(
         message,
@@ -1916,7 +1957,7 @@ fn common_views_projects_persisted_default_mail_favorites_in_startup_table() {
                 || shortcut.target_folder_id
                     == Some(crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID)
     )));
-    assert!(table_messages.iter().any(|message| matches!(
+    assert!(!table_messages.iter().any(|message| matches!(
         message,
         MapiCommonViewsMessage::NavigationShortcut(shortcut)
             if shortcut.shortcut_type == 4
@@ -1927,40 +1968,40 @@ fn common_views_projects_persisted_default_mail_favorites_in_startup_table() {
         MapiCommonViewsMessage::NavigationShortcut(shortcut)
             if shortcut.subject == "Inbox"
                 && shortcut.target_folder_id == Some(crate::mapi::identity::INBOX_FOLDER_ID)
-                && shortcut.id == OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID
+                && crate::mapi::identity::mapped_mapi_object_id(&inbox_id) == Some(shortcut.id)
     )));
     assert!(table_messages.iter().any(|message| matches!(
         message,
         MapiCommonViewsMessage::NavigationShortcut(shortcut)
             if shortcut.subject == "Sent"
                 && shortcut.target_folder_id == Some(crate::mapi::identity::SENT_FOLDER_ID)
-                && shortcut.id == OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID
+                && crate::mapi::identity::mapped_mapi_object_id(&sent_id) == Some(shortcut.id)
     )));
     assert!(table_messages.iter().any(|message| matches!(
         message,
         MapiCommonViewsMessage::NavigationShortcut(shortcut)
             if shortcut.subject == "Trash"
                 && shortcut.target_folder_id == Some(crate::mapi::identity::TRASH_FOLDER_ID)
-                && shortcut.id == OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID
+                && crate::mapi::identity::mapped_mapi_object_id(&trash_id) == Some(shortcut.id)
     )));
 }
 
 #[test]
-fn common_views_projects_supported_module_shortcuts_in_startup_table() {
+fn common_views_projects_distinct_supported_module_shortcuts_in_startup_table() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let first_calendar_id = Uuid::from_u128(0x6d617069_776c_4361_8000_000000000020);
     let second_calendar_id = Uuid::from_u128(0x6d617069_776c_4361_8000_000000000021);
-    for (offset, id) in [first_calendar_id, second_calendar_id]
+    let persisted_ids = [first_calendar_id, second_calendar_id]
         .into_iter()
         .enumerate()
-    {
-        crate::mapi::identity::remember_mapi_identity(
-            id,
-            crate::mapi::identity::mapi_store_id(
+        .map(|(offset, id)| {
+            let message_id = crate::mapi::identity::mapi_store_id(
                 crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 90 + offset as u64,
-            ),
-        );
-    }
+            );
+            crate::mapi::identity::remember_mapi_identity(id, message_id);
+            (id, message_id)
+        })
+        .collect::<Vec<_>>();
 
     let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
         MapiNavigationShortcutRecord {
@@ -1972,9 +2013,10 @@ fn common_views_projects_supported_module_shortcuts_in_startup_table() {
             flags: 0,
             save_stamp: 0,
             section: 3,
-            ordinal: 255,
+            ordinal: vec![254],
             group_header_id: Some(Uuid::from_u128(0xb7f00600_0000_0000_c000_000000000046)),
             group_name: "My Calendars".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
         MapiNavigationShortcutRecord {
             id: second_calendar_id,
@@ -1985,30 +2027,30 @@ fn common_views_projects_supported_module_shortcuts_in_startup_table() {
             flags: 0,
             save_stamp: 0,
             section: 3,
-            ordinal: 511,
+            ordinal: vec![1, 254],
             group_header_id: Some(Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681)),
             group_name: "My Calendars".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
 
-    assert_eq!(snapshot.navigation_shortcut_messages().len(), 1);
-    assert_eq!(
-        snapshot
-            .navigation_shortcut_messages()
-            .first()
-            .and_then(|shortcut| shortcut.target_folder_id),
-        Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
-    );
-    assert!(snapshot
-        .navigation_shortcut_message_for_id(crate::mapi::identity::mapi_store_id(
-            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 90
-        ))
-        .is_some());
-    assert!(snapshot
-        .navigation_shortcut_table_message_for_id(crate::mapi::identity::mapi_store_id(
-            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 90
-        ))
-        .is_some());
+    let shortcuts = snapshot.navigation_shortcut_messages();
+    assert_eq!(shortcuts.len(), 2);
+    for (canonical_id, message_id) in &persisted_ids {
+        let shortcut = snapshot
+            .navigation_shortcut_message_for_id(*message_id)
+            .expect("persisted Calendar shortcut");
+        assert_eq!(shortcut.canonical_id, *canonical_id);
+        assert_eq!(
+            shortcut.target_folder_id,
+            Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+        );
+        let table_shortcut = snapshot
+            .navigation_shortcut_table_message_for_id(*message_id)
+            .expect("persisted Calendar shortcut in Common Views table");
+        assert_eq!(table_shortcut.canonical_id, *canonical_id);
+    }
+    assert_ne!(persisted_ids[0].1, persisted_ids[1].1);
     let table_messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
     assert_eq!(
         table_messages
@@ -2020,8 +2062,15 @@ fn common_views_projects_supported_module_shortcuts_in_startup_table() {
                         == Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
             ))
             .count(),
-        1
+        2
     );
+    for (canonical_id, message_id) in &persisted_ids {
+        assert!(table_messages.iter().any(|message| matches!(
+            message,
+            MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                if shortcut.canonical_id == *canonical_id && shortcut.id == *message_id
+        )));
+    }
 }
 
 #[test]

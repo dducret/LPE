@@ -869,21 +869,41 @@ compatible. They do not replace canonical mail or collaboration tables.
 ## Implementation Notes
 
 - `schema.sql` creates the fresh `0.5.0-sql-v1` baseline.
+- `schema.sql` is the dense canonical DDL definition and is the documented
+  source-size exception. Before adding another schema-contract family, split
+  `schema_contract.rs` into feature-scoped checks (core ownership, mail and
+  collaboration, and MAPI cache/identity) while retaining one central public
+  contract runner.
 - `0.5.0` installations start from an empty SQL database initialized by
   `init-schema.sh`. Databases from pre-0.5 releases are not upgraded in place.
-- A database initialized from an earlier 0.5.0 checkout that lacks
-  `mapi_special_folder_aliases` is physically incomplete even if its metadata
-  still says `0.5.0-sql-v1`. There is no in-place compatibility SQL for this
-  development baseline: deploy it with a new empty database or perform an
-  explicitly destructive `LPE_RESET_SCHEMA=true` initialization.
-- `update-lpe.sh` accepts only the current schema version and performs no SQL
-  compatibility mutation. `init-schema.sh`, `check-lpe.sh`, and
+- A database initialized from an earlier 0.5.0 checkout can receive only an
+  explicitly reviewed, forward-only, transactional, idempotent SQL update for
+  the same `0.5.0-sql-v1` label. The ordered
+  `0.5.0-sql-v1-outlook-cache-fidelity.sql` update adds
+  `mapi_local_replica_id_ranges` and `mapi_local_replica_deleted_ranges`,
+  converts each legacy `mapi_navigation_shortcuts.ordinal` integer without
+  collapsing distinct values. A compact projection whose final byte is already
+  valid remains unchanged; a value ending in the reserved `0x00` or `0xFF`
+  byte uses an injective five-byte representation containing the four-byte
+  big-endian integer followed by `0x80`, as required by [MS-OXOCFG] section
+  2.2.9.7. Migrated and client-written ordinals use lexicographic binary
+  ordering rather than historical numeric BIGINT ordering. The update also
+  lets subsequent client writes retain their full variable-length value, adds
+  nullable canonical columns for the five client-written Calendar WLink
+  properties, and replaces the stale unique associated-configuration label
+  index with a non-unique lookup index.
+  Databases from before 0.5 remain unsupported, and `schema.sql` remains the
+  canonical complete source for every new database.
+- `update-lpe.sh` rejects every schema version other than the current one
+  before applying the bounded 0.5.0 forward-only update. `init-schema.sh`, `check-lpe.sh`, and
   `update-lpe.sh` validate the alias table's required columns, bounded FID,
   SourceKey, and server-CN checks, account foreign key, alias/SourceKey/CN
   uniqueness, and absence
-  of a uniqueness constraint on `canonical_folder_id`. A future 0.5.x schema
-  change requires an explicit release-policy decision before an update path is
-  added.
+  of a uniqueness constraint on `canonical_folder_id`. They also require both
+  MAPI local-replica range tables, the WLink binary/client-property shape, and
+  the non-unique FAI logical lookup index. Any additional 0.5.x schema change requires
+  its own explicit release-policy decision, reviewed SQL, and matching
+  architecture and installation documentation.
 - Fresh schema initialization inserts the real platform tenant UUID row and the
   default PostgreSQL storage pool/policy rows. Runtime bootstrap must not
   synthesize pseudo-tenants.

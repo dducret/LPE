@@ -236,16 +236,17 @@ fn persisted_common_views_shortcuts(
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(ordinal),
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         }
     })
     .collect()
 }
 
 #[test]
-fn common_views_fai_fasttransfer_boundaries_cover_shortcuts_and_named_views() {
+fn common_views_fai_fasttransfer_boundaries_cover_only_persisted_shortcuts() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty()
         .with_navigation_shortcuts(persisted_common_views_shortcuts(account_id));
@@ -259,7 +260,7 @@ fn common_views_fai_fasttransfer_boundaries_cover_shortcuts_and_named_views() {
 
     let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
 
-    assert_fai_boundary_summary(&buffer, &summary, 6);
+    assert_fai_boundary_summary(&buffer, &summary, 4);
     assert_eq!(
         summary
             .fai_items
@@ -274,11 +275,11 @@ fn common_views_fai_fasttransfer_boundaries_cover_shortcuts_and_named_views() {
             .iter()
             .filter(|item| item.message_class == "IPM.Microsoft.FolderDesign.NamedView")
             .count(),
-        2
+        0
     );
-    assert!(summary.fai_items.iter().any(|item| {
+    assert!(!summary.fai_items.iter().any(|item| {
         item.item_id == Some(crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID)
-            && item.subject == "Compact"
+            || item.item_id == Some(crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID)
     }));
     let summary_property_count = summary
         .fai_items
@@ -291,16 +292,12 @@ fn common_views_fai_fasttransfer_boundaries_cover_shortcuts_and_named_views() {
         let special_object = objects.iter().find(|object| object.item_id == item_id);
         let origin =
             mapi_mailstore::fai_debug_state_origin(COMMON_VIEWS_FOLDER_ID, special_object, item_id);
-        if item.message_class == "IPM.Microsoft.FolderDesign.NamedView" {
-            assert_eq!(origin, "mapi_synthetic_default");
-        } else {
-            assert_eq!(origin, "sql_associated");
-        }
+        assert_eq!(origin, "sql_associated");
     }
 }
 
 #[test]
-fn inbox_fai_fasttransfer_boundaries_export_folder_local_default_view() {
+fn inbox_fai_fasttransfer_boundaries_export_only_persisted_fai() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty()
         .with_associated_configs(persisted_inbox_associated_configs(account_id));
@@ -314,7 +311,7 @@ fn inbox_fai_fasttransfer_boundaries_export_folder_local_default_view() {
 
     let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
 
-    assert_fai_boundary_summary(&buffer, &summary, 7);
+    assert_fai_boundary_summary(&buffer, &summary, 6);
     let summary_property_count = summary
         .fai_items
         .iter()
@@ -326,25 +323,61 @@ fn inbox_fai_fasttransfer_boundaries_export_folder_local_default_view() {
         let special_object = objects.iter().find(|object| object.item_id == item_id);
         let origin =
             mapi_mailstore::fai_debug_state_origin(INBOX_FOLDER_ID, special_object, item_id);
-        if item.message_class == "IPM.Microsoft.FolderDesign.NamedView" {
-            assert_eq!(origin, "mapi_synthetic_default");
-        } else {
-            assert_eq!(origin, "sql_associated");
-        }
+        assert_eq!(origin, "sql_associated");
     }
-    assert!(summary.fai_items.iter().any(|item| {
-        item.item_id
-            == Some(crate::mapi_store::outlook_default_folder_named_view_id(
-                INBOX_FOLDER_ID,
-            ))
-            && item.message_class == "IPM.Microsoft.FolderDesign.NamedView"
-            && item.subject == "Compact"
-    }));
+    assert!(!summary
+        .fai_items
+        .iter()
+        .any(|item| item.message_class == "IPM.Microsoft.FolderDesign.NamedView"));
     assert!(!summary
         .fai_items
         .iter()
         .any(|item| item.item_id
             == Some(crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID)));
+}
+
+#[test]
+fn empty_persisted_inbox_named_view_is_exported_by_fai_sync() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let config_id = Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000121);
+    let item_id = crate::mapi::identity::mapi_store_id(0x7906);
+    crate::mapi::identity::remember_mapi_identity(config_id, item_id);
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: config_id,
+            account_id,
+            folder_id: INBOX_FOLDER_ID,
+            message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+            subject: "Compact".to_string(),
+            properties_json: serde_json::json!({}),
+        },
+    ]);
+
+    // [MS-OXCFOLD] sections 2.2.1.14.1 and 2.2.1.14.2 identify a
+    // persisted associated Message as FAI. [MS-OXCFXICS] section 3.2.5.3
+    // requires that real FAI object to participate in content sync even when
+    // it has no optional view-descriptor properties yet.
+    let objects = special_sync_objects_for(
+        INBOX_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
+    assert_eq!(objects.len(), 1);
+    assert_eq!(objects[0].item_id, item_id);
+    assert_eq!(
+        objects[0].message_class,
+        "IPM.Microsoft.FolderDesign.NamedView"
+    );
+
+    let buffer = associated_content_sync_buffer(account_id, INBOX_FOLDER_ID, &objects);
+    let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
+    assert_fai_boundary_summary(&buffer, &summary, 1);
+    assert_eq!(summary.fai_items[0].item_id, Some(item_id));
+    assert_eq!(
+        summary.fai_items[0].message_class,
+        "IPM.Microsoft.FolderDesign.NamedView"
+    );
 }
 
 #[test]
@@ -1095,9 +1128,10 @@ fn common_views_shortcut_sync_uses_account_bound_entry_ids() {
             flags: 0,
             save_stamp: 0,
             section: 0,
-            ordinal: 0x81,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(0x81),
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
 
@@ -1134,7 +1168,7 @@ fn common_views_shortcut_sync_uses_account_bound_entry_ids() {
     );
     assert_eq!(
         property(PID_TAG_WLINK_FOLDER_TYPE),
-        &crate::mapi_mailstore::SpecialMessagePropertyValue::Guid([
+        &crate::mapi_mailstore::SpecialMessagePropertyValue::Binary(vec![
             0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x46,
         ])
@@ -1161,9 +1195,10 @@ fn common_views_shortcut_sync_does_not_emit_materialized_mail_header() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 0x81,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(0x81),
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
 
@@ -1207,10 +1242,11 @@ fn common_views_group_header_sync_includes_group_identity_without_target() {
             shortcut_type: 4,
             flags: 0,
             save_stamp: 0,
-            section: 1,
-            ordinal: 0x80,
+            section: 3,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(0x80),
             group_header_id: Some(group_id),
             group_name: "My Calendars".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
 
@@ -1237,20 +1273,19 @@ fn common_views_group_header_sync_includes_group_identity_without_target() {
     );
     assert_eq!(
         property(PID_TAG_WLINK_GROUP_HEADER_ID),
-        Some(&crate::mapi_mailstore::SpecialMessagePropertyValue::Guid(
-            *group_id.as_bytes()
+        Some(&crate::mapi_mailstore::SpecialMessagePropertyValue::Binary(
+            group_id.as_bytes().to_vec()
         ))
     );
+    assert_eq!(property(PID_TAG_WLINK_GROUP_CLSID), None);
+    assert_eq!(property(PID_TAG_WLINK_GROUP_NAME_W), None);
     assert_eq!(
-        property(PID_TAG_WLINK_GROUP_CLSID),
-        Some(&crate::mapi_mailstore::SpecialMessagePropertyValue::Guid(
-            *group_id.as_bytes()
-        ))
-    );
-    assert_eq!(
-        property(PID_TAG_WLINK_GROUP_NAME_W),
-        Some(&crate::mapi_mailstore::SpecialMessagePropertyValue::String(
-            "My Calendars".to_string()
+        property(PID_TAG_WLINK_FOLDER_TYPE),
+        Some(&crate::mapi_mailstore::SpecialMessagePropertyValue::Binary(
+            vec![
+                0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x46,
+            ]
         ))
     );
     assert_eq!(property(PID_TAG_WLINK_ENTRY_ID), None);
@@ -1475,9 +1510,10 @@ fn common_views_associated_content_sync_payload_emits_view_and_wunderbar_propert
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 127,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(127),
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
     let mut objects = special_sync_objects_for(
@@ -1571,6 +1607,8 @@ fn fast_transfer_manifest_rejects_unbacked_common_views_shortcut() {
     let object = MapiObject::NavigationShortcut {
         folder_id: COMMON_VIEWS_FOLDER_ID,
         shortcut_id,
+        pending_properties: HashMap::new(),
+        deleted_properties: HashSet::new(),
     };
 
     assert!(fast_transfer_manifest_for_object(
@@ -1585,7 +1623,7 @@ fn fast_transfer_manifest_rejects_unbacked_common_views_shortcut() {
 }
 
 #[test]
-fn fast_transfer_manifest_exports_default_common_views_named_view() {
+fn fast_transfer_manifest_rejects_unpersisted_common_views_named_view() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let view_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF7);
     let object = MapiObject::CommonViewNamedView {
@@ -1593,7 +1631,7 @@ fn fast_transfer_manifest_exports_default_common_views_named_view() {
         view_id,
     };
 
-    let manifest = fast_transfer_manifest_for_object(
+    assert!(fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
         &object,
         &sync_principal(account_id),
@@ -1601,27 +1639,7 @@ fn fast_transfer_manifest_exports_default_common_views_named_view() {
         &[],
         &MapiMailStoreSnapshot::empty(),
     )
-    .expect("default common views named view manifest");
-
-    assert_eq!(manifest.0, COMMON_VIEWS_FOLDER_ID);
-    let utf16z = |value: &str| {
-        let mut bytes = value
-            .encode_utf16()
-            .flat_map(u16::to_le_bytes)
-            .collect::<Vec<_>>();
-        bytes.extend_from_slice(&[0, 0]);
-        bytes
-    };
-    let named_view_class = utf16z("IPM.Microsoft.FolderDesign.NamedView");
-    let compact_name = utf16z("Compact");
-    assert!(manifest
-        .1
-        .windows(named_view_class.len())
-        .any(|window| window == named_view_class.as_slice()));
-    assert!(manifest
-        .1
-        .windows(compact_name.len())
-        .any(|window| window == compact_name.as_slice()));
+    .is_none());
 }
 
 #[test]
@@ -1707,6 +1725,8 @@ fn fast_transfer_manifest_rejects_common_views_shortcut_from_wrong_folder() {
     let object = MapiObject::NavigationShortcut {
         folder_id: INBOX_FOLDER_ID,
         shortcut_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9),
+        pending_properties: HashMap::new(),
+        deleted_properties: HashSet::new(),
     };
 
     let manifest = fast_transfer_manifest_for_object(

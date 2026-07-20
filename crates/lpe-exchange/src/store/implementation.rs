@@ -28,3 +28,9 @@ impl ExchangeStore for Storage {
 
 include!("storage_impl/address_helpers.rs");
 include!("storage_impl/mapi_helpers.rs");
+include!("storage_impl/fai_identity_import.rs");
+include!("storage_impl/navigation_shortcut_import.rs");
+include!("storage_impl/associated_config_import.rs");
+include!("storage_impl/associated_config_create.rs");
+include!("storage_impl/navigation_shortcut_create.rs");
+include!("storage_impl/navigation_shortcut_update.rs");

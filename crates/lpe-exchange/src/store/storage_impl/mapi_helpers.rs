@@ -540,9 +540,16 @@ fn mapi_navigation_shortcut_from_row(
         flags: row.try_get::<i64, _>("flags")? as u32,
         save_stamp: row.try_get::<i64, _>("save_stamp")? as u32,
         section: row.try_get::<i64, _>("section")? as u32,
-        ordinal: row.try_get::<i64, _>("ordinal")? as u32,
+        ordinal: row.try_get("ordinal")?,
         group_header_id: row.try_get("group_header_id")?,
         group_name: row.try_get("group_name")?,
+        client_properties: MapiNavigationShortcutClientProperties {
+            calendar_color: row.try_get("calendar_color")?,
+            address_book_entry_id: row.try_get("address_book_entry_id")?,
+            address_book_store_entry_id: row.try_get("address_book_store_entry_id")?,
+            client_id: row.try_get("client_id")?,
+            ro_group_type: row.try_get("ro_group_type")?,
+        },
     })
 }
 

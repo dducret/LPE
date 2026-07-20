@@ -853,6 +853,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         MapiObject::NavigationShortcut {
             folder_id,
             shortcut_id,
+            ..
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
             if !mapi_store::is_outlook_common_views_default_navigation_shortcut_id(*shortcut_id) {
@@ -861,11 +862,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         }
         MapiObject::CommonViewNamedView { folder_id, view_id } => {
             push_unique(&mut plan.object_ids, *folder_id);
-            if !mapi_store::is_outlook_common_views_default_named_view_id(*view_id)
-                && !mapi_store::is_outlook_default_folder_named_view_id(*view_id)
-            {
-                push_unique(&mut plan.object_ids, *view_id);
-            }
+            push_unique(&mut plan.object_ids, *view_id);
         }
         MapiObject::SearchFolderDefinitionMessage {
             folder_id,
@@ -880,9 +877,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
             ..
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
-            if !mapi_store::is_outlook_inbox_default_associated_config_id(*config_id)
-                && !mapi_store::is_outlook_contact_default_associated_config_id(*config_id)
-            {
+            if !mapi_store::is_outlook_inbox_default_associated_config_id(*config_id) {
                 push_unique(&mut plan.object_ids, *config_id);
             }
         }

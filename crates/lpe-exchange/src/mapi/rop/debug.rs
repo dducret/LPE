@@ -123,7 +123,9 @@ pub(in crate::mapi) fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_VIEW_DESCRIPTOR_STRINGS_W => "PidTagViewDescriptorStrings",
         PID_TAG_VIEW_DESCRIPTOR_NAME_W => "PidTagViewDescriptorName",
         PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL => "PidTagViewDescriptorVersionCanonical",
-        PID_TAG_WLINK_GROUP_HEADER_ID => "PidTagWlinkGroupHeaderId",
+        // PidTagWlinkGroupHeaderId and PidTagSearchFolderId intentionally
+        // share the exact 0x68420102 wire tag; only object context distinguishes them.
+        PID_TAG_WLINK_GROUP_HEADER_ID => "PidTagSearchFolderId/PidTagWlinkGroupHeaderId",
         PID_TAG_WLINK_SAVE_STAMP => "PidTagWlinkSaveStamp",
         PID_TAG_WLINK_TYPE => "PidTagWlinkType",
         PID_TAG_WLINK_FLAGS => "PidTagWlinkFlags",
@@ -263,7 +265,6 @@ pub(in crate::mapi) fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_FOLDER_VIEWS_ONLY => "PidTagFolderViewsOnly",
         PID_TAG_FOLDER_FORM_STORAGE => "PidTagFolderFormStorage",
         PID_TAG_EXTENDED_FOLDER_FLAGS => "PidTagExtendedFolderFlags",
-        PID_TAG_SEARCH_FOLDER_ID => "PidTagSearchFolderId",
         PID_TAG_SEARCH_FOLDER_STORAGE_TYPE => "PidTagSearchFolderStorageType",
         PID_TAG_SEARCH_FOLDER_EFP_FLAGS => "PidTagSearchFolderEfpFlags",
         PID_TAG_SEARCH_FOLDER_DEFINITION => "PidTagSearchFolderDefinition",

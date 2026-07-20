@@ -6,7 +6,7 @@ pub(super) fn is_release_dispatch_rop(rop_id: RopId) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn append_release_dispatch_response<S: ExchangeStore>(
-    store: &S,
+    _store: &S,
     principal: &AccountPrincipal,
     request_id: &str,
     request_rop_names: &str,
@@ -21,7 +21,7 @@ pub(super) async fn append_release_dispatch_response<S: ExchangeStore>(
 ) -> bool {
     if matches!(RopId::from_u8(request.rop_id), Some(RopId::Release)) {
         append_release_response(
-            store,
+            _store,
             principal,
             request_id,
             request_rop_names,
@@ -42,7 +42,7 @@ pub(super) async fn append_release_dispatch_response<S: ExchangeStore>(
 }
 
 pub(super) async fn append_release_response<S: ExchangeStore>(
-    store: &S,
+    _store: &S,
     principal: &AccountPrincipal,
     request_id: &str,
     request_rop_names: &str,
@@ -327,27 +327,6 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
         Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
     ) {
         session.record_logoff_after_hierarchy_completion();
-    }
-    if let Err(error) = persist_released_associated_config_stream(
-        store,
-        principal,
-        session,
-        released_object_for_stream_persist.as_ref(),
-    )
-    .await
-    {
-        tracing::warn!(
-            rca_debug = true,
-            adapter = "mapi",
-            endpoint = "emsmdb",
-            mailbox = %principal.email,
-            request_type = "Execute",
-            request_rop_id = "0x01",
-            input_handle_index = request.input_handle_index().unwrap_or(0),
-            input_handle_value = %format_optional_debug_handle(released_handle),
-            error = %error,
-            "mapi associated config stream release persist failed"
-        );
     }
     if let Some(handle) = released_handle {
         if matches!(

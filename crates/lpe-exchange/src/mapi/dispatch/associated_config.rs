@@ -1,17 +1,12 @@
 use super::*;
 
-pub(super) async fn delete_associated_config_properties<S>(
-    store: &S,
-    principal: &AccountPrincipal,
+pub(super) fn delete_associated_config_properties(
     folder_id: u64,
     config_id: u64,
     snapshot: &MapiMailStoreSnapshot,
     saved_message: Option<&crate::mapi_store::MapiAssociatedConfigMessage>,
     property_tags: &[u32],
-) -> Result<(usize, crate::mapi_store::MapiAssociatedConfigMessage)>
-where
-    S: ExchangeStore,
-{
+) -> Result<(usize, crate::mapi_store::MapiAssociatedConfigMessage)> {
     if property_tags.is_empty() {
         let existing =
             associated_config_message_for_mutation(snapshot, folder_id, config_id, saved_message)
@@ -37,26 +32,15 @@ where
         }
     }
     let (message_class, subject) = associated_config_class_and_subject(&properties);
-    let properties = normalized_associated_config_persisted_properties(&message_class, &properties);
-    let saved = store
-        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
-            id: Some(existing.canonical_id),
-            account_id: principal.account_id,
-            folder_id,
-            message_class,
-            subject,
-            properties_json: mapi_properties_to_json(&properties),
-        })
-        .await?;
     Ok((
         deleted,
         crate::mapi_store::MapiAssociatedConfigMessage {
             id: config_id,
             folder_id,
-            canonical_id: saved.id,
-            message_class: saved.message_class,
-            subject: saved.subject,
-            properties_json: saved.properties_json,
+            canonical_id: existing.canonical_id,
+            message_class,
+            subject,
+            properties_json: mapi_properties_to_json(&properties),
         },
     ))
 }
@@ -75,36 +59,20 @@ pub(super) fn associated_config_message_for_mutation(
         .filter(|message| message.folder_id == folder_id)
 }
 
-pub(super) async fn set_associated_config_properties<S>(
-    store: &S,
-    principal: &AccountPrincipal,
+pub(super) fn set_associated_config_properties(
     existing: &crate::mapi_store::MapiAssociatedConfigMessage,
     values: Vec<(u32, MapiValue)>,
-) -> Result<crate::mapi_store::MapiAssociatedConfigMessage>
-where
-    S: ExchangeStore,
-{
+) -> Result<crate::mapi_store::MapiAssociatedConfigMessage> {
     let mut properties = associated_config_mutation_base_properties(existing);
     apply_mapi_property_values_to_map(&mut properties, values);
     let (message_class, subject) = associated_config_class_and_subject(&properties);
-    let properties = normalized_associated_config_persisted_properties(&message_class, &properties);
-    let saved = store
-        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
-            id: Some(existing.canonical_id),
-            account_id: principal.account_id,
-            folder_id: existing.folder_id,
-            message_class,
-            subject,
-            properties_json: mapi_properties_to_json(&properties),
-        })
-        .await?;
     Ok(crate::mapi_store::MapiAssociatedConfigMessage {
         id: existing.id,
         folder_id: existing.folder_id,
-        canonical_id: saved.id,
-        message_class: saved.message_class,
-        subject: saved.subject,
-        properties_json: saved.properties_json,
+        canonical_id: existing.canonical_id,
+        message_class,
+        subject,
+        properties_json: mapi_properties_to_json(&properties),
     })
 }
 
@@ -202,111 +170,372 @@ pub(super) async fn persist_associated_config_message<S>(
     principal: &AccountPrincipal,
     folder_id: u64,
     properties: &HashMap<u32, MapiValue>,
-) -> Result<(crate::store::MapiAssociatedConfigRecord, u64)>
+    imported_message_id: Option<u64>,
+    fail_on_conflict: bool,
+) -> Result<(
+    crate::store::MapiAssociatedConfigRecord,
+    crate::store::MapiIdentityRecord,
+    Option<MapiFaiImportDisposition>,
+)>
 where
     S: ExchangeStore,
 {
-    let source_key = imported_message_source_key(properties);
-    let reserved_global_counter = source_key
-        .as_deref()
-        .and_then(persistable_import_source_key_global_counter);
+    let imported_identity = imported_message_id
+        .map(|message_id| imported_fai_identity(properties, message_id))
+        .transpose()?;
     let (message_class, subject) = associated_config_class_and_subject(properties);
-    let properties = normalized_associated_config_persisted_properties(&message_class, properties);
-    let id = associated_config_uuid(&properties);
-    if is_empty_inbox_message_list_settings_placeholder(folder_id, &message_class, &properties) {
-        let default = crate::mapi_store::outlook_inbox_message_list_settings_default();
-        let mut persisted_properties =
-            message_list_settings_placeholder_persisted_properties(&default);
-        // MS-OXCFXICS 2.2.3.2.4.2.1 and 3.3.5.8.7: normalizing an
-        // otherwise-empty FAI payload must not replace its imported ICS
-        // identity. The defaults enrich the message; client properties that
-        // have no modeled default, including SourceKey, ChangeKey, and PCL,
-        // remain canonical.
-        for (tag, value) in &properties {
-            persisted_properties
-                .entry(*tag)
-                .or_insert_with(|| value.clone());
-        }
-        let saved = store
-            .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
-                id: Some(default.canonical_id),
+    let imported_canonical_id = imported_identity
+        .as_ref()
+        .map(|_| associated_config_uuid(properties));
+    let normalized = normalized_associated_config_persisted_properties(&message_class, properties);
+    let mut input =
+        if is_empty_inbox_message_list_settings_placeholder(folder_id, &message_class, &normalized)
+        {
+            let default = crate::mapi_store::outlook_inbox_message_list_settings_default();
+            let mut persisted_properties =
+                message_list_settings_placeholder_persisted_properties(&default);
+            // MS-OXCFXICS 2.2.3.2.4.2.1 and 3.3.5.8.7: normalizing an
+            // otherwise-empty FAI payload must not replace its imported ICS
+            // identity. The defaults enrich only the content payload; the
+            // imported SourceKey/ChangeKey/PCL remain canonical in the separate
+            // durable identity record.
+            for (tag, value) in &normalized {
+                persisted_properties
+                    .entry(*tag)
+                    .or_insert_with(|| value.clone());
+            }
+            UpsertMapiAssociatedConfigInput {
+                id: Some(if imported_identity.is_some() {
+                    imported_canonical_id.expect("imported FAI canonical ID")
+                } else {
+                    default.canonical_id
+                }),
                 account_id: principal.account_id,
                 folder_id: default.folder_id,
                 message_class: default.message_class.clone(),
                 subject: default.subject.clone(),
                 properties_json: mapi_properties_to_json(&persisted_properties),
+            }
+        } else {
+            UpsertMapiAssociatedConfigInput {
+                // [MS-OXCMSG] sections 2.2.3.2 and 2.2.3.3: each newly
+                // created Message has its own identity even when its payload
+                // is byte-for-byte equal to another FAI message.
+                id: Some(imported_canonical_id.unwrap_or_else(Uuid::new_v4)),
+                account_id: principal.account_id,
+                folder_id,
+                message_class,
+                subject,
+                properties_json: mapi_properties_to_json(&normalized),
+            }
+        };
+
+    // mapi_object_identities is the sole durable ICS identity. Content JSON
+    // contains only user/configuration properties and receives the identity
+    // tuple as an ephemeral snapshot projection on reload.
+    let mut content_properties = mapi_properties_from_json(&input.properties_json);
+    remove_associated_config_identity_properties(&mut content_properties);
+    input.properties_json = mapi_properties_to_json(&content_properties);
+
+    if let Some(imported_identity) = imported_identity {
+        let committed = store
+            .commit_mapi_associated_config_import(CommitMapiAssociatedConfigImportInput {
+                config: input,
+                identity: imported_identity,
+                fail_on_conflict,
             })
             .await?;
-        let identity_global_counter = reserved_global_counter
-            .or_else(|| crate::mapi::identity::global_counter_from_store_id(default.id));
-        let identity_source_key = source_key.filter(|_| reserved_global_counter.is_some());
-        let message_id = remember_created_mapi_identity(
-            store,
-            principal,
-            MapiIdentityObjectKind::AssociatedConfig,
-            default.canonical_id,
-            identity_global_counter,
-            identity_source_key,
-        )
-        .await?;
+        crate::mapi::identity::remember_mapi_identity_with_source_key(
+            committed.config.id,
+            committed.identity.object_id,
+            Some(committed.identity.source_key.clone()),
+        );
         return Ok((
-            crate::store::MapiAssociatedConfigRecord {
-                id: default.canonical_id,
-                account_id: principal.account_id,
-                folder_id: default.folder_id,
-                message_class: saved.message_class,
-                subject: saved.subject,
-                properties_json: saved.properties_json,
-            },
-            message_id,
+            committed.config,
+            committed.identity,
+            Some(committed.disposition),
         ));
     }
-    let saved = store
-        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
-            id: Some(id),
+
+    let committed = store.commit_mapi_associated_config_create(input).await?;
+    crate::mapi::identity::remember_mapi_identity_with_source_key(
+        committed.config.id,
+        committed.identity.object_id,
+        Some(committed.identity.source_key.clone()),
+    );
+    Ok((committed.config, committed.identity, None))
+}
+
+fn remove_associated_config_identity_properties(properties: &mut HashMap<u32, MapiValue>) {
+    properties
+        .retain(|tag, _| !crate::mapi_store::is_associated_config_identity_property_tag(*tag));
+}
+
+fn associated_config_message_with_identity(
+    saved: &crate::store::MapiAssociatedConfigRecord,
+    identity: &crate::store::MapiIdentityRecord,
+) -> crate::mapi_store::MapiAssociatedConfigMessage {
+    let mut properties = mapi_properties_from_json(&saved.properties_json);
+    properties.insert(PID_TAG_MID, MapiValue::U64(identity.object_id));
+    properties.insert(
+        PID_TAG_SOURCE_KEY,
+        MapiValue::Binary(identity.source_key.clone()),
+    );
+    properties.insert(
+        PID_TAG_CHANGE_KEY,
+        MapiValue::Binary(identity.change_key.clone()),
+    );
+    properties.insert(
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        MapiValue::Binary(identity.predecessor_change_list.clone()),
+    );
+    properties.insert(
+        PID_TAG_CHANGE_NUMBER,
+        MapiValue::U64(identity.change_number),
+    );
+    properties.insert(
+        PID_TAG_LAST_MODIFICATION_TIME,
+        MapiValue::I64(identity.last_modification_time as i64),
+    );
+    crate::mapi_store::MapiAssociatedConfigMessage {
+        id: identity.object_id,
+        folder_id: saved.folder_id,
+        canonical_id: saved.id,
+        message_class: saved.message_class.clone(),
+        subject: saved.subject.clone(),
+        properties_json: mapi_properties_to_json(&properties),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn append_pending_associated_config_save_response<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    mapi_request_id: &str,
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+    handle: u32,
+    folder_id: u64,
+    properties: &HashMap<u32, MapiValue>,
+    imported_message_id: Option<u64>,
+    fail_on_conflict: bool,
+) {
+    match persist_associated_config_message(
+        store,
+        principal,
+        folder_id,
+        properties,
+        imported_message_id,
+        fail_on_conflict,
+    )
+    .await
+    {
+        Ok((saved, identity, import_disposition)) => {
+            let message_id = identity.object_id;
+            let changed = import_disposition
+                .map(MapiFaiImportDisposition::changes_server_replica)
+                .unwrap_or(true);
+            session.record_last_post_hierarchy_create_save_object_context(format!(
+                "kind=associated_config;send_candidate=false;create_associated=true;request_id={mapi_request_id};folder=0x{folder_id:016x};role={};class={};subject={};mapi_message_id=0x{message_id:016x};canonical_id={};property_count={}",
+                debug_role_for_folder_id(folder_id),
+                saved.message_class,
+                saved.subject,
+                saved.id,
+                saved.properties_json.as_object().map_or(0, |properties| properties.len())
+            ));
+            session.handles.insert(
+                handle,
+                MapiObject::AssociatedConfig {
+                    folder_id,
+                    config_id: message_id,
+                    saved_message: Some(associated_config_message_with_identity(&saved, &identity)),
+                },
+            );
+            if import_disposition
+                .map(fai_import_is_reflected_in_client_replica)
+                .unwrap_or(true)
+            {
+                record_sync_upload_content_change(
+                    session,
+                    folder_id,
+                    message_id,
+                    identity.change_number,
+                    true,
+                    false,
+                );
+            }
+            if changed {
+                session.record_notification(MapiNotificationEvent::content(
+                    folder_id,
+                    Some(message_id),
+                ));
+            }
+            append_save_changes_message_response(
+                session,
+                responses,
+                handle_slots,
+                request,
+                handle,
+                message_id,
+            );
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %principal.email,
+                request_type = "Execute",
+                mapi_request_id = %mapi_request_id,
+                request_rop_id = "0x0c",
+                folder_id = %format!("{folder_id:#018x}"),
+                associated_config_id = %saved.id,
+                mapi_message_id = %format!("{message_id:#018x}"),
+                associated_message_class = %saved.message_class,
+                associated_subject = %saved.subject,
+                property_count = saved.properties_json.as_object().map_or(0, |properties| properties.len()),
+                "rca debug persisted associated config message"
+            );
+        }
+        Err(error) => {
+            let return_value = if error.is::<crate::store::MapiFaiImportObjectDeleted>() {
+                0x8004_010A
+            } else if error.is::<crate::store::MapiFaiImportConflict>() {
+                0x8004_0109
+            } else {
+                0x8004_010F
+            };
+            responses.extend_from_slice(&rop_error_response(
+                0x0C,
+                request.response_handle_index(),
+                return_value,
+            ));
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn append_existing_associated_config_save_response<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    handle: u32,
+    folder_id: u64,
+    config_id: u64,
+    saved_message: Option<&crate::mapi_store::MapiAssociatedConfigMessage>,
+) {
+    let Some(message) =
+        associated_config_message_for_mutation(snapshot, folder_id, config_id, saved_message)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x0C,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    };
+    let staged_properties = associated_config_mutation_base_properties(&message);
+    let (message_class, subject) = associated_config_class_and_subject(&staged_properties);
+    let properties =
+        normalized_associated_config_content_properties(&message_class, &staged_properties);
+    let Some(current) =
+        associated_config_message_for_mutation(snapshot, folder_id, config_id, None)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x0C,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    };
+    let current_properties = associated_config_mutation_base_properties(&current);
+    let (current_message_class, current_subject) =
+        associated_config_class_and_subject(&current_properties);
+    let current_properties = normalized_associated_config_content_properties(
+        &current_message_class,
+        &current_properties,
+    );
+    if message.canonical_id == current.canonical_id
+        && message_class == current_message_class
+        && subject == current_subject
+        && properties == current_properties
+    {
+        append_save_changes_message_response(
+            session,
+            responses,
+            handle_slots,
+            request,
+            handle,
+            config_id,
+        );
+        return;
+    }
+    match store
+        .commit_mapi_associated_config_update(UpsertMapiAssociatedConfigInput {
+            id: Some(message.canonical_id),
             account_id: principal.account_id,
             folder_id,
             message_class,
             subject,
             properties_json: mapi_properties_to_json(&properties),
         })
-        .await?;
-    let message_id = remember_created_mapi_identity(
-        store,
-        principal,
-        MapiIdentityObjectKind::AssociatedConfig,
-        saved.id,
-        reserved_global_counter,
-        source_key.filter(|_| reserved_global_counter.is_some()),
-    )
-    .await?;
-    Ok((saved, message_id))
-}
-
-pub(super) async fn persist_associated_config_stream_message<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    folder_id: u64,
-    message: &crate::mapi_store::MapiAssociatedConfigMessage,
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    let properties = normalized_associated_config_persisted_properties(
-        &message.message_class,
-        &mapi_properties_from_json(&message.properties_json),
-    );
-    store
-        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
-            id: Some(message.canonical_id),
-            account_id: principal.account_id,
-            folder_id,
-            message_class: message.message_class.clone(),
-            subject: message.subject.clone(),
-            properties_json: mapi_properties_to_json(&properties),
-        })
-        .await?;
-    Ok(())
+        .await
+    {
+        Ok(committed) => {
+            let message_id = committed.identity.object_id;
+            session.handles.insert(
+                handle,
+                MapiObject::AssociatedConfig {
+                    folder_id,
+                    config_id: message_id,
+                    saved_message: Some(associated_config_message_with_identity(
+                        &committed.config,
+                        &committed.identity,
+                    )),
+                },
+            );
+            record_sync_upload_content_change(
+                session,
+                folder_id,
+                message_id,
+                committed.identity.change_number,
+                true,
+                false,
+            );
+            session
+                .record_notification(MapiNotificationEvent::content(folder_id, Some(message_id)));
+            append_save_changes_message_response(
+                session,
+                responses,
+                handle_slots,
+                request,
+                handle,
+                message_id,
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                mailbox = %principal.email,
+                request_type = "Execute",
+                request_rop_id = "0x0c",
+                folder_id = %format!("{folder_id:#018x}"),
+                config_id = %format!("{config_id:#018x}"),
+                error = %error,
+                "mapi associated config save failed"
+            );
+            responses.extend_from_slice(&rop_error_response(
+                0x0C,
+                request.response_handle_index(),
+                0x8004_010F,
+            ));
+        }
+    }
 }
 
 pub(super) fn normalized_associated_config_persisted_properties(
@@ -337,38 +566,16 @@ pub(super) fn normalized_associated_config_persisted_properties(
     normalized
 }
 
-pub(super) async fn persist_released_associated_config_stream<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    session: &MapiSession,
-    released_object: Option<&MapiObject>,
-) -> Result<()>
-where
-    S: ExchangeStore,
-{
-    let Some(MapiObject::AttachmentStream {
-        writable_target: Some(StreamWriteTarget::AssociatedConfigProperty { handle, .. }),
-        ..
-    }) = released_object
-    else {
-        return Ok(());
-    };
-    let message = match session.handles.get(handle) {
-        Some(MapiObject::AssociatedConfig {
-            folder_id,
-            saved_message: Some(message),
-            ..
-        }) => Some((*folder_id, message.clone())),
-        _ => None,
-    };
-    match message {
-        Some((folder_id, message)) => {
-            persist_associated_config_stream_message(store, principal, folder_id, &message).await
-        }
-        None => Err(anyhow!(
-            "MAPI associated config stream release target was not found"
-        )),
-    }
+pub(super) fn normalized_associated_config_content_properties(
+    message_class: &str,
+    properties: &HashMap<u32, MapiValue>,
+) -> HashMap<u32, MapiValue> {
+    let mut normalized =
+        normalized_associated_config_persisted_properties(message_class, properties);
+    // Identity/version properties are projected from mapi_object_identities.
+    // Never re-persist that projection when an existing FAI is mutated.
+    remove_associated_config_identity_properties(&mut normalized);
+    normalized
 }
 
 pub(super) fn message_list_settings_placeholder_persisted_properties(

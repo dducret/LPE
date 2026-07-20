@@ -116,6 +116,8 @@ pub(super) fn append_create_message_response(
         MapiObject::PendingAssociatedMessage {
             folder_id,
             properties: initial_message_properties(),
+            imported_message_id: None,
+            fail_on_conflict: false,
         }
     } else {
         match snapshot
@@ -155,10 +157,14 @@ pub(super) fn append_create_message_response(
             _ if folder_id == FREEBUSY_DATA_FOLDER_ID => MapiObject::PendingAssociatedMessage {
                 folder_id,
                 properties: initial_message_properties(),
+                imported_message_id: None,
+                fail_on_conflict: false,
             },
             _ if folder_id == COMMON_VIEWS_FOLDER_ID => MapiObject::PendingNavigationShortcut {
                 folder_id,
                 properties: initial_message_properties(),
+                imported_message_id: None,
+                fail_on_conflict: false,
             },
             _ => MapiObject::PendingMessage {
                 folder_id,

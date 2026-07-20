@@ -137,6 +137,7 @@ pub(in crate::mapi) fn mapi_object_debug_fields(
         Some(MapiObject::NavigationShortcut {
             folder_id,
             shortcut_id,
+            ..
         }) => (
             "navigation_shortcut",
             format!("{folder_id:#018x}"),

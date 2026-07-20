@@ -535,120 +535,25 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         Some(MapiObject::PendingNavigationShortcut {
             folder_id,
             properties,
+            imported_message_id,
+            fail_on_conflict,
         }) => {
-            let shortcut =
-                navigation_shortcut_from_mapi_properties(principal.account_id, None, &properties);
-            tracing::info!(
-                rca_debug = true,
-                adapter = "mapi",
-                endpoint = "emsmdb",
-                mailbox = %principal.email,
-                request_type = "Execute",
-                mapi_request_id = %mapi_request_id,
-                request_rop_id = "0x0c",
-                folder_id = format_args!("0x{:016x}", folder_id),
-                decoded_shortcut =
-                    %common_views_saved_shortcut_summary(&shortcut, &properties),
-                "rca debug mapi common views navigation shortcut save"
-            );
-            let input = UpsertMapiNavigationShortcutInput {
-                // [MS-OXCMSG] sections 2.2.3.2 and 2.2.3.3: a message
-                // created by RopCreateMessage receives a new identity when it
-                // is first saved, even when it replaces a logical WLink.
-                id: Some(Uuid::new_v4()),
-                account_id: principal.account_id,
-                subject: shortcut.subject,
-                target_folder_id: shortcut.target_folder_id,
-                shortcut_type: shortcut.shortcut_type,
-                flags: shortcut.flags,
-                save_stamp: shortcut.save_stamp,
-                section: shortcut.section,
-                ordinal: shortcut.ordinal,
-                group_header_id: shortcut.group_header_id,
-                group_name: shortcut.group_name,
-            };
-            match store.upsert_mapi_navigation_shortcut(input).await {
-                Ok(saved) => {
-                    session.record_last_post_hierarchy_create_save_object_context(format!(
-                        "kind=navigation_shortcut;send_candidate=false;create_associated=true;class=IPM.Microsoft.WunderBar.Link;request_id={mapi_request_id};folder=0x{folder_id:016x};role={};subject={};target_folder={};shortcut_type={};section={};ordinal={};group_name={};canonical_id={}",
-                        debug_role_for_folder_id(folder_id),
-                        saved.subject,
-                        saved.target_folder_id
-                            .map(|id| format!("0x{id:016x}"))
-                            .unwrap_or_else(|| "none".to_string()),
-                        saved.shortcut_type,
-                        saved.section,
-                        saved.ordinal,
-                        saved.group_name,
-                        saved.id
-                    ));
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        mapi_request_id = %mapi_request_id,
-                        request_rop_id = "0x0c",
-                        folder_id = format_args!("0x{:016x}", folder_id),
-                        navigation_shortcut_id = %saved.id,
-                        subject = %saved.subject,
-                        target_folder_id = saved
-                            .target_folder_id
-                            .map(|id| format!("0x{id:016x}"))
-                            .unwrap_or_else(|| "none".to_string()),
-                        shortcut_type = saved.shortcut_type,
-                        section = saved.section,
-                        ordinal = saved.ordinal,
-                        group_name = %saved.group_name,
-                        "rca debug persisted navigation shortcut"
-                    );
-                    let shortcut_id = match remember_created_mapi_identity(
-                        store,
-                        principal,
-                        MapiIdentityObjectKind::NavigationShortcut,
-                        saved.id,
-                        None,
-                        None,
-                    )
-                    .await
-                    {
-                        Ok(shortcut_id) => shortcut_id,
-                        Err(_) => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x0C,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            ));
-                            return;
-                        }
-                    };
-                    session.handles.insert(
-                        handle,
-                        MapiObject::NavigationShortcut {
-                            folder_id,
-                            shortcut_id,
-                        },
-                    );
-                    session.record_notification(MapiNotificationEvent::content(
-                        folder_id,
-                        Some(shortcut_id),
-                    ));
-                    append_save_changes_message_response(
-                        session,
-                        responses,
-                        handle_slots,
-                        &request,
-                        handle,
-                        shortcut_id,
-                    );
-                }
-                Err(_) => responses.extend_from_slice(&rop_error_response(
-                    0x0C,
-                    request.response_handle_index(),
-                    0x8004_010F,
-                )),
-            }
+            append_pending_navigation_shortcut_save_response(
+                store,
+                principal,
+                mapi_request_id,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+                handle,
+                folder_id,
+                properties,
+                imported_message_id,
+                fail_on_conflict,
+            )
+            .await;
             return;
         }
         Some(MapiObject::PendingMessage { .. })
@@ -894,6 +799,50 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             .await;
             return;
         }
+        Some(MapiObject::NavigationShortcut {
+            folder_id,
+            shortcut_id,
+            pending_properties,
+            deleted_properties,
+        }) => {
+            append_existing_navigation_shortcut_save_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+                handle,
+                folder_id,
+                shortcut_id,
+                pending_properties,
+                deleted_properties,
+            )
+            .await;
+            return;
+        }
+        Some(MapiObject::AssociatedConfig {
+            folder_id,
+            config_id,
+            saved_message,
+        }) => {
+            append_existing_associated_config_save_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+                handle,
+                folder_id,
+                config_id,
+                saved_message.as_ref(),
+            )
+            .await;
+            return;
+        }
         Some(MapiObject::Contact { contact_id, .. })
         | Some(MapiObject::Task {
             task_id: contact_id,
@@ -909,14 +858,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         })
         | Some(MapiObject::ConversationAction {
             conversation_action_id: contact_id,
-            ..
-        })
-        | Some(MapiObject::NavigationShortcut {
-            shortcut_id: contact_id,
-            ..
-        })
-        | Some(MapiObject::AssociatedConfig {
-            config_id: contact_id,
             ..
         })
         | Some(MapiObject::DelegateFreeBusyMessage {
@@ -936,76 +877,24 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         Some(MapiObject::PendingAssociatedMessage {
             folder_id,
             properties,
+            imported_message_id,
+            fail_on_conflict,
         }) => {
-            match persist_associated_config_message(store, principal, folder_id, &properties).await
-            {
-                Ok((saved, message_id)) => {
-                    session.record_last_post_hierarchy_create_save_object_context(format!(
-                        "kind=associated_config;send_candidate=false;create_associated=true;request_id={mapi_request_id};folder=0x{folder_id:016x};role={};class={};subject={};mapi_message_id=0x{message_id:016x};canonical_id={};property_count={}",
-                        debug_role_for_folder_id(folder_id),
-                        saved.message_class,
-                        saved.subject,
-                        saved.id,
-                        saved.properties_json.as_object().map_or(0, |properties| properties.len())
-                    ));
-                    session.handles.insert(
-                        handle,
-                        MapiObject::AssociatedConfig {
-                            folder_id,
-                            config_id: message_id,
-                            saved_message: Some(crate::mapi_store::MapiAssociatedConfigMessage {
-                                id: message_id,
-                                folder_id,
-                                canonical_id: saved.id,
-                                message_class: saved.message_class.clone(),
-                                subject: saved.subject.clone(),
-                                properties_json: saved.properties_json.clone(),
-                            }),
-                        },
-                    );
-                    record_sync_upload_content_change(
-                        session,
-                        folder_id,
-                        message_id,
-                        mapi_mailstore::change_number_for_store_id(message_id),
-                        true,
-                        false,
-                    );
-                    session.record_notification(MapiNotificationEvent::content(
-                        folder_id,
-                        Some(message_id),
-                    ));
-                    append_save_changes_message_response(
-                        session,
-                        responses,
-                        handle_slots,
-                        &request,
-                        handle,
-                        message_id,
-                    );
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        mapi_request_id = %mapi_request_id,
-                        request_rop_id = "0x0c",
-                        folder_id = %format!("{folder_id:#018x}"),
-                        associated_config_id = %saved.id,
-                        mapi_message_id = %format!("{message_id:#018x}"),
-                        associated_message_class = %saved.message_class,
-                        associated_subject = %saved.subject,
-                        property_count = saved.properties_json.as_object().map_or(0, |properties| properties.len()),
-                        "rca debug persisted associated config message"
-                    );
-                }
-                Err(_) => responses.extend_from_slice(&rop_error_response(
-                    0x0C,
-                    request.response_handle_index(),
-                    0x8004_010F,
-                )),
-            }
+            append_pending_associated_config_save_response(
+                store,
+                principal,
+                mapi_request_id,
+                session,
+                handle_slots,
+                request,
+                responses,
+                handle,
+                folder_id,
+                &properties,
+                imported_message_id,
+                fail_on_conflict,
+            )
+            .await;
             return;
         }
         Some(MapiObject::PublicFolderItem {

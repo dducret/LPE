@@ -252,6 +252,9 @@ pub(in crate::mapi) fn rop_find_row_response(
                                 )
                             })
                         }
+                        MapiCommonViewsMessage::AssociatedConfig(message) => {
+                            restriction_matches_associated_config(Some(&restriction), message)
+                        }
                     },
                 ) {
                     *position = index;

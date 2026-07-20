@@ -131,6 +131,16 @@ where
                 values,
             )
             .map(|problems| event_property_problems = problems),
+            Some(MapiObject::NavigationShortcut { .. }) => {
+                stage_existing_navigation_shortcut_property_values(
+                    principal,
+                    session,
+                    handle_slots,
+                    request,
+                    snapshot,
+                    values,
+                )
+            }
             Some(MapiObject::AssociatedConfig {
                 folder_id,
                 config_id,
@@ -142,22 +152,17 @@ where
                     config_id,
                     saved_message.as_ref(),
                 ) {
-                    Some(existing) => {
-                        match set_associated_config_properties(store, principal, &existing, values)
-                            .await
-                        {
-                            Ok(saved) => {
-                                if let Some(MapiObject::AssociatedConfig {
-                                    saved_message, ..
-                                }) = input_object_mut(session, handle_slots, request)
-                                {
-                                    *saved_message = Some(saved);
-                                }
-                                Ok(())
+                    Some(existing) => match set_associated_config_properties(&existing, values) {
+                        Ok(saved) => {
+                            if let Some(MapiObject::AssociatedConfig { saved_message, .. }) =
+                                input_object_mut(session, handle_slots, request)
+                            {
+                                *saved_message = Some(saved);
                             }
-                            Err(error) => Err(error),
+                            Ok(())
                         }
-                    }
+                        Err(error) => Err(error),
+                    },
                     None => Err(anyhow!("MAPI associated config message was not found")),
                 }
             }
@@ -167,7 +172,6 @@ where
                 | MapiObject::Note { .. }
                 | MapiObject::JournalEntry { .. }
                 | MapiObject::ConversationAction { .. }
-                | MapiObject::NavigationShortcut { .. }
                 | MapiObject::DelegateFreeBusyMessage { .. }
                 | MapiObject::PublicFolderItem { .. }
                 | MapiObject::Attachment { .. }),
@@ -347,6 +351,16 @@ pub(super) async fn append_delete_properties_response<S>(
     } else if matches!(object, Some(MapiObject::Event { .. })) {
         stage_event_property_deletions(session, handle_slots, request, snapshot, &property_tags)
             .map(|problems| event_property_problems = problems)
+    } else if matches!(object, Some(MapiObject::NavigationShortcut { .. })) {
+        stage_existing_navigation_shortcut_property_deletions(
+            principal,
+            session,
+            handle_slots,
+            request,
+            snapshot,
+            &property_tags,
+        )
+        .map(|problems| event_property_problems = problems)
     } else if let Some(MapiObject::ConversationAction {
         folder_id,
         conversation_action_id,
@@ -371,15 +385,12 @@ pub(super) async fn append_delete_properties_response<S>(
     }) = object
     {
         let result = delete_associated_config_properties(
-            store,
-            principal,
             folder_id,
             config_id,
             snapshot,
             saved_message.as_ref(),
             &property_tags,
-        )
-        .await;
+        );
         if let Ok((deleted_property_count, saved)) = &result {
             if let Some(MapiObject::AssociatedConfig { saved_message, .. }) =
                 input_object_mut(session, handle_slots, request)

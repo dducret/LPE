@@ -347,10 +347,8 @@ pub(crate) fn log_fai_content_sync_debug(
                         entry_id_len = item.entry_id_len,
                         expected_entry_id_len,
                         persisted = special_object.is_some()
-                            && !crate::mapi_store::is_outlook_common_views_default_named_view_id(item_id)
                             && !crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id),
-                        default = crate::mapi_store::is_outlook_common_views_default_named_view_id(item_id)
-                            || crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id),
+                        default = crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id),
                         virtual_only = false,
                         classification,
                         state_origin,
@@ -459,10 +457,7 @@ fn fai_debug_item_classification(
             "unknown"
         }
     } else if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
-        if crate::mapi_store::is_outlook_common_views_default_named_view_id(item_id) {
-            "default_named_view"
-        } else if crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id)
-        {
+        if crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id) {
             "default_navigation_shortcut"
         } else if special_object.is_some() {
             "persisted_navigation_shortcut"
@@ -482,9 +477,7 @@ pub(crate) fn fai_debug_state_origin(
     if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
         if crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(item_id) {
             "mapi_virtual"
-        } else if crate::mapi_store::is_outlook_inbox_default_associated_config_id(item_id)
-            || crate::mapi_store::is_outlook_default_folder_named_view_id(item_id)
-        {
+        } else if crate::mapi_store::is_outlook_inbox_default_associated_config_id(item_id) {
             "mapi_synthetic_default"
         } else if special_object.is_some() {
             "sql_associated"
@@ -492,9 +485,7 @@ pub(crate) fn fai_debug_state_origin(
             "unknown"
         }
     } else if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
-        if crate::mapi_store::is_outlook_common_views_default_named_view_id(item_id)
-            || crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id)
-        {
+        if crate::mapi_store::is_outlook_common_views_default_navigation_shortcut_id(item_id) {
             "mapi_synthetic_default"
         } else if special_object.is_some() {
             "sql_associated"

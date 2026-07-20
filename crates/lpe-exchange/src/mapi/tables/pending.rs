@@ -43,25 +43,27 @@ pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
         },
     )
     .and_then(navigation_shortcut_guid_value);
-    let group_name = properties
-        .get(&PID_TAG_WLINK_GROUP_NAME_W)
-        .and_then(|value| match value {
-            MapiValue::String(value) => Some(value.clone()),
-            _ => None,
-        })
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| {
-            if shortcut_type == 4 {
-                subject.clone()
-            } else {
-                "Mail".to_string()
-            }
-        });
+    let group_name = if shortcut_type == 4 {
+        // [MS-OXOCFG] section 3.1.4.10.1 does not put
+        // PidTagWlinkGroupName on a group header. Its canonical group name is
+        // the display name carried by PidTagNormalizedSubject.
+        subject.clone()
+    } else {
+        properties
+            .get(&PID_TAG_WLINK_GROUP_NAME_W)
+            .and_then(|value| match value {
+                MapiValue::String(value) => Some(value.clone()),
+                _ => None,
+            })
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "Mail".to_string())
+    };
     MapiNavigationShortcutMessage {
         id: crate::mapi::identity::mapped_mapi_object_id(&shortcut_id)
             .unwrap_or_else(|| crate::mapi::identity::mapi_store_id(0x7fff)),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: shortcut_id,
+        durable_identity: None,
         subject,
         target_folder_id: entry_target,
         shortcut_type,
@@ -80,32 +82,52 @@ pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
             .and_then(MapiValue::as_i64)
             .map(|value| value as u32)
             .unwrap_or(0),
-        ordinal: properties
-            .get(&PID_TAG_WLINK_ORDINAL)
+        // [MS-OXOCFG] section 2.2.9.7: retain the complete variable-length
+        // PtypBinary ordinal. The final byte invariant is enforced canonically
+        // by PostgreSQL when the staged Message is saved.
+        ordinal: navigation_shortcut_property_by_id(properties, &PID_TAG_WLINK_ORDINAL)
             .and_then(|value| match value {
-                MapiValue::Binary(bytes) => Some(
-                    bytes
-                        .iter()
-                        .take(4)
-                        .fold(0u32, |value, byte| (value << 8) | u32::from(*byte)),
-                ),
+                MapiValue::Binary(bytes) => Some(bytes.clone()),
                 _ => None,
             })
-            .or_else(|| {
-                properties
-                    .get(&0x684B_0003)
-                    .and_then(MapiValue::as_i64)
-                    .map(|value| value as u32)
-            })
-            .or_else(|| {
-                properties
-                    .get(&PID_TAG_WLINK_ORDINAL)
-                    .and_then(MapiValue::as_i64)
-                    .map(|value| value as u32)
-            })
-            .unwrap_or(0),
+            .unwrap_or_else(|| vec![1]),
         group_header_id,
         group_name,
+        client_properties: crate::store::MapiNavigationShortcutClientProperties {
+            calendar_color: navigation_shortcut_property_by_id(
+                properties,
+                &PID_TAG_WLINK_CALENDAR_COLOR,
+            )
+            .and_then(MapiValue::as_i64)
+            .map(|value| value as i32),
+            address_book_entry_id: navigation_shortcut_property_by_id(
+                properties,
+                &PID_TAG_WLINK_ADDRESS_BOOK_EID,
+            )
+            .and_then(|value| match value {
+                MapiValue::Binary(bytes) => Some(bytes.clone()),
+                _ => None,
+            }),
+            address_book_store_entry_id: navigation_shortcut_property_by_id(
+                properties,
+                &PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
+            )
+            .and_then(|value| match value {
+                MapiValue::Binary(bytes) => Some(bytes.clone()),
+                _ => None,
+            }),
+            client_id: navigation_shortcut_property_by_id(properties, &PID_TAG_WLINK_CLIENT_ID)
+                .and_then(|value| match value {
+                    MapiValue::Binary(bytes) => Some(bytes.clone()),
+                    _ => None,
+                }),
+            ro_group_type: navigation_shortcut_property_by_id(
+                properties,
+                &PID_TAG_WLINK_RO_GROUP_TYPE,
+            )
+            .and_then(MapiValue::as_i64)
+            .map(|value| value as i32),
+        },
     }
 }
 
@@ -131,10 +153,8 @@ fn navigation_shortcut_property_by_id<'a>(
 
 fn navigation_shortcut_guid_value(value: &MapiValue) -> Option<Uuid> {
     match value {
-        MapiValue::Guid(value) => Some(Uuid::from_bytes(*value)),
-        MapiValue::Binary(value) => value
-            .get(..16)
-            .and_then(|bytes| <[u8; 16]>::try_from(bytes).ok())
+        MapiValue::Binary(value) => <[u8; 16]>::try_from(value.as_slice())
+            .ok()
             .map(Uuid::from_bytes),
         _ => None,
     }

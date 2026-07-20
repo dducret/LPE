@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 
 fn synchronization_import_deletes_response(request: &RopRequest, had_failure: bool) -> Vec<u8> {
     // [MS-OXCROPS] section 2.2.13.5.2 and [MS-OXCFXICS] section
@@ -30,17 +31,35 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
         _ => None,
     };
     if hierarchy_collector_folder_id.is_some() {
+        if request.import_delete_flags() & !0x03 != 0 {
+            // [MS-OXCFXICS] section 3.2.5.9.4.5 recommends failing the
+            // complete ROP when ImportDeleteFlags contains unknown bits.
+            responses.extend_from_slice(&synchronization_import_deletes_response(request, true));
+            return;
+        }
+        let mut seen_folder_ids = HashSet::new();
+        let folder_ids = request
+            .import_delete_message_ids()
+            .into_iter()
+            .filter(|folder_id| seen_folder_ids.insert(*folder_id))
+            .collect::<Vec<_>>();
+        // [MS-OXCFXICS] section 3.2.5.9.4.5 requires a reasonable
+        // prediction for the entire batch and recommends failing before any
+        // deletion when one cannot succeed. System folders are known from
+        // the current canonical snapshot to be non-deletable.
+        if folder_ids.iter().any(|folder_id| {
+            folder_row_for_id(*folder_id, mailboxes).is_some_and(|mailbox| mailbox.role != "custom")
+        }) {
+            responses.extend_from_slice(&synchronization_import_deletes_response(request, true));
+            return;
+        }
         let mut had_failure = false;
-        for folder_id in request.import_delete_message_ids() {
+        for folder_id in folder_ids {
             let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) else {
                 // [MS-OXCFXICS] section 3.2.5.9.4.5: an object that was
                 // already deleted MUST be ignored.
                 continue;
             };
-            if mailbox.role != "custom" {
-                had_failure = true;
-                continue;
-            }
             if store
                 .destroy_jmap_mailbox(
                     principal.account_id,
@@ -74,9 +93,72 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
         ));
         return;
     };
+    if request.import_delete_flags() & !0x03 != 0 {
+        responses.extend_from_slice(&synchronization_import_deletes_response(request, true));
+        return;
+    }
     let mut had_failure = false;
     let hard_delete = request.import_delete_hard_delete();
-    for source_key in request.import_delete_source_keys() {
+    let mut seen_source_keys = HashSet::new();
+    let source_keys = request
+        .import_delete_source_keys()
+        .into_iter()
+        .filter(|source_key| seen_source_keys.insert(source_key.clone()))
+        .collect::<Vec<_>>();
+    if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
+        let unknown_source_keys = source_keys
+            .iter()
+            .filter(|source_key| {
+                let message_id =
+                    source_key_global_counter(source_key).map(crate::mapi::identity::mapi_store_id);
+                let associated_config_exists = message_id
+                    .and_then(|message_id| snapshot.associated_config_message_for_id(message_id))
+                    .filter(|message| message.folder_id == folder_id)
+                    .or_else(|| {
+                        snapshot.associated_config_message_for_folder_and_source_key(
+                            folder_id, source_key,
+                        )
+                    })
+                    .is_some();
+                let navigation_shortcut_exists = snapshot
+                    .navigation_shortcut_messages()
+                    .into_iter()
+                    .find(|message| {
+                        message.durable_identity.as_ref().is_some_and(|identity| {
+                            identity.source_key.as_slice() == source_key.as_slice()
+                        })
+                    })
+                    .or_else(|| {
+                        message_id.and_then(|message_id| {
+                            snapshot.navigation_shortcut_message_for_id(message_id)
+                        })
+                    })
+                    .is_some();
+                !associated_config_exists && !navigation_shortcut_exists
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !unknown_source_keys.is_empty()
+            && store
+                .preflight_unknown_mapi_navigation_shortcut_deletes(
+                    principal.account_id,
+                    folder_id,
+                    &unknown_source_keys,
+                )
+                .await
+                .is_err()
+        {
+            // [MS-OXCFXICS] section 3.2.5.9.4.5 recommends rejecting a
+            // predictable batch failure before the first deletion because
+            // the response cannot describe partial completion.
+            responses.extend_from_slice(&synchronization_import_deletes_response(request, true));
+            return;
+        }
+    }
+    for source_key in source_keys {
+        // [MS-OXCFXICS] sections 3.2.5.9.4.5 and 3.3.5.8.10 require
+        // retries of already-applied deletions to be safe. Deduplication
+        // makes the immediate same-batch form a single canonical mutation.
         let message_id =
             source_key_global_counter(&source_key).map(crate::mapi::identity::mapi_store_id);
         if let Some(message) = message_id
@@ -93,6 +175,52 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
             {
                 had_failure = true;
             } else {
+                record_sync_upload_content_checkpoint(session, folder_id);
+            }
+            continue;
+        }
+        if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
+            // [MS-OXCFXICS] sections 2.2.3.2.4.5 and 3.3.4.3.3.2.3:
+            // ImportDeletes identifies content objects by PidTagSourceKey.
+            // Common Views WLinks are FAI messages, so resolve the durable
+            // identity before considering the derived MID fallback.
+            let message = snapshot
+                .navigation_shortcut_messages()
+                .into_iter()
+                .find(|message| {
+                    message.durable_identity.as_ref().is_some_and(|identity| {
+                        identity.source_key.as_slice() == source_key.as_slice()
+                    })
+                })
+                .or_else(|| {
+                    message_id.and_then(|message_id| {
+                        snapshot.navigation_shortcut_message_for_id(message_id)
+                    })
+                });
+            if let Some(message) = message {
+                if store
+                    .delete_mapi_navigation_shortcut(principal.account_id, message.canonical_id)
+                    .await
+                    .is_err()
+                {
+                    had_failure = true;
+                } else {
+                    record_sync_upload_content_checkpoint(session, folder_id);
+                }
+            } else if store
+                .tombstone_unknown_mapi_navigation_shortcut(
+                    principal.account_id,
+                    folder_id,
+                    &source_key,
+                )
+                .await
+                .is_err()
+            {
+                had_failure = true;
+            } else {
+                // [MS-OXCFXICS] section 3.2.5.9.4.5 recommends recording
+                // deletions of objects absent from the server replica so a
+                // later upload cannot restore them.
                 record_sync_upload_content_checkpoint(session, folder_id);
             }
             continue;

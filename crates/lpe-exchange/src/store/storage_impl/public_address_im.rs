@@ -265,6 +265,10 @@ macro_rules! store_impl_public_address_im {
                     parent_identity.mapi_object_id AS parent_mapi_object_id,
                     message_identity.mapi_object_id AS message_mapi_object_id,
                     source_identity.mapi_object_id AS source_mapi_object_id,
+                    navigation_shortcut_identity.mapi_object_id
+                        AS navigation_shortcut_mapi_object_id,
+                    associated_config_identity.mapi_object_id
+                        AS associated_config_mapi_object_id,
                     COALESCE(
                         calendar_event_identity.mapi_object_id,
                         CASE
@@ -365,6 +369,18 @@ macro_rules! store_impl_public_address_im {
                  AND source_identity.object_kind = 'mailbox'
                  AND source_identity.canonical_id = (log.summary_json->>'sourceMailboxId')::uuid
                  AND source_identity.deleted_at IS NULL
+                LEFT JOIN mapi_object_identities navigation_shortcut_identity
+                  ON navigation_shortcut_identity.tenant_id = log.tenant_id
+                 AND navigation_shortcut_identity.account_id = log.account_id
+                 AND navigation_shortcut_identity.object_kind = 'navigation_shortcut'
+                 AND navigation_shortcut_identity.canonical_id = log.object_id
+                 AND log.object_kind = 'navigation_shortcut'
+                LEFT JOIN mapi_object_identities associated_config_identity
+                  ON associated_config_identity.tenant_id = log.tenant_id
+                 AND associated_config_identity.account_id = log.account_id
+                 AND associated_config_identity.object_kind = 'associated_config'
+                 AND associated_config_identity.canonical_id = log.object_id
+                 AND log.object_kind = 'associated_config'
                 LEFT JOIN mapi_object_identities calendar_event_identity
                   ON calendar_event_identity.tenant_id = log.tenant_id
                  AND calendar_event_identity.account_id = $3
@@ -385,7 +401,7 @@ macro_rules! store_impl_public_address_im {
                   AND (log.retained_until IS NULL OR log.retained_until > NOW())
                   AND log.object_kind IN (
                       'mailbox', 'mailbox_message', 'attachment', 'calendar_event',
-                      'deleted_calendar_event'
+                      'deleted_calendar_event', 'navigation_shortcut', 'associated_config'
                   )
                 ORDER BY log.cursor ASC
                 LIMIT 101

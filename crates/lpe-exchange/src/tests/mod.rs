@@ -26,7 +26,7 @@ use lpe_storage::{
     UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::{
     collections::HashMap,
     env,
@@ -511,11 +511,13 @@ async fn mapi_associated_config_storage_is_account_scoped() {
 }
 
 #[tokio::test]
-async fn mapi_associated_config_upsert_reuses_logical_config_row() {
+async fn mapi_associated_config_upsert_preserves_canonical_message_identity() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;
     };
 
+    // [MS-OXCMSG] section 1.3.2: FAI messages are persisted Messages. Equal
+    // class/subject values do not collapse two distinct canonical identities.
     let first = fixture
         .storage
         .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
@@ -541,13 +543,12 @@ async fn mapi_associated_config_upsert_reuses_logical_config_row() {
         .await
         .unwrap();
 
-    assert_eq!(second.id, first.id);
+    assert_ne!(second.id, first.id);
     assert_eq!(second.properties_json["version"], serde_json::json!(2));
-    let explicit_new_id = Uuid::parse_str("10000000-0000-0000-0000-000000000015").unwrap();
     let explicit = fixture
         .storage
         .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
-            id: Some(explicit_new_id),
+            id: Some(first.id),
             account_id: fixture.account_id,
             folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
             message_class: "IPM.Configuration.RssRule".to_string(),
@@ -564,84 +565,11 @@ async fn mapi_associated_config_upsert_reuses_logical_config_row() {
         .fetch_mapi_associated_configs(fixture.account_id)
         .await
         .unwrap();
-    assert_eq!(configs.len(), 1);
-    assert_eq!(configs[0].id, first.id);
-
-    let stale_id = Uuid::parse_str("10000000-0000-0000-0000-000000000016").unwrap();
-    let tenant_id = sqlx::query_scalar::<_, Uuid>(
-        r#"
-        SELECT tenant_id
-        FROM accounts
-        WHERE id = $1
-        "#,
-    )
-    .bind(fixture.account_id)
-    .fetch_one(fixture.storage.pool())
-    .await
-    .unwrap();
-    sqlx::query("DROP INDEX mapi_associated_config_messages_logical_idx")
-        .execute(fixture.storage.pool())
-        .await
-        .unwrap();
-    sqlx::query(
-        r#"
-        INSERT INTO mapi_associated_config_messages (
-            tenant_id, id, account_id, folder_id, message_class, subject, properties_json
-        )
-        VALUES ($1, $2, $3, $4, 'IPM.Configuration.RssRule', 'IPM.Configuration.RssRule', '{"stale":true}'::jsonb)
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(stale_id)
-    .bind(fixture.account_id)
-    .bind(crate::mapi::identity::INBOX_FOLDER_ID as i64)
-    .execute(fixture.storage.pool())
-    .await
-    .unwrap();
-
-    let configs = fixture
-        .storage
-        .fetch_mapi_associated_configs(fixture.account_id)
-        .await
-        .unwrap();
-    assert_eq!(
-        configs
-            .iter()
-            .filter(|config| config.message_class == "IPM.Configuration.RssRule")
-            .count(),
-        1
-    );
-
-    let third = fixture
-        .storage
-        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
-            id: None,
-            account_id: fixture.account_id,
-            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
-            message_class: "IPM.Configuration.RssRule".to_string(),
-            subject: "IPM.Configuration.RssRule".to_string(),
-            properties_json: serde_json::json!({"version": 3}),
-        })
-        .await
-        .unwrap();
-    assert_eq!(third.id, stale_id);
-    let physical_count = sqlx::query_scalar::<_, i64>(
-        r#"
-        SELECT COUNT(*)
-        FROM mapi_associated_config_messages
-        WHERE tenant_id = $1
-          AND account_id = $2
-          AND folder_id = $3
-          AND message_class = 'IPM.Configuration.RssRule'
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(fixture.account_id)
-    .bind(crate::mapi::identity::INBOX_FOLDER_ID as i64)
-    .fetch_one(fixture.storage.pool())
-    .await
-    .unwrap();
-    assert_eq!(physical_count, 1);
+    assert_eq!(configs.len(), 2);
+    assert!(configs.iter().any(|config| config.id == first.id
+        && config.properties_json["version"] == serde_json::json!(22)));
+    assert!(configs.iter().any(|config| config.id == second.id
+        && config.properties_json["version"] == serde_json::json!(2)));
 
     fixture.cleanup().await.unwrap();
 }
@@ -698,7 +626,7 @@ async fn mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects(
 }
 
 #[tokio::test]
-async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
+async fn mapi_navigation_shortcut_upsert_preserves_distinct_message_rows() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;
     };
@@ -714,9 +642,10 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 127,
+            ordinal: vec![127],
             group_header_id: None,
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         })
         .await
         .unwrap();
@@ -731,16 +660,17 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             flags: 8,
             save_stamp: 0,
             section: 1,
-            ordinal: 191,
+            ordinal: vec![191],
             group_header_id: None,
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         })
         .await
         .unwrap();
 
-    assert_eq!(second.id, first.id);
+    assert_ne!(second.id, first.id);
     assert_eq!(second.flags, 8);
-    assert_eq!(second.ordinal, 191);
+    assert_eq!(second.ordinal, vec![191]);
     let third = fixture
         .storage
         .upsert_mapi_navigation_shortcut(crate::store::UpsertMapiNavigationShortcutInput {
@@ -752,14 +682,16 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             flags: 8,
             save_stamp: 0,
             section: 1,
-            ordinal: 191,
+            ordinal: vec![191],
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         })
         .await
         .unwrap();
 
-    assert_eq!(third.id, first.id);
+    assert_ne!(third.id, first.id);
+    assert_ne!(third.id, second.id);
     assert_eq!(
         fixture
             .storage
@@ -767,7 +699,7 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             .await
             .unwrap()
             .len(),
-        1
+        3
     );
     let stale_calendar = fixture
         .storage
@@ -780,9 +712,10 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             flags: 0,
             save_stamp: 0,
             section: 3,
-            ordinal: 127,
+            ordinal: vec![127],
             group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
             group_name: "My Calendars".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         })
         .await
         .unwrap();
@@ -799,14 +732,15 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             flags: 0,
             save_stamp: 0,
             section: 3,
-            ordinal: 127,
+            ordinal: vec![127],
             group_header_id: Some(outlook_calendar_group_id),
             group_name: "My Calendars".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         })
         .await
         .unwrap();
 
-    assert_eq!(corrected_calendar.id, stale_calendar.id);
+    assert_ne!(corrected_calendar.id, stale_calendar.id);
     assert_eq!(
         corrected_calendar.group_header_id,
         Some(outlook_calendar_group_id)
@@ -819,7 +753,7 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             .await
             .unwrap()
             .len(),
-        2
+        5
     );
     let shortcut_identity = fixture
         .storage
@@ -863,9 +797,10 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             flags: 0,
             save_stamp: 1,
             section: 3,
-            ordinal: 127,
+            ordinal: vec![127],
             group_header_id: Some(outlook_calendar_group_id),
             group_name: "My Calendars".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         })
         .await
         .unwrap();
@@ -881,7 +816,7 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
         )
         .await
         .unwrap();
-    assert!(replaced
+    assert!(!replaced
         .deleted_navigation_shortcut_ids
         .contains(&corrected_calendar.id));
     assert!(replaced
@@ -894,7 +829,7 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
             .await
             .unwrap()
             .len(),
-        2
+        6
     );
 
     fixture
@@ -933,6 +868,930 @@ async fn mapi_navigation_shortcut_upsert_reuses_logical_shortcut_row() {
         .is_empty());
 
     fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
+async fn mapi_navigation_shortcut_create_preserves_distinct_rows_for_same_target() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+
+    // [MS-OXCMSG] sections 2.2.3.2 and 2.2.3.3 give each newly created
+    // Message object its own saved MID. [MS-OXOCFG] sections 2.2.9 and 4.4.2
+    // apply that Message-object lifecycle to Common Views WLink FAI messages.
+    let first = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_create(
+            crate::store::CommitMapiNavigationShortcutCreateInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: None,
+                    account_id: fixture.account_id,
+                    subject: "Calendar primary".to_string(),
+                    target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+                    shortcut_type: 0,
+                    flags: 0,
+                    save_stamp: 0x1234_5678,
+                    section: 3,
+                    ordinal: vec![0x80],
+                    group_header_id: Some(
+                        Uuid::parse_str("5ba943d8-daaa-462c-a63e-9136f65c8681").unwrap(),
+                    ),
+                    group_name: "My Work Calendars".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+    let second = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_create(
+            crate::store::CommitMapiNavigationShortcutCreateInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: None,
+                    account_id: fixture.account_id,
+                    subject: "Calendar secondary".to_string(),
+                    target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+                    shortcut_type: 0,
+                    flags: 0,
+                    save_stamp: 0x1234_5678,
+                    section: 3,
+                    ordinal: vec![0x90],
+                    group_header_id: Some(
+                        Uuid::parse_str("5ba943d8-daaa-462c-a63e-9136f65c8681").unwrap(),
+                    ),
+                    group_name: "My Work Calendars".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+    let durable_rows = sqlx::query_as::<_, (i64, i64)>(
+        r#"
+        SELECT COUNT(*), COUNT(DISTINCT identity.mapi_object_id)
+        FROM mapi_navigation_shortcuts shortcut
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = shortcut.tenant_id
+         AND identity.account_id = shortcut.account_id
+         AND identity.object_kind = 'navigation_shortcut'
+         AND identity.canonical_id = shortcut.id
+         AND identity.deleted_at IS NULL
+        WHERE shortcut.account_id = $1
+          AND shortcut.target_folder_id = $2
+          AND shortcut.shortcut_type = 0
+          AND shortcut.section = 3
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(crate::mapi::identity::CALENDAR_FOLDER_ID as i64)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+
+    fixture.cleanup().await.unwrap();
+    assert_ne!(first.shortcut.id, second.shortcut.id);
+    assert_ne!(first.identity.object_id, second.identity.object_id);
+    assert_eq!(
+        durable_rows,
+        (2, 2),
+        "two saved WLink Message objects may share a target but not an identity"
+    );
+}
+
+#[tokio::test]
+async fn mapi_navigation_shortcut_import_commits_content_and_identity_atomically() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let canonical_id = Uuid::parse_str("b2dfdcfe-c5cb-46ad-9eed-c85fcb98a210").unwrap();
+    let reservation_count = 0x0001_0000;
+    let reservation_start = fixture
+        .storage
+        .reserve_mapi_local_replica_ids(fixture.account_id, reservation_count)
+        .await
+        .unwrap();
+    let reservation_end = reservation_start + u64::from(reservation_count);
+    let source_counter = reservation_start + 0x0605;
+    assert!(source_counter < reservation_end);
+    let message_id = crate::mapi::identity::mapi_store_id(source_counter);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let change_key = vec![
+        0xA2, 0xD1, 0xCC, 0x5A, 0x17, 0xAB, 0x87, 0x4F, 0xB7, 0x18, 0xA2, 0xE4, 0xB8, 0xAB, 0x0A,
+        0xC2, 0x00, 0x00, 0x08, 0x20,
+    ];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+    let last_modification_time = test_filetime("2026-07-19", "07:10") as u64;
+    let input = crate::store::CommitMapiNavigationShortcutImportInput {
+        shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+            id: Some(canonical_id),
+            account_id: fixture.account_id,
+            subject: "My Contacts".to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            save_stamp: 814_362_746,
+            section: 4,
+            ordinal: vec![127],
+            group_header_id: Some(Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap()),
+            group_name: "My Contacts".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
+        },
+        identity: crate::store::MapiFaiImportedIdentity {
+            source_key: source_key.clone(),
+            change_key: change_key.clone(),
+            predecessor_change_list: predecessor_change_list.clone(),
+            last_modification_time,
+        },
+        fail_on_conflict: false,
+    };
+
+    let committed = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(input.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        committed.disposition,
+        crate::store::MapiFaiImportDisposition::Applied
+    );
+    assert_eq!(committed.shortcut.id, canonical_id);
+    assert_eq!(committed.identity.object_id, message_id);
+    assert_ne!(committed.identity.change_number, source_counter);
+    assert_eq!(committed.identity.source_key, source_key);
+    assert_eq!(committed.identity.change_key, change_key);
+    assert_eq!(
+        committed.identity.predecessor_change_list,
+        predecessor_change_list
+    );
+    assert_eq!(
+        committed.identity.last_modification_time,
+        last_modification_time
+    );
+
+    let replica_allocation_floor = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT next_global_counter
+        FROM mapi_mailbox_replicas
+        WHERE account_id = $1
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let allocation_floor_ok = replica_allocation_floor as u64 > reservation_end
+        && committed.identity.change_number >= reservation_end;
+
+    let reloaded = fixture
+        .storage
+        .fetch_or_allocate_mapi_identities(
+            fixture.account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::NavigationShortcut,
+                canonical_id,
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(reloaded, committed.identity);
+    let change_count_after_create = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND object_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let mut duplicate_input = input.clone();
+    duplicate_input.shortcut.subject = "Duplicate must not overwrite content".to_string();
+    let duplicate = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(duplicate_input)
+        .await
+        .unwrap();
+    assert_eq!(duplicate.identity, committed.identity);
+    assert_eq!(duplicate.shortcut.subject, "My Contacts");
+    assert_eq!(
+        duplicate.disposition,
+        crate::store::MapiFaiImportDisposition::IgnoredOlderOrSame
+    );
+    let change_count_after_duplicate = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND object_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    assert_eq!(change_count_after_duplicate, change_count_after_create);
+    assert_eq!(
+        fixture
+            .storage
+            .fetch_mapi_navigation_shortcuts(fixture.account_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let mut conflicting_change_key = change_key.clone();
+    conflicting_change_key[0] = 0xB2;
+    conflicting_change_key[19] = 0x31;
+    let mut conflicting_pcl = vec![conflicting_change_key.len() as u8];
+    conflicting_pcl.extend_from_slice(&conflicting_change_key);
+    let mut older_conflict = input.clone();
+    older_conflict.shortcut.subject = "Older conflict must not overwrite content".to_string();
+    older_conflict.identity.change_key = conflicting_change_key.clone();
+    older_conflict.identity.predecessor_change_list = conflicting_pcl;
+    older_conflict.identity.last_modification_time = last_modification_time - 600_000_000;
+    let resolved = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(older_conflict)
+        .await
+        .unwrap();
+    assert_eq!(
+        resolved.disposition,
+        crate::store::MapiFaiImportDisposition::ConflictResolved {
+            imported_wins: false,
+        }
+    );
+    assert_eq!(resolved.shortcut.subject, "My Contacts");
+    assert_eq!(resolved.identity.change_key, change_key);
+    assert!(test_mapi_pcl_includes_change_key(
+        &resolved.identity.predecessor_change_list,
+        &conflicting_change_key,
+    ));
+    assert!(test_mapi_pcl_includes_change_key(
+        &resolved.identity.predecessor_change_list,
+        &change_key,
+    ));
+    let change_count_after_server_wins = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND object_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        change_count_after_server_wins,
+        change_count_after_duplicate + 1,
+        "a server-winning resolution must be journaled for a later ICS download"
+    );
+
+    let mut rejected_conflict_change_key = change_key.clone();
+    rejected_conflict_change_key[0] = 0xC2;
+    rejected_conflict_change_key[19] = 0x32;
+    let mut rejected_conflict_pcl = vec![rejected_conflict_change_key.len() as u8];
+    rejected_conflict_pcl.extend_from_slice(&rejected_conflict_change_key);
+    let mut rejected_conflict = input.clone();
+    rejected_conflict.shortcut.subject = "FailOnConflict must not overwrite content".to_string();
+    rejected_conflict.identity.change_key = rejected_conflict_change_key;
+    rejected_conflict.identity.predecessor_change_list = rejected_conflict_pcl;
+    rejected_conflict.identity.last_modification_time = last_modification_time + 600_000_000;
+    rejected_conflict.fail_on_conflict = true;
+    assert!(fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(rejected_conflict)
+        .await
+        .is_err());
+    assert_eq!(
+        fixture
+            .storage
+            .fetch_mapi_navigation_shortcuts(fixture.account_id)
+            .await
+            .unwrap()[0]
+            .subject,
+        "My Contacts"
+    );
+    let reloaded_after_rejected_conflict = fixture
+        .storage
+        .fetch_or_allocate_mapi_identities(
+            fixture.account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::NavigationShortcut,
+                canonical_id,
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(reloaded_after_rejected_conflict, resolved.identity);
+
+    let mut equal_timestamp_change_key = change_key.clone();
+    equal_timestamp_change_key[0] = 0xF2;
+    equal_timestamp_change_key[19] = 0x34;
+    let mut equal_timestamp_pcl = vec![equal_timestamp_change_key.len() as u8];
+    equal_timestamp_pcl.extend_from_slice(&equal_timestamp_change_key);
+    let mut equal_timestamp_conflict = input.clone();
+    equal_timestamp_conflict.shortcut.subject = "Equal timestamp higher GUID must win".to_string();
+    equal_timestamp_conflict.identity.change_key = equal_timestamp_change_key.clone();
+    equal_timestamp_conflict.identity.predecessor_change_list = equal_timestamp_pcl;
+    equal_timestamp_conflict.identity.last_modification_time = last_modification_time;
+    let equal_timestamp_resolution = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(equal_timestamp_conflict)
+        .await
+        .unwrap();
+    let equal_timestamp_import_wins = equal_timestamp_resolution.shortcut.subject
+        == "Equal timestamp higher GUID must win"
+        && equal_timestamp_resolution.identity.change_key == equal_timestamp_change_key
+        && equal_timestamp_resolution.disposition
+            == crate::store::MapiFaiImportDisposition::ConflictResolved {
+                imported_wins: true,
+            };
+
+    let mut causal_change_key = equal_timestamp_resolution.identity.change_key.clone();
+    *causal_change_key.last_mut().unwrap() = 0x35;
+    let mut causal_change_key_pcl = vec![causal_change_key.len() as u8];
+    causal_change_key_pcl.extend_from_slice(&causal_change_key);
+    let causal_pcl = test_merge_mapi_predecessor_change_lists(
+        &equal_timestamp_resolution.identity.predecessor_change_list,
+        &causal_change_key_pcl,
+    )
+    .unwrap();
+    let mut causal_successor = input.clone();
+    causal_successor.shortcut.subject = "Causal successor must be applied".to_string();
+    causal_successor.identity.change_key = causal_change_key.clone();
+    causal_successor.identity.predecessor_change_list = causal_pcl;
+    causal_successor.identity.last_modification_time = last_modification_time + 600_000_000;
+    let causal_resolution = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(causal_successor)
+        .await
+        .unwrap();
+    let causal_update_applied = causal_resolution.shortcut.subject
+        == "Causal successor must be applied"
+        && causal_resolution.identity.change_key == causal_change_key
+        && causal_resolution.disposition == crate::store::MapiFaiImportDisposition::Applied;
+
+    let rejected_id = Uuid::parse_str("0e8a26aa-edec-4891-846b-0566d628ee16").unwrap();
+    let mut invalid = crate::store::CommitMapiNavigationShortcutImportInput {
+        shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+            id: Some(rejected_id),
+            account_id: fixture.account_id,
+            subject: "Suggested Contacts".to_string(),
+            target_folder_id: Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 1_048_576,
+            save_stamp: 814_362_746,
+            section: 4,
+            ordinal: vec![127],
+            group_header_id: None,
+            group_name: "My Contacts".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
+        },
+        identity: crate::store::MapiFaiImportedIdentity {
+            source_key: crate::mapi::identity::source_key_for_object_id(
+                crate::mapi::identity::mapi_store_id(0x0206_B5),
+            ),
+            change_key: vec![0x55; 20],
+            predecessor_change_list: Vec::new(),
+            last_modification_time,
+        },
+        fail_on_conflict: false,
+    };
+    invalid.identity.predecessor_change_list = vec![20];
+    assert!(fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(invalid)
+        .await
+        .is_err());
+    let rejected_rows = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_navigation_shortcuts
+        WHERE account_id = $1 AND id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(rejected_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let rejected_identities = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND canonical_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(rejected_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let rejected_changes = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND object_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(rejected_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        (rejected_rows, rejected_identities, rejected_changes),
+        (0, 0, 0)
+    );
+
+    let reserved_id = Uuid::parse_str("831b9771-aabd-4986-a92e-068b7aec6267").unwrap();
+    let reserved_change_key = vec![0xE2; 20];
+    let mut reserved_pcl = vec![reserved_change_key.len() as u8];
+    reserved_pcl.extend_from_slice(&reserved_change_key);
+    let reserved_result = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(
+            crate::store::CommitMapiNavigationShortcutImportInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: Some(reserved_id),
+                    account_id: fixture.account_id,
+                    subject: "Reserved high WLink".to_string(),
+                    target_folder_id: None,
+                    shortcut_type: 4,
+                    flags: 0,
+                    save_stamp: 814_362_746,
+                    section: 4,
+                    ordinal: vec![127],
+                    group_header_id: Some(
+                        Uuid::parse_str("0ab23abf-d099-4b66-980f-96cd6d0d54ef").unwrap(),
+                    ),
+                    group_name: "Reserved high WLink".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+                identity: crate::store::MapiFaiImportedIdentity {
+                    source_key: crate::mapi::identity::source_key_for_object_id(
+                        crate::mapi::identity::mapi_store_id(
+                            crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER,
+                        ),
+                    ),
+                    change_key: reserved_change_key,
+                    predecessor_change_list: reserved_pcl,
+                    last_modification_time,
+                },
+                fail_on_conflict: false,
+            },
+        )
+        .await;
+    let reserved_rows = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_navigation_shortcuts
+        WHERE account_id = $1 AND id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(reserved_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let reserved_identities = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND canonical_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(reserved_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let reserved_changes = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND object_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(reserved_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let reserved_range_rejected = reserved_result.is_err()
+        && (reserved_rows, reserved_identities, reserved_changes) == (0, 0, 0);
+
+    let unreserved_id = Uuid::parse_str("b76e0914-dd05-4910-9912-76bc791555eb").unwrap();
+    let unreserved_counter = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT next_global_counter
+        FROM mapi_mailbox_replicas
+        WHERE account_id = $1
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap() as u64;
+    let unreserved_change_key = vec![0xD2; 20];
+    let mut unreserved_pcl = vec![unreserved_change_key.len() as u8];
+    unreserved_pcl.extend_from_slice(&unreserved_change_key);
+    let unreserved_result = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(
+            crate::store::CommitMapiNavigationShortcutImportInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: Some(unreserved_id),
+                    account_id: fixture.account_id,
+                    subject: "Unreserved WLink".to_string(),
+                    target_folder_id: None,
+                    shortcut_type: 4,
+                    flags: 0,
+                    save_stamp: 814_362_746,
+                    section: 4,
+                    ordinal: vec![127],
+                    group_header_id: Some(
+                        Uuid::parse_str("297f850a-2fc2-4e4f-8fd0-d4c248d9feb7").unwrap(),
+                    ),
+                    group_name: "Unreserved WLink".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+                identity: crate::store::MapiFaiImportedIdentity {
+                    source_key: crate::mapi::identity::source_key_for_object_id(
+                        crate::mapi::identity::mapi_store_id(unreserved_counter),
+                    ),
+                    change_key: unreserved_change_key,
+                    predecessor_change_list: unreserved_pcl,
+                    last_modification_time,
+                },
+                fail_on_conflict: false,
+            },
+        )
+        .await;
+    let unreserved_writes = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM mapi_navigation_shortcuts
+             WHERE account_id = $1 AND id = $2)
+          + (SELECT COUNT(*) FROM mapi_object_identities
+             WHERE account_id = $1 AND object_kind = 'navigation_shortcut'
+               AND canonical_id = $2)
+          + (SELECT COUNT(*) FROM mail_change_log
+             WHERE account_id = $1 AND object_kind = 'navigation_shortcut'
+               AND object_id = $2)
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(unreserved_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let unreserved_source_rejected = unreserved_result.is_err() && unreserved_writes == 0;
+
+    // A high-water mark does not prove that a lower counter belongs to a
+    // range actually returned by RopGetLocalReplicaIds. Remove the exact
+    // reservation record while retaining next_global_counter to model that
+    // semantic gap and require the import to reject it without writes.
+    sqlx::query(
+        r#"
+        DELETE FROM mapi_local_replica_id_ranges
+        WHERE account_id = $1
+          AND first_global_counter = $2
+          AND end_global_counter_exclusive = $3
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(reservation_start as i64)
+    .bind(reservation_end as i64)
+    .execute(fixture.storage.pool())
+    .await
+    .unwrap();
+    let high_water_only_id = Uuid::parse_str("c86e0914-dd05-4910-9912-76bc791555ec").unwrap();
+    let high_water_only_counter = reservation_start + 0x0705;
+    let high_water_only_change_key = vec![0xC2; 20];
+    let mut high_water_only_pcl = vec![high_water_only_change_key.len() as u8];
+    high_water_only_pcl.extend_from_slice(&high_water_only_change_key);
+    let high_water_only_result = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(
+            crate::store::CommitMapiNavigationShortcutImportInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: Some(high_water_only_id),
+                    account_id: fixture.account_id,
+                    subject: "High-water-only WLink".to_string(),
+                    target_folder_id: None,
+                    shortcut_type: 4,
+                    flags: 0,
+                    save_stamp: 814_362_746,
+                    section: 4,
+                    ordinal: vec![127],
+                    group_header_id: Some(
+                        Uuid::parse_str("397f850a-2fc2-4e4f-8fd0-d4c248d9feb8").unwrap(),
+                    ),
+                    group_name: "High-water-only WLink".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+                identity: crate::store::MapiFaiImportedIdentity {
+                    source_key: crate::mapi::identity::source_key_for_object_id(
+                        crate::mapi::identity::mapi_store_id(high_water_only_counter),
+                    ),
+                    change_key: high_water_only_change_key,
+                    predecessor_change_list: high_water_only_pcl,
+                    last_modification_time,
+                },
+                fail_on_conflict: false,
+            },
+        )
+        .await;
+    let high_water_only_writes = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM mapi_navigation_shortcuts
+             WHERE account_id = $1 AND id = $2)
+          + (SELECT COUNT(*) FROM mapi_object_identities
+             WHERE account_id = $1 AND object_kind = 'navigation_shortcut'
+               AND canonical_id = $2)
+          + (SELECT COUNT(*) FROM mail_change_log
+             WHERE account_id = $1 AND object_kind = 'navigation_shortcut'
+               AND object_id = $2)
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(high_water_only_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let high_water_only_source_rejected =
+        high_water_only_result.is_err() && high_water_only_writes == 0;
+
+    fixture.cleanup().await.unwrap();
+    assert!(
+        allocation_floor_ok
+            && equal_timestamp_import_wins
+            && causal_update_applied
+            && reserved_range_rejected
+            && unreserved_source_rejected
+            && high_water_only_source_rejected,
+        "imported WLink invariants: allocation_floor_ok={allocation_floor_ok}, \
+         equal_timestamp_import_wins={equal_timestamp_import_wins}, \
+         causal_update_applied={causal_update_applied}, \
+         reserved_range_rejected={reserved_range_rejected}, \
+         unreserved_source_rejected={unreserved_source_rejected}, \
+         high_water_only_source_rejected={high_water_only_source_rejected}"
+    );
+}
+
+#[tokio::test]
+async fn mapi_navigation_shortcut_delete_tombstones_identity_and_replay_is_object_deleted() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let canonical_id = Uuid::parse_str("83a302f4-5b88-4687-96fe-4bef3d3cb507").unwrap();
+    let reservation_start = fixture
+        .storage
+        .reserve_mapi_local_replica_ids(fixture.account_id, 0x0100)
+        .await
+        .unwrap();
+    let source_counter = reservation_start + 0x74;
+    let message_id = crate::mapi::identity::mapi_store_id(source_counter);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let change_key = vec![
+        0xF6, 0x84, 0xAD, 0x0D, 0xB2, 0x48, 0x4A, 0x13, 0xB8, 0x63, 0x42, 0xDF, 0xF1, 0x7E, 0xE6,
+        0x1A, 0x00, 0x00, 0x00, 0x74,
+    ];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+    let input = crate::store::CommitMapiNavigationShortcutImportInput {
+        shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+            id: Some(canonical_id),
+            account_id: fixture.account_id,
+            subject: "My Contacts deleted WLink".to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            save_stamp: 1_537_819_608,
+            section: 4,
+            ordinal: vec![127],
+            group_header_id: Some(Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap()),
+            group_name: "My Contacts".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
+        },
+        identity: crate::store::MapiFaiImportedIdentity {
+            source_key,
+            change_key,
+            predecessor_change_list,
+            last_modification_time: test_filetime("2026-07-19", "14:00") as u64,
+        },
+        fail_on_conflict: false,
+    };
+    fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(input.clone())
+        .await
+        .unwrap();
+
+    fixture
+        .storage
+        .delete_mapi_navigation_shortcut(fixture.account_id, canonical_id)
+        .await
+        .unwrap();
+    let identity_after_delete = sqlx::query(
+        r#"
+        SELECT deleted_at IS NOT NULL AS deleted,
+               mapi_object_id, mapi_change_number, source_key, change_key,
+               predecessor_change_list
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND canonical_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let identity_after_delete = (
+        identity_after_delete.get::<bool, _>("deleted"),
+        identity_after_delete.get::<i64, _>("mapi_object_id"),
+        identity_after_delete.get::<i64, _>("mapi_change_number"),
+        identity_after_delete.get::<Vec<u8>, _>("source_key"),
+        identity_after_delete.get::<Vec<u8>, _>("change_key"),
+        identity_after_delete.get::<Vec<u8>, _>("predecessor_change_list"),
+    );
+    let content_after_delete = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_navigation_shortcuts
+        WHERE account_id = $1 AND id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let destroyed_after_delete = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND object_id = $2
+          AND change_kind = 'destroyed'
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let journal_count_after_delete = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND object_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let next_counter_after_delete = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT next_global_counter
+        FROM mapi_mailbox_replicas
+        WHERE account_id = $1
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+
+    let mut replay_input = input;
+    replay_input.shortcut.subject = "Replay must not resurrect WLink".to_string();
+    let replay = fixture
+        .storage
+        .commit_mapi_navigation_shortcut_import(replay_input)
+        .await;
+    let replay_is_object_deleted = replay
+        .as_ref()
+        .err()
+        .is_some_and(|error| error.is::<crate::store::MapiFaiImportObjectDeleted>());
+    let identity_after_replay = sqlx::query(
+        r#"
+        SELECT deleted_at IS NOT NULL AS deleted,
+               mapi_object_id, mapi_change_number, source_key, change_key,
+               predecessor_change_list
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND canonical_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let identity_after_replay = (
+        identity_after_replay.get::<bool, _>("deleted"),
+        identity_after_replay.get::<i64, _>("mapi_object_id"),
+        identity_after_replay.get::<i64, _>("mapi_change_number"),
+        identity_after_replay.get::<Vec<u8>, _>("source_key"),
+        identity_after_replay.get::<Vec<u8>, _>("change_key"),
+        identity_after_replay.get::<Vec<u8>, _>("predecessor_change_list"),
+    );
+    let content_after_replay = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_navigation_shortcuts
+        WHERE account_id = $1 AND id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let journal_count_after_replay = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND object_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+    let next_counter_after_replay = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT next_global_counter
+        FROM mapi_mailbox_replicas
+        WHERE account_id = $1
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap();
+
+    fixture.cleanup().await.unwrap();
+    assert!(
+        identity_after_delete.0,
+        "the canonical delete must tombstone the durable SourceKey identity"
+    );
+    assert_eq!(content_after_delete, 0);
+    assert_eq!(destroyed_after_delete, 1);
+    assert!(
+        replay_is_object_deleted,
+        "[MS-OXCFXICS] section 3.3.4.3.3.2.2.1 permits ObjectDeleted from SaveChangesMessage"
+    );
+    assert_eq!(identity_after_replay, identity_after_delete);
+    assert_eq!(content_after_replay, 0);
+    assert_eq!(journal_count_after_replay, journal_count_after_delete);
+    assert_eq!(next_counter_after_replay, next_counter_after_delete);
 }
 
 #[tokio::test]
@@ -2340,6 +3199,7 @@ struct FakeStore {
     search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
     deleted_search_folders: Arc<Mutex<Vec<Uuid>>>,
     navigation_shortcuts: Arc<Mutex<Vec<crate::store::MapiNavigationShortcutRecord>>>,
+    deleted_navigation_shortcut_ids: Arc<Mutex<Vec<Uuid>>>,
     associated_configs: Arc<Mutex<Vec<crate::store::MapiAssociatedConfigRecord>>>,
     conversation_actions: Arc<Mutex<Vec<ConversationAction>>>,
     delegate_freebusy_messages: Arc<Mutex<Vec<DelegateFreeBusyMessageObject>>>,
@@ -2364,6 +3224,9 @@ struct FakeStore {
     ews_app_marketplace_policy: Arc<Mutex<EwsAppMarketplacePolicy>>,
     ews_unified_messaging_calls: Arc<Mutex<Vec<FakeUnifiedMessagingCall>>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
+    mapi_local_replica_ranges: Arc<Mutex<Vec<(Uuid, u64, u64)>>>,
+    mapi_local_replica_deleted_ranges:
+        Arc<Mutex<Vec<(Uuid, u64, crate::store::MapiLocalReplicaDeletedRange)>>>,
     omit_principal_from_directory: bool,
     fail_query_jmap_email_ids: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
@@ -3187,7 +4050,7 @@ fn test_merge_mapi_predecessor_change_lists(first: &[u8], second: &[u8]) -> Opti
 impl ExchangeStore for FakeStore {
     fn reserve_mapi_local_replica_ids<'a>(
         &'a self,
-        _account_id: Uuid,
+        account_id: Uuid,
         id_count: u32,
     ) -> StoreFuture<'a, u64> {
         Box::pin(async move {
@@ -3204,7 +4067,57 @@ impl ExchangeStore for FakeStore {
                 .filter(|next| *next <= crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
                 .ok_or_else(|| anyhow::anyhow!("MAPI local replica ID space exhausted"))?;
             *next_counter = next_global_counter;
+            self.mapi_local_replica_ranges.lock().unwrap().push((
+                account_id,
+                first_global_counter,
+                next_global_counter,
+            ));
             Ok(first_global_counter)
+        })
+    }
+
+    fn add_mapi_local_replica_deleted_ranges<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        ranges: &'a [crate::store::MapiLocalReplicaDeletedRange],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            if folder_id == 0 || ranges.is_empty() {
+                anyhow::bail!("invalid MAPI local replica deleted-item range request");
+            }
+            let reservations = self.mapi_local_replica_ranges.lock().unwrap();
+            for range in ranges {
+                let reserved_count = reservations
+                    .iter()
+                    .filter(|(reserved_account_id, first, end)| {
+                        *reserved_account_id == account_id
+                            && *first <= range.max_global_counter
+                            && *end > range.min_global_counter
+                    })
+                    .map(|(_, first, end)| {
+                        end.min(&(range.max_global_counter + 1))
+                            - first.max(&range.min_global_counter)
+                    })
+                    .sum::<u64>();
+                if range.replica_guid != Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID)
+                    || range.min_global_counter > range.max_global_counter
+                    || reserved_count != range.max_global_counter - range.min_global_counter + 1
+                {
+                    anyhow::bail!(
+                        "MAPI local replica deleted-item range was not previously reserved"
+                    );
+                }
+            }
+            drop(reservations);
+            let mut deleted = self.mapi_local_replica_deleted_ranges.lock().unwrap();
+            for range in ranges {
+                let value = (account_id, folder_id, *range);
+                if !deleted.contains(&value) {
+                    deleted.push(value);
+                }
+            }
+            Ok(())
         })
     }
 
@@ -7583,26 +8496,7 @@ impl ExchangeStore for FakeStore {
         let shortcuts = self.navigation_shortcuts.clone();
         Box::pin(async move {
             let mut shortcuts = shortcuts.lock().unwrap();
-            let id = input.id.unwrap_or_else(|| {
-                shortcuts
-                    .iter()
-                    .find(|shortcut| {
-                        if input.target_folder_id.is_some() {
-                            shortcut.target_folder_id == input.target_folder_id
-                                && shortcut.shortcut_type == input.shortcut_type
-                                && shortcut.section == input.section
-                        } else {
-                            shortcut.subject == input.subject
-                                && shortcut.target_folder_id == input.target_folder_id
-                                && shortcut.shortcut_type == input.shortcut_type
-                                && shortcut.section == input.section
-                                && shortcut.group_header_id == input.group_header_id
-                                && shortcut.group_name == input.group_name
-                        }
-                    })
-                    .map(|shortcut| shortcut.id)
-                    .unwrap_or_else(Uuid::new_v4)
-            });
+            let id = input.id.unwrap_or_else(Uuid::new_v4);
             let record = crate::store::MapiNavigationShortcutRecord {
                 id,
                 account_id: input.account_id,
@@ -7615,28 +8509,373 @@ impl ExchangeStore for FakeStore {
                 ordinal: input.ordinal,
                 group_header_id: input.group_header_id,
                 group_name: input.group_name,
+                client_properties: input.client_properties,
             };
             if let Some(existing) = shortcuts.iter_mut().find(|shortcut| shortcut.id == id) {
                 *existing = record.clone();
             } else {
                 shortcuts.push(record.clone());
             }
-            shortcuts.retain(|shortcut| {
-                shortcut.id == id
-                    || if record.target_folder_id.is_some() {
-                        shortcut.target_folder_id != record.target_folder_id
-                            || shortcut.shortcut_type != record.shortcut_type
-                            || shortcut.section != record.section
-                    } else {
-                        shortcut.subject != record.subject
-                            || shortcut.target_folder_id != record.target_folder_id
-                            || shortcut.shortcut_type != record.shortcut_type
-                            || shortcut.section != record.section
-                            || shortcut.group_header_id != record.group_header_id
-                            || shortcut.group_name != record.group_name
-                    }
-            });
             Ok(record)
+        })
+    }
+
+    fn commit_mapi_navigation_shortcut_create<'a>(
+        &'a self,
+        mut input: crate::store::CommitMapiNavigationShortcutCreateInput,
+    ) -> StoreFuture<'a, crate::store::MapiNavigationShortcutCommit> {
+        Box::pin(async move {
+            let canonical_id = input.shortcut.id.unwrap_or_else(Uuid::new_v4);
+            input.shortcut.id = Some(canonical_id);
+            let identity = self
+                .fetch_or_allocate_mapi_identities(
+                    input.shortcut.account_id,
+                    &[MapiIdentityRequest {
+                        object_kind: MapiIdentityObjectKind::NavigationShortcut,
+                        canonical_id,
+                        reserved_global_counter: None,
+                        source_key: None,
+                    }],
+                )
+                .await?
+                .remove(0);
+            let shortcut = self.upsert_mapi_navigation_shortcut(input.shortcut).await?;
+            Ok(crate::store::MapiNavigationShortcutCommit { shortcut, identity })
+        })
+    }
+
+    fn commit_mapi_navigation_shortcut_update<'a>(
+        &'a self,
+        input: crate::store::UpsertMapiNavigationShortcutInput,
+    ) -> StoreFuture<'a, crate::store::MapiNavigationShortcutCommit> {
+        Box::pin(async move {
+            let canonical_id = input
+                .id
+                .ok_or_else(|| anyhow::anyhow!("existing WLink canonical identity is missing"))?;
+            let object_id = self
+                .mapi_identities
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("active WLink identity was not found"))?;
+            let source_key = self
+                .mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned()
+                .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(object_id));
+            let current_predecessors = self
+                .mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("active WLink PCL was not found"))?;
+            let change_number = {
+                let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+                if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+                    *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
+                }
+                let value = *next_counter;
+                *next_counter = next_counter.saturating_add(1);
+                value
+            };
+            let change_key = crate::mapi::identity::change_key_for_change_number(change_number);
+            let predecessor_change_list = test_merge_mapi_predecessor_change_lists(
+                &current_predecessors,
+                &crate::mapi_mailstore::predecessor_change_list(change_number),
+            )
+            .ok_or_else(|| anyhow::anyhow!("active WLink PCL is invalid"))?;
+            let last_modification_time =
+                crate::mapi_mailstore::filetime_from_change_number(change_number);
+            let shortcut = self.upsert_mapi_navigation_shortcut(input).await?;
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_number);
+            self.mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_key.clone());
+            self.mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .insert(canonical_id, predecessor_change_list.clone());
+            self.mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .insert(canonical_id, last_modification_time);
+            Ok(crate::store::MapiNavigationShortcutCommit {
+                shortcut,
+                identity: crate::store::MapiIdentityRecord {
+                    object_kind: MapiIdentityObjectKind::NavigationShortcut,
+                    canonical_id,
+                    object_id,
+                    change_number,
+                    source_key,
+                    change_key,
+                    predecessor_change_list,
+                    last_modification_time,
+                },
+            })
+        })
+    }
+
+    fn commit_mapi_navigation_shortcut_import<'a>(
+        &'a self,
+        input: crate::store::CommitMapiNavigationShortcutImportInput,
+    ) -> StoreFuture<'a, crate::store::MapiNavigationShortcutImportCommit> {
+        Box::pin(async move {
+            let object_id =
+                crate::mapi::identity::object_id_from_source_key(&input.identity.source_key)
+                    .ok_or_else(|| anyhow::anyhow!("invalid imported WLink SourceKey"))?;
+            let source_counter = crate::mapi::identity::global_counter_from_store_id(object_id)
+                .filter(|counter| {
+                    (crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+                        ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+                        .contains(counter)
+                })
+                .ok_or_else(|| anyhow::anyhow!("imported WLink SourceKey is reserved"))?;
+            if !(17..=24).contains(&input.identity.change_key.len())
+                || !test_mapi_pcl_includes_change_key(
+                    &input.identity.predecessor_change_list,
+                    &input.identity.change_key,
+                )
+            {
+                anyhow::bail!("invalid imported WLink version");
+            }
+            let locally_reserved = self.mapi_local_replica_ranges.lock().unwrap().iter().any(
+                |(account_id, first, end)| {
+                    *account_id == input.shortcut.account_id
+                        && *first <= source_counter
+                        && source_counter < *end
+                },
+            );
+            if !locally_reserved {
+                anyhow::bail!("imported WLink SourceKey was not locally reserved");
+            }
+            if self
+                .mapi_local_replica_deleted_ranges
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(account_id, folder_id, range)| {
+                    *account_id == input.shortcut.account_id
+                        && *folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID
+                        && range.replica_guid
+                            == Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID)
+                        && range.min_global_counter <= source_counter
+                        && source_counter <= range.max_global_counter
+                })
+            {
+                return Err(crate::store::MapiFaiImportObjectDeleted.into());
+            }
+            let existing_canonical_id = self
+                .mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|(canonical_id, source_key)| {
+                    (*source_key == input.identity.source_key).then_some(*canonical_id)
+                })
+                .or_else(|| {
+                    self.mapi_identities.lock().unwrap().iter().find_map(
+                        |(canonical_id, existing_object_id)| {
+                            (*existing_object_id == object_id).then_some(*canonical_id)
+                        },
+                    )
+                });
+            let canonical_id = existing_canonical_id
+                .or(input.shortcut.id)
+                .unwrap_or_else(Uuid::new_v4);
+            if self
+                .deleted_navigation_shortcut_ids
+                .lock()
+                .unwrap()
+                .contains(&canonical_id)
+            {
+                return Err(crate::store::MapiFaiImportObjectDeleted.into());
+            }
+            if self
+                .mapi_identities
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .is_some_and(|existing| *existing != object_id)
+            {
+                anyhow::bail!("imported WLink canonical identity has a different SourceKey");
+            }
+
+            let current_change_number = self
+                .mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied();
+            let current_change_key = self
+                .mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned();
+            let current_predecessor_change_list = self
+                .mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned();
+            let current_last_modification_time = self
+                .mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied();
+            let current_shortcut = self
+                .navigation_shortcuts
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|shortcut| shortcut.id == canonical_id)
+                .cloned();
+            let merged_predecessor_change_list = current_predecessor_change_list
+                .as_deref()
+                .map(|current| {
+                    test_merge_mapi_predecessor_change_lists(
+                        current,
+                        &input.identity.predecessor_change_list,
+                    )
+                    .ok_or_else(|| anyhow::anyhow!("invalid imported WLink PCL"))
+                })
+                .transpose()?;
+            let duplicate = current_predecessor_change_list
+                .as_deref()
+                .zip(merged_predecessor_change_list.as_deref())
+                .is_some_and(|(current, merged)| {
+                    test_mapi_pcl_includes_change_key(current, &input.identity.change_key)
+                        && merged == current
+                });
+            let conflict = current_predecessor_change_list.is_some()
+                && !duplicate
+                && merged_predecessor_change_list
+                    .as_deref()
+                    .is_some_and(|merged| merged != input.identity.predecessor_change_list);
+            if conflict && input.fail_on_conflict {
+                return Err(crate::store::MapiFaiImportConflict.into());
+            }
+            let current_last_modification_time_value =
+                current_last_modification_time.unwrap_or_default();
+            let imported_last_modification_time =
+                input.identity.last_modification_time - input.identity.last_modification_time % 10;
+            let imported_wins = !conflict
+                || match imported_last_modification_time.cmp(&current_last_modification_time_value)
+                {
+                    std::cmp::Ordering::Greater => true,
+                    std::cmp::Ordering::Less => false,
+                    std::cmp::Ordering::Equal => {
+                        input.identity.change_key[..16]
+                            >= current_change_key
+                                .as_deref()
+                                .expect("conflicting WLink ChangeKey")[..16]
+                    }
+                };
+            let apply_imported_content =
+                current_change_number.is_none() || (!duplicate && imported_wins);
+            let disposition = if duplicate {
+                crate::store::MapiFaiImportDisposition::IgnoredOlderOrSame
+            } else if conflict {
+                crate::store::MapiFaiImportDisposition::ConflictResolved { imported_wins }
+            } else {
+                crate::store::MapiFaiImportDisposition::Applied
+            };
+            let changed = disposition.changes_server_replica();
+            let (change_number, change_key, predecessor_change_list, last_modification_time) =
+                if !changed {
+                    (
+                        current_change_number.expect("duplicate WLink CN"),
+                        current_change_key.expect("duplicate WLink ChangeKey"),
+                        current_predecessor_change_list.expect("duplicate WLink PCL"),
+                        current_last_modification_time.expect("duplicate WLink timestamp"),
+                    )
+                } else {
+                    let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+                    if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+                        *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
+                    }
+                    let mut change_number = *next_counter;
+                    *next_counter = next_counter.saturating_add(1);
+                    if change_number == source_counter {
+                        change_number = *next_counter;
+                        *next_counter = next_counter.saturating_add(1);
+                    }
+                    let predecessor_change_list = merged_predecessor_change_list
+                        .unwrap_or_else(|| input.identity.predecessor_change_list.clone());
+                    let change_key = if imported_wins {
+                        input.identity.change_key.clone()
+                    } else {
+                        current_change_key.expect("server-winning WLink ChangeKey")
+                    };
+                    let last_modification_time = if imported_wins {
+                        imported_last_modification_time
+                    } else {
+                        current_last_modification_time_value
+                    };
+                    (
+                        change_number,
+                        change_key,
+                        predecessor_change_list,
+                        last_modification_time,
+                    )
+                };
+
+            let shortcut = if apply_imported_content {
+                let mut shortcut_input = input.shortcut;
+                shortcut_input.id = Some(canonical_id);
+                self.upsert_mapi_navigation_shortcut(shortcut_input).await?
+            } else {
+                current_shortcut
+                    .ok_or_else(|| anyhow::anyhow!("durable imported WLink content is missing"))?
+            };
+            self.mapi_identities
+                .lock()
+                .unwrap()
+                .insert(canonical_id, object_id);
+            self.mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .insert(canonical_id, input.identity.source_key.clone());
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_number);
+            self.mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_key.clone());
+            self.mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .insert(canonical_id, predecessor_change_list.clone());
+            self.mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .insert(canonical_id, last_modification_time);
+            let identity = crate::store::MapiIdentityRecord {
+                object_kind: MapiIdentityObjectKind::NavigationShortcut,
+                canonical_id,
+                object_id,
+                change_number,
+                source_key: input.identity.source_key,
+                change_key,
+                predecessor_change_list,
+                last_modification_time,
+            };
+            Ok(crate::store::MapiNavigationShortcutImportCommit {
+                shortcut,
+                identity,
+                disposition,
+            })
         })
     }
 
@@ -7645,11 +8884,187 @@ impl ExchangeStore for FakeStore {
         _account_id: Uuid,
         shortcut_id: Uuid,
     ) -> StoreFuture<'a, ()> {
-        self.navigation_shortcuts
-            .lock()
-            .unwrap()
-            .retain(|shortcut| shortcut.id != shortcut_id);
-        Box::pin(async move { Ok(()) })
+        let deleted = {
+            let mut shortcuts = self.navigation_shortcuts.lock().unwrap();
+            let before = shortcuts.len();
+            shortcuts.retain(|shortcut| shortcut.id != shortcut_id);
+            shortcuts.len() != before
+        };
+        if deleted {
+            self.deleted_navigation_shortcut_ids
+                .lock()
+                .unwrap()
+                .push(shortcut_id);
+            Box::pin(async move { Ok(()) })
+        } else {
+            Box::pin(async move { Err(anyhow::anyhow!("MAPI navigation shortcut not found")) })
+        }
+    }
+
+    fn preflight_unknown_mapi_navigation_shortcut_deletes<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        source_keys: &'a [Vec<u8>],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            if folder_id != crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
+                anyhow::bail!("unknown WLink tombstone is outside Common Views");
+            }
+            for source_key in source_keys {
+                let object_id = crate::mapi::identity::object_id_from_source_key(source_key)
+                    .ok_or_else(|| anyhow::anyhow!("invalid deleted WLink SourceKey"))?;
+                let source_counter = crate::mapi::identity::global_counter_from_store_id(object_id)
+                    .filter(|counter| {
+                        (crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+                            ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+                            .contains(counter)
+                    })
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("deleted WLink SourceKey is outside the dynamic range")
+                    })?;
+                let existing_canonical_id = self
+                    .mapi_identity_source_keys
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find_map(|(canonical_id, existing_source_key)| {
+                        (existing_source_key.as_slice() == source_key.as_slice())
+                            .then_some(*canonical_id)
+                    })
+                    .or_else(|| {
+                        self.mapi_identities.lock().unwrap().iter().find_map(
+                            |(canonical_id, existing_object_id)| {
+                                (*existing_object_id == object_id).then_some(*canonical_id)
+                            },
+                        )
+                    });
+                if let Some(canonical_id) = existing_canonical_id {
+                    if self
+                        .navigation_shortcuts
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .any(|shortcut| shortcut.id == canonical_id)
+                    {
+                        anyhow::bail!(
+                            "deleted WLink identity became active before tombstone commit"
+                        );
+                    }
+                    continue;
+                }
+                if !self.mapi_local_replica_ranges.lock().unwrap().iter().any(
+                    |(reserved_account_id, first, end)| {
+                        *reserved_account_id == account_id
+                            && *first <= source_counter
+                            && source_counter < *end
+                    },
+                ) {
+                    anyhow::bail!("deleted WLink SourceKey was not locally reserved");
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn tombstone_unknown_mapi_navigation_shortcut<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        source_key: &'a [u8],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            if folder_id != crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
+                anyhow::bail!("unknown WLink tombstone is outside Common Views");
+            }
+            let object_id = crate::mapi::identity::object_id_from_source_key(source_key)
+                .ok_or_else(|| anyhow::anyhow!("invalid deleted WLink SourceKey"))?;
+            let source_counter = crate::mapi::identity::global_counter_from_store_id(object_id)
+                .ok_or_else(|| anyhow::anyhow!("invalid deleted WLink MID"))?;
+            if !self.mapi_local_replica_ranges.lock().unwrap().iter().any(
+                |(reserved_account_id, first, end)| {
+                    *reserved_account_id == account_id
+                        && *first <= source_counter
+                        && source_counter < *end
+                },
+            ) {
+                anyhow::bail!("deleted WLink SourceKey was not locally reserved");
+            }
+
+            let canonical_id = self
+                .mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|(canonical_id, existing_source_key)| {
+                    (existing_source_key.as_slice() == source_key).then_some(*canonical_id)
+                })
+                .or_else(|| {
+                    self.mapi_identities.lock().unwrap().iter().find_map(
+                        |(canonical_id, existing_object_id)| {
+                            (*existing_object_id == object_id).then_some(*canonical_id)
+                        },
+                    )
+                })
+                .unwrap_or_else(Uuid::new_v4);
+            if self
+                .navigation_shortcuts
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|shortcut| shortcut.id == canonical_id)
+            {
+                anyhow::bail!("deleted WLink identity became active before tombstone commit");
+            }
+            self.mapi_identities
+                .lock()
+                .unwrap()
+                .insert(canonical_id, object_id);
+            self.mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .insert(canonical_id, source_key.to_vec());
+            let change_number = {
+                let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+                let mut change_number = *next_counter;
+                *next_counter = next_counter.saturating_add(1);
+                if change_number == source_counter {
+                    change_number = *next_counter;
+                    *next_counter = next_counter.saturating_add(1);
+                }
+                change_number
+            };
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_number);
+            self.mapi_identity_change_keys.lock().unwrap().insert(
+                canonical_id,
+                crate::mapi::identity::change_key_for_change_number(change_number),
+            );
+            self.mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .insert(
+                    canonical_id,
+                    crate::mapi_mailstore::predecessor_change_list(change_number),
+                );
+            let mut deleted_ids = self.deleted_navigation_shortcut_ids.lock().unwrap();
+            if !deleted_ids.contains(&canonical_id) {
+                deleted_ids.push(canonical_id);
+            }
+            drop(deleted_ids);
+            let range = crate::store::MapiLocalReplicaDeletedRange {
+                replica_guid: Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID),
+                min_global_counter: source_counter,
+                max_global_counter: source_counter,
+            };
+            let mut deleted_ranges = self.mapi_local_replica_deleted_ranges.lock().unwrap();
+            if !deleted_ranges.contains(&(account_id, folder_id, range)) {
+                deleted_ranges.push((account_id, folder_id, range));
+            }
+            Ok(())
+        })
     }
 
     fn fetch_mapi_associated_configs<'a>(
@@ -7716,6 +9131,306 @@ impl ExchangeStore for FakeStore {
                     config_id: record.id,
                 });
             Ok(record)
+        })
+    }
+
+    fn commit_mapi_associated_config_create<'a>(
+        &'a self,
+        mut input: crate::store::UpsertMapiAssociatedConfigInput,
+    ) -> StoreFuture<'a, crate::store::MapiAssociatedConfigCommit> {
+        Box::pin(async move {
+            if input.folder_id == 0
+                || input.message_class.trim().is_empty()
+                || input.subject.trim().is_empty()
+            {
+                anyhow::bail!("invalid MAPI associated config content");
+            }
+            let canonical_id = input.id.unwrap_or_else(Uuid::new_v4);
+            if self
+                .associated_configs
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|config| config.id == canonical_id)
+                || self
+                    .mapi_identities
+                    .lock()
+                    .unwrap()
+                    .contains_key(&canonical_id)
+            {
+                anyhow::bail!("MAPI associated config identity already exists");
+            }
+            input.id = Some(canonical_id);
+            let identity = self
+                .fetch_or_allocate_mapi_identities(
+                    input.account_id,
+                    &[MapiIdentityRequest {
+                        object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                        canonical_id,
+                        reserved_global_counter: None,
+                        source_key: None,
+                    }],
+                )
+                .await?
+                .remove(0);
+            let config = self.upsert_mapi_associated_config(input).await?;
+            Ok(crate::store::MapiAssociatedConfigCommit { config, identity })
+        })
+    }
+
+    fn commit_mapi_associated_config_import<'a>(
+        &'a self,
+        input: crate::store::CommitMapiAssociatedConfigImportInput,
+    ) -> StoreFuture<'a, crate::store::MapiAssociatedConfigImportCommit> {
+        Box::pin(async move {
+            let object_id =
+                crate::mapi::identity::object_id_from_source_key(&input.identity.source_key)
+                    .ok_or_else(|| anyhow::anyhow!("invalid imported FAI SourceKey"))?;
+            let source_counter = crate::mapi::identity::global_counter_from_store_id(object_id)
+                .filter(|counter| {
+                    (crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+                        ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+                        .contains(counter)
+                })
+                .ok_or_else(|| anyhow::anyhow!("imported FAI SourceKey is reserved"))?;
+            if !(17..=24).contains(&input.identity.change_key.len())
+                || !test_mapi_pcl_includes_change_key(
+                    &input.identity.predecessor_change_list,
+                    &input.identity.change_key,
+                )
+            {
+                anyhow::bail!("invalid imported FAI version");
+            }
+            if !self.mapi_local_replica_ranges.lock().unwrap().iter().any(
+                |(account_id, first, end)| {
+                    *account_id == input.config.account_id
+                        && *first <= source_counter
+                        && source_counter < *end
+                },
+            ) {
+                anyhow::bail!("imported FAI SourceKey was not locally reserved");
+            }
+
+            let existing_canonical_id = self
+                .mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|(canonical_id, source_key)| {
+                    (*source_key == input.identity.source_key).then_some(*canonical_id)
+                })
+                .or_else(|| {
+                    self.mapi_identities.lock().unwrap().iter().find_map(
+                        |(canonical_id, existing_object_id)| {
+                            (*existing_object_id == object_id).then_some(*canonical_id)
+                        },
+                    )
+                });
+            let canonical_id = existing_canonical_id
+                .or(input.config.id)
+                .unwrap_or_else(Uuid::new_v4);
+            if self
+                .mapi_identities
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .is_some_and(|existing| *existing != object_id)
+            {
+                anyhow::bail!("imported FAI canonical identity has a different SourceKey");
+            }
+
+            let current_pcl = self
+                .mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned();
+            let duplicate = current_pcl.as_deref().is_some_and(|pcl| {
+                test_mapi_pcl_includes_change_key(pcl, &input.identity.change_key)
+            });
+            if current_pcl.is_some() && !duplicate && input.fail_on_conflict {
+                return Err(crate::store::MapiFaiImportConflict.into());
+            }
+            let disposition = if duplicate {
+                crate::store::MapiFaiImportDisposition::IgnoredOlderOrSame
+            } else {
+                crate::store::MapiFaiImportDisposition::Applied
+            };
+
+            let (change_number, change_key, predecessor_change_list, last_modification_time) =
+                if duplicate {
+                    (
+                        self.mapi_identity_change_numbers.lock().unwrap()[&canonical_id],
+                        self.mapi_identity_change_keys.lock().unwrap()[&canonical_id].clone(),
+                        current_pcl.expect("duplicate FAI PCL"),
+                        self.mapi_identity_last_modification_times.lock().unwrap()[&canonical_id],
+                    )
+                } else {
+                    let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+                    if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+                        *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
+                    }
+                    let mut change_number = *next_counter;
+                    *next_counter = next_counter.saturating_add(1);
+                    if change_number == source_counter {
+                        change_number = *next_counter;
+                        *next_counter = next_counter.saturating_add(1);
+                    }
+                    (
+                        change_number,
+                        input.identity.change_key.clone(),
+                        input.identity.predecessor_change_list.clone(),
+                        input.identity.last_modification_time
+                            - input.identity.last_modification_time % 10,
+                    )
+                };
+
+            let config = if duplicate {
+                self.associated_configs
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|config| {
+                        config.account_id == input.config.account_id && config.id == canonical_id
+                    })
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("durable imported FAI content is missing"))?
+            } else {
+                let mut config = input.config;
+                config.id = Some(canonical_id);
+                self.upsert_mapi_associated_config(config).await?
+            };
+            self.mapi_identities
+                .lock()
+                .unwrap()
+                .insert(canonical_id, object_id);
+            self.mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .insert(canonical_id, input.identity.source_key.clone());
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_number);
+            self.mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_key.clone());
+            self.mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .insert(canonical_id, predecessor_change_list.clone());
+            self.mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .insert(canonical_id, last_modification_time);
+
+            Ok(crate::store::MapiAssociatedConfigImportCommit {
+                config,
+                identity: crate::store::MapiIdentityRecord {
+                    object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                    canonical_id,
+                    object_id,
+                    change_number,
+                    source_key: input.identity.source_key,
+                    change_key,
+                    predecessor_change_list,
+                    last_modification_time,
+                },
+                disposition,
+            })
+        })
+    }
+
+    fn commit_mapi_associated_config_update<'a>(
+        &'a self,
+        input: crate::store::UpsertMapiAssociatedConfigInput,
+    ) -> StoreFuture<'a, crate::store::MapiAssociatedConfigCommit> {
+        Box::pin(async move {
+            let canonical_id = input
+                .id
+                .ok_or_else(|| anyhow::anyhow!("existing associated config ID is missing"))?;
+            let object_id = self
+                .mapi_identities
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("active associated config identity is missing"))?;
+            let current_change_number = self
+                .mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied()
+                .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(object_id));
+            let current_predecessors = self
+                .mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned()
+                .unwrap_or_else(|| mapi_mailstore::predecessor_change_list(current_change_number));
+            let change_number = {
+                let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+                if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+                    *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
+                }
+                let change_number = *next_counter;
+                *next_counter = next_counter.saturating_add(1);
+                change_number
+            };
+            let change_key = crate::mapi::identity::change_key_for_change_number(change_number);
+            let predecessor_change_list = test_merge_mapi_predecessor_change_lists(
+                &current_predecessors,
+                &mapi_mailstore::predecessor_change_list(change_number),
+            )
+            .ok_or_else(|| anyhow::anyhow!("invalid associated config predecessor list"))?;
+            let source_key = self
+                .mapi_identity_source_keys
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned()
+                .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(object_id));
+            let last_modification_time = self
+                .mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied()
+                .unwrap_or_default()
+                .saturating_add(10);
+            let config = self.upsert_mapi_associated_config(input).await?;
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_number);
+            self.mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_key.clone());
+            self.mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .insert(canonical_id, predecessor_change_list.clone());
+            self.mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .insert(canonical_id, last_modification_time);
+            Ok(crate::store::MapiAssociatedConfigCommit {
+                config,
+                identity: crate::store::MapiIdentityRecord {
+                    object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                    canonical_id,
+                    object_id,
+                    change_number,
+                    source_key,
+                    change_key,
+                    predecessor_change_list,
+                    last_modification_time,
+                },
+            })
         })
     }
 
@@ -9636,11 +11351,11 @@ const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
 const PID_TAG_SEARCH_FOLDER_DEFINITION: u32 = 0x6845_0102;
-const PID_TAG_WLINK_GROUP_HEADER_ID: u32 = 0x6842_0048;
+const PID_TAG_WLINK_GROUP_HEADER_ID: u32 = 0x6842_0102;
 const PID_TAG_WLINK_TYPE: u32 = 0x6849_0003;
 const PID_TAG_WLINK_ORDINAL: u32 = 0x684B_0102;
 const PID_TAG_WLINK_ENTRY_ID: u32 = 0x684C_0102;
-const PID_TAG_WLINK_GROUP_CLSID: u32 = 0x6850_0048;
+const PID_TAG_WLINK_GROUP_CLSID: u32 = 0x6850_0102;
 const PID_TAG_WLINK_GROUP_NAME_W: u32 = 0x6851_001F;
 const PID_TAG_VIEW_DESCRIPTOR_BINARY: u32 = 0x7001_0102;
 const PID_TAG_VIEW_DESCRIPTOR_STRINGS_W: u32 = 0x7002_001F;
@@ -10496,15 +12211,14 @@ struct StrictContentSyncStream {
 
 #[derive(Debug)]
 struct StrictContentMessageChange {
-    header_tags: Vec<u32>,
     source_key: Vec<u8>,
     parent_source_key: Vec<u8>,
     change_key: Vec<u8>,
     predecessor_change_list: Vec<u8>,
-    entry_id: Vec<u8>,
     body_tags: Vec<u32>,
     mid: Option<u64>,
     change_number: Option<u64>,
+    last_modification_time: Option<u64>,
     associated: bool,
     subject: String,
 }
@@ -10517,9 +12231,9 @@ struct StrictContentMessageBuilder {
     parent_source_key: Option<Vec<u8>>,
     change_key: Option<Vec<u8>>,
     predecessor_change_list: Option<Vec<u8>>,
-    entry_id: Option<Vec<u8>>,
     mid: Option<u64>,
     change_number: Option<u64>,
+    last_modification_time: Option<u64>,
     associated: Option<bool>,
     subject: Option<String>,
 }
@@ -10911,7 +12625,7 @@ fn strict_record_content_header_property(
         PID_TAG_SOURCE_KEY => message.source_key = Some(property.value),
         PID_TAG_CHANGE_KEY => message.change_key = Some(property.value),
         PID_TAG_PREDECESSOR_CHANGE_LIST => message.predecessor_change_list = Some(property.value),
-        PID_TAG_MID => message.mid = Some(strict_decode_u64_property(&property)?),
+        PID_TAG_MID => message.mid = Some(strict_decode_object_id_property(&property)?),
         PID_TAG_CHANGE_NUMBER => {
             message.change_number = Some(strict_decode_change_number_property(&property)?)
         }
@@ -10925,7 +12639,7 @@ fn strict_record_content_header_property(
             message.associated = Some(u16::from_le_bytes(property.value.try_into().unwrap()) != 0);
         }
         PID_TAG_LAST_MODIFICATION_TIME => {
-            let _ = strict_decode_u64_property(&property)?;
+            message.last_modification_time = Some(strict_decode_u64_property(&property)?);
         }
         tag => {
             return Err(format!(
@@ -10949,7 +12663,7 @@ fn strict_record_content_body_property(
     message.body_tags.push(property.tag);
     match property.tag {
         PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = Some(property.value),
-        PID_TAG_ENTRY_ID => message.entry_id = Some(property.value),
+        PID_TAG_ENTRY_ID => {}
         PID_TAG_SUBJECT_W => message.subject = Some(strict_decode_utf16z(&property.value)?),
         PID_TAG_NORMALIZED_SUBJECT_A => {
             message.subject = Some(strict_decode_string8z(&property.value)?)
@@ -11004,15 +12718,14 @@ fn strict_finish_content_message(
         .ok_or("messageChange missing PidTagAssociated")?;
     let subject = message.subject.unwrap_or_default();
     message_changes.push(StrictContentMessageChange {
-        header_tags: message.header_tags,
         source_key,
         parent_source_key,
         change_key,
         predecessor_change_list,
-        entry_id: message.entry_id.unwrap_or_default(),
         body_tags: message.body_tags,
         mid: message.mid,
         change_number: message.change_number,
+        last_modification_time: message.last_modification_time,
         associated,
         subject,
     });
@@ -11562,11 +13275,6 @@ fn append_mapi_bool_property(values: &mut Vec<u8>, property_tag: u32, value: boo
     values.push(value as u8);
 }
 
-fn append_mapi_guid_property(values: &mut Vec<u8>, property_tag: u32, value: [u8; 16]) {
-    values.extend_from_slice(&property_tag.to_le_bytes());
-    values.extend_from_slice(&value);
-}
-
 fn append_mapi_multi_binary_property(values: &mut Vec<u8>, property_tag: u32, items: &[&[u8]]) {
     values.extend_from_slice(&property_tag.to_le_bytes());
     values.extend_from_slice(&(items.len() as u32).to_le_bytes());
@@ -11859,11 +13567,31 @@ fn append_rop_sync_manifest_get_buffer_with_state(
     buffer_size: u16,
     state: &[u8],
 ) {
+    append_rop_sync_manifest_get_buffer_with_state_and_flags(
+        rops,
+        input,
+        output,
+        buffer_size,
+        state,
+        0x0028,
+    );
+}
+
+fn append_rop_sync_manifest_get_buffer_with_state_and_flags(
+    rops: &mut Vec<u8>,
+    input: u8,
+    output: u8,
+    buffer_size: u16,
+    state: &[u8],
+    synchronization_flags: u16,
+) {
     rops.extend_from_slice(&[
         0x70, 0x00, input, output, // RopSynchronizationConfigure
         0x01,   // content sync
         0x00,   // SendOptions
-        0x28, 0x00, // SynchronizationFlags: ReadState | Normal
+    ]);
+    rops.extend_from_slice(&synchronization_flags.to_le_bytes());
+    rops.extend_from_slice(&[
         0x00, 0x00, // RestrictionDataSize
         0x05, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN
         0x00, 0x00, // PropertyTagCount
@@ -11923,6 +13651,18 @@ async fn content_sync_response_rops_for_store<S>(
 where
     S: ExchangeStore + Clone + Send + Sync + 'static,
 {
+    content_sync_response_rops_for_store_with_flags(store, folder_id, client_state, 0x0028).await
+}
+
+async fn content_sync_response_rops_for_store_with_flags<S>(
+    store: S,
+    folder_id: u64,
+    client_state: &[u8],
+    synchronization_flags: u16,
+) -> Vec<u8>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+{
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -11932,7 +13672,19 @@ where
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, folder_id);
-    append_rop_sync_manifest_get_buffer_with_state(&mut rops, 1, 2, 4096, client_state);
+    let buffer_size = if synchronization_flags & 0x0010 != 0 {
+        u16::MAX
+    } else {
+        4096
+    };
+    append_rop_sync_manifest_get_buffer_with_state_and_flags(
+        &mut rops,
+        1,
+        2,
+        buffer_size,
+        client_state,
+        synchronization_flags,
+    );
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service

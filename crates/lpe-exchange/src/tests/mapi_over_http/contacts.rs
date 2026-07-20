@@ -111,11 +111,13 @@ async fn mapi_over_http_outlook_contacts_open_resolves_standard_named_properties
 
 #[tokio::test]
 async fn mapi_over_http_contact_link_copy_to_uses_message_content_root() {
+    let associated_configs = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
         session: Some(FakeStore::account()),
         contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
             "default", "contacts", "Contacts",
         )])),
+        associated_configs: associated_configs.clone(),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -130,14 +132,25 @@ async fn mapi_over_http_contact_link_copy_to_uses_message_content_root() {
     );
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CONTACTS_FOLDER_ID);
-    append_rop_open_message(
+    append_rop_create_associated_message(
         &mut rops,
-        1,
+        0,
         2,
         crate::mapi::identity::CONTACTS_FOLDER_ID,
-        crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEC),
     );
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.ContactLink.TimeStamp",
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_SUBJECT_W,
+        "IPM.Microsoft.ContactLink.TimeStamp",
+    );
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+    append_rop_save_changes_message(&mut rops, 2, 2);
     rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]);
     rops.push(0); // Level: include subobjects.
     rops.extend_from_slice(&0x0000_2000u32.to_le_bytes()); // BestBody.
@@ -173,6 +186,7 @@ async fn mapi_over_http_contact_link_copy_to_uses_message_content_root() {
         transfer,
         &utf16z("IPM.Microsoft.ContactLink.TimeStamp")
     ));
+    assert_eq!(associated_configs.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -904,7 +918,7 @@ async fn mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags(
 }
 
 #[tokio::test]
-async fn mapi_over_http_virtual_contact_link_config_accepts_outlook_marker_property() {
+async fn mapi_over_http_created_contact_link_config_accepts_outlook_marker_property() {
     let account = FakeStore::account();
     let associated_configs = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
@@ -913,6 +927,9 @@ async fn mapi_over_http_virtual_contact_link_config_accepts_outlook_marker_prope
             "55555555-5555-4555-9555-555555555501",
             "inbox",
             "Inbox",
+        )])),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
         )])),
         associated_configs: associated_configs.clone(),
         ..Default::default()
@@ -924,20 +941,28 @@ async fn mapi_over_http_virtual_contact_link_config_accepts_outlook_marker_prope
         .unwrap();
     let cookie = mapi_cookie_header(&connect);
 
-    let config_object_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEC);
     let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.ContactLink.TimeStamp",
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_SUBJECT_W,
+        "IPM.Microsoft.ContactLink.TimeStamp",
+    );
     append_mapi_i32_property(&mut property_values, 0x800F_0003, 1);
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CONTACTS_FOLDER_ID);
-    append_rop_open_message(
+    append_rop_create_associated_message(
         &mut rops,
+        0,
         1,
-        2,
         crate::mapi::identity::CONTACTS_FOLDER_ID,
-        config_object_id,
     );
-    append_rop_set_properties(&mut rops, 2, 1, &property_values);
+    append_rop_set_properties(&mut rops, 1, 3, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
 
     let mut headers = mapi_headers("Execute");
     headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -945,16 +970,17 @@ async fn mapi_over_http_virtual_contact_link_config_accepts_outlook_marker_prope
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
         )
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &[0x03, 0x02, 0, 0, 0, 0]));
     assert!(
-        contains_bytes(&response_rops, &[0x0A, 0x02, 0, 0, 0, 0, 0, 0]),
+        contains_bytes(&response_rops, &[0x06, 0x01, 0, 0, 0, 0])
+            && contains_bytes(&response_rops, &[0x0A, 0x01, 0, 0, 0, 0, 0, 0])
+            && contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]),
         "{response_rops:02x?}"
     );
 

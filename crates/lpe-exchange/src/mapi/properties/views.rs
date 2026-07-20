@@ -85,21 +85,16 @@ pub(in crate::mapi) fn default_view_supported_folder(
 }
 
 pub(in crate::mapi) fn default_folder_view_entry_id(
-    mailbox_guid: Uuid,
-    folder_id: u64,
-    container_class: &str,
+    _mailbox_guid: Uuid,
+    _folder_id: u64,
+    _container_class: &str,
 ) -> Option<MapiValue> {
-    let (view_folder_id, view_id) =
-        if let Some(view_id) = default_common_views_named_view_id(container_class, folder_id) {
-            (COMMON_VIEWS_FOLDER_ID, view_id)
-        } else {
-            (
-                folder_id,
-                crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
-            )
-        };
-    crate::mapi::identity::message_entry_id_from_object_ids(mailbox_guid, view_folder_id, view_id)
-        .map(MapiValue::Binary)
+    // [MS-OXOCFG] sections 2.2.6 and 3.1.4.1: a view definition is an FAI
+    // Message, and when no matching configuration message exists the client
+    // uses its defaults. LPE has no canonical folder property selecting a
+    // persisted view, so advertising an EntryID here would create a dangling
+    // pointer to synthetic state.
+    None
 }
 
 pub(in crate::mapi) fn default_view_uses_common_views(
@@ -110,15 +105,10 @@ pub(in crate::mapi) fn default_view_uses_common_views(
 }
 
 pub(in crate::mapi) fn default_common_views_named_view_id(
-    container_class: &str,
-    folder_id: u64,
+    _container_class: &str,
+    _folder_id: u64,
 ) -> Option<u64> {
-    (container_class == "IPF.Note" || container_class.starts_with("IPF.Note."))
-        .then_some(folder_id)
-        .and_then(|folder_id| match folder_id {
-            SENT_FOLDER_ID => Some(crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID),
-            _ => None,
-        })
+    None
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

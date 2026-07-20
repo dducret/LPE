@@ -312,15 +312,17 @@ fn associated_fai_identity_properties_do_not_reuse_source_key_for_change_keys() 
         id: shortcut_id,
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x9191),
+        durable_identity: None,
         subject: "Inbox".to_string(),
         target_folder_id: Some(INBOX_FOLDER_ID),
         shortcut_type: 1,
         flags: 0,
         save_stamp: 0,
         section: 0,
-        ordinal: 0,
+        ordinal: wlink_ordinal_bytes(0),
         group_header_id: None,
         group_name: String::new(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
     let source_key = navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_SOURCE_KEY);
     let change_key = navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_CHANGE_KEY);
@@ -690,7 +692,7 @@ fn mailbox_properties_report_persisted_search_folder_type() {
 }
 
 #[test]
-fn inbox_mailbox_properties_advertise_folder_local_compact_default_view() {
+fn inbox_mailbox_properties_do_not_advertise_unpersisted_default_view() {
     let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
     let mailbox = mailbox(
         "56565656-5656-4656-9656-565656565656",
@@ -700,13 +702,6 @@ fn inbox_mailbox_properties_advertise_folder_local_compact_default_view() {
     );
     crate::mapi::identity::remember_mapi_identity(mailbox.id, INBOX_FOLDER_ID);
 
-    let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
-        account_id,
-        INBOX_FOLDER_ID,
-        crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID),
-    )
-    .unwrap();
-
     assert_eq!(
         mailbox_property_value_with_context_for_account(
             &mailbox,
@@ -714,22 +709,15 @@ fn inbox_mailbox_properties_advertise_folder_local_compact_default_view() {
             PID_TAG_DEFAULT_VIEW_ENTRY_ID,
             account_id,
         ),
-        Some(MapiValue::Binary(expected_entry_id))
+        None
     );
 }
 
 #[test]
-fn sent_mailbox_properties_advertise_common_views_sent_to_default_view() {
+fn sent_mailbox_properties_do_not_advertise_unpersisted_common_view() {
     let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_4bbb_8bbb_bbbbbbbbbbbb);
     let mailbox = mailbox("56565656-5656-4656-9656-565656565657", None, "sent", "Sent");
     crate::mapi::identity::remember_mapi_identity(mailbox.id, SENT_FOLDER_ID);
-
-    let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
-        account_id,
-        COMMON_VIEWS_FOLDER_ID,
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
-    )
-    .unwrap();
 
     assert_eq!(
         mailbox_property_value_with_context_for_account(
@@ -738,7 +726,7 @@ fn sent_mailbox_properties_advertise_common_views_sent_to_default_view() {
             PID_TAG_DEFAULT_VIEW_ENTRY_ID,
             account_id,
         ),
-        Some(MapiValue::Binary(expected_entry_id))
+        None
     );
 }
 
@@ -826,12 +814,7 @@ fn collaboration_folder_projects_default_post_message_class_for_contacts() {
     );
     assert_eq!(
         collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-        crate::mapi::identity::message_entry_id_from_object_ids(
-            account_id,
-            CONTACTS_FOLDER_ID,
-            crate::mapi_store::outlook_default_folder_named_view_id(CONTACTS_FOLDER_ID),
-        )
-        .map(MapiValue::Binary)
+        None
     );
 }
 
@@ -4685,42 +4668,46 @@ fn navigation_shortcut_group_header_and_link_properties_round_trip_group_identit
         id: crate::mapi::identity::mapi_store_id(900),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x1111),
+        durable_identity: None,
         subject: "Projects".to_string(),
         target_folder_id: None,
         shortcut_type: 4,
         flags: 0,
         save_stamp: 0,
         section: 3,
-        ordinal: 0x80,
+        ordinal: wlink_ordinal_bytes(0x80),
         group_header_id: Some(group_id),
         group_name: "Projects".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
     let link = MapiNavigationShortcutMessage {
         id: crate::mapi::identity::mapi_store_id(901),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x2222),
+        durable_identity: None,
         subject: "Project Inbox".to_string(),
         target_folder_id: Some(INBOX_FOLDER_ID),
         shortcut_type: 0,
         flags: 0,
         save_stamp: 0,
         section: 3,
-        ordinal: 0x81,
+        ordinal: wlink_ordinal_bytes(0x81),
         group_header_id: Some(group_id),
         group_name: "Projects".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
 
     assert_eq!(
         navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_GROUP_HEADER_ID),
-        Some(MapiValue::Guid([0x33; 16]))
+        Some(MapiValue::Binary([0x33; 16].to_vec()))
     );
     assert_eq!(
         navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_GROUP_CLSID),
-        Some(MapiValue::Guid([0x33; 16]))
+        None
     );
     assert_eq!(
         navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_GROUP_NAME_W),
-        Some(MapiValue::String("Projects".to_string()))
+        None
     );
     assert_eq!(
         navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_ENTRY_ID),
@@ -4736,11 +4723,11 @@ fn navigation_shortcut_group_header_and_link_properties_round_trip_group_identit
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_CLSID),
-        Some(MapiValue::Guid([0x33; 16]))
+        Some(MapiValue::Binary([0x33; 16].to_vec()))
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_HEADER_ID),
-        Some(MapiValue::Guid([0x33; 16]))
+        None
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_NAME_W),
@@ -4764,29 +4751,33 @@ fn microsoft_navigation_shortcut_example_preserves_wlink_properties() {
         id: crate::mapi::identity::mapi_store_id(920),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x9200),
+        durable_identity: None,
         subject: "My Work Calendars".to_string(),
         target_folder_id: None,
         shortcut_type: 4,
         flags: 0,
         save_stamp: 0x1234_5678,
         section: 3,
-        ordinal: 0x80,
+        ordinal: wlink_ordinal_bytes(0x80),
         group_header_id: Some(group_id),
         group_name: "My Work Calendars".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
     let link = MapiNavigationShortcutMessage {
         id: crate::mapi::identity::mapi_store_id(921),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x9210),
+        durable_identity: None,
         subject: "Meetings".to_string(),
         target_folder_id: Some(CALENDAR_FOLDER_ID),
         shortcut_type: 0,
         flags: 0,
         save_stamp: 0x1234_5678,
         section: 3,
-        ordinal: 0x80,
+        ordinal: wlink_ordinal_bytes(0x80),
         group_header_id: Some(group_id),
         group_name: "My Work Calendars".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
     let calendar_folder_type = [
         0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -4807,25 +4798,45 @@ fn microsoft_navigation_shortcut_example_preserves_wlink_properties() {
             Some(MapiValue::Binary(vec![0x80]))
         );
         assert_eq!(
-            navigation_shortcut_property_value(shortcut, account_id, PID_TAG_WLINK_GROUP_NAME_W),
-            Some(MapiValue::String("My Work Calendars".to_string()))
-        );
-        assert_eq!(
-            navigation_shortcut_property_value(shortcut, account_id, PID_TAG_WLINK_GROUP_CLSID),
-            Some(MapiValue::Guid(*group_id.as_bytes()))
+            navigation_shortcut_property_value(shortcut, account_id, PID_TAG_WLINK_FOLDER_TYPE),
+            Some(MapiValue::Binary(calendar_folder_type.to_vec()))
         );
     }
+    assert_eq!(
+        navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_GROUP_HEADER_ID),
+        Some(MapiValue::Binary(group_id.as_bytes().to_vec()))
+    );
+    assert_eq!(
+        navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_GROUP_CLSID),
+        None
+    );
+    assert_eq!(
+        navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_GROUP_NAME_W),
+        None
+    );
+    assert_eq!(
+        navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_HEADER_ID),
+        None
+    );
+    assert_eq!(
+        navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_CLSID),
+        Some(MapiValue::Binary(group_id.as_bytes().to_vec()))
+    );
+    assert_eq!(
+        navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_NAME_W),
+        Some(MapiValue::String("My Work Calendars".to_string()))
+    );
     assert_eq!(
         navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_ENTRY_ID),
         None
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_FOLDER_TYPE),
-        Some(MapiValue::Guid(calendar_folder_type))
+        Some(MapiValue::Binary(calendar_folder_type.to_vec()))
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_CALENDAR_COLOR),
-        Some(MapiValue::I32(-1))
+        None
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_ADDRESS_BOOK_EID),
@@ -4838,11 +4849,8 @@ fn microsoft_navigation_shortcut_example_preserves_wlink_properties() {
             &store_test_principal(account_id),
             PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
         ),
-        Some(MapiValue::Binary(
-            crate::mapi::identity::principal_mailbox_store_entry_id(&store_test_principal(
-                account_id,
-            ))
-        ))
+        None,
+        "an absent client-owned address-book store EntryID must not be synthesized"
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_CLIENT_ID),
@@ -4851,7 +4859,7 @@ fn microsoft_navigation_shortcut_example_preserves_wlink_properties() {
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_RO_GROUP_TYPE),
-        Some(MapiValue::I32(-1))
+        None
     );
 
     let parsed_link = navigation_shortcut_from_mapi_properties(
@@ -4876,7 +4884,11 @@ fn microsoft_navigation_shortcut_example_preserves_wlink_properties() {
             (PID_TAG_WLINK_ORDINAL, MapiValue::Binary(vec![0x80])),
             (
                 PID_TAG_WLINK_GROUP_CLSID,
-                MapiValue::Guid(*group_id.as_bytes()),
+                MapiValue::Binary(group_id.as_bytes().to_vec()),
+            ),
+            (
+                PID_TAG_WLINK_FOLDER_TYPE,
+                MapiValue::Binary(calendar_folder_type.to_vec()),
             ),
             (
                 PID_TAG_WLINK_GROUP_NAME_W,
@@ -4891,9 +4903,104 @@ fn microsoft_navigation_shortcut_example_preserves_wlink_properties() {
     assert_eq!(parsed_link.flags, 0);
     assert_eq!(parsed_link.save_stamp, 0x1234_5678);
     assert_eq!(parsed_link.section, 3);
-    assert_eq!(parsed_link.ordinal, 0x80);
+    assert_eq!(parsed_link.ordinal, vec![0x80]);
     assert_eq!(parsed_link.group_header_id, Some(group_id));
     assert_eq!(parsed_link.group_name, "My Work Calendars");
+}
+
+#[test]
+fn outlook_contacts_navigation_shortcuts_use_contact_folder_type() {
+    // Outlook trace 202607190710, Common Views WLinks 0x206b4 and 0x206b5.
+    // [MS-OXOCFG] sections 2.2.9.11 and 3.1.4.10.1 define the folder CLSIDs
+    // and group-header property set. The trace confirms that Outlook applies
+    // CLSID_ContactFolder to the targetless Contacts section header too.
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let group_id = Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap();
+    let header = MapiNavigationShortcutMessage {
+        id: crate::mapi::identity::mapi_store_id(0x0206_B4),
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x206b4),
+        durable_identity: None,
+        subject: "My Contacts".to_string(),
+        target_folder_id: None,
+        shortcut_type: 4,
+        flags: 0,
+        save_stamp: 814_362_746,
+        section: 4,
+        ordinal: wlink_ordinal_bytes(127),
+        group_header_id: Some(group_id),
+        group_name: "My Contacts".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
+    };
+    let suggested_contacts = MapiNavigationShortcutMessage {
+        id: crate::mapi::identity::mapi_store_id(0x0206_B5),
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x206b5),
+        durable_identity: None,
+        subject: "Suggested Contacts".to_string(),
+        target_folder_id: Some(SUGGESTED_CONTACTS_FOLDER_ID),
+        shortcut_type: 0,
+        flags: 1_048_576,
+        save_stamp: 814_362_746,
+        section: 4,
+        ordinal: wlink_ordinal_bytes(127),
+        group_header_id: Some(group_id),
+        group_name: "My Contacts".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
+    };
+    let contact_folder_type = [
+        0x01, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+
+    for shortcut in [&header, &suggested_contacts] {
+        assert_eq!(
+            navigation_shortcut_property_value(shortcut, account_id, PID_TAG_WLINK_FOLDER_TYPE,),
+            Some(MapiValue::Binary(contact_folder_type.to_vec()))
+        );
+    }
+}
+
+#[test]
+fn navigation_shortcuts_use_the_folder_clsid_for_each_navigation_module() {
+    // [MS-OXOCFG] section 2.2.9.11 defines the six folder CLSIDs. Targetless
+    // group headers use their WlinkSection to select the navigation module.
+    let cases = [
+        (1, 0x0C),
+        (3, 0x02),
+        (4, 0x01),
+        (5, 0x03),
+        (6, 0x04),
+        (7, 0x08),
+    ];
+    for (section, first_guid_byte) in cases {
+        let shortcut = MapiNavigationShortcutMessage {
+            id: crate::mapi::identity::mapi_store_id(0x0207_00 + section as u64),
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x20700 + section as u128),
+            durable_identity: None,
+            subject: format!("Section {section}"),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            save_stamp: 1,
+            section,
+            ordinal: vec![0x80],
+            group_header_id: Some(Uuid::from_u128(0x1234)),
+            group_name: format!("Section {section}"),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
+        };
+        let mut expected = [0; 16];
+        expected[0] = first_guid_byte;
+        expected[1..4].copy_from_slice(&[0x78, 0x06, 0x00]);
+        expected[8] = 0xC0;
+        expected[15] = 0x46;
+        assert_eq!(
+            wlink_folder_type_guid(&shortcut),
+            expected,
+            "section {section}"
+        );
+    }
 }
 
 #[test]
@@ -4903,15 +5010,17 @@ fn navigation_shortcut_projects_associated_table_identity_columns() {
         id: crate::mapi::identity::mapi_store_id(901),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x2222),
+        durable_identity: None,
         subject: "Project Inbox".to_string(),
         target_folder_id: Some(INBOX_FOLDER_ID),
         shortcut_type: 0,
         flags: 0,
         save_stamp: 0,
         section: 3,
-        ordinal: 0x81,
+        ordinal: wlink_ordinal_bytes(0x81),
         group_header_id: None,
         group_name: "Projects".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
 
     assert_eq!(
@@ -5453,7 +5562,7 @@ fn folder_default_view_definitions_use_type_specific_columns() {
 }
 
 #[test]
-fn common_view_named_view_descriptor_opens_as_stream() {
+fn already_open_common_view_missing_descriptor_uses_empty_stream_semantics() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let view_id = crate::mapi::identity::mapi_store_id(0x7fff_ffff_fff7);
     let mut handles = std::collections::HashMap::new();
@@ -5513,7 +5622,7 @@ fn common_view_named_view_descriptor_opens_as_stream() {
     };
     let snapshot = MapiMailStoreSnapshot::empty();
 
-    let (stream, writable_target) = property_stream_data(
+    let stream = property_stream_data(
         &mut session,
         1,
         PID_TAG_VIEW_DESCRIPTOR_BINARY,
@@ -5521,20 +5630,11 @@ fn common_view_named_view_descriptor_opens_as_stream() {
         &[],
         account_id,
         &snapshot,
-    )
-    .expect("common view descriptor stream");
-
-    assert_eq!(
-        stream,
-        view_descriptor_binary(&outlook_mail_view_definition("Compact"))
     );
-    assert_eq!(
-        stream.len(),
-        view_descriptor_binary(&outlook_mail_view_definition("Compact")).len()
-    );
-    assert!(writable_target.is_none());
 
-    let (strings_stream, writable_target) = property_stream_data(
+    assert_eq!(stream, Some((Vec::new(), None)));
+
+    let strings_stream = property_stream_data(
         &mut session,
         1,
         PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
@@ -5542,23 +5642,8 @@ fn common_view_named_view_descriptor_opens_as_stream() {
         &[],
         account_id,
         &snapshot,
-    )
-    .expect("common view descriptor strings stream");
-    assert_eq!(
-        strings_stream,
-        view_descriptor_strings_binary(&outlook_mail_view_definition("Compact"))
     );
-    assert_eq!(&strings_stream[..4], &[0x0A, 0x00, b'I', 0x00]);
-    assert!(strings_stream.ends_with(&[0x0A, 0x00]));
-    assert!(!strings_stream.ends_with(&[0x00, 0x00]));
-    assert_eq!(
-        strings_stream
-            .windows(2)
-            .filter(|bytes| *bytes == [0x0A, 0x00])
-            .count(),
-        11
-    );
-    assert!(writable_target.is_none());
+    assert_eq!(strings_stream, Some((vec![0, 0], None)));
 }
 
 #[test]
@@ -6457,15 +6542,17 @@ fn navigation_shortcut_projects_sharing_local_folder_id() {
         id: crate::mapi::identity::mapi_store_id(901),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x2222),
+        durable_identity: None,
         subject: "Project Inbox".to_string(),
         target_folder_id: Some(INBOX_FOLDER_ID),
         shortcut_type: 0,
         flags: 0,
         save_stamp: 0,
         section: 3,
-        ordinal: 0x81,
+        ordinal: wlink_ordinal_bytes(0x81),
         group_header_id: None,
         group_name: "Projects".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
     let expected =
         crate::mapi::identity::folder_entry_id_from_object_id(account_id, INBOX_FOLDER_ID).unwrap();
@@ -6489,21 +6576,27 @@ fn navigation_shortcut_projects_sharing_local_folder_id() {
 }
 
 #[test]
-fn navigation_shortcut_projects_address_book_store_entry_id() {
+fn navigation_shortcut_preserves_persisted_address_book_store_entry_id() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let persisted_entry_id = vec![0x00, 0x01, 0x02, 0xfe, 0xff];
     let shortcut = MapiNavigationShortcutMessage {
         id: crate::mapi::identity::mapi_store_id(901),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x2222),
+        durable_identity: None,
         subject: "Inbox".to_string(),
         target_folder_id: Some(INBOX_FOLDER_ID),
         shortcut_type: 0,
         flags: 0,
         save_stamp: 0,
         section: 1,
-        ordinal: 0x10,
+        ordinal: wlink_ordinal_bytes(0x10),
         group_header_id: None,
         group_name: "Mail".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties {
+            address_book_store_entry_id: Some(persisted_entry_id.clone()),
+            ..crate::store::MapiNavigationShortcutClientProperties::default()
+        },
     };
 
     assert_eq!(
@@ -6512,11 +6605,7 @@ fn navigation_shortcut_projects_address_book_store_entry_id() {
             &store_test_principal(account_id),
             PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
         ),
-        Some(MapiValue::Binary(
-            crate::mapi::identity::principal_mailbox_store_entry_id(&store_test_principal(
-                account_id,
-            ))
-        ))
+        Some(MapiValue::Binary(persisted_entry_id))
     );
 }
 
@@ -6528,15 +6617,17 @@ fn navigation_shortcut_projects_outlook_mailbox_store_object_entry_id() {
         id: crate::mapi::identity::mapi_store_id(901),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x2222),
+        durable_identity: None,
         subject: "Calendar".to_string(),
         target_folder_id: Some(CALENDAR_FOLDER_ID),
         shortcut_type: 0,
         flags: 0,
         save_stamp: 0,
         section: 3,
-        ordinal: 0x7f,
+        ordinal: wlink_ordinal_bytes(0x7f),
         group_header_id: None,
         group_name: "My Calendars".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
     let expected = crate::mapi::identity::principal_mailbox_store_entry_id(&principal);
 
@@ -6555,64 +6646,86 @@ fn navigation_shortcut_projects_outlook_mailbox_store_object_entry_id() {
             &principal,
             PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID,
         ),
-        Some(MapiValue::Binary(expected))
+        None
     );
 }
 
 #[test]
-fn microsoft_oxocfg_wlink_ordinal_never_ends_with_reserved_insert_markers() {
-    for ordinal in [0, 0x0100, 0x01ff] {
+fn microsoft_oxocfg_wlink_ordinal_projection_is_injective_and_avoids_reserved_markers() {
+    let projected = [
+        (0, vec![0x00, 0x00, 0x00, 0x00, 0x80]),
+        (1, vec![0x01]),
+        (254, vec![0xfe]),
+        (255, vec![0x00, 0x00, 0x00, 0xff, 0x80]),
+        (256, vec![0x00, 0x00, 0x01, 0x00, 0x80]),
+        (257, vec![0x01, 0x01]),
+        (u32::MAX, vec![0xff, 0xff, 0xff, 0xff, 0x80]),
+    ];
+
+    let projected_count = projected.len();
+    let mut distinct = Vec::new();
+    for (ordinal, expected) in projected {
         let bytes = wlink_ordinal_bytes(ordinal);
-        assert!(!bytes.is_empty());
+        assert_eq!(bytes, expected);
         assert!(!matches!(bytes.last(), Some(0 | 0xff)));
+        distinct.push(bytes);
     }
+    distinct.sort();
+    distinct.dedup();
+    assert_eq!(distinct.len(), projected_count);
 }
 
 #[test]
-fn navigation_shortcut_wlink_guid_fields_follow_requested_property_type() {
+fn navigation_shortcut_wlink_identifiers_use_exact_binary_tags() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let group_id = Uuid::from_bytes([0x33; 16]);
     let header = MapiNavigationShortcutMessage {
         id: crate::mapi::identity::mapi_store_id(900),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x1111),
+        durable_identity: None,
         subject: "Projects".to_string(),
         target_folder_id: None,
         shortcut_type: 4,
         flags: 0,
         save_stamp: 0,
         section: 3,
-        ordinal: 0x80,
+        ordinal: wlink_ordinal_bytes(0x80),
         group_header_id: Some(group_id),
         group_name: "Projects".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
     let link = MapiNavigationShortcutMessage {
         id: crate::mapi::identity::mapi_store_id(901),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x2222),
+        durable_identity: None,
         subject: "Project Inbox".to_string(),
         target_folder_id: Some(INBOX_FOLDER_ID),
         shortcut_type: 0,
         flags: 0,
         save_stamp: 0,
         section: 3,
-        ordinal: 0x81,
+        ordinal: wlink_ordinal_bytes(0x81),
         group_header_id: Some(group_id),
         group_name: "Projects".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
     let calendar_link = MapiNavigationShortcutMessage {
         id: crate::mapi::identity::mapi_store_id(902),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x3333),
+        durable_identity: None,
         subject: "Project Calendar".to_string(),
         target_folder_id: Some(CALENDAR_FOLDER_ID),
         shortcut_type: 0,
         flags: 0,
         save_stamp: 0,
         section: 3,
-        ordinal: 0x82,
+        ordinal: wlink_ordinal_bytes(0x82),
         group_header_id: Some(group_id),
         group_name: "Projects".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
 
     assert_eq!(
@@ -6629,7 +6742,19 @@ fn navigation_shortcut_wlink_guid_fields_follow_requested_property_type() {
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_FOLDER_TYPE),
-        Some(MapiValue::Guid(wlink_folder_type_guid(&link)))
+        Some(MapiValue::Binary(wlink_folder_type_guid(&link).to_vec()))
+    );
+    assert_eq!(
+        navigation_shortcut_property_value(&header, account_id, 0x6842_0048),
+        None
+    );
+    assert_eq!(
+        navigation_shortcut_property_value(&link, account_id, 0x6850_0048),
+        None
+    );
+    assert_eq!(
+        navigation_shortcut_property_value(&link, account_id, 0x684F_0048),
+        None
     );
     assert_eq!(
         navigation_shortcut_property_value(&link, account_id, 0x684F_0102),
@@ -6659,15 +6784,17 @@ fn navigation_shortcut_section_one_projects_favorites_group_name() {
         id: crate::mapi::identity::mapi_store_id(903),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x4444),
+        durable_identity: None,
         subject: "Inbox".to_string(),
         target_folder_id: Some(INBOX_FOLDER_ID),
         shortcut_type: 0,
         flags: 0,
         save_stamp: 0,
         section: 1,
-        ordinal: 0x7f,
+        ordinal: wlink_ordinal_bytes(0x7f),
         group_header_id: Some(default_wlink_group_uuid()),
         group_name: "Mail".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
 
     assert_eq!(
@@ -6677,26 +6804,28 @@ fn navigation_shortcut_section_one_projects_favorites_group_name() {
 }
 
 #[test]
-fn navigation_shortcut_section_one_preserves_non_mail_group_name() {
+fn navigation_shortcut_group_header_does_not_project_group_name() {
     let group_id = Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap();
     let shortcut = MapiNavigationShortcutMessage {
         id: crate::mapi::identity::mapi_store_id(904),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x4445),
+        durable_identity: None,
         subject: "My Calendars".to_string(),
         target_folder_id: None,
         shortcut_type: 4,
         flags: 0,
         save_stamp: 0,
         section: 1,
-        ordinal: 0x80,
+        ordinal: wlink_ordinal_bytes(0x80),
         group_header_id: Some(group_id),
         group_name: "My Calendars".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
     };
 
     assert_eq!(
         navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_WLINK_GROUP_NAME_W),
-        Some(MapiValue::String("My Calendars".to_string()))
+        None
     );
 }
 

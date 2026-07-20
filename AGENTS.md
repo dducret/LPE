@@ -199,5 +199,8 @@ Web interfaces must support at least `en`, `fr`, `de`, `it`, and `es`, with Engl
 - new `LPE` `0.5.0` deployments start from an empty SQL database
 - upgrades from pre-0.5 releases are unsupported; `update-lpe.sh` must reject
   their schema versions without mutation
-- any future in-place 0.5.x schema update requires an explicit release-policy
-  decision and matching architecture and installation documentation
+- during 0.5.0 interoperability testing, an explicitly reviewed 0.5.x schema
+  fix may use a forward-only, transactional, idempotent SQL update for the
+  existing `0.5.0-sql-v1` label; `update-lpe.sh` must reject pre-0.5 schemas
+  before running it, `schema.sql` remains canonical for new databases, and the
+  matching architecture and installation documentation must change with it

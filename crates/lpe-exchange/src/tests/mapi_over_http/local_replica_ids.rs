@@ -99,6 +99,26 @@ async fn mapi_over_http_get_local_replica_ids_reserves_full_outlook_range_in_pos
 
     assert!(first_global_counter >= initial_next_global_counter);
     assert_eq!(persisted_next_global_counter, expected_next_global_counter);
+    let persisted_ranges = sqlx::query_as::<_, (i64, i64)>(
+        r#"
+        SELECT first_global_counter, end_global_counter_exclusive
+        FROM mapi_local_replica_id_ranges
+        WHERE tenant_id = $1 AND account_id = $2
+        ORDER BY first_global_counter
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_all(storage.pool())
+    .await?;
+    assert_eq!(
+        persisted_ranges,
+        vec![(
+            first_global_counter as i64,
+            expected_next_global_counter as i64,
+        )],
+        "the exact range returned by RopGetLocalReplicaIds must survive the session"
+    );
 
     let following_identity = storage
         .fetch_or_allocate_mapi_identities(

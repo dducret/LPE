@@ -5,6 +5,7 @@ INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe}"
 SRC_DIR="${SRC_DIR:-$INSTALL_ROOT/src}"
 ENV_FILE="${ENV_FILE:-/etc/lpe/lpe.env}"
 SCHEMA_FILE="${SCHEMA_FILE:-$SRC_DIR/crates/lpe-storage/sql/schema.sql}"
+SERVICE_NAME="${SERVICE_NAME:-lpe.service}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "Environment file not found: ${ENV_FILE}" >&2
@@ -26,6 +27,12 @@ source "${SCRIPT_DIR}/lib/install-common.sh"
 
 if ! ensure_database_url; then
   echo "DATABASE_URL is not set in ${ENV_FILE} and could not be derived from LPE_DB_HOST/LPE_DB_PORT/LPE_DB_NAME/LPE_DB_USER/LPE_DB_PASSWORD" >&2
+  exit 1
+fi
+
+if systemctl is-active --quiet "${SERVICE_NAME}"; then
+  echo "Service ${SERVICE_NAME} is active; init-schema.sh will not reset its database." >&2
+  echo "Stop ${SERVICE_NAME} before running init-schema.sh." >&2
   exit 1
 fi
 
@@ -89,6 +96,12 @@ calendar_event_lifecycle_column_count="$(
 mapi_calendar_event_identity_moves_table="$(
   psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.mapi_calendar_event_identity_moves')"
 )"
+mapi_local_replica_range_shape_ok="$(
+  mapi_local_replica_range_shape_ok "${DATABASE_URL}"
+)"
+mapi_outlook_cache_fidelity_shape_ok="$(
+  mapi_outlook_cache_fidelity_shape_ok "${DATABASE_URL}"
+)"
 deleted_calendar_event_constraint_count="$(
   psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%'"
 )"
@@ -106,13 +119,15 @@ if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${mapi_identity_version_column_count}" != "2" \
   || "${calendar_event_lifecycle_column_count}" != "2" \
   || "${mapi_calendar_event_identity_moves_table}" != "mapi_calendar_event_identity_moves" \
+  || "${mapi_local_replica_range_shape_ok}" != "1" \
+  || "${mapi_outlook_cache_fidelity_shape_ok}" != "1" \
   || "${deleted_calendar_event_constraint_count}" != "2" \
   || "${mapi_identity_constraint_count}" != "3" \
   || "${mapi_calendar_event_move_change_key_constraint_count}" != "2" \
   || "${mapi_special_folder_alias_shape_ok}" != "1" ]]; then
-  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}, MAPI special-folder alias shape=${mapi_special_folder_alias_shape_ok}." >&2
+  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, MAPI local replica range table shape=${mapi_local_replica_range_shape_ok}, MAPI WLink/configuration FAI fidelity shape=${mapi_outlook_cache_fidelity_shape_ok}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}, MAPI special-folder alias shape=${mapi_special_folder_alias_shape_ok}." >&2
   echo "Initialize a fresh LPE 0.5.0 database after correcting the canonical schema source." >&2
   exit 1
 fi
 
-echo "LPE schema ${schema_version} initialized successfully."
+echo "LPE schema ${schema_version}, including MAPI local replica ranges and WLink/configuration FAI fidelity, initialized successfully."

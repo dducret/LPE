@@ -6,7 +6,9 @@ use crate::mapi::properties::{
     MapiNamedPropertyKind, MapiRestriction, MapiSortOrder, MapiValue, PID_TAG_SOURCE_KEY,
 };
 use crate::mapi::wire::{MapiSyncType, RopId};
+use crate::store::MapiLocalReplicaDeletedRange;
 use anyhow::{anyhow, Result};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct RopRequest {
@@ -454,8 +456,12 @@ impl RopRequest {
             .collect()
     }
 
+    pub(in crate::mapi) fn import_delete_flags(&self) -> u8 {
+        self.payload.first().copied().unwrap_or(0)
+    }
+
     pub(in crate::mapi) fn import_delete_hard_delete(&self) -> bool {
-        self.payload.first().is_some_and(|flags| flags & 0x02 != 0)
+        self.import_delete_flags() & 0x02 != 0
     }
 
     pub(in crate::mapi) fn fast_transfer_message_ids(&self) -> Vec<u64> {
@@ -559,8 +565,45 @@ impl RopRequest {
         changes
     }
 
-    pub(in crate::mapi) fn local_replica_midset_deleted(&self) -> &[u8] {
-        self.payload.as_slice()
+    pub(in crate::mapi) fn local_replica_deleted_ranges(
+        &self,
+    ) -> Option<Vec<MapiLocalReplicaDeletedRange>> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::SetLocalReplicaMidsetDeleted)
+        ) {
+            return None;
+        }
+        let count = u32::from_le_bytes(self.payload.get(..4)?.try_into().ok()?) as usize;
+        if count == 0 || 4usize.checked_add(count.checked_mul(48)?)? != self.payload.len() {
+            return None;
+        }
+        let mut ranges = Vec::with_capacity(count);
+        for bytes in self.payload.get(4..)?.chunks_exact(48) {
+            let minimum = bytes.get(..24)?;
+            let maximum = bytes.get(24..48)?;
+            if minimum.get(22..24)? != [0, 0] || maximum.get(22..24)? != [0, 0] {
+                return None;
+            }
+            let minimum_replica_guid: [u8; 16] = minimum.get(..16)?.try_into().ok()?;
+            let maximum_replica_guid: [u8; 16] = maximum.get(..16)?.try_into().ok()?;
+            if minimum_replica_guid != maximum_replica_guid {
+                return None;
+            }
+            let min_global_counter =
+                crate::mapi::identity::global_counter_from_globcnt(minimum.get(16..22)?)?;
+            let max_global_counter =
+                crate::mapi::identity::global_counter_from_globcnt(maximum.get(16..22)?)?;
+            if min_global_counter > max_global_counter {
+                return None;
+            }
+            ranges.push(MapiLocalReplicaDeletedRange {
+                replica_guid: Uuid::from_bytes(minimum_replica_guid),
+                min_global_counter,
+                max_global_counter,
+            });
+        }
+        Some(ranges)
     }
 
     pub(in crate::mapi) fn search_criteria_restriction_bytes(&self) -> Option<&[u8]> {

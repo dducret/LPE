@@ -271,16 +271,7 @@ fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
         properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
         Some(&MapiValue::Binary(vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID),
-        crate::mapi::identity::message_entry_id_from_object_ids(
-            principal.account_id,
-            INBOX_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
-        )
-        .map(MapiValue::Binary)
-        .as_ref()
-    );
+    assert!(!properties.contains_key(&PID_TAG_DEFAULT_VIEW_ENTRY_ID));
     assert_eq!(
         properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
         Some(&MapiValue::U32(0))
@@ -1216,46 +1207,21 @@ fn default_folder_entry_id_values_debug_decodes_additional_ren_entry_ids_ex() {
 }
 
 #[test]
-fn default_folder_entry_id_values_debug_decodes_default_view_entry_id() {
+fn default_folder_entry_id_is_absent_without_persisted_selection() {
     let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
-    let entry_id = default_folder_view_entry_id(mailbox_guid, INBOX_FOLDER_ID, "IPF.Note").unwrap();
-
-    let debug =
-        default_folder_entry_id_values_for_debug(&[(PID_TAG_DEFAULT_VIEW_ENTRY_ID, entry_id)]);
-
-    assert!(debug.contains("PidTagDefaultViewEntryId:bytes=70"));
-    assert!(debug.contains(&format!("decoded_folder_id=0x{INBOX_FOLDER_ID:016x}")));
-    assert!(debug.contains("decoded_folder_name=inbox"));
-    assert!(debug.contains(&format!(
-        "decoded_message_id=0x{:016x}",
-        crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
-    )));
+    assert_eq!(
+        default_folder_view_entry_id(mailbox_guid, INBOX_FOLDER_ID, "IPF.Note"),
+        None
+    );
 }
 
 #[test]
-fn getprops_view_response_values_debug_decodes_default_view_entry_id() {
+fn sent_default_folder_entry_id_is_absent_without_persisted_selection() {
     let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
-    let MapiValue::Binary(entry_id) =
-        default_folder_view_entry_id(mailbox_guid, SENT_FOLDER_ID, "IPF.Note").unwrap()
-    else {
-        panic!("default folder view entry id must be binary");
-    };
-    let mut response = vec![0x07, 0x01, 0, 0, 0, 0, 0];
-    response.extend_from_slice(&(entry_id.len() as u16).to_le_bytes());
-    response.extend_from_slice(&entry_id);
-
-    let debug =
-        get_properties_view_response_values_for_debug(&[PID_TAG_DEFAULT_VIEW_ENTRY_ID], &response);
-
-    assert!(debug.contains("PidTagDefaultViewEntryId:bytes=70"));
-    assert!(debug.contains(&format!(
-        "decoded_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
-    )));
-    assert!(debug.contains("decoded_folder_name=common_views"));
-    assert!(debug.contains(&format!(
-        "decoded_message_id=0x{:016x}",
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID
-    )));
+    assert_eq!(
+        default_folder_view_entry_id(mailbox_guid, SENT_FOLDER_ID, "IPF.Note"),
+        None
+    );
 }
 
 #[test]
@@ -1863,7 +1829,7 @@ fn bootstrap_query_rows_total_count_keeps_sync_issues_leaf_until_backed() {
 }
 
 #[test]
-fn bootstrap_query_rows_total_count_projects_common_views_navigation_shortcuts() {
+fn bootstrap_query_rows_total_count_keeps_empty_common_views_empty() {
     let object = MapiObject::ContentsTable {
         folder_id: COMMON_VIEWS_FOLDER_ID,
         associated: true,
@@ -1887,21 +1853,21 @@ fn bootstrap_query_rows_total_count_projects_common_views_navigation_shortcuts()
             &MapiMailStoreSnapshot::empty(),
             Uuid::nil(),
         ),
-        Some(6)
+        Some(0)
     );
 }
 
 #[test]
-fn contents_table_open_row_count_projects_common_views_full_table() {
+fn contents_table_open_row_count_keeps_empty_common_views_empty() {
     let snapshot = MapiMailStoreSnapshot::empty();
 
     assert_eq!(
         associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-        6
+        0
     );
     assert_eq!(
         contents_table_open_row_count(COMMON_VIEWS_FOLDER_ID, true, &[], &[], &snapshot,),
-        6
+        0
     );
 }
 

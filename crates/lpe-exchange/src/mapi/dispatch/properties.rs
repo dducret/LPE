@@ -439,21 +439,6 @@ pub(super) async fn append_get_properties_specific_response<S>(
     }
 }
 
-fn normalized_get_properties_request(session: &MapiSession, request: &RopRequest) -> RopRequest {
-    let mut normalized = request.clone();
-    for (index, property_tag) in request.property_tags().into_iter().enumerate() {
-        let offset = 4 + index * 4;
-        if let Some(bytes) = normalized.payload.get_mut(offset..offset + 4) {
-            bytes.copy_from_slice(
-                &session
-                    .normalize_named_property_tag(property_tag)
-                    .to_le_bytes(),
-            );
-        }
-    }
-    normalized
-}
-
 pub(super) fn append_get_properties_all_response(
     principal: &AccountPrincipal,
     session: &MapiSession,
@@ -1250,7 +1235,7 @@ pub(super) async fn append_copy_properties_response<S>(
 }
 
 pub(super) async fn append_commit_stream_response<S>(
-    store: &S,
+    _store: &S,
     principal: &AccountPrincipal,
     session: &mut MapiSession,
     handle_slots: &[u32],
@@ -1299,25 +1284,15 @@ pub(super) async fn append_commit_stream_response<S>(
         Some(MapiObject::AttachmentStream {
             writable_target: Some(StreamWriteTarget::AssociatedConfigProperty { handle, .. }),
             ..
-        }) => {
-            let message = match session.handles.get(&handle) {
-                Some(MapiObject::AssociatedConfig {
-                    folder_id,
-                    saved_message: Some(message),
-                    ..
-                }) => Some((*folder_id, message.clone())),
-                _ => None,
-            };
-            match message {
-                Some((folder_id, message)) => {
-                    persist_associated_config_stream_message(store, principal, folder_id, &message)
-                        .await
-                }
-                None => Err(anyhow!(
-                    "MAPI associated config stream commit target was not found"
-                )),
-            }
-        }
+        }) => matches!(
+            session.handles.get(&handle),
+            Some(MapiObject::AssociatedConfig {
+                saved_message: Some(_),
+                ..
+            })
+        )
+        .then_some(())
+        .ok_or_else(|| anyhow!("MAPI associated config stream commit target was not found")),
         Some(MapiObject::AttachmentStream { .. }) => Ok(()),
         _ => Err(anyhow!("MAPI stream commit target was not found")),
     };
@@ -1472,55 +1447,6 @@ where
                 )
                 .await?;
             }
-            MapiObject::NavigationShortcut {
-                folder_id,
-                shortcut_id,
-            } => {
-                let Some(existing) = snapshot
-                    .navigation_shortcut_message_for_id(*shortcut_id)
-                    .filter(|message| message.folder_id == *folder_id)
-                else {
-                    return Err(anyhow!("canonical MAPI navigation shortcut was not found"));
-                };
-                let mut properties = HashMap::new();
-                for tag in [
-                    PID_TAG_SUBJECT_W,
-                    PID_TAG_NORMALIZED_SUBJECT_W,
-                    PID_TAG_WLINK_ENTRY_ID,
-                    PID_TAG_WLINK_SAVE_STAMP,
-                    PID_TAG_WLINK_TYPE,
-                    PID_TAG_WLINK_FLAGS,
-                    PID_TAG_WLINK_SECTION,
-                    PID_TAG_WLINK_ORDINAL,
-                ] {
-                    if let Some(value) =
-                        navigation_shortcut_property_value(&existing, principal.account_id, tag)
-                    {
-                        properties.insert(tag, value);
-                    }
-                }
-                apply_mapi_property_values_to_map(&mut properties, canonical_values);
-                let shortcut = navigation_shortcut_from_mapi_properties(
-                    principal.account_id,
-                    Some(existing.canonical_id),
-                    &properties,
-                );
-                store
-                    .upsert_mapi_navigation_shortcut(UpsertMapiNavigationShortcutInput {
-                        id: Some(shortcut.canonical_id),
-                        account_id: principal.account_id,
-                        subject: shortcut.subject,
-                        target_folder_id: shortcut.target_folder_id,
-                        shortcut_type: shortcut.shortcut_type,
-                        flags: shortcut.flags,
-                        save_stamp: shortcut.save_stamp,
-                        section: shortcut.section,
-                        ordinal: shortcut.ordinal,
-                        group_header_id: shortcut.group_header_id,
-                        group_name: shortcut.group_name,
-                    })
-                    .await?;
-            }
             MapiObject::AssociatedConfig {
                 folder_id,
                 config_id,
@@ -1538,7 +1464,7 @@ where
                 apply_mapi_property_values_to_map(&mut properties, canonical_values);
                 let (message_class, subject) = associated_config_class_and_subject(&properties);
                 let properties =
-                    normalized_associated_config_persisted_properties(&message_class, &properties);
+                    normalized_associated_config_content_properties(&message_class, &properties);
                 store
                     .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
                         id: Some(existing.canonical_id),

@@ -4358,8 +4358,10 @@ async fn mapi_over_http_microsoft_oxosrch_search_definition_message_properties_a
 #[tokio::test]
 async fn mapi_over_http_common_view_named_view_accepts_microsoft_descriptor_write_stream_batch() {
     let account = FakeStore::account();
+    let associated_configs = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
         session: Some(account),
+        associated_configs: associated_configs.clone(),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -4377,13 +4379,20 @@ async fn mapi_over_http_common_view_named_view_accepts_microsoft_descriptor_writ
         1,
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
     );
-    append_rop_open_message(
+    append_rop_create_associated_message(
         &mut rops,
-        1,
+        0,
         2,
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-        crate::mapi_store::OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
     );
+    let mut view_properties = Vec::new();
+    append_mapi_utf16_property(
+        &mut view_properties,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.FolderDesign.NamedView",
+    );
+    append_mapi_utf16_property(&mut view_properties, PID_TAG_SUBJECT_W, "Compact");
+    append_rop_set_properties(&mut rops, 2, 2, &view_properties);
     rops.extend_from_slice(&[
         0x2B, 0x00, 0x02, 0x03, // RopOpenStream
     ]);
@@ -4401,6 +4410,7 @@ async fn mapi_over_http_common_view_named_view_accepts_microsoft_descriptor_writ
     rops.extend_from_slice(&[
         0x5D, 0x00, 0x03, // RopCommitStream
     ]);
+    append_rop_save_changes_message(&mut rops, 2, 2);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -4416,6 +4426,11 @@ async fn mapi_over_http_common_view_named_view_accepts_microsoft_descriptor_writ
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x06, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
     assert!(contains_bytes(&response_rops, &[0x2B, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x2F, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(
@@ -4423,6 +4438,17 @@ async fn mapi_over_http_common_view_named_view_accepts_microsoft_descriptor_writ
         &[0x2D, 0x03, 0, 0, 0, 0, descriptor.len() as u8, 0]
     ));
     assert!(contains_bytes(&response_rops, &[0x5D, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
+    let configs = associated_configs.lock().unwrap();
+    assert_eq!(configs.len(), 1, "{response_rops:02x?}");
+    assert_eq!(
+        configs[0].message_class,
+        "IPM.Microsoft.FolderDesign.NamedView"
+    );
+    assert_eq!(
+        configs[0].properties_json["0x70010102"]["value"],
+        "76696577"
+    );
 }
 
 #[tokio::test]
@@ -4540,15 +4566,16 @@ async fn mapi_over_http_fast_transfer_destination_rejects_partial_property_buffe
 }
 
 #[tokio::test]
-async fn mapi_over_http_microsoft_oxocfg_release_persists_configuration_stream() {
+async fn mapi_over_http_microsoft_oxcprpt_stream_release_then_message_save_persists_property() {
     let associated_object_id = crate::mapi::identity::mapi_store_id(
         crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 67,
     );
     let associated_source_key =
         crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let associated_config_id = Uuid::parse_str("a0fdf7ca-15f8-bc62-ff51-d543d69a14a5").unwrap();
     let account = FakeStore::account();
     let associated_configs = Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
-        id: Uuid::parse_str("a0fdf7ca-15f8-bc62-ff51-d543d69a14a5").unwrap(),
+        id: associated_config_id,
         account_id: account.account_id,
         folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
         message_class: "IPM.Configuration.MessageListSettings".to_string(),
@@ -4571,6 +4598,10 @@ async fn mapi_over_http_microsoft_oxocfg_release_persists_configuration_stream()
     let store = FakeStore {
         session: Some(account.clone()),
         associated_configs: associated_configs.clone(),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(
+            associated_config_id,
+            associated_object_id,
+        )]))),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -4639,15 +4670,638 @@ async fn mapi_over_http_microsoft_oxocfg_release_persists_configuration_stream()
 }
 
 #[tokio::test]
+async fn mapi_over_http_microsoft_oxcprpt_stream_release_does_not_save_message() {
+    // [MS-OXCPRPT] sections 3.1.1 and 3.2.5.13: releasing a Stream on a
+    // Message makes the new property value available on that Message handle,
+    // but only a successful RopSaveChangesMessage persists it to the database.
+    let associated_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 69,
+    );
+    let associated_source_key =
+        crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let associated_config_id = Uuid::parse_str("7a940962-277b-49d4-a87f-d7dfaf859a8a").unwrap();
+    let account = FakeStore::account();
+    let associated_configs = Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
+        id: associated_config_id,
+        account_id: account.account_id,
+        folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+        message_class: "IPM.Configuration.MessageListSettings".to_string(),
+        subject: "Unsaved Outlook Inbox view state".to_string(),
+        properties_json: serde_json::json!({
+            "0x001a001f": {
+                "type": "string",
+                "value": "IPM.Configuration.MessageListSettings"
+            },
+            "0x0037001f": {
+                "type": "string",
+                "value": "Unsaved Outlook Inbox view state"
+            },
+            "0x65e00102": {
+                "type": "binary",
+                "value": associated_source_key.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+            },
+            "0x7c070102": {"type": "binary", "value": "0102"}
+        }),
+    }]));
+    let store = FakeStore {
+        session: Some(account),
+        associated_configs: associated_configs.clone(),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(
+            associated_config_id,
+            associated_object_id,
+        )]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let unsaved_stream = b"unsaved stream value";
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        associated_object_id,
+    );
+    rops.extend_from_slice(&[0x2B, 0x00, 0x02, 0x03]); // RopOpenStream.
+    rops.extend_from_slice(&0x7C07_0102u32.to_le_bytes());
+    rops.push(2);
+    rops.extend_from_slice(&[0x2F, 0x00, 0x03]); // RopSetStreamSize.
+    rops.extend_from_slice(&(unsaved_stream.len() as u64).to_le_bytes());
+    rops.extend_from_slice(&[0x2D, 0x00, 0x03]); // RopWriteStream.
+    rops.extend_from_slice(&(unsaved_stream.len() as u16).to_le_bytes());
+    rops.extend_from_slice(unsaved_stream);
+    rops.extend_from_slice(&[0x01, 0x00, 0x03]); // RopRelease Stream.
+    rops.extend_from_slice(&[0x01, 0x00, 0x02]); // RopRelease Message without Save.
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x2B, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2D, 0x03, 0, 0, 0, 0, unsaved_stream.len() as u8, 0]
+    ));
+    let configs = associated_configs.lock().unwrap();
+    let config = configs
+        .iter()
+        .find(|config| config.message_class == "IPM.Configuration.MessageListSettings")
+        .expect("unchanged associated config");
+    assert_eq!(config.properties_json["0x7c070102"]["value"], "0102");
+}
+
+#[tokio::test]
+async fn mapi_over_http_online_associated_config_create_is_atomic_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXCPRPT] sections 3.1.1 and 3.2.5.13 and [MS-OXCROPS]
+    // section 2.2.6.3 make SaveChangesMessage the publication boundary for
+    // Message properties. [MS-OXCFXICS] sections 3.3.5.2.1 and 3.3.5.2.2
+    // require the server to assign an online-created Message identity.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await?;
+
+    let client_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER - 0x0200,
+    );
+    let client_source_key = crate::mapi::identity::source_key_for_object_id(client_object_id);
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Configuration.AccountPrefs",
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_SUBJECT_W,
+        "Atomic online AssociatedConfig",
+    );
+    append_mapi_binary_property(&mut property_values, PID_TAG_SOURCE_KEY, &client_source_key);
+    append_mapi_binary_property(&mut property_values, 0x7C08_0102, b"atomic-config");
+    let mut rops = Vec::new();
+    append_rop_create_associated_message(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_set_properties(&mut rops, 1, 4, &property_values);
+    append_rop_save_changes_message_with_flags(&mut rops, 0, 1, 0x01);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    let save_succeeded = contains_bytes(&response_rops, &[0x0C, 0x00, 0, 0, 0, 0]);
+
+    let saved = sqlx::query_as::<_, (Uuid, i64, Vec<u8>, Vec<u8>, Vec<u8>, serde_json::Value)>(
+        r#"
+        SELECT config.id, identity.mapi_object_id, identity.source_key,
+               identity.change_key, identity.predecessor_change_list,
+               config.properties_json
+        FROM mapi_associated_config_messages config
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = config.tenant_id
+         AND identity.account_id = config.account_id
+         AND identity.canonical_id = config.id
+         AND identity.object_kind = 'associated_config'
+         AND identity.deleted_at IS NULL
+        WHERE config.account_id = $1
+          AND config.subject = 'Atomic online AssociatedConfig'
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_optional(storage.pool())
+    .await?;
+    let saved_changes = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log change_log
+        JOIN mapi_associated_config_messages config
+          ON config.tenant_id = change_log.tenant_id
+         AND config.account_id = change_log.account_id
+         AND config.id = change_log.object_id
+        WHERE change_log.account_id = $1
+          AND change_log.object_kind = 'associated_config'
+          AND change_log.change_kind = 'created'
+          AND config.subject = 'Atomic online AssociatedConfig'
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_one(storage.pool())
+    .await?;
+
+    let rollback_id = Uuid::parse_str("6c2d72c9-8e32-4199-84ca-22a379802cd8")?;
+    let rejected = storage
+        .commit_mapi_associated_config_create(crate::store::UpsertMapiAssociatedConfigInput {
+            id: Some(rollback_id),
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: String::new(),
+            subject: "Rollback AssociatedConfig".to_string(),
+            properties_json: serde_json::json!({}),
+        })
+        .await;
+    let rollback_rows = sqlx::query_as::<_, (i64, i64, i64)>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM mapi_object_identities
+             WHERE account_id = $1 AND canonical_id = $2),
+            (SELECT COUNT(*) FROM mapi_associated_config_messages
+             WHERE account_id = $1 AND id = $2),
+            (SELECT COUNT(*) FROM mail_change_log
+             WHERE account_id = $1 AND object_kind = 'associated_config' AND object_id = $2)
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(rollback_id)
+    .fetch_one(storage.pool())
+    .await?;
+    fixture.cleanup().await?;
+
+    assert!(save_succeeded, "{response_rops:02x?}");
+    let (_config_id, object_id, source_key, change_key, predecessor_change_list, properties_json) =
+        saved.expect("online AssociatedConfig content and identity commit atomically");
+    assert_ne!(object_id as u64, client_object_id);
+    assert_ne!(source_key, client_source_key);
+    assert_eq!(
+        source_key,
+        crate::mapi::identity::source_key_for_object_id(object_id as u64)
+    );
+    assert!((17..=24).contains(&change_key.len()));
+    assert!(!predecessor_change_list.is_empty());
+    assert_eq!(
+        properties_json["0x7c080102"]["value"],
+        "61746f6d69632d636f6e666967"
+    );
+    assert!(properties_json.get("0x65e00102").is_none());
+    assert_eq!(saved_changes, 1);
+    assert!(rejected.is_err());
+    assert_eq!(rollback_rows, (0, 0, 0));
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_over_http_existing_associated_config_save_is_atomic_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXCPRPT] sections 3.1.1, 3.2.5.4, 3.2.5.5, 3.2.5.13,
+    // and 3.2.5.15 plus [MS-OXCROPS] section 2.2.6.3: Message property
+    // and Stream mutations are handle-local until RopSaveChangesMessage.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    // Establish the canonical Inbox and its durable folder identity before
+    // attaching an FAI to that folder; identity repair correctly rejects an
+    // associated message whose parent does not exist yet.
+    storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await?;
+    let config_id = Uuid::parse_str("8debd1c4-c6a5-4ab7-ae11-f29d0cfe44e9")?;
+    storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: Some(config_id),
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "Atomic Outlook Inbox view state".to_string(),
+            properties_json: serde_json::json!({
+                "0x001a001f": {
+                    "type": "string",
+                    "value": "IPM.Configuration.MessageListSettings"
+                },
+                "0x0037001f": {
+                    "type": "string",
+                    "value": "Atomic Outlook Inbox view state"
+                },
+                "0x7c060003": {"type": "u32", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "0102"},
+                "0x7c080102": {"type": "binary", "value": "aabb"}
+            }),
+        })
+        .await?;
+    let identity_request = [MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::AssociatedConfig,
+        canonical_id: config_id,
+        reserved_global_counter: None,
+        source_key: None,
+    }];
+    let initial_identity = storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &identity_request)
+        .await?
+        .remove(0);
+    let initial_config = storage
+        .fetch_mapi_associated_configs(fixture.account_id)
+        .await?
+        .into_iter()
+        .find(|config| config.id == config_id)
+        .expect("persisted associated config");
+    let initial_snapshot = storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await?;
+    let associated_object_id = initial_snapshot
+        .associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
+        .into_iter()
+        .find(|message| message.canonical_id == config_id)
+        .expect("persisted associated config in initial snapshot")
+        .id;
+    assert_eq!(associated_object_id, initial_identity.object_id);
+    let baseline_changes = storage
+        .fetch_mapi_sync_changes(fixture.account_id, None, MapiCheckpointKind::Content, 0)
+        .await?;
+    let stream_value = b"saved only by the parent Message";
+    let mutation_rops = |save_changes: bool| {
+        let mut rops = Vec::new();
+        append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+        append_rop_open_message(
+            &mut rops,
+            1,
+            2,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            associated_object_id,
+        );
+        let mut property_values = Vec::new();
+        property_values.extend_from_slice(&0x7C06_0003u32.to_le_bytes());
+        property_values.extend_from_slice(&8i32.to_le_bytes());
+        append_rop_set_properties(&mut rops, 2, 1, &property_values);
+        append_rop_delete_properties(&mut rops, 2, &[0x7C08_0102]);
+        rops.extend_from_slice(&[0x2B, 0x00, 0x02, 0x03]); // RopOpenStream.
+        rops.extend_from_slice(&0x7C07_0102u32.to_le_bytes());
+        rops.push(2);
+        rops.extend_from_slice(&[0x2F, 0x00, 0x03]); // RopSetStreamSize.
+        rops.extend_from_slice(&(stream_value.len() as u64).to_le_bytes());
+        rops.extend_from_slice(&[0x2D, 0x00, 0x03]); // RopWriteStream.
+        rops.extend_from_slice(&(stream_value.len() as u16).to_le_bytes());
+        rops.extend_from_slice(stream_value);
+        rops.extend_from_slice(&[0x5D, 0x00, 0x03]); // RopCommitStream.
+        rops.extend_from_slice(&[0x01, 0x00, 0x03]); // RopRelease Stream.
+        if save_changes {
+            append_rop_save_changes_message(&mut rops, 2, 2);
+        } else {
+            rops.extend_from_slice(&[0x01, 0x00, 0x02]); // Abandon Message.
+        }
+        rops
+    };
+
+    let service = ExchangeService::new(storage.clone());
+    let mut no_op_save_rops = Vec::new();
+    append_rop_open_folder(
+        &mut no_op_save_rops,
+        0,
+        1,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    );
+    append_rop_open_message(
+        &mut no_op_save_rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        associated_object_id,
+    );
+    append_rop_save_changes_message(&mut no_op_save_rops, 2, 2);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&no_op_save_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
+    let no_op_config = storage
+        .fetch_mapi_associated_configs(fixture.account_id)
+        .await?
+        .into_iter()
+        .find(|config| config.id == config_id)
+        .expect("associated config after no-op save");
+    assert_eq!(no_op_config, initial_config);
+    let no_op_identity = storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &identity_request)
+        .await?
+        .remove(0);
+    assert_eq!(no_op_identity, initial_identity);
+    let no_op_changes = storage
+        .fetch_mapi_sync_changes(fixture.account_id, None, MapiCheckpointKind::Content, 0)
+        .await?;
+    assert_eq!(
+        no_op_changes.current_change_sequence,
+        baseline_changes.current_change_sequence
+    );
+
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &mutation_rops(false),
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, &[0x2B, 0x03, 0, 0, 0, 0]),
+        "{response_rops:02x?}"
+    );
+    assert!(
+        contains_bytes(&response_rops, &[0x5D, 0x03, 0, 0, 0, 0]),
+        "{response_rops:02x?}"
+    );
+
+    let unchanged = storage
+        .fetch_mapi_associated_configs(fixture.account_id)
+        .await?
+        .into_iter()
+        .find(|config| config.id == config_id)
+        .expect("unchanged associated config");
+    assert_eq!(unchanged.properties_json["0x7c060003"]["value"], 4);
+    assert_eq!(unchanged.properties_json["0x7c070102"]["value"], "0102");
+    assert_eq!(unchanged.properties_json["0x7c080102"]["value"], "aabb");
+    let unchanged_identity = storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &identity_request)
+        .await?
+        .remove(0);
+    assert_eq!(unchanged_identity, initial_identity);
+    let unchanged_changes = storage
+        .fetch_mapi_sync_changes(fixture.account_id, None, MapiCheckpointKind::Content, 0)
+        .await?;
+    assert_eq!(
+        unchanged_changes.current_change_sequence,
+        baseline_changes.current_change_sequence
+    );
+
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &mutation_rops(true),
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
+
+    let saved = storage
+        .fetch_mapi_associated_configs(fixture.account_id)
+        .await?
+        .into_iter()
+        .find(|config| config.id == config_id)
+        .expect("saved associated config");
+    let stream_hex = stream_value
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(saved.properties_json["0x7c060003"]["value"], 8);
+    assert_eq!(saved.properties_json["0x7c070102"]["value"], stream_hex);
+    assert!(saved.properties_json.get("0x7c080102").is_none());
+    let saved_identity = storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &identity_request)
+        .await?
+        .remove(0);
+    assert_eq!(saved_identity.object_id, initial_identity.object_id);
+    assert_eq!(saved_identity.source_key, initial_identity.source_key);
+    assert_ne!(saved_identity.change_number, initial_identity.change_number);
+    assert_ne!(saved_identity.change_key, initial_identity.change_key);
+    assert_ne!(
+        saved_identity.predecessor_change_list,
+        initial_identity.predecessor_change_list
+    );
+    assert!(test_mapi_pcl_includes_change_key(
+        &saved_identity.predecessor_change_list,
+        &initial_identity.change_key
+    ));
+    assert!(test_mapi_pcl_includes_change_key(
+        &saved_identity.predecessor_change_list,
+        &saved_identity.change_key
+    ));
+    assert!(saved_identity.last_modification_time > initial_identity.last_modification_time);
+    let saved_changes = storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            None,
+            MapiCheckpointKind::Content,
+            baseline_changes.current_change_sequence,
+        )
+        .await?;
+    assert_eq!(
+        saved_changes.changed_associated_config_ids,
+        vec![crate::store::MapiAssociatedConfigChange {
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            config_id,
+        }]
+    );
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_associated_config_delete_tombstones_identity_in_postgresql() -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    fixture
+        .storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await?;
+    let config_id = Uuid::parse_str("6a5ce0a4-2921-463a-a8f5-a9e4ebc8b637")?;
+    fixture
+        .storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: Some(config_id),
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.AccountPrefs".to_string(),
+            subject: "Deleted Outlook configuration".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "u32", "value": 4}
+            }),
+        })
+        .await?;
+    let identity = fixture
+        .storage
+        .fetch_or_allocate_mapi_identities(
+            fixture.account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                canonical_id: config_id,
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await?
+        .remove(0);
+    let baseline = fixture
+        .storage
+        .fetch_mapi_sync_changes(fixture.account_id, None, MapiCheckpointKind::Content, 0)
+        .await?
+        .current_change_sequence;
+
+    fixture
+        .storage
+        .delete_mapi_associated_config(fixture.account_id, config_id)
+        .await?;
+
+    assert!(fixture
+        .storage
+        .fetch_mapi_associated_configs(fixture.account_id)
+        .await?
+        .into_iter()
+        .all(|config| config.id != config_id));
+    let tombstoned = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT deleted_at IS NOT NULL
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'associated_config'
+          AND canonical_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(config_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert!(tombstoned);
+    assert!(fixture
+        .storage
+        .fetch_mapi_identities_by_object_ids(fixture.account_id, &[identity.object_id])
+        .await?
+        .is_empty());
+    let changes = fixture
+        .storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            None,
+            MapiCheckpointKind::Content,
+            baseline,
+        )
+        .await?;
+    assert_eq!(
+        changes.deleted_associated_config_ids,
+        vec![crate::store::MapiAssociatedConfigChange {
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            config_id,
+        }]
+    );
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn mapi_over_http_associated_config_mutations_are_cumulative_until_save() {
     let associated_object_id = crate::mapi::identity::mapi_store_id(
         crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 68,
     );
     let associated_source_key =
         crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let associated_config_id = Uuid::parse_str("4f3d59dd-2918-4ec6-86f5-f8ca0db18dc2").unwrap();
     let account = FakeStore::account();
     let associated_configs = Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
-        id: Uuid::parse_str("4f3d59dd-2918-4ec6-86f5-f8ca0db18dc2").unwrap(),
+        id: associated_config_id,
         account_id: account.account_id,
         folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
         message_class: "IPM.Configuration.MessageListSettings".to_string(),
@@ -4667,6 +5321,10 @@ async fn mapi_over_http_associated_config_mutations_are_cumulative_until_save() 
     let store = FakeStore {
         session: Some(account),
         associated_configs: associated_configs.clone(),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(
+            associated_config_id,
+            associated_object_id,
+        )]))),
         ..Default::default()
     };
     let service = ExchangeService::new(store);

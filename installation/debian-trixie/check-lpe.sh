@@ -126,6 +126,18 @@ mapi_special_folder_alias_shape_ok="$(mapi_special_folder_alias_shape_ok "${DATA
   || fail "MAPI special-folder alias schema is missing or invalid. Initialize a fresh LPE 0.5.0 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI special-folder alias schema is current"
 
+mapi_local_replica_range_shape_status="$(mapi_local_replica_range_shape_ok "$DATABASE_URL")" \
+  || fail "Unable to inspect MAPI local replica range table shape"
+[[ "$mapi_local_replica_range_shape_status" == "1" ]] \
+  || fail "MAPI local replica range table shape is missing or invalid. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh for an existing 0.5.0-sql-v1 database, or initialize a fresh LPE 0.5.0 database with init-schema.sh."
+pass "MAPI local replica range table shape is current"
+
+mapi_outlook_cache_fidelity_shape_status="$(mapi_outlook_cache_fidelity_shape_ok "$DATABASE_URL")" \
+  || fail "Unable to inspect MAPI WLink/configuration FAI fidelity shape"
+[[ "$mapi_outlook_cache_fidelity_shape_status" == "1" ]] \
+  || fail "MAPI WLink/configuration FAI fidelity shape is missing or invalid. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh for an existing 0.5.0-sql-v1 database, or initialize a fresh LPE 0.5.0 database with init-schema.sh."
+pass "MAPI WLink/configuration FAI fidelity shape is current"
+
 mapi_shortcut_group_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name IN ('group_header_id', 'group_name');")" \
   || fail "Unable to inspect MAPI navigation shortcut columns"
 [[ "$mapi_shortcut_group_column_count" == "2" ]] \

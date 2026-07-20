@@ -1,4 +1,6 @@
 const SCHEMA: &str = include_str!("../sql/schema.sql");
+const OUTLOOK_CACHE_FIDELITY_UPDATE: &str =
+    include_str!("../sql/updates/0.5.0-sql-v1-outlook-cache-fidelity.sql");
 const ACTIVESYNC_STORAGE: &str = include_str!("activesync.rs");
 const ATTACHMENTS_STORAGE: &str = include_str!("attachments.rs");
 const BLOB_STORE_STORAGE: &str = include_str!("blob_store.rs");
@@ -758,6 +760,63 @@ fn mapi_identity_mapping_is_store_backed() {
 }
 
 #[test]
+fn mapi_local_replica_ranges_and_deleted_item_list_are_durable() {
+    let reservations = table_definition("mapi_local_replica_id_ranges");
+    for required in [
+        "replica_guid UUID NOT NULL",
+        "first_global_counter BIGINT NOT NULL CHECK (first_global_counter >= 43 AND first_global_counter < 140737454800896)",
+        "end_global_counter_exclusive BIGINT NOT NULL CHECK (end_global_counter_exclusive > 43 AND end_global_counter_exclusive <= 140737454800896)",
+        "CHECK (first_global_counter < end_global_counter_exclusive)",
+        "PRIMARY KEY (tenant_id, account_id, replica_guid, first_global_counter)",
+        "FOREIGN KEY (tenant_id, account_id, replica_guid)\n        REFERENCES mapi_mailbox_replicas (tenant_id, account_id, replica_guid)\n        ON DELETE CASCADE",
+    ] {
+        assert!(
+            reservations.contains(required),
+            "GetLocalReplicaIds must persist each exact returned range: {required}"
+        );
+    }
+
+    let deleted_ranges = table_definition("mapi_local_replica_deleted_ranges");
+    for required in [
+        "folder_id BIGINT NOT NULL CHECK (folder_id > 0)",
+        "replica_guid UUID NOT NULL",
+        "min_global_counter BIGINT NOT NULL CHECK (min_global_counter >= 43 AND min_global_counter < 140737454800896)",
+        "max_global_counter BIGINT NOT NULL CHECK (max_global_counter >= 43 AND max_global_counter < 140737454800896)",
+        "CHECK (min_global_counter <= max_global_counter)",
+        "PRIMARY KEY (tenant_id, account_id, folder_id, replica_guid, min_global_counter, max_global_counter)",
+        "FOREIGN KEY (tenant_id, account_id, replica_guid)\n        REFERENCES mapi_mailbox_replicas (tenant_id, account_id, replica_guid)\n        ON DELETE CASCADE",
+    ] {
+        assert!(
+            deleted_ranges.contains(required),
+            "RopSetLocalReplicaMidsetDeleted must persist its folder-scoped deleted-item list: {required}"
+        );
+    }
+
+    assert_schema_contains_all(&[
+        "CREATE INDEX mapi_local_replica_id_ranges_membership_idx\n    ON mapi_local_replica_id_ranges (\n        tenant_id,\n        account_id,\n        replica_guid,\n        first_global_counter,\n        end_global_counter_exclusive\n    )",
+        "CREATE INDEX mapi_local_replica_deleted_ranges_folder_idx\n    ON mapi_local_replica_deleted_ranges (\n        tenant_id,\n        account_id,\n        folder_id,\n        replica_guid,\n        min_global_counter,\n        max_global_counter\n    )",
+    ]);
+    assert_contains_before(
+        SCHEMA,
+        "CREATE TABLE mapi_mailbox_replicas",
+        "CREATE TABLE mapi_local_replica_id_ranges",
+        "the replica parent must exist before the local-id reservation child",
+    );
+    assert_contains_before(
+        SCHEMA,
+        "CREATE TABLE mapi_mailbox_replicas",
+        "CREATE TABLE mapi_local_replica_deleted_ranges",
+        "the replica parent must exist before the deleted-range child",
+    );
+    assert_contains_before(
+        SCHEMA,
+        "CREATE TABLE mapi_local_replica_deleted_ranges",
+        "CREATE TABLE mapi_object_identities",
+        "local replica child tables must be declared before later MAPI identity tables",
+    );
+}
+
+#[test]
 fn deleted_calendar_events_remain_canonical_and_are_hidden_from_active_reads() {
     let events = table_definition("calendar_events");
     for required in [
@@ -879,8 +938,17 @@ fn mapi_navigation_shortcuts_persist_group_header_links() {
         "target_folder_id BIGINT CHECK (target_folder_id IS NULL OR target_folder_id > 0)",
         "shortcut_type BIGINT NOT NULL CHECK (shortcut_type >= 0 AND shortcut_type <= 4294967295)",
         "save_stamp BIGINT NOT NULL DEFAULT 0 CHECK (save_stamp >= 0 AND save_stamp <= 4294967295)",
+        "ordinal BYTEA NOT NULL",
         "group_header_id UUID",
         "group_name TEXT NOT NULL DEFAULT ''",
+        "calendar_color INTEGER CONSTRAINT mapi_navigation_shortcuts_calendar_color_check",
+        "address_book_entry_id BYTEA CONSTRAINT mapi_navigation_shortcuts_address_book_entry_id_check",
+        "address_book_store_entry_id BYTEA CONSTRAINT mapi_navigation_shortcuts_address_book_store_entry_id_check",
+        "client_id BYTEA CONSTRAINT mapi_navigation_shortcuts_client_id_check",
+        "ro_group_type INTEGER CONSTRAINT mapi_navigation_shortcuts_ro_group_type_check",
+        "CONSTRAINT mapi_navigation_shortcuts_ordinal_check CHECK",
+        "get_byte(ordinal, octet_length(ordinal) - 1) <> 0",
+        "get_byte(ordinal, octet_length(ordinal) - 1) <> 255",
     ] {
         assert!(
             shortcuts.contains(required),
@@ -906,9 +974,13 @@ fn mapi_associated_config_messages_are_bounded_mapi_only_state() {
     }
     assert_schema_contains_all(&[
         "CREATE INDEX mapi_associated_config_messages_account_folder_idx",
-        "CREATE UNIQUE INDEX mapi_associated_config_messages_logical_idx",
+        "CREATE INDEX mapi_associated_config_messages_logical_idx",
         "ON mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class, subject)",
     ]);
+    assert!(
+        !SCHEMA.contains("CREATE UNIQUE INDEX mapi_associated_config_messages_logical_idx"),
+        "distinct FAI identities must not be collapsed by their class and subject labels"
+    );
 }
 
 #[test]
@@ -1110,7 +1182,7 @@ fn mapi_special_folder_aliases_are_bounded_protocol_identity_metadata() {
 }
 
 #[test]
-fn update_script_requires_the_current_schema_without_mutating_it() {
+fn update_script_rejects_pre_050_before_running_bounded_forward_only_sql() {
     assert_source_contains_all(
         "update-lpe.sh",
         UPDATE_LPE_SCRIPT,
@@ -1119,12 +1191,14 @@ fn update_script_requires_the_current_schema_without_mutating_it() {
             "INSTALLED_SCHEMA_VERSION",
             "EXPECTED_SCHEMA_VERSION",
             "Upgrades from releases before LPE 0.5.0 are unsupported",
-            "no compatibility SQL is required",
+            "SCHEMA_UPDATE_FILE",
+            "0.5.0-sql-v1-outlook-cache-fidelity.sql",
+            "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${SCHEMA_UPDATE_FILE}\"",
+            "reviewed forward-only 0.5.0 schema updates are applied",
         ],
     );
 
     for forbidden in [
-        "psql \"${DATABASE_URL}\" -v ON_ERROR_STOP=1 -f",
         "CREATE TABLE",
         "ALTER TABLE",
         "UPDATE public.",
@@ -1133,6 +1207,200 @@ fn update_script_requires_the_current_schema_without_mutating_it() {
         assert!(
             !UPDATE_LPE_SCRIPT.contains(forbidden),
             "update-lpe.sh must not mutate the LPE 0.5.0 schema: {forbidden}"
+        );
+    }
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "if [[ \"${INSTALLED_SCHEMA_VERSION}\" != \"${EXPECTED_SCHEMA_VERSION}\" ]]",
+        "systemctl stop \"${SERVICE_NAME}\"",
+        "update-lpe.sh must reject pre-0.5 schemas before stopping LPE",
+    );
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "systemctl stop \"${SERVICE_NAME}\"",
+        "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${SCHEMA_UPDATE_FILE}\"",
+        "update-lpe.sh must stop the incompatible service before invoking any 0.5.0 update",
+    );
+    assert!(
+        UPDATE_LPE_SCRIPT.contains("if systemctl is-active --quiet \"${SERVICE_NAME}\""),
+        "update-lpe.sh must accept an already inactive service without masking a real stop failure"
+    );
+    assert!(
+        !UPDATE_LPE_SCRIPT.contains("systemctl stop \"${SERVICE_NAME}\" || true"),
+        "update-lpe.sh must not ignore a real service stop failure"
+    );
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${SCHEMA_UPDATE_FILE}\"",
+        "MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK",
+        "update-lpe.sh must run the forward-only update before enforcing its postcondition guard",
+    );
+}
+
+#[test]
+fn outlook_cache_fidelity_update_is_transactional_idempotent_and_version_bounded() {
+    assert_source_contains_all(
+        "0.5.0 Outlook cache fidelity update",
+        OUTLOOK_CACHE_FIDELITY_UPDATE,
+        &[
+            "BEGIN;",
+            "SET LOCAL search_path = pg_catalog, public;",
+            "to_regclass('public.schema_metadata')",
+            "FROM public.schema_metadata",
+            "installed_schema_version IS DISTINCT FROM '0.5.0-sql-v1'",
+            "CREATE TABLE IF NOT EXISTS public.mapi_local_replica_id_ranges",
+            "CREATE INDEX IF NOT EXISTS mapi_local_replica_id_ranges_membership_idx",
+            "ON public.mapi_local_replica_id_ranges",
+            "CREATE TABLE IF NOT EXISTS public.mapi_local_replica_deleted_ranges",
+            "CREATE INDEX IF NOT EXISTS mapi_local_replica_deleted_ranges_folder_idx",
+            "ON public.mapi_local_replica_deleted_ranges",
+            "REFERENCES public.mapi_mailbox_replicas (tenant_id, account_id, replica_guid)",
+            "ON DELETE CASCADE",
+            "ALTER COLUMN ordinal TYPE BYTEA",
+            "WHEN (ordinal & 255) IN (0, 255)",
+            "decode(lpad(to_hex(ordinal), 8, '0') || '80', 'hex')",
+            "((length(to_hex(ordinal)) + 1) / 2) * 2",
+            "ADD COLUMN IF NOT EXISTS calendar_color INTEGER",
+            "ADD COLUMN IF NOT EXISTS address_book_entry_id BYTEA",
+            "ADD COLUMN IF NOT EXISTS address_book_store_entry_id BYTEA",
+            "ADD COLUMN IF NOT EXISTS client_id BYTEA",
+            "ADD COLUMN IF NOT EXISTS ro_group_type INTEGER",
+            "mapi_navigation_shortcuts_ordinal_check",
+            "mapi_navigation_shortcuts_calendar_color_check",
+            "mapi_navigation_shortcuts_address_book_entry_id_check",
+            "mapi_navigation_shortcuts_address_book_store_entry_id_check",
+            "mapi_navigation_shortcuts_client_id_check",
+            "mapi_navigation_shortcuts_ro_group_type_check",
+            "DROP INDEX public.mapi_associated_config_messages_logical_idx",
+            "CREATE INDEX mapi_associated_config_messages_logical_idx",
+            "wlink_fidelity_shape_ok",
+            "COMMIT;",
+        ],
+    );
+    assert_contains_before(
+        OUTLOOK_CACHE_FIDELITY_UPDATE,
+        "installed_schema_version IS DISTINCT FROM '0.5.0-sql-v1'",
+        "CREATE TABLE IF NOT EXISTS public.mapi_local_replica_id_ranges",
+        "the direct SQL runner must reject unsupported schema versions before DDL",
+    );
+    for forbidden in [
+        "DROP TABLE",
+        "DROP SCHEMA",
+        "TRUNCATE",
+        "UPDATE public.schema_metadata",
+        "DELETE FROM public.schema_metadata",
+    ] {
+        assert!(
+            !OUTLOOK_CACHE_FIDELITY_UPDATE.contains(forbidden),
+            "the bounded 0.5.0 update must not destroy canonical rows or schema objects: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn local_replica_range_update_rejects_preexisting_incomplete_tables() {
+    assert_source_contains_all(
+        "shared MAPI local replica range validation",
+        INSTALL_COMMON_SCRIPT,
+        &[
+            "mapi_local_replica_range_shape_ok()",
+            "information_schema.columns",
+            "pg_constraint",
+            "pg_index",
+            "mapi_local_replica_id_ranges_membership_idx",
+            "mapi_local_replica_deleted_ranges_folder_idx",
+        ],
+    );
+    assert_source_contains_all(
+        "0.5.0 local replica range update postcondition",
+        OUTLOOK_CACHE_FIDELITY_UPDATE,
+        &[
+            "local_replica_range_shape_ok",
+            "information_schema.columns",
+            "pg_constraint",
+            "pg_index",
+            "MAPI local replica range table shape is incomplete",
+        ],
+    );
+    assert_contains_before(
+        OUTLOOK_CACHE_FIDELITY_UPDATE,
+        "CREATE INDEX IF NOT EXISTS mapi_local_replica_deleted_ranges_folder_idx",
+        "IF NOT local_replica_range_shape_ok THEN",
+        "the update must validate preexisting IF NOT EXISTS tables after all additive DDL",
+    );
+    assert_contains_before(
+        OUTLOOK_CACHE_FIDELITY_UPDATE,
+        "IF NOT local_replica_range_shape_ok THEN",
+        "COMMIT;",
+        "an incomplete preexisting table must abort the transaction",
+    );
+
+    for (label, source) in [
+        ("init-schema.sh", INIT_LPE_SCRIPT),
+        ("check-lpe.sh", CHECK_LPE_SCRIPT),
+        ("update-lpe.sh", UPDATE_LPE_SCRIPT),
+    ] {
+        assert_source_contains_all(
+            label,
+            source,
+            &[
+                "mapi_local_replica_range_shape_ok",
+                "MAPI local replica range table shape",
+                "Initialize a fresh LPE 0.5.0 database",
+            ],
+        );
+    }
+}
+
+#[test]
+fn local_replica_range_update_matches_the_canonical_fresh_schema_ddl() {
+    fn statement<'a>(source: &'a str, start: &str) -> &'a str {
+        let offset = source
+            .find(start)
+            .unwrap_or_else(|| panic!("missing SQL statement starting with {start}"));
+        let statement = &source[offset..];
+        let end = statement
+            .find(';')
+            .unwrap_or_else(|| panic!("unterminated SQL statement starting with {start}"));
+        &statement[..=end]
+    }
+
+    fn normalized(statement: &str) -> String {
+        statement
+            .replace("CREATE TABLE IF NOT EXISTS public.", "CREATE TABLE ")
+            .replace("CREATE INDEX IF NOT EXISTS ", "CREATE INDEX ")
+            .replace("REFERENCES public.", "REFERENCES ")
+            .replace("ON public.", "ON ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    for table in [
+        "mapi_local_replica_id_ranges",
+        "mapi_local_replica_deleted_ranges",
+    ] {
+        assert_eq!(
+            normalized(statement(SCHEMA, &format!("CREATE TABLE {table}"))),
+            normalized(statement(
+                OUTLOOK_CACHE_FIDELITY_UPDATE,
+                &format!("CREATE TABLE IF NOT EXISTS public.{table}"),
+            )),
+            "the additive definition for {table} must match schema.sql exactly",
+        );
+    }
+
+    for index in [
+        "mapi_local_replica_id_ranges_membership_idx",
+        "mapi_local_replica_deleted_ranges_folder_idx",
+    ] {
+        assert_eq!(
+            normalized(statement(SCHEMA, &format!("CREATE INDEX {index}"))),
+            normalized(statement(
+                OUTLOOK_CACHE_FIDELITY_UPDATE,
+                &format!("CREATE INDEX IF NOT EXISTS {index}"),
+            )),
+            "the additive definition for {index} must match schema.sql exactly",
         );
     }
 }
@@ -1172,12 +1440,6 @@ fn deployment_scripts_reject_tagged_schema_without_mapi_identity_version_columns
     assert_contains_before(
         UPDATE_LPE_SCRIPT,
         "MAPI_IDENTITY_VERSION_COLUMN_COUNT",
-        "systemctl stop \"${SERVICE_NAME}\"",
-        "update-lpe.sh must reject missing MAPI identity version columns before stopping LPE",
-    );
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "MAPI_IDENTITY_VERSION_COLUMN_COUNT",
         "\"${CARGO_BIN}\" build --release -p lpe-cli",
         "update-lpe.sh must reject missing MAPI identity version columns before building LPE",
     );
@@ -1192,6 +1454,110 @@ fn deployment_scripts_reject_tagged_schema_without_mapi_identity_version_columns
         "check-lpe.sh deterministic psql wrapper",
         CHECK_LPE_SCRIPT,
         &["psql() {", "command psql -X \"$@\""],
+    );
+}
+
+#[test]
+fn deployment_scripts_require_local_replica_range_table_shape() {
+    for (label, source, shape_variable) in [
+        (
+            "init-schema.sh",
+            INIT_LPE_SCRIPT,
+            "mapi_local_replica_range_shape_ok",
+        ),
+        (
+            "check-lpe.sh",
+            CHECK_LPE_SCRIPT,
+            "mapi_local_replica_range_shape_status",
+        ),
+        (
+            "update-lpe.sh",
+            UPDATE_LPE_SCRIPT,
+            "MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK",
+        ),
+    ] {
+        assert_source_contains_all(
+            label,
+            source,
+            &[
+                shape_variable,
+                "mapi_local_replica_range_shape_ok",
+                "MAPI local replica range table shape",
+                "Initialize a fresh LPE 0.5.0 database",
+            ],
+        );
+    }
+
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK",
+        "\"${CARGO_BIN}\" build --release -p lpe-cli",
+        "update-lpe.sh must reject an invalid local replica range shape before building LPE",
+    );
+}
+
+#[test]
+fn deployment_and_runtime_guards_require_outlook_cache_fidelity_shape() {
+    assert_source_contains_all(
+        "shared Outlook cache fidelity validation",
+        INSTALL_COMMON_SCRIPT,
+        &[
+            "mapi_outlook_cache_fidelity_shape_ok()",
+            "mapi_navigation_shortcuts",
+            "calendar_color",
+            "address_book_entry_id",
+            "address_book_store_entry_id",
+            "client_id",
+            "ro_group_type",
+            "mapi_associated_config_messages_logical_idx",
+            "CREATE INDEX mapi_associated_config_messages_logical_idx",
+        ],
+    );
+
+    for (label, source, shape_variable) in [
+        (
+            "init-schema.sh",
+            INIT_LPE_SCRIPT,
+            "mapi_outlook_cache_fidelity_shape_ok",
+        ),
+        (
+            "check-lpe.sh",
+            CHECK_LPE_SCRIPT,
+            "mapi_outlook_cache_fidelity_shape_status",
+        ),
+        (
+            "update-lpe.sh",
+            UPDATE_LPE_SCRIPT,
+            "MAPI_OUTLOOK_CACHE_FIDELITY_SHAPE_OK",
+        ),
+    ] {
+        assert_source_contains_all(
+            label,
+            source,
+            &[
+                shape_variable,
+                "mapi_outlook_cache_fidelity_shape_ok",
+                "MAPI WLink/configuration FAI fidelity shape",
+            ],
+        );
+    }
+
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "MAPI_OUTLOOK_CACHE_FIDELITY_SHAPE_OK",
+        "\"${CARGO_BIN}\" build --release -p lpe-cli",
+        "update-lpe.sh must reject an invalid WLink/configuration FAI shape before building LPE",
+    );
+
+    assert_source_contains_all(
+        "storage runtime Outlook cache fidelity guard",
+        CORE_STORAGE,
+        &[
+            "\"mapi_navigation_shortcuts\"",
+            "mapi_outlook_cache_fidelity_shape_is_current",
+            "required MAPI WLink/configuration FAI fidelity shape is missing or incompatible",
+            "AND NOT index_row.indisunique",
+        ],
     );
 }
 
@@ -1234,12 +1600,6 @@ fn deployment_scripts_reject_tagged_schema_without_special_folder_alias_shape() 
     assert_contains_before(
         UPDATE_LPE_SCRIPT,
         "MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK",
-        "systemctl stop \"${SERVICE_NAME}\"",
-        "update-lpe.sh must reject a missing alias table before stopping LPE",
-    );
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK",
         "\"${CARGO_BIN}\" build --release -p lpe-cli",
         "update-lpe.sh must reject a missing alias table before building LPE",
     );
@@ -1279,12 +1639,6 @@ fn deployment_and_startup_reject_stale_mapi_change_key_constraints() {
     assert_contains_before(
         UPDATE_LPE_SCRIPT,
         "MAPI_IDENTITY_KEY_CONSTRAINT_COUNT",
-        "systemctl stop \"${SERVICE_NAME}\"",
-        "update-lpe.sh must reject stale MAPI ChangeKey constraints before stopping LPE",
-    );
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "MAPI_IDENTITY_KEY_CONSTRAINT_COUNT",
         "\"${CARGO_BIN}\" build --release -p lpe-cli",
         "update-lpe.sh must reject stale MAPI ChangeKey constraints before building LPE",
     );
@@ -1309,6 +1663,9 @@ fn schema_initializer_resets_atomically_and_validates_durable_mapi_shape() {
         INIT_LPE_SCRIPT,
         &[
             "LPE_RESET_SCHEMA",
+            "SERVICE_NAME=\"${SERVICE_NAME:-lpe.service}\"",
+            "systemctl is-active --quiet \"${SERVICE_NAME}\"",
+            "Stop ${SERVICE_NAME} before running init-schema.sh.",
             "existing_non_public_objects",
             "n.nspname <> 'public'",
             "n.nspname !~ '^pg_'",
@@ -1346,6 +1703,12 @@ fn schema_initializer_resets_atomically_and_validates_durable_mapi_shape() {
             "-c \"SET search_path TO public;\"",
             "-f \"${SCHEMA_FILE}\"",
         ],
+    );
+    assert_contains_before(
+        INIT_LPE_SCRIPT,
+        "systemctl is-active --quiet \"${SERVICE_NAME}\"",
+        "existing_public_objects",
+        "init-schema.sh must reject an active LPE service before inspecting or resetting public",
     );
     assert_contains_before(
         INIT_LPE_SCRIPT,
@@ -1389,6 +1752,9 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "FROM public.schema_metadata",
             "\"calendar_events\"",
             "\"mapi_calendar_event_identity_moves\"",
+            "\"mapi_mailbox_replicas\"",
+            "\"mapi_local_replica_id_ranges\"",
+            "\"mapi_local_replica_deleted_ranges\"",
             "\"mapi_object_identities\"",
             "\"mapi_special_folder_aliases\"",
             "\"mapi_named_properties\"",

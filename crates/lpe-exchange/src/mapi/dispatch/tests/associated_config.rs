@@ -105,7 +105,7 @@ fn conversation_action_open_prefers_action_over_stale_associated_config_identity
 }
 
 #[test]
-fn common_views_open_projects_default_navigation_shortcut() {
+fn common_views_open_rejects_unbacked_default_navigation_shortcut() {
     let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
     let selected = navigation_shortcut_message_for_open(
         &MapiMailStoreSnapshot::empty(),
@@ -113,10 +113,7 @@ fn common_views_open_projects_default_navigation_shortcut() {
         shortcut_id,
     );
 
-    assert_eq!(
-        selected.map(|message| message.subject),
-        Some("Inbox".to_string())
-    );
+    assert!(selected.is_none());
 }
 
 #[test]
@@ -144,42 +141,31 @@ fn common_views_open_rejects_default_named_view_from_wrong_folder() {
 }
 
 #[test]
-fn folder_default_named_view_open_materializes_for_inbox() {
+fn folder_default_named_view_open_rejects_unpersisted_inbox_view() {
     let selected = common_view_named_view_message_for_open(
         &MapiMailStoreSnapshot::empty(),
         INBOX_FOLDER_ID,
         crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
     );
 
-    assert_eq!(
-        selected.map(|message| (message.folder_id, message.name)),
-        Some((INBOX_FOLDER_ID, "Compact".to_string()))
-    );
+    assert!(selected.is_none());
 }
 
 #[test]
-fn folder_default_named_view_open_materializes_for_supported_contact_folder() {
+fn folder_default_named_view_open_rejects_unpersisted_contact_view() {
     let selected = common_view_named_view_message_for_open(
         &MapiMailStoreSnapshot::empty(),
         CONTACTS_FOLDER_ID,
         crate::mapi_store::outlook_default_folder_named_view_id(CONTACTS_FOLDER_ID),
     );
 
-    assert_eq!(
-        selected.map(|message| (message.folder_id, message.name)),
-        Some((CONTACTS_FOLDER_ID, "Contacts".to_string()))
-    );
+    assert!(selected.is_none());
     let legacy = common_view_named_view_message_for_open(
         &MapiMailStoreSnapshot::empty(),
         CONTACTS_FOLDER_ID,
         crate::mapi_store::OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
     );
-    assert_eq!(
-        legacy.map(|message| message.id),
-        Some(crate::mapi_store::outlook_default_folder_named_view_id(
-            CONTACTS_FOLDER_ID
-        ))
-    );
+    assert!(legacy.is_none());
 }
 
 #[test]
@@ -591,9 +577,10 @@ fn inbox_associated_config_summary_reports_modeled_startup_rows() {
                 flags: 0,
                 save_stamp: 0,
                 section: 1,
-                ordinal: 0,
+                ordinal: crate::mapi::properties::wlink_ordinal_bytes(0),
                 group_header_id: Some(header_id),
                 group_name: "Mail".to_string(),
+                client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
             },
             crate::store::MapiNavigationShortcutRecord {
                 id: shortcut_id,
@@ -604,9 +591,10 @@ fn inbox_associated_config_summary_reports_modeled_startup_rows() {
                 flags: 0,
                 save_stamp: 0,
                 section: 1,
-                ordinal: 127,
+                ordinal: crate::mapi::properties::wlink_ordinal_bytes(127),
                 group_header_id: Some(header_id),
                 group_name: "Mail".to_string(),
+                client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
             },
         ]);
 
@@ -847,7 +835,7 @@ fn associated_config_debug_summaries_honor_table_restriction() {
 }
 
 #[test]
-fn inbox_associated_named_view_debug_summaries_report_folder_local_default_view() {
+fn inbox_associated_named_view_debug_summaries_do_not_invent_folder_local_default_view() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty();
     let restriction = MapiRestriction::Property {
@@ -897,21 +885,21 @@ fn inbox_associated_named_view_debug_summaries_report_folder_local_default_view(
         &snapshot,
     );
 
-    assert!(window.contains("total=1"), "{window}");
+    assert!(window.contains("total=0"), "{window}");
     assert!(
-        values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+        !values.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
         "{values}"
     );
     assert!(
-        wire.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
+        !wire.contains("class=IPM.Microsoft.FolderDesign.NamedView"),
         "{wire}"
     );
     let expected_id = format!(
         "id=0x{:016x}",
         crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
     );
-    assert!(values.contains(&expected_id), "{values}");
-    assert!(wire.contains(&expected_id), "{wire}");
+    assert!(!values.contains(&expected_id), "{values}");
+    assert!(!wire.contains(&expected_id), "{wire}");
 }
 
 #[test]
@@ -932,9 +920,10 @@ fn common_views_query_row_values_report_selected_wlink_columns() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 0x10,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(0x10),
             group_header_id: Some(default_wlink_group_uuid()),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
 
@@ -968,12 +957,12 @@ fn common_views_query_row_values_report_selected_wlink_columns() {
     assert!(summary.contains("0x674e0003=0"));
     assert!(summary.contains("0x0037001f=Pinned Inbox"));
     assert!(summary.contains("0x684c0102=binary:"));
-    assert!(summary.contains("0x68910102=binary:"));
+    assert!(summary.contains("0x68910102=default"));
     assert!(summary.contains("0x80100102=binary:"));
 }
 
 #[test]
-fn common_views_diagnostics_keep_named_views_for_wlink_columns() {
+fn common_views_diagnostics_do_not_invent_named_views_for_wlink_columns() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty();
     let columns = default_navigation_shortcut_property_tags();
@@ -1003,10 +992,10 @@ fn common_views_diagnostics_keep_named_views_for_wlink_columns() {
         &snapshot,
     );
 
-    assert!(window.contains("total=6"), "{window}");
-    assert!(window.contains("FolderDesign.NamedView"), "{window}");
-    assert!(window.contains("Sent To"), "{window}");
-    assert!(values.contains("FolderDesign.NamedView"), "{values}");
+    assert!(window.contains("total=0"), "{window}");
+    assert!(!window.contains("FolderDesign.NamedView"), "{window}");
+    assert!(!window.contains("Sent To"), "{window}");
+    assert!(!values.contains("FolderDesign.NamedView"), "{values}");
 }
 
 #[test]
@@ -1070,9 +1059,10 @@ fn common_views_wlink_target_decoding_reports_inbox_match() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 0x10,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(0x10),
             group_header_id: Some(default_wlink_group_uuid()),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
 
@@ -1090,9 +1080,9 @@ fn common_views_wlink_target_decoding_reports_inbox_match() {
     assert!(summary.contains("store_entry_id=binary:bytes=145"));
     assert!(summary.contains("store_entry_id_decoded=none"));
     assert!(summary.contains("store_entry_id_matches_private_store=true"));
-    assert!(summary.contains("address_book_store_entry_id=binary:bytes=145"));
+    assert!(summary.contains("address_book_store_entry_id=missing"));
     assert!(summary.contains("address_book_store_entry_id_decoded=none"));
-    assert!(summary.contains("address_book_store_entry_id_matches_private_store=true"));
+    assert!(summary.contains("address_book_store_entry_id_matches_private_store=false"));
     assert!(summary.contains(&format!(
         "sharing_local_folder_id_decoded=0x{INBOX_FOLDER_ID:016x}"
     )));
@@ -1126,9 +1116,10 @@ fn common_views_wlink_contract_distinguishes_expected_link_defaults() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 0,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(0),
             group_header_id: Some(header_id),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
         crate::store::MapiNavigationShortcutRecord {
             id: shortcut_id,
@@ -1139,9 +1130,10 @@ fn common_views_wlink_contract_distinguishes_expected_link_defaults() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 127,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(127),
             group_header_id: Some(header_id),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
     let columns = [
@@ -1169,7 +1161,7 @@ fn common_views_wlink_contract_distinguishes_expected_link_defaults() {
 
     let summary = format_common_views_wlink_contract_summary(&columns, &snapshot);
 
-    assert!(summary.contains("link_rows=3"));
+    assert!(summary.contains("link_rows=1"));
     assert!(summary.contains("header_rows=1"));
     assert!(summary.contains("not_selected_required_link_columns="));
     assert!(summary.contains("expected_link_default_columns=0x68530003"));

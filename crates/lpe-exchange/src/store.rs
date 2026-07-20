@@ -21,7 +21,6 @@ use lpe_storage::{
     UpsertSearchFolderInput,
 };
 use sqlx::Row;
-use std::collections::HashSet;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +66,13 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         id_count: u32,
     ) -> StoreFuture<'a, u64>;
+
+    fn add_mapi_local_replica_deleted_ranges<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        ranges: &'a [MapiLocalReplicaDeletedRange],
+    ) -> StoreFuture<'a, ()>;
 
     fn commit_mapi_folder_hierarchy_change<'a>(
         &'a self,
@@ -918,15 +924,45 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
     ) -> StoreFuture<'a, Vec<MapiNavigationShortcutRecord>>;
 
+    #[cfg(test)]
     fn upsert_mapi_navigation_shortcut<'a>(
         &'a self,
         input: UpsertMapiNavigationShortcutInput,
     ) -> StoreFuture<'a, MapiNavigationShortcutRecord>;
 
+    fn commit_mapi_navigation_shortcut_create<'a>(
+        &'a self,
+        input: CommitMapiNavigationShortcutCreateInput,
+    ) -> StoreFuture<'a, MapiNavigationShortcutCommit>;
+
+    fn commit_mapi_navigation_shortcut_update<'a>(
+        &'a self,
+        input: UpsertMapiNavigationShortcutInput,
+    ) -> StoreFuture<'a, MapiNavigationShortcutCommit>;
+
+    fn commit_mapi_navigation_shortcut_import<'a>(
+        &'a self,
+        input: CommitMapiNavigationShortcutImportInput,
+    ) -> StoreFuture<'a, MapiNavigationShortcutImportCommit>;
+
     fn delete_mapi_navigation_shortcut<'a>(
         &'a self,
         account_id: Uuid,
         shortcut_id: Uuid,
+    ) -> StoreFuture<'a, ()>;
+
+    fn preflight_unknown_mapi_navigation_shortcut_deletes<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        source_keys: &'a [Vec<u8>],
+    ) -> StoreFuture<'a, ()>;
+
+    fn tombstone_unknown_mapi_navigation_shortcut<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        source_key: &'a [u8],
     ) -> StoreFuture<'a, ()>;
 
     fn fetch_mapi_associated_configs<'a>(
@@ -938,6 +974,21 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         input: UpsertMapiAssociatedConfigInput,
     ) -> StoreFuture<'a, MapiAssociatedConfigRecord>;
+
+    fn commit_mapi_associated_config_create<'a>(
+        &'a self,
+        input: UpsertMapiAssociatedConfigInput,
+    ) -> StoreFuture<'a, MapiAssociatedConfigCommit>;
+
+    fn commit_mapi_associated_config_import<'a>(
+        &'a self,
+        input: CommitMapiAssociatedConfigImportInput,
+    ) -> StoreFuture<'a, MapiAssociatedConfigImportCommit>;
+
+    fn commit_mapi_associated_config_update<'a>(
+        &'a self,
+        input: UpsertMapiAssociatedConfigInput,
+    ) -> StoreFuture<'a, MapiAssociatedConfigCommit>;
 
     fn delete_mapi_associated_config<'a>(
         &'a self,

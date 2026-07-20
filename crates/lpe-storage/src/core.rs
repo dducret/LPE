@@ -71,10 +71,14 @@ impl Storage {
             "accounts",
             "calendar_events",
             "mapi_calendar_event_identity_moves",
+            "mapi_mailbox_replicas",
+            "mapi_local_replica_id_ranges",
+            "mapi_local_replica_deleted_ranges",
             "mapi_object_identities",
             "mapi_special_folder_aliases",
             "mapi_named_properties",
             "mapi_custom_property_values",
+            "mapi_navigation_shortcuts",
             "mapi_folder_profile_property_values",
             "mapi_associated_config_messages",
             "mapi_profile_settings",
@@ -279,6 +283,94 @@ impl Storage {
             );
         }
 
+        let mapi_outlook_cache_fidelity_shape_is_current = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT
+                (
+                    SELECT COUNT(*) = 6
+                    FROM information_schema.columns
+                    WHERE table_schema = $1
+                      AND table_name = 'mapi_navigation_shortcuts'
+                      AND (
+                            (column_name = 'ordinal' AND data_type = 'bytea' AND is_nullable = 'NO' AND column_default IS NULL)
+                            OR (column_name = 'calendar_color' AND data_type = 'integer' AND is_nullable = 'YES' AND column_default IS NULL)
+                            OR (column_name = 'address_book_entry_id' AND data_type = 'bytea' AND is_nullable = 'YES' AND column_default IS NULL)
+                            OR (column_name = 'address_book_store_entry_id' AND data_type = 'bytea' AND is_nullable = 'YES' AND column_default IS NULL)
+                            OR (column_name = 'client_id' AND data_type = 'bytea' AND is_nullable = 'YES' AND column_default IS NULL)
+                            OR (column_name = 'ro_group_type' AND data_type = 'integer' AND is_nullable = 'YES' AND column_default IS NULL)
+                      )
+                )
+                AND (
+                    SELECT COUNT(*) = 6
+                    FROM pg_constraint constraint_row
+                    JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid
+                    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                    WHERE namespace_row.nspname = $1
+                      AND table_row.relname = 'mapi_navigation_shortcuts'
+                      AND constraint_row.contype = 'c'
+                      AND (
+                            (constraint_row.conname = 'mapi_navigation_shortcuts_ordinal_check'
+                             AND pg_get_constraintdef(constraint_row.oid) LIKE '%octet_length(ordinal) > 0%'
+                             AND pg_get_constraintdef(constraint_row.oid) LIKE '%octet_length(ordinal) <= 65535%'
+                             AND pg_get_constraintdef(constraint_row.oid) LIKE '%get_byte(ordinal, (octet_length(ordinal) - 1)) <> 0%'
+                             AND pg_get_constraintdef(constraint_row.oid) LIKE '%get_byte(ordinal, (octet_length(ordinal) - 1)) <> 255%')
+                            OR (constraint_row.conname = 'mapi_navigation_shortcuts_calendar_color_check'
+                                AND replace(pg_get_constraintdef(constraint_row.oid), '''', '') LIKE '%calendar_color >= -1%'
+                                AND pg_get_constraintdef(constraint_row.oid) LIKE '%calendar_color <= 14%')
+                            OR (constraint_row.conname = 'mapi_navigation_shortcuts_address_book_entry_id_check'
+                                AND pg_get_constraintdef(constraint_row.oid) LIKE '%octet_length(address_book_entry_id) > 0%'
+                                AND pg_get_constraintdef(constraint_row.oid) LIKE '%octet_length(address_book_entry_id) <= 65535%')
+                            OR (constraint_row.conname = 'mapi_navigation_shortcuts_address_book_store_entry_id_check'
+                                AND pg_get_constraintdef(constraint_row.oid) LIKE '%octet_length(address_book_store_entry_id) > 0%'
+                                AND pg_get_constraintdef(constraint_row.oid) LIKE '%octet_length(address_book_store_entry_id) <= 65535%')
+                            OR (constraint_row.conname = 'mapi_navigation_shortcuts_client_id_check'
+                                AND pg_get_constraintdef(constraint_row.oid) LIKE '%octet_length(client_id) > 0%'
+                                AND pg_get_constraintdef(constraint_row.oid) LIKE '%octet_length(client_id) <= 65535%')
+                            OR (constraint_row.conname = 'mapi_navigation_shortcuts_ro_group_type_check'
+                                AND replace(pg_get_constraintdef(constraint_row.oid), '''', '') LIKE '%ro_group_type >= -1%'
+                                AND pg_get_constraintdef(constraint_row.oid) LIKE '%ro_group_type <= 4%')
+                      )
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_index index_row
+                    JOIN pg_class index_class ON index_class.oid = index_row.indexrelid
+                    JOIN pg_class table_row ON table_row.oid = index_row.indrelid
+                    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                    WHERE namespace_row.nspname = $1
+                      AND table_row.relname = 'mapi_navigation_shortcuts'
+                      AND index_class.relname = 'mapi_navigation_shortcuts_account_idx'
+                      AND NOT index_row.indisunique
+                      AND pg_get_indexdef(index_row.indexrelid) LIKE '%USING btree (tenant_id, account_id, section, ordinal, subject, id)'
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_index index_row
+                    JOIN pg_class index_class ON index_class.oid = index_row.indexrelid
+                    JOIN pg_class table_row ON table_row.oid = index_row.indrelid
+                    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                    WHERE namespace_row.nspname = $1
+                      AND table_row.relname = 'mapi_associated_config_messages'
+                      AND index_class.relname = 'mapi_associated_config_messages_logical_idx'
+                      AND NOT index_row.indisunique
+                      AND pg_get_indexdef(index_row.indexrelid) LIKE '%USING btree (tenant_id, account_id, folder_id, message_class, subject)'
+                )
+            "#,
+        )
+        .bind(schema_name)
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| {
+            format!(
+                "unable to inspect MAPI WLink/configuration FAI fidelity shape in schema {schema_name}"
+            )
+        })?;
+        if !mapi_outlook_cache_fidelity_shape_is_current {
+            bail!(
+                "required MAPI WLink/configuration FAI fidelity shape is missing or incompatible in {schema_name}; run the reviewed 0.5.0 update or initialize an empty database from crates/lpe-storage/sql/schema.sql"
+            );
+        }
+
         let mapi_change_key_constraint_count = sqlx::query_scalar::<_, i64>(
             r#"
             SELECT COUNT(*)
@@ -443,6 +535,86 @@ mod tests {
                 .execute(&pool)
                 .await
                 .context("apply crates/lpe-storage/sql/schema.sql")?;
+
+            for table in [
+                "mapi_local_replica_id_ranges",
+                "mapi_local_replica_deleted_ranges",
+            ] {
+                let hidden_table = format!("{table}_missing");
+                sqlx::query(&format!("ALTER TABLE {table} RENAME TO {hidden_table}"))
+                    .execute(&pool)
+                    .await
+                    .with_context(|| format!("temporarily hide required table {table}"))?;
+                let error = Storage::new(pool.clone())
+                    .assert_required_schema_objects(&schema_name)
+                    .await
+                    .expect_err("startup must reject a missing local replica range table");
+                let message = format!("{error:#}");
+                anyhow::ensure!(
+                    message.contains(table),
+                    "startup rejection must identify missing table {table}: {message}"
+                );
+                sqlx::query(&format!("ALTER TABLE {hidden_table} RENAME TO {table}"))
+                    .execute(&pool)
+                    .await
+                    .with_context(|| format!("restore required table {table}"))?;
+            }
+
+            sqlx::query(
+                "ALTER TABLE mapi_navigation_shortcuts ALTER COLUMN ordinal DROP NOT NULL",
+            )
+            .execute(&pool)
+            .await
+            .context("make the WLink ordinal nullable")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject an incompatible WLink ordinal shape");
+            let message = format!("{error:#}");
+            anyhow::ensure!(
+                message.contains("MAPI WLink/configuration FAI fidelity shape"),
+                "startup rejection must identify the invalid WLink ordinal shape: {message}"
+            );
+            sqlx::query(
+                "ALTER TABLE mapi_navigation_shortcuts ALTER COLUMN ordinal SET NOT NULL",
+            )
+            .execute(&pool)
+            .await
+            .context("restore the WLink ordinal nullability")?;
+
+            sqlx::raw_sql(
+                r#"
+                DROP INDEX mapi_associated_config_messages_logical_idx;
+                CREATE UNIQUE INDEX mapi_associated_config_messages_logical_idx
+                    ON mapi_associated_config_messages (
+                        tenant_id, account_id, folder_id, message_class, subject
+                    );
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("replace the FAI logical lookup index with the stale unique index")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject the stale unique FAI logical index");
+            let message = format!("{error:#}");
+            anyhow::ensure!(
+                message.contains("MAPI WLink/configuration FAI fidelity shape"),
+                "startup rejection must identify the stale unique FAI logical index: {message}"
+            );
+            sqlx::raw_sql(
+                r#"
+                DROP INDEX mapi_associated_config_messages_logical_idx;
+                CREATE INDEX mapi_associated_config_messages_logical_idx
+                    ON mapi_associated_config_messages (
+                        tenant_id, account_id, folder_id, message_class, subject
+                    );
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("restore the non-unique FAI logical lookup index")?;
 
             sqlx::query(
                 r#"

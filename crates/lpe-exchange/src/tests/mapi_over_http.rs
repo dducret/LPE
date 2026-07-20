@@ -18,6 +18,7 @@ mod sync;
 mod sync_import_deletes;
 mod tables;
 mod transport;
+mod wlink_properties;
 
 fn exchange_reminder_excluded_folder_roles() -> Vec<String> {
     [

@@ -110,6 +110,61 @@ fn assert_calendar_notification(
     assert_eq!(event.canonical_message_id(), Some(event_id));
 }
 
+fn assert_navigation_shortcut_notification(
+    poll: &MapiNotificationPoll,
+    cursor: i64,
+    event_mask: u16,
+    message_id: u64,
+    shortcut_id: Uuid,
+) {
+    assert!(poll.event_pending);
+    assert_eq!(poll.cursor, Some(cursor));
+    assert_eq!(poll.events.len(), 1);
+    let event = &poll.events[0];
+    assert_eq!(
+        event.notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            event_mask,
+            crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            Some(message_id),
+            None,
+            None,
+            Some("navigation_shortcut"),
+        )
+    );
+    assert_eq!(event.canonical_folder_id(), None);
+    assert_eq!(event.canonical_message_id(), Some(shortcut_id));
+}
+
+async fn navigation_shortcut_notification_cursor(
+    storage: &Storage,
+    account_id: Uuid,
+    shortcut_id: Uuid,
+    change_kind: &str,
+    after_cursor: i64,
+) -> anyhow::Result<i64> {
+    Ok(sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT cursor
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND object_id = $2
+          AND change_kind = $3
+          AND cursor > $4
+        ORDER BY cursor DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(account_id)
+    .bind(shortcut_id)
+    .bind(change_kind)
+    .bind(after_cursor)
+    .fetch_one(storage.pool())
+    .await?)
+}
+
 async fn assert_outsider_has_no_notifications(
     storage: &Storage,
     outsider_account_id: Uuid,
@@ -655,6 +710,114 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
     // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2 require the
     // ObjectCreated/ObjectModified/ObjectDeleted/ObjectMoved message
     // notifications above to retain each principal's exact old/new IDs.
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_navigation_shortcut_notifications_are_durable_across_storage_instances_in_postgresql(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let writer = fixture.storage.clone();
+    let reader = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let shortcut_id = Uuid::parse_str("c414c414-c414-4414-8414-c414c414c414")?;
+    let input = |subject: &str, ordinal: u8| crate::store::UpsertMapiNavigationShortcutInput {
+        id: Some(shortcut_id),
+        account_id,
+        subject: subject.to_string(),
+        target_folder_id: Some(crate::mapi::identity::CONTACTS_FOLDER_ID),
+        shortcut_type: 0,
+        flags: 0,
+        save_stamp: 1_537_819_608,
+        section: 4,
+        ordinal: vec![ordinal],
+        group_header_id: Some(Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap()),
+        group_name: "My Contacts".to_string(),
+        client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
+    };
+    let baseline_cursor = reader
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+
+    let identity = writer
+        .commit_mapi_navigation_shortcut_create(
+            crate::store::CommitMapiNavigationShortcutCreateInput {
+                shortcut: input("Contacts", 127),
+            },
+        )
+        .await?
+        .identity;
+    let created_cursor = navigation_shortcut_notification_cursor(
+        &writer,
+        account_id,
+        shortcut_id,
+        "created",
+        baseline_cursor,
+    )
+    .await?;
+    let created = reader
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+    assert_navigation_shortcut_notification(
+        &created,
+        created_cursor,
+        0x0004,
+        identity.object_id,
+        shortcut_id,
+    );
+
+    writer
+        .upsert_mapi_navigation_shortcut(input("Contacts renamed", 191))
+        .await?;
+    let updated_cursor = navigation_shortcut_notification_cursor(
+        &writer,
+        account_id,
+        shortcut_id,
+        "updated",
+        created_cursor,
+    )
+    .await?;
+    let updated = reader
+        .poll_mapi_notifications(account_id, created_cursor)
+        .await?;
+    assert_navigation_shortcut_notification(
+        &updated,
+        updated_cursor,
+        0x0010,
+        identity.object_id,
+        shortcut_id,
+    );
+
+    writer
+        .delete_mapi_navigation_shortcut(account_id, shortcut_id)
+        .await?;
+    let deleted_cursor = navigation_shortcut_notification_cursor(
+        &writer,
+        account_id,
+        shortcut_id,
+        "destroyed",
+        updated_cursor,
+    )
+    .await?;
+    let deleted = reader
+        .poll_mapi_notifications(account_id, updated_cursor)
+        .await?;
+    assert_navigation_shortcut_notification(
+        &deleted,
+        deleted_cursor,
+        0x0008,
+        identity.object_id,
+        shortcut_id,
+    );
+
+    // [MS-OXOCFG] sections 2.2.9 and 3.1.4.9 make WLinks Common Views
+    // FAI rows. [MS-OXCNOTIF] sections 2.2.1.1, 2.2.1.1.1, 3.1.4.3,
+    // and 3.2.4.2 require another client viewing that table to observe its
+    // create, update, and delete changes through table notifications.
     fixture.cleanup().await?;
     Ok(())
 }

@@ -113,6 +113,18 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
     if let Some(fixture) = fixture {
         collect(
             &mut failures,
+            "MAPI local replica range constraints",
+            exercise_mapi_local_replica_range_constraints(pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
+            "MAPI WLink/configuration FAI fidelity constraints",
+            exercise_mapi_outlook_cache_fidelity_constraints(pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
             "change log and cursor constraints",
             exercise_change_log_cursor_constraints(&storage, pool, &fixture).await,
         );
@@ -862,6 +874,363 @@ async fn seed_mailbox_fixture(pool: &PgPool) -> Result<RuntimeFixture> {
         inbox_id,
         account_email,
     })
+}
+
+async fn exercise_mapi_local_replica_range_constraints(
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    const FIRST_GLOBAL_COUNTER: i64 = 43;
+    const FIRST_RESERVED_HIGH_GLOBAL_COUNTER: i64 = 140_737_454_800_896;
+
+    let replica_guid = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_mailbox_replicas (tenant_id, account_id, replica_guid)
+        VALUES ($1, $2, $3)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(replica_guid)
+    .execute(pool)
+    .await
+    .context("seed parent MAPI mailbox replica")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_local_replica_id_ranges (
+            tenant_id, account_id, replica_guid,
+            first_global_counter, end_global_counter_exclusive
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(replica_guid)
+    .bind(FIRST_GLOBAL_COUNTER)
+    .bind(FIRST_GLOBAL_COUNTER + 1)
+    .execute(pool)
+    .await
+    .context("insert a valid GetLocalReplicaIds reservation")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_local_replica_deleted_ranges (
+            tenant_id, account_id, folder_id, replica_guid,
+            min_global_counter, max_global_counter
+        )
+        VALUES ($1, $2, 15, $3, $4, $4)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(replica_guid)
+    .bind(FIRST_GLOBAL_COUNTER)
+    .execute(pool)
+    .await
+    .context("insert a valid folder-scoped deleted local-id range")?;
+
+    expect_constraint_failure(
+        "local replica reservations reject a counter below the dynamic range",
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_local_replica_id_ranges (
+                tenant_id, account_id, replica_guid,
+                first_global_counter, end_global_counter_exclusive
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(replica_guid)
+        .bind(FIRST_GLOBAL_COUNTER - 1)
+        .bind(FIRST_GLOBAL_COUNTER + 1)
+        .execute(pool)
+        .await,
+    )?;
+    expect_constraint_failure(
+        "local replica reservations reject the high reserved counter range",
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_local_replica_id_ranges (
+                tenant_id, account_id, replica_guid,
+                first_global_counter, end_global_counter_exclusive
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(replica_guid)
+        .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER - 1)
+        .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER + 1)
+        .execute(pool)
+        .await,
+    )?;
+    expect_constraint_failure(
+        "deleted local-id ranges reject a counter below the dynamic range",
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_local_replica_deleted_ranges (
+                tenant_id, account_id, folder_id, replica_guid,
+                min_global_counter, max_global_counter
+            )
+            VALUES ($1, $2, 16, $3, $4, $5)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(replica_guid)
+        .bind(FIRST_GLOBAL_COUNTER - 1)
+        .bind(FIRST_GLOBAL_COUNTER)
+        .execute(pool)
+        .await,
+    )?;
+    expect_constraint_failure(
+        "deleted local-id ranges reject the high reserved counter range",
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_local_replica_deleted_ranges (
+                tenant_id, account_id, folder_id, replica_guid,
+                min_global_counter, max_global_counter
+            )
+            VALUES ($1, $2, 17, $3, $4, $5)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(replica_guid)
+        .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER - 1)
+        .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+        .execute(pool)
+        .await,
+    )?;
+    expect_constraint_failure(
+        "local replica ranges require the matching parent replica tuple",
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_local_replica_id_ranges (
+                tenant_id, account_id, replica_guid,
+                first_global_counter, end_global_counter_exclusive
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(Uuid::new_v4())
+        .bind(FIRST_GLOBAL_COUNTER + 2)
+        .bind(FIRST_GLOBAL_COUNTER + 3)
+        .execute(pool)
+        .await,
+    )?;
+
+    sqlx::query(
+        "DELETE FROM mapi_mailbox_replicas WHERE tenant_id = $1 AND account_id = $2 AND replica_guid = $3",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(replica_guid)
+    .execute(pool)
+    .await
+    .context("delete parent MAPI replica to exercise child cascades")?;
+    let remaining_children = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM mapi_local_replica_id_ranges
+             WHERE tenant_id = $1 AND account_id = $2 AND replica_guid = $3)
+          + (SELECT COUNT(*) FROM mapi_local_replica_deleted_ranges
+             WHERE tenant_id = $1 AND account_id = $2 AND replica_guid = $3)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(replica_guid)
+    .fetch_one(pool)
+    .await
+    .context("count local replica child rows after parent deletion")?;
+    anyhow::ensure!(
+        remaining_children == 0,
+        "deleting a MAPI mailbox replica must cascade to both local range tables"
+    );
+
+    Ok(())
+}
+
+async fn exercise_mapi_outlook_cache_fidelity_constraints(
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let first_shortcut_id = Uuid::new_v4();
+    let second_shortcut_id = Uuid::new_v4();
+    let first_ordinal = vec![0x80, 0x10, 0x20, 0x30, 0x40];
+    let second_ordinal = vec![0x80, 0x11];
+    let address_book_entry_id = vec![0xA1; 20];
+    let address_book_store_entry_id = vec![0xB2; 22];
+    let client_id = vec![0xC3; 16];
+
+    for (id, subject, ordinal) in [
+        (
+            first_shortcut_id,
+            "Runtime variable WLink ordinal",
+            first_ordinal.as_slice(),
+        ),
+        (
+            second_shortcut_id,
+            "Runtime second WLink ordinal",
+            second_ordinal.as_slice(),
+        ),
+    ] {
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_navigation_shortcuts (
+                tenant_id, id, account_id, subject, target_folder_id,
+                shortcut_type, flags, save_stamp, section, ordinal,
+                calendar_color, address_book_entry_id,
+                address_book_store_entry_id, client_id, ro_group_type
+            )
+            VALUES ($1, $2, $3, $4, 9, 0, 0, 305419896, 3, $5,
+                    $6, $7, $8, $9, $10)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(id)
+        .bind(fixture.account_id)
+        .bind(subject)
+        .bind(ordinal)
+        .bind((id == first_shortcut_id).then_some(7i32))
+        .bind((id == first_shortcut_id).then_some(address_book_entry_id.as_slice()))
+        .bind((id == first_shortcut_id).then_some(address_book_store_entry_id.as_slice()))
+        .bind((id == first_shortcut_id).then_some(client_id.as_slice()))
+        .bind((id == first_shortcut_id).then_some(3i32))
+        .execute(pool)
+        .await
+        .context("insert a WLink with a variable-length binary ordinal")?;
+    }
+
+    let persisted = sqlx::query(
+        r#"
+        SELECT ordinal, calendar_color, address_book_entry_id,
+               address_book_store_entry_id, client_id, ro_group_type
+        FROM mapi_navigation_shortcuts
+        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(first_shortcut_id)
+    .fetch_one(pool)
+    .await
+    .context("reload the canonical WLink client properties")?;
+    anyhow::ensure!(
+        persisted.get::<Vec<u8>, _>("ordinal") == first_ordinal
+            && persisted.get::<Option<i32>, _>("calendar_color") == Some(7)
+            && persisted.get::<Option<Vec<u8>>, _>("address_book_entry_id")
+                == Some(address_book_entry_id)
+            && persisted.get::<Option<Vec<u8>>, _>("address_book_store_entry_id")
+                == Some(address_book_store_entry_id)
+            && persisted.get::<Option<Vec<u8>>, _>("client_id") == Some(client_id)
+            && persisted.get::<Option<i32>, _>("ro_group_type") == Some(3),
+        "the canonical WLink row must retain the complete client property values"
+    );
+
+    let ordered_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM mapi_navigation_shortcuts
+        WHERE tenant_id = $1 AND account_id = $2 AND id IN ($3, $4)
+        ORDER BY ordinal
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(first_shortcut_id)
+    .bind(second_shortcut_id)
+    .fetch_all(pool)
+    .await
+    .context("sort variable-length WLink ordinals")?;
+    anyhow::ensure!(
+        ordered_ids == vec![first_shortcut_id, second_shortcut_id],
+        "WLink ordinals must use complete bytea lexicographic ordering"
+    );
+
+    expect_constraint_failure(
+        "WLink ordinals reject a forbidden trailing zero byte",
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_navigation_shortcuts (
+                tenant_id, id, account_id, subject, shortcut_type, ordinal
+            )
+            VALUES ($1, $2, $3, 'Invalid trailing WLink ordinal', 0, $4)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(Uuid::new_v4())
+        .bind(fixture.account_id)
+        .bind(vec![0x80, 0x00])
+        .execute(pool)
+        .await,
+    )?;
+    expect_constraint_failure(
+        "WLink CalendarColor rejects values outside the documented range",
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_navigation_shortcuts (
+                tenant_id, id, account_id, subject, shortcut_type, ordinal,
+                calendar_color
+            )
+            VALUES ($1, $2, $3, 'Invalid WLink CalendarColor', 0, $4, 15)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(Uuid::new_v4())
+        .bind(fixture.account_id)
+        .bind(vec![0x80, 0x01])
+        .execute(pool)
+        .await,
+    )?;
+    expect_constraint_failure(
+        "WLink ROGroupType rejects values outside the documented range",
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_navigation_shortcuts (
+                tenant_id, id, account_id, subject, shortcut_type, ordinal,
+                ro_group_type
+            )
+            VALUES ($1, $2, $3, 'Invalid WLink ROGroupType', 0, $4, 5)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(Uuid::new_v4())
+        .bind(fixture.account_id)
+        .bind(vec![0x80, 0x01])
+        .execute(pool)
+        .await,
+    )?;
+
+    let duplicate_subject = "Runtime duplicate FAI identity";
+    for id in [Uuid::new_v4(), Uuid::new_v4()] {
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_associated_config_messages (
+                tenant_id, id, account_id, folder_id, message_class, subject
+            )
+            VALUES ($1, $2, $3, 10, 'IPM.Configuration.Views', $4)
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(id)
+        .bind(fixture.account_id)
+        .bind(duplicate_subject)
+        .execute(pool)
+        .await
+        .context("insert distinct FAI identities with the same logical labels")?;
+    }
+
+    Ok(())
 }
 
 async fn exercise_mailbox_path(storage: &Storage, fixture: &RuntimeFixture) -> Result<()> {

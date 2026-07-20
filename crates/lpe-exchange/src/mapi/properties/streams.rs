@@ -115,10 +115,19 @@ pub(super) fn property_stream_data(
         (object, open_mode),
         (MapiObject::PendingEvent { .. }, 1 | 2)
     );
+    let writable_pending_associated_message = matches!(
+        (object, open_mode),
+        (
+            MapiObject::PendingAssociatedMessage { .. }
+                | MapiObject::PendingNavigationShortcut { .. },
+            1 | 2
+        )
+    );
     if open_mode != 0
         && !writable_associated_config
         && !writable_common_view_named_view
         && !writable_pending_event
+        && !writable_pending_associated_message
     {
         return None;
     }
@@ -147,9 +156,9 @@ pub(super) fn property_stream_data(
             folder_id,
             config_id,
             saved_message,
-        } => snapshot
-            .associated_config_message_for_id(*config_id)
-            .or_else(|| saved_message.clone())
+        } => saved_message
+            .clone()
+            .or_else(|| snapshot.associated_config_message_for_id(*config_id))
             .filter(|message| message.folder_id == *folder_id)
             .and_then(|message| {
                 associated_config_property_value_with_mailbox_guid(
@@ -164,6 +173,13 @@ pub(super) fn property_stream_data(
                 common_view_named_view_property_value(&message, mailbox_guid, property_tag)
             }),
         MapiObject::PendingEvent { properties, .. } => match open_mode {
+            2 => None,
+            _ => properties
+                .get(&canonical_property_storage_tag(property_tag))
+                .cloned(),
+        },
+        MapiObject::PendingAssociatedMessage { properties, .. }
+        | MapiObject::PendingNavigationShortcut { properties, .. } => match open_mode {
             2 => None,
             _ => properties
                 .get(&canonical_property_storage_tag(property_tag))
@@ -202,6 +218,14 @@ pub(super) fn property_stream_data(
         Some(StreamWriteTarget::VolatileProperty)
     } else if writable_pending_event {
         Some(StreamWriteTarget::PendingEventProperty {
+            handle: input_handle,
+            property_tag,
+        })
+    } else if writable_pending_associated_message {
+        // [MS-OXOCFG] section 2.2.6 stores view definitions in stream
+        // properties on an FAI Message. A new Common Views message remains a
+        // PendingNavigationShortcut until SaveChangesMessage classifies it.
+        Some(StreamWriteTarget::PendingAssociatedMessageProperty {
             handle: input_handle,
             property_tag,
         })
@@ -361,9 +385,9 @@ pub(in crate::mapi) fn message_body_stream_data(
             config_id,
             saved_message,
         } if open_mode == 0 => {
-            let message = snapshot
-                .associated_config_message_for_id(*config_id)
-                .or_else(|| saved_message.clone())
+            let message = saved_message
+                .clone()
+                .or_else(|| snapshot.associated_config_message_for_id(*config_id))
                 .filter(|message| message.folder_id == *folder_id)?;
             let body_text = match associated_config_property_value(&message, PID_TAG_BODY_W) {
                 Some(MapiValue::String(value)) => value,
@@ -642,13 +666,13 @@ pub(in crate::mapi) fn sync_stream_target(
             property_tag,
         } => {
             let value = stream_property_value(property_tag, data)?;
-            if let Some(MapiObject::PendingAssociatedMessage { properties, .. }) =
-                session.handles.get_mut(&handle)
-            {
-                properties.insert(canonical_property_storage_tag(property_tag), value);
-                Some(())
-            } else {
-                None
+            match session.handles.get_mut(&handle) {
+                Some(MapiObject::PendingAssociatedMessage { properties, .. })
+                | Some(MapiObject::PendingNavigationShortcut { properties, .. }) => {
+                    properties.insert(canonical_property_storage_tag(property_tag), value);
+                    Some(())
+                }
+                _ => None,
             }
         }
         StreamWriteTarget::AssociatedConfigProperty {
@@ -698,6 +722,9 @@ pub(in crate::mapi) fn stream_property_value(
             Some(MapiValue::String(decode_utf16_stream_value(&data)?))
         }
         PID_TAG_HTML_BINARY => Some(MapiValue::Binary(data)),
+        _ if property_tag_type(property_tag) == 0x001F => {
+            Some(MapiValue::String(decode_utf16_stream_value(&data)?))
+        }
         _ if property_tag_type(property_tag) == 0x0102 => Some(MapiValue::Binary(data)),
         _ => None,
     }

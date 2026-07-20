@@ -282,6 +282,8 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         Some(MapiObject::NavigationShortcut {
             folder_id,
             shortcut_id,
+            pending_properties,
+            deleted_properties,
         }) => {
             let Some(message) = snapshot
                 .navigation_shortcut_table_message_for_id(*shortcut_id)
@@ -293,6 +295,12 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                     0x8004_010F,
                 );
             };
+            let message = navigation_shortcut_with_pending_properties(
+                &message,
+                principal.account_id,
+                pending_properties,
+                deleted_properties,
+            );
             serialize_navigation_shortcut_row(&message, Some(principal), &columns)
         }
         Some(MapiObject::CommonViewNamedView { folder_id, view_id }) => {
@@ -608,6 +616,9 @@ fn fallback_default_specific_property(
     tag: u32,
 ) -> bool {
     if event_object_property_is_deleted(object, tag) {
+        return true;
+    }
+    if navigation_shortcut_object_property_is_deleted(object, tag) {
         return true;
     }
     if let Some(MapiObject::PendingAssociatedMessage { properties, .. }) = object {
@@ -1201,10 +1212,20 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::NavigationShortcut {
             folder_id,
             shortcut_id,
+            pending_properties,
+            deleted_properties,
         }) => snapshot
             .navigation_shortcut_table_message_for_id(*shortcut_id)
             .filter(|message| message.folder_id == *folder_id)
-            .map(|message| serialize_navigation_shortcut_row(&message, Some(principal), &[tag]))
+            .map(|message| {
+                let message = navigation_shortcut_with_pending_properties(
+                    &message,
+                    principal.account_id,
+                    pending_properties,
+                    deleted_properties,
+                );
+                serialize_navigation_shortcut_row(&message, Some(principal), &[tag])
+            })
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);

@@ -1556,20 +1556,8 @@ async fn mapi_over_http_common_views_sync_suppresses_lpe_search_definition_fai()
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 2);
-    assert!(stream
-        .message_changes
-        .iter()
-        .all(|message| message.associated));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Compact"));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Sent To"));
-    assert!(contains_bytes(
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.FolderDesign.NamedView")
     ));
@@ -1591,7 +1579,7 @@ async fn mapi_over_http_common_views_sync_suppresses_lpe_search_definition_fai()
 }
 
 #[tokio::test]
-async fn mapi_over_http_common_views_observed_outlook_partial_sync_returns_named_views_only() {
+async fn mapi_over_http_empty_common_views_observed_outlook_partial_sync_returns_no_fai() {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -1659,36 +1647,8 @@ async fn mapi_over_http_common_views_observed_outlook_partial_sync_returns_named
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 2);
-    assert!(stream
-        .message_changes
-        .iter()
-        .all(|message| message.associated));
-    // [MS-OXCFXICS] sections 2.2.3.2.1.1.1, 2.2.4.3.14, and
-    // 3.2.5.9.1.1: 0x0000000d does not request PidTagMessageSize.
-    for message in &stream.message_changes {
-        assert_eq!(
-            message.header_tags,
-            [
-                PID_TAG_SOURCE_KEY,
-                PID_TAG_LAST_MODIFICATION_TIME,
-                PID_TAG_CHANGE_KEY,
-                PID_TAG_PREDECESSOR_CHANGE_LIST,
-                PID_TAG_ASSOCIATED,
-                PID_TAG_MID,
-                PID_TAG_CHANGE_NUMBER,
-            ]
-        );
-    }
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Compact"));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Sent To"));
-    assert!(contains_bytes(
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.FolderDesign.NamedView")
     ));
@@ -1774,7 +1734,16 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
         crate::mapi::identity::INBOX_FOLDER_ID,
     )
     .unwrap();
+    let mail_folder_type = [
+        0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
     let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
     append_mapi_utf16_property(&mut property_values, PID_TAG_SUBJECT_W, "Persisted Inbox");
     append_mapi_binary_property(
         &mut property_values,
@@ -1782,9 +1751,13 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
         &inbox_entry_id,
     );
     append_mapi_i32_property(&mut property_values, PID_TAG_WLINK_TYPE, 0);
+    append_mapi_i32_property(&mut property_values, 0x684A_0003, 0);
+    append_mapi_i32_property(&mut property_values, 0x6847_0003, 1_537_819_608);
+    append_mapi_i32_property(&mut property_values, 0x6852_0003, 1);
     append_mapi_binary_property(&mut property_values, PID_TAG_WLINK_ORDINAL, &[0x89]);
-    append_mapi_guid_property(&mut property_values, PID_TAG_WLINK_GROUP_CLSID, [0x11; 16]);
+    append_mapi_binary_property(&mut property_values, PID_TAG_WLINK_GROUP_CLSID, &[0x11; 16]);
     append_mapi_utf16_property(&mut property_values, PID_TAG_WLINK_GROUP_NAME_W, "Custom");
+    append_mapi_binary_property(&mut property_values, 0x684F_0102, &mail_folder_type);
 
     let mut rops = Vec::new();
     append_rop_create_associated_message(
@@ -1793,7 +1766,7 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
         1,
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
     );
-    append_rop_set_properties(&mut rops, 1, 6, &property_values);
+    append_rop_set_properties(&mut rops, 1, 11, &property_values);
     rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x01, 0x00]);
 
     let response = service
@@ -1814,12 +1787,2729 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
         Some(crate::mapi::identity::INBOX_FOLDER_ID)
     );
     assert_eq!(stored[0].shortcut_type, 0);
-    assert_eq!(stored[0].ordinal, 0x89);
+    assert_eq!(stored[0].ordinal, vec![0x89]);
     assert_eq!(
         stored[0].group_header_id,
         Some(Uuid::from_bytes([0x11; 16]))
     );
     assert_eq!(stored[0].group_name, "Custom");
+}
+
+#[tokio::test]
+async fn mapi_over_http_common_views_rejects_incomplete_wlink_without_synthetic_defaults() {
+    // [MS-OXOCFG] sections 3.1.4.10.1 and 3.1.4.10.2 enumerate the
+    // properties of group-header and shortcut WLinks. Saving only the class
+    // and subject must not invent type=2, section=0, group="Mail", or ordinal=01.
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account),
+        ..Default::default()
+    };
+    let shortcuts = store.navigation_shortcuts.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
+    append_mapi_utf16_property(&mut property_values, PID_TAG_SUBJECT_W, "Incomplete WLink");
+    let mut rops = Vec::new();
+    append_rop_create_associated_message(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut rops, 1, 2, &property_values);
+    rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x01, 0x00]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(
+        contains_bytes(&response_rops, &[0x0C, 0x01, 0x0F, 0x01, 0x04, 0x80]),
+        "{response_rops:02x?}"
+    );
+    assert!(shortcuts.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_common_views_accepts_outlook_calendar_group_header_without_group_name() {
+    // RR 202607141822 and logs/LPE_last_202607141822.log lines 308-309:
+    // Outlook saves My Calendars with the normative PtypBinary
+    // PidTagWlinkGroupHeaderID and PidTagWlinkFolderType properties, but no
+    // PidTagWlinkGroupName. [MS-OXOCFG] sections 2.2.9.3, 2.2.9.11, and
+    // 3.1.4.10.1 define that exact group-header shape.
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account),
+        ..Default::default()
+    };
+    let shortcuts = store.navigation_shortcuts.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let group_id = Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap();
+    let calendar_folder_type = [
+        0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "My Calendars",
+    );
+    append_mapi_binary_property(&mut property_values, 0x6842_0102, group_id.as_bytes());
+    append_mapi_i32_property(&mut property_values, 0x6847_0003, 0x4F30_48F7);
+    append_mapi_i32_property(&mut property_values, PID_TAG_WLINK_TYPE, 4);
+    append_mapi_i32_property(&mut property_values, 0x684A_0003, 0);
+    append_mapi_binary_property(&mut property_values, PID_TAG_WLINK_ORDINAL, &[0x7F]);
+    append_mapi_binary_property(&mut property_values, 0x684F_0102, &calendar_folder_type);
+    append_mapi_i32_property(&mut property_values, 0x6852_0003, 3);
+
+    let mut rops = Vec::new();
+    append_rop_create_associated_message(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut rops, 1, 9, &property_values);
+    append_rop_save_changes_message_with_flags(&mut rops, 0, 1, 0x08);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let stored = shortcuts.lock().unwrap();
+
+    assert!(
+        contains_bytes(&response_rops, &[0x0C, 0x00, 0, 0, 0, 0]),
+        "Outlook's group header must save without PidTagWlinkGroupName: {response_rops:02x?}"
+    );
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].subject, "My Calendars");
+    assert_eq!(stored[0].group_name, "My Calendars");
+    assert_eq!(stored[0].group_header_id, Some(group_id));
+    assert_eq!(stored[0].target_folder_id, None);
+}
+
+#[tokio::test]
+async fn mapi_over_http_common_views_online_create_ignores_client_source_key_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXCFXICS] section 3.3.5.2.1 reserves client-chosen local IDs for
+    // ImportMessageChange, while section 3.3.5.2.2 requires the server to
+    // allocate the identity for an online ROP create. The SourceKey below is
+    // deliberately valid and reserved, but must remain only an ignored
+    // read-only property on this RopCreateMessage/RopSaveChangesMessage path.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let reserved_start = storage
+        .reserve_mapi_local_replica_ids(fixture.account_id, 0x0001_0000)
+        .await?;
+    let colliding_id = crate::mapi::identity::mapi_store_id(reserved_start + 0x0200);
+    let colliding_source_key = crate::mapi::identity::source_key_for_object_id(colliding_id);
+    storage
+        .upsert_mapi_special_folder_aliases(
+            fixture.account_id,
+            &[MapiSpecialFolderAlias {
+                alias_folder_id: colliding_id,
+                canonical_folder_id: crate::mapi::identity::JUNK_FOLDER_ID,
+                source_key: colliding_source_key.clone(),
+            }],
+        )
+        .await?;
+
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let inbox_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        fixture.account_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    )
+    .unwrap();
+    let mail_folder_type = [
+        0x0C, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
+    append_mapi_binary_property(
+        &mut property_values,
+        PID_TAG_SOURCE_KEY,
+        &colliding_source_key,
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_SUBJECT_W,
+        "Atomic native WLink",
+    );
+    append_mapi_binary_property(
+        &mut property_values,
+        PID_TAG_WLINK_ENTRY_ID,
+        &inbox_entry_id,
+    );
+    append_mapi_i32_property(&mut property_values, PID_TAG_WLINK_TYPE, 0);
+    append_mapi_i32_property(&mut property_values, 0x684A_0003, 0);
+    append_mapi_i32_property(&mut property_values, 0x6847_0003, 1_537_819_608);
+    append_mapi_i32_property(&mut property_values, 0x6852_0003, 1);
+    append_mapi_binary_property(&mut property_values, PID_TAG_WLINK_ORDINAL, &[0x89]);
+    append_mapi_binary_property(&mut property_values, PID_TAG_WLINK_GROUP_CLSID, &[0x11; 16]);
+    append_mapi_utf16_property(&mut property_values, PID_TAG_WLINK_GROUP_NAME_W, "Atomic");
+    append_mapi_binary_property(&mut property_values, 0x684F_0102, &mail_folder_type);
+    let mut rops = Vec::new();
+    append_rop_create_associated_message(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut rops, 1, 12, &property_values);
+    append_rop_save_changes_message_with_flags(&mut rops, 0, 1, 0x01);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    let save_succeeded = contains_bytes(&response_rops, &[0x0C, 0x00, 0, 0, 0, 0]);
+    let saved_content = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_navigation_shortcuts
+        WHERE account_id = $1 AND subject = 'Atomic native WLink'
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    let saved_identity = sqlx::query_as::<_, (i64, Vec<u8>)>(
+        r#"
+        SELECT identity.mapi_object_id, identity.source_key
+        FROM mapi_object_identities identity
+        JOIN mapi_navigation_shortcuts shortcut
+          ON shortcut.tenant_id = identity.tenant_id
+         AND shortcut.account_id = identity.account_id
+         AND shortcut.id = identity.canonical_id
+        WHERE identity.account_id = $1
+          AND identity.object_kind = 'navigation_shortcut'
+          AND shortcut.subject = 'Atomic native WLink'
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_optional(storage.pool())
+    .await?;
+    let saved_changes = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE account_id = $1 AND object_kind = 'navigation_shortcut'
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    fixture.cleanup().await?;
+
+    assert!(save_succeeded);
+    assert_eq!((saved_content, saved_changes), (1, 1));
+    let (saved_object_id, saved_source_key) =
+        saved_identity.expect("online WLink content and identity commit atomically");
+    assert_ne!(saved_object_id as u64, colliding_id);
+    assert_ne!(saved_source_key, colliding_source_key);
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_over_http_online_common_views_wlink_accepts_later_ics_update_without_local_reservation(
+) -> anyhow::Result<()> {
+    // [MS-OXCFXICS] sections 3.3.5.2.1 and 3.3.5.2.2 distinguish an
+    // imported client-chosen local ID from the server-assigned identity of an
+    // online RopCreateMessage. Section 3.2.5.9.4.2 then permits a later
+    // ImportMessageChange to update the downloaded server object without a
+    // GetLocalReplicaIds reservation for that already-durable identity.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let contacts_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        fixture.account_id,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+    )
+    .ok_or_else(|| anyhow::anyhow!("Contacts EntryID could not be encoded"))?;
+    let group_id = Uuid::parse_str("b7f00600-0000-0000-c000-000000000046")?;
+    let contacts_folder_type = [
+        0x01, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let mut create_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut create_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
+    append_mapi_utf16_property(
+        &mut create_values,
+        PID_TAG_SUBJECT_W,
+        "Online Contacts WLink",
+    );
+    append_mapi_binary_property(
+        &mut create_values,
+        PID_TAG_WLINK_ENTRY_ID,
+        &contacts_entry_id,
+    );
+    append_mapi_i32_property(&mut create_values, PID_TAG_WLINK_TYPE, 0);
+    append_mapi_i32_property(&mut create_values, 0x684A_0003, 0x0010_0000);
+    append_mapi_i32_property(&mut create_values, 0x6847_0003, 1_537_819_608);
+    append_mapi_i32_property(&mut create_values, 0x6852_0003, 4);
+    append_mapi_binary_property(&mut create_values, PID_TAG_WLINK_ORDINAL, &[0x7F]);
+    append_mapi_binary_property(
+        &mut create_values,
+        PID_TAG_WLINK_GROUP_CLSID,
+        group_id.as_bytes(),
+    );
+    append_mapi_utf16_property(
+        &mut create_values,
+        PID_TAG_WLINK_GROUP_NAME_W,
+        "My Contacts",
+    );
+    append_mapi_binary_property(&mut create_values, 0x684F_0102, &contacts_folder_type);
+    let mut create_rops = Vec::new();
+    append_rop_create_associated_message(
+        &mut create_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut create_rops, 1, 11, &create_values);
+    append_rop_save_changes_message_with_flags(&mut create_rops, 0, 1, 0x01);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&create_rops, &[1, u32::MAX])),
+        )
+        .await?;
+    let create_response = response_rops_from_execute_response(response).await;
+    let save_offset = create_response
+        .windows(6)
+        .position(|window| window == [0x0C, 0x00, 0, 0, 0, 0])
+        .ok_or_else(|| anyhow::anyhow!("online WLink SaveChangesMessage failed"))?;
+    let online_message_id = crate::mapi::identity::object_id_from_wire_id(
+        &create_response[save_offset + 7..save_offset + 15],
+    )
+    .ok_or_else(|| anyhow::anyhow!("online WLink SaveChangesMessage omitted its MID"))?;
+    let source_counter = crate::mapi::identity::global_counter_from_store_id(online_message_id)
+        .ok_or_else(|| anyhow::anyhow!("online WLink MID is not a store ID"))?;
+    let online_canonical_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT canonical_id
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND mapi_object_id = $2
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(online_message_id as i64)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM mapi_local_replica_id_ranges
+            WHERE account_id = $1
+              AND replica_guid = $2
+              AND first_global_counter <= $3
+              AND end_global_counter_exclusive > $3
+            "#,
+        )
+        .bind(fixture.account_id)
+        .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+        .bind(source_counter as i64)
+        .fetch_one(storage.pool())
+        .await?,
+        0,
+        "an online-created WLink identity is server-assigned, not locally reserved"
+    );
+
+    let mut download_rops = Vec::new();
+    append_rop_open_folder(
+        &mut download_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    download_rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure.
+        0x01, 0x00, 0x39, 0xA1, // Content sync, observed Outlook FAI flags.
+        0x00, 0x00, // RestrictionDataSize.
+        0x0D, 0x00, 0x00, 0x00, // Eid | CN | OrderByDeliveryTime.
+        0x00, 0x00, // PropertyTagCount.
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer.
+    ]);
+    download_rops.extend_from_slice(&31_680u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&download_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let download_response = response_rops_from_execute_response(response).await;
+    let download = strict_content_sync_transfer_from_response(&download_response)
+        .map_err(anyhow::Error::msg)?;
+    let downloaded = download
+        .message_changes
+        .iter()
+        .find(|message| message.subject == "Online Contacts WLink")
+        .ok_or_else(|| anyhow::anyhow!("online WLink was not downloaded through ICS"))?;
+    assert!(downloaded.associated);
+    assert_eq!(downloaded.mid, Some(online_message_id));
+    assert_eq!(
+        downloaded.source_key,
+        crate::mapi::identity::source_key_for_object_id(online_message_id)
+    );
+    let initial_change_number = downloaded
+        .change_number
+        .ok_or_else(|| anyhow::anyhow!("downloaded WLink omitted its change number"))?;
+    let initial_change_key = downloaded.change_key.clone();
+    let initial_predecessor_change_list = downloaded.predecessor_change_list.clone();
+    let imported_change_key = vec![
+        0x51, 0xA1, 0x66, 0x72, 0x14, 0x93, 0x5C, 0x48, 0xAA, 0x14, 0xE7, 0xDC, 0xB0, 0x5E, 0x0D,
+        0xA6, 0x00, 0x00, 0x04, 0x21,
+    ];
+    let mut predecessor_keys = vec![initial_change_key.clone(), imported_change_key.clone()];
+    predecessor_keys.sort_by(|left, right| left[..16].cmp(&right[..16]));
+    let mut imported_predecessor_change_list = Vec::new();
+    for predecessor in predecessor_keys {
+        imported_predecessor_change_list.push(predecessor.len() as u8);
+        imported_predecessor_change_list.extend_from_slice(&predecessor);
+    }
+    let imported_last_modification_time = downloaded
+        .last_modification_time
+        .ok_or_else(|| anyhow::anyhow!("downloaded WLink omitted its modification time"))?
+        + 10_000_000;
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // OpenCollector, contents.
+    ]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let response_body = response_bytes(response).await;
+    let (collector_response, collector_handles) =
+        response_rops_and_handles_from_execute_body(&response_body);
+    assert!(contains_bytes(
+        &collector_response,
+        &[0x7E, 0x02, 0, 0, 0, 0]
+    ));
+
+    let mut identity_values = Vec::new();
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_SOURCE_KEY,
+        &downloaded.source_key,
+    );
+    append_mapi_i64_property(
+        &mut identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time as i64,
+    );
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_CHANGE_KEY,
+        &imported_change_key,
+    );
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &imported_predecessor_change_list,
+    );
+    let mut import_rops = vec![
+        0x72, 0x00, 0x00, 0x01, 0x10, // ImportMessageChange, associated FAI.
+    ];
+    import_rops.extend_from_slice(&4u16.to_le_bytes());
+    import_rops.extend_from_slice(&identity_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_rops, &[collector_handles[2], u32::MAX])),
+        )
+        .await?;
+    let response_body = response_bytes(response).await;
+    let (import_response, import_handles) =
+        response_rops_and_handles_from_execute_body(&response_body);
+    assert!(contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]));
+
+    let mut update_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut update_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
+    append_mapi_utf16_property(
+        &mut update_values,
+        PID_TAG_SUBJECT_W,
+        "Online Contacts WLink updated by ICS",
+    );
+    // [MS-OXCFXICS] sections 2.2.3.2.4.2, 3.2.5.9.4.2, and
+    // 3.3.4.3.3.2.2.1 require an existing-message import to upload the
+    // complete client-settable Message rather than a property delta.
+    append_mapi_binary_property(
+        &mut update_values,
+        PID_TAG_WLINK_ENTRY_ID,
+        &contacts_entry_id,
+    );
+    append_mapi_i32_property(&mut update_values, PID_TAG_WLINK_TYPE, 0);
+    append_mapi_i32_property(&mut update_values, 0x684A_0003, 0x0010_0000);
+    append_mapi_i32_property(&mut update_values, 0x6847_0003, 1_537_819_608);
+    append_mapi_i32_property(&mut update_values, 0x6852_0003, 4);
+    append_mapi_binary_property(&mut update_values, PID_TAG_WLINK_ORDINAL, &[0x81]);
+    append_mapi_binary_property(
+        &mut update_values,
+        PID_TAG_WLINK_GROUP_CLSID,
+        group_id.as_bytes(),
+    );
+    append_mapi_utf16_property(
+        &mut update_values,
+        PID_TAG_WLINK_GROUP_NAME_W,
+        "My Contacts",
+    );
+    append_mapi_binary_property(&mut update_values, 0x684F_0102, &contacts_folder_type);
+    let mut set_rops = Vec::new();
+    append_rop_set_properties(&mut set_rops, 1, 11, &update_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&set_rops, &import_handles)),
+        )
+        .await?;
+    assert!(contains_bytes(
+        &response_rops_from_execute_response(response).await,
+        &[0x0A, 0x01, 0, 0, 0, 0]
+    ));
+
+    let staged_state = sqlx::query_as::<_, (String, i64, Vec<u8>, Vec<u8>, i64)>(
+        r#"
+        SELECT shortcut.subject, identity.mapi_change_number,
+               identity.change_key, identity.predecessor_change_list,
+               (SELECT COUNT(*) FROM mail_change_log changes
+                WHERE changes.account_id = shortcut.account_id
+                  AND changes.object_kind = 'navigation_shortcut'
+                  AND changes.object_id = shortcut.id)
+        FROM mapi_navigation_shortcuts shortcut
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = shortcut.tenant_id
+         AND identity.account_id = shortcut.account_id
+         AND identity.canonical_id = shortcut.id
+        WHERE shortcut.account_id = $1
+          AND identity.object_kind = 'navigation_shortcut'
+          AND identity.mapi_object_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(online_message_id as i64)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(staged_state.0, "Online Contacts WLink");
+    assert_eq!(staged_state.1 as u64, initial_change_number);
+    assert_eq!(staged_state.2, initial_change_key);
+    assert_eq!(staged_state.3, initial_predecessor_change_list);
+    assert_eq!(staged_state.4, 1);
+
+    let mut save_rops = Vec::new();
+    append_rop_save_changes_message_with_flags(&mut save_rops, 0, 1, 0x08);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &import_handles)),
+        )
+        .await?;
+    let save_response = response_rops_from_execute_response(response).await;
+    let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
+    expected_save.extend_from_slice(&mapi_wire_id_bytes(online_message_id));
+    assert!(
+        contains_bytes(&save_response, &expected_save),
+        "ICS SaveChangesMessage must preserve the online-created WLink identity: {save_response:02x?}"
+    );
+
+    let saved_state =
+        sqlx::query_as::<_, (Uuid, String, i64, Vec<u8>, i64, Vec<u8>, Vec<u8>, i64)>(
+            r#"
+        SELECT shortcut.id, shortcut.subject, identity.mapi_object_id,
+               identity.source_key, identity.mapi_change_number,
+               identity.change_key, identity.predecessor_change_list,
+               (SELECT COUNT(*) FROM mail_change_log changes
+                WHERE changes.account_id = shortcut.account_id
+                  AND changes.object_kind = 'navigation_shortcut'
+                  AND changes.object_id = shortcut.id)
+        FROM mapi_navigation_shortcuts shortcut
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = shortcut.tenant_id
+         AND identity.account_id = shortcut.account_id
+         AND identity.canonical_id = shortcut.id
+        WHERE shortcut.account_id = $1
+          AND identity.object_kind = 'navigation_shortcut'
+          AND identity.mapi_object_id = $2
+        "#,
+        )
+        .bind(fixture.account_id)
+        .bind(online_message_id as i64)
+        .fetch_one(storage.pool())
+        .await?;
+    assert_eq!(saved_state.0, online_canonical_id);
+    assert_eq!(saved_state.1, "Online Contacts WLink updated by ICS");
+    assert_eq!(saved_state.2 as u64, online_message_id);
+    assert_eq!(saved_state.3, downloaded.source_key);
+    assert!(saved_state.4 as u64 > initial_change_number);
+    assert_eq!(saved_state.5, imported_change_key);
+    assert!(test_mapi_pcl_includes_change_key(
+        &saved_state.6,
+        &initial_change_key
+    ));
+    assert!(test_mapi_pcl_includes_change_key(
+        &saved_state.6,
+        &saved_state.5
+    ));
+    assert_eq!(saved_state.7, 2);
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXOCFG] section 3.1.4.10 requires the existing WLink sequence
+    // RopOpenMessage(ReadWrite), RopSetProperties, then RopSaveChangesMessage.
+    // [MS-OXCROPS] sections 2.2.6.1, 2.2.8.6, and 2.2.6.3 define those
+    // ROPs. SetProperties alone must not publish canonical Common Views state.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let group_id = Uuid::from_bytes([0x44; 16]);
+    let initial = storage
+        .commit_mapi_navigation_shortcut_create(
+            crate::store::CommitMapiNavigationShortcutCreateInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: Some(Uuid::new_v4()),
+                    account_id: fixture.account_id,
+                    subject: "Contacts before staged update".to_string(),
+                    target_folder_id: Some(crate::mapi::identity::CONTACTS_FOLDER_ID),
+                    shortcut_type: 0,
+                    flags: 0x0010_0000,
+                    save_stamp: 0x1234_5678,
+                    section: 4,
+                    ordinal: vec![0x80],
+                    group_header_id: Some(group_id),
+                    group_name: "My Contacts".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+            },
+        )
+        .await?;
+
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let mut staged_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut staged_values,
+        PID_TAG_SUBJECT_W,
+        "Contacts after atomic save",
+    );
+    append_mapi_binary_property(&mut staged_values, PID_TAG_WLINK_ORDINAL, &[0x91]);
+    let mut stage_rops = Vec::new();
+    append_rop_open_folder(
+        &mut stage_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_open_message_with_flags(
+        &mut stage_rops,
+        1,
+        2,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        initial.identity.object_id,
+        0x01,
+    );
+    append_rop_set_properties(&mut stage_rops, 2, 2, &staged_values);
+    append_rop_get_properties_specific(
+        &mut stage_rops,
+        2,
+        &[PID_TAG_SUBJECT_W, PID_TAG_WLINK_ORDINAL],
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&stage_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let body = response_bytes(response).await;
+    let (response_rops, handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(&response_rops, &[0x0A, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x07, 0x02, 0, 0, 0, 0]));
+    assert!(
+        contains_bytes(&response_rops, &utf16z("Contacts after atomic save")),
+        "GetPropertiesSpecific on the open handle must expose the staged WLink value"
+    );
+
+    let staged_state = sqlx::query(
+        r#"
+        SELECT shortcut.subject, shortcut.ordinal, shortcut.group_header_id,
+               shortcut.group_name, identity.mapi_change_number,
+               identity.change_key, identity.predecessor_change_list,
+               to_char(identity.updated_at AT TIME ZONE 'UTC',
+                       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at
+        FROM mapi_navigation_shortcuts shortcut
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = shortcut.tenant_id
+         AND identity.account_id = shortcut.account_id
+         AND identity.canonical_id = shortcut.id
+        WHERE shortcut.account_id = $1
+          AND shortcut.id = $2
+          AND identity.object_kind = 'navigation_shortcut'
+          AND identity.deleted_at IS NULL
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(initial.shortcut.id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(
+        staged_state.get::<String, _>("subject"),
+        "Contacts before staged update",
+        "RopSetProperties must not persist an existing WLink before SaveChangesMessage"
+    );
+    assert_eq!(staged_state.get::<Vec<u8>, _>("ordinal"), vec![0x80]);
+    assert_eq!(
+        staged_state.get::<i64, _>("mapi_change_number") as u64,
+        initial.identity.change_number
+    );
+    assert_eq!(
+        staged_state.get::<Vec<u8>, _>("change_key"),
+        initial.identity.change_key
+    );
+    assert_eq!(
+        staged_state.get::<Vec<u8>, _>("predecessor_change_list"),
+        initial.identity.predecessor_change_list
+    );
+
+    let mut save_rops = Vec::new();
+    append_rop_save_changes_message_with_flags(&mut save_rops, 2, 2, 0x0A);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &handles)),
+        )
+        .await?;
+    let save_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&save_response, &[0x0C, 0x02, 0, 0, 0, 0]));
+
+    let saved_state = sqlx::query(
+        r#"
+        SELECT shortcut.subject, shortcut.ordinal, shortcut.group_header_id,
+               shortcut.group_name, identity.mapi_object_id,
+               identity.mapi_change_number, identity.source_key,
+               identity.change_key, identity.predecessor_change_list,
+               to_char(identity.updated_at AT TIME ZONE 'UTC',
+                       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at
+        FROM mapi_navigation_shortcuts shortcut
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = shortcut.tenant_id
+         AND identity.account_id = shortcut.account_id
+         AND identity.canonical_id = shortcut.id
+        WHERE shortcut.account_id = $1
+          AND shortcut.id = $2
+          AND identity.object_kind = 'navigation_shortcut'
+          AND identity.deleted_at IS NULL
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(initial.shortcut.id)
+    .fetch_one(storage.pool())
+    .await?;
+    let saved_change_number = saved_state.get::<i64, _>("mapi_change_number") as u64;
+    let saved_change_key = saved_state.get::<Vec<u8>, _>("change_key");
+    let saved_predecessors = saved_state.get::<Vec<u8>, _>("predecessor_change_list");
+    assert_eq!(
+        saved_state.get::<String, _>("subject"),
+        "Contacts after atomic save"
+    );
+    assert_eq!(saved_state.get::<Vec<u8>, _>("ordinal"), vec![0x91]);
+    assert_eq!(
+        saved_state.get::<Option<Uuid>, _>("group_header_id"),
+        Some(group_id)
+    );
+    assert_eq!(saved_state.get::<String, _>("group_name"), "My Contacts");
+    assert_eq!(
+        saved_state.get::<i64, _>("mapi_object_id") as u64,
+        initial.identity.object_id
+    );
+    assert_eq!(
+        saved_state.get::<Vec<u8>, _>("source_key"),
+        initial.identity.source_key
+    );
+    assert!(saved_change_number > initial.identity.change_number);
+    assert_eq!(
+        saved_change_key,
+        crate::mapi::identity::change_key_for_change_number(saved_change_number)
+    );
+    assert_ne!(saved_predecessors, initial.identity.predecessor_change_list);
+    assert!(contains_bytes(&saved_predecessors, &saved_change_key));
+    assert_ne!(
+        saved_state.get::<String, _>("updated_at"),
+        staged_state.get::<String, _>("updated_at"),
+        "SaveChangesMessage must advance PidTagLastModificationTime"
+    );
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_over_http_existing_common_views_wlink_entry_id_replacement_is_staged_until_atomic_save_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXCROPS] sections 2.2.8.8 and 2.2.6.3 require property deletion
+    // on the open Message to remain pending until SaveChangesMessage.
+    // [MS-OXOCFG] sections 2.2.9.8 and 3.1.4.10.2 require a shortcut
+    // EntryID, so this realistic edit replaces rather than removes its target.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let initial = storage
+        .commit_mapi_navigation_shortcut_create(
+            crate::store::CommitMapiNavigationShortcutCreateInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: Some(Uuid::new_v4()),
+                    account_id: fixture.account_id,
+                    subject: "Contacts target deletion".to_string(),
+                    target_folder_id: Some(crate::mapi::identity::CONTACTS_FOLDER_ID),
+                    shortcut_type: 0,
+                    flags: 0x0010_0000,
+                    save_stamp: 0x1234_5678,
+                    section: 4,
+                    ordinal: vec![0x80],
+                    group_header_id: Some(Uuid::from_bytes([0x45; 16])),
+                    group_name: "My Contacts".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+            },
+        )
+        .await?;
+    let initial_change_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND object_id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(initial.shortcut.id)
+    .fetch_one(storage.pool())
+    .await?;
+
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(
+        &mut open_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_open_message_with_flags(
+        &mut open_rops,
+        1,
+        2,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        initial.identity.object_id,
+        0x01,
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let body = response_bytes(response).await;
+    let (open_response, handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(&open_response, &[0x03, 0x02, 0, 0, 0, 0]));
+
+    let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        fixture.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .unwrap();
+    let mut replacement = Vec::new();
+    append_mapi_binary_property(&mut replacement, PID_TAG_WLINK_ENTRY_ID, &calendar_entry_id);
+    let mut stage_rops = Vec::new();
+    append_rop_delete_properties(&mut stage_rops, 2, &[PID_TAG_WLINK_ENTRY_ID]);
+    append_rop_get_properties_specific(&mut stage_rops, 2, &[PID_TAG_WLINK_ENTRY_ID]);
+    append_rop_set_properties(&mut stage_rops, 2, 1, &replacement);
+    append_rop_get_properties_specific(&mut stage_rops, 2, &[PID_TAG_WLINK_ENTRY_ID]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&stage_rops, &handles)),
+        )
+        .await?;
+    let stage_response = response_rops_from_execute_response(response).await;
+    assert_eq!(
+        stage_response
+            .windows(4)
+            .filter(|window| *window == 0x8004_010Fu32.to_le_bytes())
+            .count(),
+        1,
+        "the staged deletion must read as ecNotFound on the same WLink handle: {stage_response:02x?}"
+    );
+    assert!(
+        contains_bytes(&stage_response, &calendar_entry_id),
+        "SetProperties after DeleteProperties must cancel the staged deletion for the same tag"
+    );
+
+    let staged_state = sqlx::query_as::<_, (Option<i64>, i64, Vec<u8>, Vec<u8>, Vec<u8>, i64)>(
+        r#"
+        SELECT shortcut.target_folder_id, identity.mapi_object_id,
+               identity.source_key, identity.change_key,
+               identity.predecessor_change_list,
+               (SELECT COUNT(*)
+                FROM mail_change_log changes
+                WHERE changes.account_id = shortcut.account_id
+                  AND changes.object_kind = 'navigation_shortcut'
+                  AND changes.object_id = shortcut.id)
+        FROM mapi_navigation_shortcuts shortcut
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = shortcut.tenant_id
+         AND identity.account_id = shortcut.account_id
+         AND identity.canonical_id = shortcut.id
+        WHERE shortcut.account_id = $1
+          AND shortcut.id = $2
+          AND identity.object_kind = 'navigation_shortcut'
+          AND identity.deleted_at IS NULL
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(initial.shortcut.id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(
+        staged_state,
+        (
+            Some(crate::mapi::identity::CONTACTS_FOLDER_ID as i64),
+            initial.identity.object_id as i64,
+            initial.identity.source_key.clone(),
+            initial.identity.change_key.clone(),
+            initial.identity.predecessor_change_list.clone(),
+            initial_change_count,
+        ),
+        "DeleteProperties and SetProperties must not publish WLink state before SaveChangesMessage"
+    );
+
+    let mut save_rops = Vec::new();
+    append_rop_save_changes_message_with_flags(&mut save_rops, 2, 2, 0x0A);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &handles)),
+        )
+        .await?;
+    let save_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&save_response, &[0x0C, 0x02, 0, 0, 0, 0]));
+
+    let saved_state = sqlx::query_as::<_, (Option<i64>, i64, i64, Vec<u8>, Vec<u8>, Vec<u8>, i64)>(
+        r#"
+        SELECT shortcut.target_folder_id, identity.mapi_object_id,
+               identity.mapi_change_number, identity.source_key,
+               identity.change_key, identity.predecessor_change_list,
+               (SELECT COUNT(*)
+                FROM mail_change_log changes
+                WHERE changes.account_id = shortcut.account_id
+                  AND changes.object_kind = 'navigation_shortcut'
+                  AND changes.object_id = shortcut.id)
+        FROM mapi_navigation_shortcuts shortcut
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = shortcut.tenant_id
+         AND identity.account_id = shortcut.account_id
+         AND identity.canonical_id = shortcut.id
+        WHERE shortcut.account_id = $1
+          AND shortcut.id = $2
+          AND identity.object_kind = 'navigation_shortcut'
+          AND identity.deleted_at IS NULL
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(initial.shortcut.id)
+    .fetch_one(storage.pool())
+    .await?;
+    let saved_change_number = saved_state.2 as u64;
+    assert_eq!(
+        saved_state.0,
+        Some(crate::mapi::identity::CALENDAR_FOLDER_ID as i64)
+    );
+    assert_eq!(saved_state.1 as u64, initial.identity.object_id);
+    assert_eq!(saved_state.3, initial.identity.source_key);
+    assert!(saved_change_number > initial.identity.change_number);
+    assert_eq!(
+        saved_state.4,
+        crate::mapi::identity::change_key_for_change_number(saved_change_number)
+    );
+    assert_ne!(saved_state.5, initial.identity.predecessor_change_list);
+    assert!(contains_bytes(&saved_state.5, &saved_state.4));
+    assert_eq!(saved_state.6, initial_change_count + 1);
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_over_http_common_views_import_classifies_non_wlink_fai_at_save() {
+    // [MS-OXCFXICS] sections 3.2.5.9.4.2 and 3.3.5.8.7: the associated
+    // Message returned by ImportMessageChange is populated by later ROPs and
+    // remains uncommitted until SaveChangesMessage. [MS-OXOCFG] section 2.2.9
+    // limits the navigation-shortcut contract to WunderBar.Link messages.
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    *store.next_mapi_global_counter.lock().unwrap() = 0x0200_AF;
+    store
+        .reserve_mapi_local_replica_ids(account.account_id, 0x0001_0000)
+        .await
+        .unwrap();
+    let shortcuts = store.navigation_shortcuts.clone();
+    let associated_configs = store.associated_configs.clone();
+    let identities = store.mapi_identities.clone();
+    let identity_source_keys = store.mapi_identity_source_keys.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (collector_response, collector_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &collector_response,
+        &[0x7E, 0x02, 0, 0, 0, 0]
+    ));
+
+    let message_id = crate::mapi::identity::mapi_store_id(0x0206_B6);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let change_key = vec![
+        0xA2, 0xD1, 0xCC, 0x5A, 0x17, 0xAB, 0x87, 0x4F, 0xB7, 0x18, 0xA2, 0xE4, 0xB8, 0xAB, 0x0A,
+        0xC2, 0x00, 0x00, 0x08, 0x22,
+    ];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+    let mut identity_values = Vec::new();
+    append_mapi_binary_property(&mut identity_values, PID_TAG_SOURCE_KEY, &source_key);
+    append_mapi_i64_property(
+        &mut identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        test_filetime("2026-07-19", "14:00"),
+    );
+    append_mapi_binary_property(&mut identity_values, PID_TAG_CHANGE_KEY, &change_key);
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &predecessor_change_list,
+    );
+    let mut import_rops = vec![
+        0x72, 0x00, 0x00, 0x01, 0x10, // ImportMessageChange, associated FAI.
+    ];
+    import_rops.extend_from_slice(&4u16.to_le_bytes());
+    import_rops.extend_from_slice(&identity_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_rops, &[collector_handles[2], u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (import_response, import_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]));
+    assert!(shortcuts.lock().unwrap().is_empty());
+    assert!(associated_configs.lock().unwrap().is_empty());
+
+    let mut config_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut config_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Configuration.CommonViews",
+    );
+    append_mapi_utf16_property(
+        &mut config_values,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "Common Views settings",
+    );
+    append_mapi_i32_property(
+        &mut config_values,
+        0x7C06_0003, // PidTagRoamingDatatypes.
+        4,
+    );
+    append_mapi_binary_property(
+        &mut config_values,
+        0x7C07_0102, // PidTagRoamingDictionary.
+        b"<xml/>",
+    );
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 1, 4, &config_values);
+    append_rop_save_changes_message_with_flags(&mut save_rops, 0, 1, 0x08);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &import_handles)),
+        )
+        .await
+        .unwrap();
+    let save_response = response_rops_from_execute_response(response).await;
+    let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
+    expected_save.extend_from_slice(&mapi_wire_id_bytes(message_id));
+    assert!(contains_bytes(&save_response, &expected_save));
+
+    assert!(
+        shortcuts.lock().unwrap().is_empty(),
+        "a non-WunderBar Common Views FAI must never enter mapi_navigation_shortcuts"
+    );
+    let configs = associated_configs.lock().unwrap();
+    assert_eq!(configs.len(), 1);
+    assert_eq!(configs[0].message_class, "IPM.Configuration.CommonViews");
+    assert_eq!(configs[0].subject, "Common Views settings");
+    assert!(configs[0].properties_json.get("0x65e00102").is_none());
+    assert!(configs[0].properties_json.get("0x65e20102").is_none());
+    assert!(configs[0].properties_json.get("0x65e30102").is_none());
+    assert_eq!(identities.lock().unwrap()[&configs[0].id], message_id);
+    assert_eq!(
+        identity_source_keys.lock().unwrap()[&configs[0].id],
+        source_key
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_common_views_keeps_identical_online_fai_messages_distinct() {
+    // [MS-OXCFOLD] section 2.2.1.14 exposes Message objects in the associated
+    // contents table. Equal class, subject, and payload are not an identity
+    // key and therefore must not collapse two RopCreateMessage operations.
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut values = Vec::new();
+    append_mapi_utf16_property(
+        &mut values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Configuration.CommonViews",
+    );
+    append_mapi_utf16_property(
+        &mut values,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "Two distinct but equal FAI messages",
+    );
+    append_mapi_i32_property(&mut values, 0x7C06_0003, 4);
+
+    for _ in 0..2 {
+        let mut rops = Vec::new();
+        append_rop_create_associated_message(
+            &mut rops,
+            0,
+            1,
+            crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        );
+        append_rop_set_properties(&mut rops, 1, 3, &values);
+        append_rop_save_changes_message(&mut rops, 1, 1);
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &execute_headers,
+                &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            )
+            .await
+            .unwrap();
+        let response_rops = response_rops_from_execute_response(response).await;
+        assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+        renew_mapi_request_id(&mut execute_headers);
+    }
+
+    let configs = store.associated_configs.lock().unwrap().clone();
+    assert_eq!(configs.len(), 2);
+    assert_ne!(configs[0].id, configs[1].id);
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let messages = snapshot
+        .associated_config_messages_for_folder(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
+        .into_iter()
+        .filter(|message| {
+            message.message_class == "IPM.Configuration.CommonViews"
+                && message.subject == "Two distinct but equal FAI messages"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        messages.len(),
+        2,
+        "snapshot must not deduplicate equal FAI payloads"
+    );
+    assert_ne!(messages[0].id, messages[1].id);
+}
+
+#[tokio::test]
+async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXCFOLD] section 2.2.1.14 and [MS-OXCFXICS] sections
+    // 3.2.5.9.4.2 and 3.3.5.8.7: Common Views contains FAI messages, and
+    // ImportMessageChange returns an uncommitted Message that Outlook can
+    // classify through later SetProperties before SaveChangesMessage.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let writer = fixture.storage.clone();
+    let reader = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let reserved_start = writer
+        .reserve_mapi_local_replica_ids(account_id, 0x0001_0000)
+        .await?;
+    let source_counter = reserved_start + 0x06B6;
+    let message_id = crate::mapi::identity::mapi_store_id(source_counter);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let imported_change_key = vec![
+        0xA2, 0xD1, 0xCC, 0x5A, 0x17, 0xAB, 0x87, 0x4F, 0xB7, 0x18, 0xA2, 0xE4, 0xB8, 0xAB, 0x0A,
+        0xC2, 0x00, 0x00, 0x08, 0x22,
+    ];
+    let mut imported_pcl = vec![imported_change_key.len() as u8];
+    imported_pcl.extend_from_slice(&imported_change_key);
+    let imported_last_modification_time = test_filetime("2026-07-19", "14:00");
+    let baseline_cursor = reader
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+
+    let service = ExchangeService::new(writer.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let body = response_bytes(response).await;
+    let (collector_response, collector_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &collector_response,
+        &[0x7E, 0x02, 0, 0, 0, 0]
+    ));
+
+    let mut identity_values = Vec::new();
+    append_mapi_binary_property(&mut identity_values, PID_TAG_SOURCE_KEY, &source_key);
+    append_mapi_i64_property(
+        &mut identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time,
+    );
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_CHANGE_KEY,
+        &imported_change_key,
+    );
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &imported_pcl,
+    );
+    let mut import_rops = vec![
+        0x72, 0x00, 0x00, 0x01, 0x10, // ImportMessageChange, associated FAI.
+    ];
+    import_rops.extend_from_slice(&4u16.to_le_bytes());
+    import_rops.extend_from_slice(&identity_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_rops, &[collector_handles[2], u32::MAX])),
+        )
+        .await?;
+    let body = response_bytes(response).await;
+    let (import_response, import_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mapi_associated_config_messages WHERE account_id = $1"
+        )
+        .bind(account_id)
+        .fetch_one(writer.pool())
+        .await?,
+        0,
+        "ImportMessageChange must not publish an unclassified FAI before SaveChangesMessage"
+    );
+
+    let mut config_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut config_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Configuration.CommonViews",
+    );
+    append_mapi_utf16_property(
+        &mut config_values,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "Durable Common Views settings",
+    );
+    append_mapi_i32_property(&mut config_values, 0x7C06_0003, 4);
+    append_mapi_binary_property(&mut config_values, 0x7C07_0102, b"<xml/>");
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 1, 4, &config_values);
+    append_rop_save_changes_message_with_flags(&mut save_rops, 0, 1, 0x08);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &import_handles)),
+        )
+        .await?;
+    let save_response = response_rops_from_execute_response(response).await;
+    let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
+    expected_save.extend_from_slice(&mapi_wire_id_bytes(message_id));
+    assert!(contains_bytes(&save_response, &expected_save));
+
+    let durable = sqlx::query(
+        r#"
+        SELECT config.id, config.folder_id, config.message_class, config.subject,
+               config.properties_json,
+               identity.mapi_object_id, identity.mapi_change_number,
+               identity.source_key, identity.change_key,
+               identity.predecessor_change_list,
+               ((EXTRACT(EPOCH FROM (identity.updated_at - TIMESTAMPTZ '1601-01-01 00:00:00+00'))
+                   * 10000000)::bigint) AS last_modification_time
+        FROM mapi_associated_config_messages config
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = config.tenant_id
+         AND identity.account_id = config.account_id
+         AND identity.object_kind = 'associated_config'
+         AND identity.canonical_id = config.id
+         AND identity.deleted_at IS NULL
+        WHERE config.account_id = $1
+          AND config.folder_id = $2
+          AND config.message_class = 'IPM.Configuration.CommonViews'
+          AND config.subject = 'Durable Common Views settings'
+        "#,
+    )
+    .bind(account_id)
+    .bind(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID as i64)
+    .fetch_one(writer.pool())
+    .await?;
+    let canonical_id = durable.get::<Uuid, _>("id");
+    let content_properties = durable.get::<serde_json::Value, _>("properties_json");
+    for identity_tag in [
+        "0x674a0014",
+        "0x65e00102",
+        "0x65e20102",
+        "0x65e30102",
+        "0x67a40014",
+        "0x30080040",
+    ] {
+        assert!(
+            content_properties.get(identity_tag).is_none(),
+            "{identity_tag} must not duplicate the canonical identity table in content JSON"
+        );
+    }
+    let server_change_number = durable.get::<i64, _>("mapi_change_number") as u64;
+    assert_eq!(durable.get::<i64, _>("mapi_object_id") as u64, message_id);
+    assert_ne!(
+        server_change_number, source_counter,
+        "[MS-OXCFXICS] section 3.3.5.2.1 requires a server CN distinct from the client-local MID"
+    );
+    assert_eq!(durable.get::<Vec<u8>, _>("source_key"), source_key);
+    assert_eq!(durable.get::<Vec<u8>, _>("change_key"), imported_change_key);
+    assert_eq!(
+        durable.get::<Vec<u8>, _>("predecessor_change_list"),
+        imported_pcl
+    );
+    assert_eq!(
+        durable.get::<i64, _>("last_modification_time") as u64,
+        imported_last_modification_time as u64
+    );
+
+    let reloaded = reader.load_mapi_mail_store(account_id, 500).await?;
+    let table_rows = reloaded
+        .associated_config_messages_for_folder(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
+        .into_iter()
+        .filter(|message| message.canonical_id == canonical_id)
+        .collect::<Vec<_>>();
+    let sync_rows = reloaded
+        .associated_config_sync_messages_for_folder(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
+        .into_iter()
+        .filter(|message| message.canonical_id == canonical_id)
+        .collect::<Vec<_>>();
+    assert_eq!(table_rows, sync_rows);
+    assert_eq!(table_rows.len(), 1);
+    assert_eq!(table_rows[0].id, message_id);
+
+    let sync_response = content_sync_response_rops_for_store_with_flags(
+        reader.clone(),
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        &[],
+        0x0010,
+    )
+    .await;
+    let sync =
+        strict_content_sync_transfer_from_response(&sync_response).map_err(anyhow::Error::msg)?;
+    let downloaded = sync
+        .message_changes
+        .iter()
+        .find(|message| message.subject == "Durable Common Views settings")
+        .ok_or_else(|| anyhow::anyhow!("persisted Common Views FAI was absent from ICS"))?;
+    assert!(downloaded.associated);
+    assert_eq!(downloaded.mid, Some(message_id));
+    assert_eq!(downloaded.source_key, source_key);
+    assert_eq!(downloaded.change_key, imported_change_key);
+    assert_eq!(downloaded.predecessor_change_list, imported_pcl);
+    assert_eq!(downloaded.change_number, Some(server_change_number));
+    assert_eq!(
+        downloaded.last_modification_time,
+        Some(imported_last_modification_time as u64)
+    );
+    assert!(strict_replguid_globset_contains_counter(
+        &sync.cnset_seen_fai,
+        &globcnt_bytes(server_change_number),
+    )
+    .map_err(anyhow::Error::msg)?);
+    assert!(!strict_replguid_globset_contains_counter(
+        &sync.cnset_seen_fai,
+        &globcnt_bytes(source_counter),
+    )
+    .map_err(anyhow::Error::msg)?);
+
+    let created = reader
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+    assert!(created.event_pending);
+    assert_eq!(created.events.len(), 1);
+    assert_eq!(
+        created.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0004,
+            crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            Some(message_id),
+            None,
+            None,
+            Some("associated_config"),
+        )
+    );
+
+    let conflict_change_key = vec![
+        0xB2, 0xD1, 0xCC, 0x5A, 0x17, 0xAB, 0x87, 0x4F, 0xB7, 0x18, 0xA2, 0xE4, 0xB8, 0xAB, 0x0A,
+        0xC2, 0x00, 0x00, 0x09, 0x33,
+    ];
+    let mut conflict_pcl = vec![conflict_change_key.len() as u8];
+    conflict_pcl.extend_from_slice(&conflict_change_key);
+    let mut conflict_values = Vec::new();
+    append_mapi_binary_property(&mut conflict_values, PID_TAG_SOURCE_KEY, &source_key);
+    append_mapi_i64_property(
+        &mut conflict_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time + 10_000_000,
+    );
+    append_mapi_binary_property(
+        &mut conflict_values,
+        PID_TAG_CHANGE_KEY,
+        &conflict_change_key,
+    );
+    append_mapi_binary_property(
+        &mut conflict_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &conflict_pcl,
+    );
+    let mut conflict_rops = vec![
+        0x72, 0x00, 0x00, 0x01, 0x50, // associated FAI + FailOnConflict.
+    ];
+    conflict_rops.extend_from_slice(&4u16.to_le_bytes());
+    conflict_rops.extend_from_slice(&conflict_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &conflict_rops,
+                &[collector_handles[2], u32::MAX],
+            )),
+        )
+        .await?;
+    let body = response_bytes(response).await;
+    let (conflict_response, conflict_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &conflict_response,
+        &[0x72, 0x01, 0x02, 0x08, 0x04, 0x80]
+    ));
+    assert_eq!(conflict_handles[1], u32::MAX);
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_over_http_common_views_fai_table_open_and_ics_share_canonical_identity() {
+    // [MS-OXCFOLD] section 2.2.1.14 exposes every FAI Message in the
+    // associated contents table. [MS-OXCFXICS] sections 2.2.1.2.1 and
+    // 3.2.5.3 require the same messages and identities in FAI content sync.
+    let account = FakeStore::account();
+    let config_canonical_id = Uuid::parse_str("67676767-6767-4767-8767-676767676767").unwrap();
+    let search_canonical_id = Uuid::parse_str("68686868-6868-4868-8868-686868686868").unwrap();
+    let mut definition_blob = vec![
+        0x04, 0x10, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    ];
+    definition_blob.extend_from_slice(&1u32.to_le_bytes());
+    definition_blob.push(0xAA);
+    definition_blob.extend_from_slice(&0u32.to_le_bytes());
+    definition_blob.push(0xBB);
+    definition_blob.extend_from_slice(&0u32.to_le_bytes());
+
+    let store = FakeStore {
+        session: Some(account.clone()),
+        search_folders: Arc::new(Mutex::new(vec![SearchFolderDefinition {
+            id: search_canonical_id,
+            account_id: account.account_id,
+            role: "unread_mail".to_string(),
+            display_name: "Canonical search FAI".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({
+                "scope": "top_of_personal_folders",
+                "recursive": true
+            }),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_unread_mail",
+                "pidTagSearchFolderDefinition": BASE64_STANDARD.encode(&definition_blob)
+            }),
+            excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
+            is_builtin: true,
+        }])),
+        associated_configs: Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
+            id: config_canonical_id,
+            account_id: account.account_id,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            message_class: "IPM.Configuration.CommonViews".to_string(),
+            subject: "Canonical config FAI".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "u32", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "01020304"}
+            }),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let identity_tags = [
+        PID_TAG_MID,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ];
+    let mut table_rops = Vec::new();
+    append_rop_open_folder(
+        &mut table_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    table_rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x02]);
+    table_rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
+    table_rops.extend_from_slice(&(identity_tags.len() as u16).to_le_bytes());
+    for tag in identity_tags {
+        table_rops.extend_from_slice(&tag.to_le_bytes());
+    }
+    table_rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
+    table_rops.extend_from_slice(&20u16.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&table_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let table_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&table_response, &[0x15, 0x02, 0, 0, 0, 0]));
+
+    let expected_identity = |canonical_id: Uuid| {
+        let object_id = store.mapi_identities.lock().unwrap()[&canonical_id];
+        let source_key = store
+            .mapi_identity_source_keys
+            .lock()
+            .unwrap()
+            .get(&canonical_id)
+            .cloned()
+            .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(object_id));
+        let change_number = store.mapi_identity_change_numbers.lock().unwrap()[&canonical_id];
+        let change_key = store.mapi_identity_change_keys.lock().unwrap()[&canonical_id].clone();
+        let predecessor_change_list =
+            store.mapi_identity_predecessor_change_lists.lock().unwrap()[&canonical_id].clone();
+        (
+            object_id,
+            source_key,
+            change_key,
+            predecessor_change_list,
+            change_number,
+        )
+    };
+    let config_identity = expected_identity(config_canonical_id);
+    let search_identity = expected_identity(search_canonical_id);
+    let expected_table_row =
+        |identity: &(u64, Vec<u8>, Vec<u8>, Vec<u8>, u64), message_class: &str, subject: &str| {
+            let mut row = vec![0];
+            row.extend_from_slice(&mapi_wire_id_bytes(identity.0));
+            row.extend_from_slice(&utf16z(message_class));
+            row.extend_from_slice(&utf16z(subject));
+            for value in [&identity.1, &identity.2, &identity.3] {
+                row.extend_from_slice(&(value.len() as u16).to_le_bytes());
+                row.extend_from_slice(value);
+            }
+            row.extend_from_slice(&mapi_wire_id_bytes(crate::mapi::identity::mapi_store_id(
+                identity.4,
+            )));
+            row
+        };
+    assert!(contains_bytes(
+        &table_response,
+        &expected_table_row(
+            &config_identity,
+            "IPM.Configuration.CommonViews",
+            "Canonical config FAI",
+        )
+    ));
+    assert!(contains_bytes(
+        &table_response,
+        &expected_table_row(
+            &search_identity,
+            "IPM.Microsoft.WunderBar.SFInfo",
+            "Canonical search FAI",
+        )
+    ));
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(
+        &mut open_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_open_message(
+        &mut open_rops,
+        1,
+        2,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        config_identity.0,
+    );
+    append_rop_get_properties_specific(
+        &mut open_rops,
+        2,
+        &[
+            PID_TAG_MID,
+            PID_TAG_SOURCE_KEY,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_CHANGE_NUMBER,
+        ],
+    );
+    append_rop_open_message(
+        &mut open_rops,
+        1,
+        3,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        search_identity.0,
+    );
+    append_rop_get_properties_specific(
+        &mut open_rops,
+        3,
+        &[
+            PID_TAG_MID,
+            PID_TAG_SOURCE_KEY,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_CHANGE_NUMBER,
+        ],
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let open_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&open_response, &[0x03, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&open_response, &[0x03, 0x03, 0, 0, 0, 0]));
+    for (handle, identity) in [(2, &config_identity), (3, &search_identity)] {
+        let mut expected = vec![0];
+        expected.extend_from_slice(&mapi_wire_id_bytes(identity.0));
+        for value in [&identity.1, &identity.2, &identity.3] {
+            expected.extend_from_slice(&(value.len() as u16).to_le_bytes());
+            expected.extend_from_slice(value);
+        }
+        expected.extend_from_slice(&mapi_wire_id_bytes(crate::mapi::identity::mapi_store_id(
+            identity.4,
+        )));
+        let row_offset =
+            mapi_get_properties_specific_standard_row_offset(&open_response, handle).unwrap();
+        assert_eq!(
+            &open_response[row_offset..row_offset + expected.len()],
+            expected.as_slice()
+        );
+    }
+
+    let sync_response = content_sync_response_rops_for_store_with_flags(
+        store,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        &[],
+        0x0010,
+    )
+    .await;
+    let sync = strict_content_sync_transfer_from_response(&sync_response).unwrap();
+    for (subject, identity) in [
+        ("Canonical config FAI", &config_identity),
+        ("Canonical search FAI", &search_identity),
+    ] {
+        let message = sync
+            .message_changes
+            .iter()
+            .find(|message| message.subject == subject)
+            .unwrap_or_else(|| panic!("Common Views ICS omitted {subject}"));
+        assert!(message.associated);
+        assert_eq!(message.mid, Some(identity.0));
+        assert_eq!(message.source_key, identity.1);
+        assert_eq!(message.change_key, identity.2);
+        assert_eq!(message.predecessor_change_list, identity.3);
+        assert_eq!(message.change_number, Some(identity.4));
+    }
+}
+
+#[tokio::test]
+async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save() {
+    // This fixture replays the two Contacts WLinks selected from the four
+    // Common Views FAI messages imported by Outlook trace 202607190710. Outlook
+    // populated each selected Message object through three
+    // RopSetProperties calls before RopSaveChangesMessage. [MS-OXCFXICS]
+    // sections 3.2.5.9.4.2 and 3.3.5.8.7 require the imported Message object
+    // to remain uncommitted until Save. [MS-OXOCFG] sections 2.2.9 and
+    // 3.1.4.9-3.1.4.10 define these FAI messages as navigation shortcuts in
+    // Common Views.
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    // RR 202607190710 reserves 0x10000 local replica IDs beginning at
+    // 0x0200af before importing the adjacent WLink MIDs 0x0206b4/0x0206b5.
+    *store.next_mapi_global_counter.lock().unwrap() = 0x0200_AF;
+    assert_eq!(
+        store
+            .reserve_mapi_local_replica_ids(account.account_id, 0x0001_0000)
+            .await
+            .unwrap(),
+        0x0200_AF
+    );
+    let shortcuts = store.navigation_shortcuts.clone();
+    let identities = store.mapi_identities.clone();
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let (collector_response, collector_handles) =
+        response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(
+        &collector_response,
+        &[0x7E, 0x02, 0, 0, 0, 0]
+    ));
+
+    let group_id = Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap();
+    let suggested_contacts_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+    )
+    .unwrap();
+    let imported_shortcuts = [
+        (
+            crate::mapi::identity::mapi_store_id(0x0206_B4),
+            "My Contacts",
+            4u32,
+            0u32,
+            127u8,
+            None,
+        ),
+        (
+            crate::mapi::identity::mapi_store_id(0x0206_B5),
+            "Suggested Contacts",
+            0u32,
+            1_048_576u32,
+            127u8,
+            Some(suggested_contacts_entry_id.as_slice()),
+        ),
+    ];
+
+    for (index, (message_id, subject, shortcut_type, flags, ordinal, entry_id)) in
+        imported_shortcuts.iter().enumerate()
+    {
+        let source_key = crate::mapi::identity::source_key_for_object_id(*message_id);
+        let mut change_key = vec![
+            0xA2, 0xD1, 0xCC, 0x5A, 0x17, 0xAB, 0x87, 0x4F, 0xB7, 0x18, 0xA2, 0xE4, 0xB8, 0xAB,
+            0x0A, 0xC2, 0x00, 0x00, 0x08, 0x20,
+        ];
+        change_key[19] += index as u8;
+        let mut predecessor_change_list = vec![change_key.len() as u8];
+        predecessor_change_list.extend_from_slice(&change_key);
+        let last_modification_time = test_filetime("2026-07-19", "07:10") as u64;
+        let mut identity_values = Vec::new();
+        append_mapi_binary_property(&mut identity_values, PID_TAG_SOURCE_KEY, &source_key);
+        append_mapi_i64_property(
+            &mut identity_values,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            last_modification_time as i64,
+        );
+        append_mapi_binary_property(&mut identity_values, PID_TAG_CHANGE_KEY, &change_key);
+        append_mapi_binary_property(
+            &mut identity_values,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            &predecessor_change_list,
+        );
+        let mut import_rops = vec![
+            0x72, 0x00, 0x00, 0x01, 0x10, // ImportMessageChange, associated FAI.
+        ];
+        import_rops.extend_from_slice(&4u16.to_le_bytes());
+        import_rops.extend_from_slice(&identity_values);
+
+        renew_mapi_request_id(&mut execute_headers);
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &execute_headers,
+                &execute_body(&rop_buffer(&import_rops, &[collector_handles[2], u32::MAX])),
+            )
+            .await
+            .unwrap();
+        let body = response_bytes(response).await;
+        let (import_response, import_handles) = response_rops_and_handles_from_execute_body(&body);
+        assert!(contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]));
+        assert_eq!(
+            shortcuts.lock().unwrap().len(),
+            index,
+            "ImportMessageChange must not persist a partial WLink before SaveChangesMessage"
+        );
+
+        let mut first_batch = Vec::new();
+        append_mapi_utf16_property(
+            &mut first_batch,
+            PID_TAG_MESSAGE_CLASS_W,
+            "IPM.Microsoft.WunderBar.Link",
+        );
+        append_mapi_utf16_property(&mut first_batch, PID_TAG_NORMALIZED_SUBJECT_W, subject);
+        append_mapi_i32_property(
+            &mut first_batch,
+            0x6847_0003, // PidTagWlinkSaveStamp
+            1_537_819_608,
+        );
+        let mut second_batch = Vec::new();
+        append_mapi_i32_property(&mut second_batch, PID_TAG_WLINK_TYPE, *shortcut_type as i32);
+        append_mapi_i32_property(
+            &mut second_batch,
+            0x684A_0003, // PidTagWlinkFlags
+            *flags as i32,
+        );
+        append_mapi_binary_property(&mut second_batch, PID_TAG_WLINK_ORDINAL, &[*ordinal]);
+        let mut third_batch = Vec::new();
+        append_mapi_binary_property(
+            &mut third_batch,
+            if *shortcut_type == 4 {
+                0x6842_0102 // PidTagWlinkGroupHeaderId, trace binary variant.
+            } else {
+                0x6850_0102 // PidTagWlinkGroupClsid, trace binary variant.
+            },
+            group_id.as_bytes(),
+        );
+        if *shortcut_type != 4 {
+            append_mapi_utf16_property(&mut third_batch, PID_TAG_WLINK_GROUP_NAME_W, "My Contacts");
+        }
+        append_mapi_i32_property(
+            &mut third_batch,
+            0x6852_0003, // PidTagWlinkSection
+            4,
+        );
+        append_mapi_binary_property(
+            &mut third_batch,
+            0x684F_0102, // PidTagWlinkFolderType, trace binary variant.
+            &[
+                0x01, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x46,
+            ],
+        );
+        if let Some(entry_id) = entry_id {
+            append_mapi_binary_property(&mut third_batch, PID_TAG_WLINK_ENTRY_ID, entry_id);
+        }
+
+        let mut save_rops = Vec::new();
+        append_rop_set_properties(&mut save_rops, 1, 3, &first_batch);
+        append_rop_set_properties(&mut save_rops, 1, 3, &second_batch);
+        append_rop_set_properties(
+            &mut save_rops,
+            1,
+            if entry_id.is_some() { 5 } else { 3 },
+            &third_batch,
+        );
+        // RR 202607190710 sends the unlisted/ignored bit 0x08, then reads the
+        // imported ChangeKey from the same Message handle in the same Execute.
+        append_rop_save_changes_message_with_flags(&mut save_rops, 0, 1, 0x08);
+        save_rops.extend_from_slice(&[0x07, 0x00, 0x01]);
+        save_rops.extend_from_slice(&0u16.to_le_bytes()); // PropertySizeLimit
+        save_rops.extend_from_slice(&0u16.to_le_bytes()); // WantUnicode = false
+        save_rops.extend_from_slice(&1u16.to_le_bytes());
+        save_rops.extend_from_slice(&PID_TAG_CHANGE_KEY.to_le_bytes());
+
+        renew_mapi_request_id(&mut execute_headers);
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &execute_headers,
+                &execute_body(&rop_buffer(&save_rops, &import_handles)),
+            )
+            .await
+            .unwrap();
+        let save_response = response_rops_from_execute_response(response).await;
+        assert_eq!(
+            save_response
+                .windows(8)
+                .filter(|window| *window == [0x0A, 0x01, 0, 0, 0, 0, 0, 0])
+                .count(),
+            3,
+            "the three SetProperties calls must be processed"
+        );
+        let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
+        expected_save.extend_from_slice(&mapi_wire_id_bytes(*message_id));
+        assert!(
+            contains_bytes(&save_response, &expected_save),
+            "SaveChangesMessage must preserve the imported WLink MID: {save_response:02x?}"
+        );
+        let mut expected_get_properties = vec![0x07, 0x01, 0, 0, 0, 0, 0];
+        expected_get_properties.extend_from_slice(&(change_key.len() as u16).to_le_bytes());
+        expected_get_properties.extend_from_slice(&change_key);
+        assert!(
+            contains_bytes(&save_response, &expected_get_properties),
+            "GetPropertiesSpecific after Save must return the imported WLink ChangeKey"
+        );
+        let canonical_id = shortcuts.lock().unwrap()[index].id;
+        assert_eq!(
+            store.mapi_identity_change_keys.lock().unwrap()[&canonical_id],
+            change_key
+        );
+        assert_eq!(
+            store.mapi_identity_predecessor_change_lists.lock().unwrap()[&canonical_id],
+            predecessor_change_list
+        );
+        assert_eq!(
+            store.mapi_identity_last_modification_times.lock().unwrap()[&canonical_id],
+            last_modification_time
+        );
+    }
+    let imported_server_change_numbers = shortcuts
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|shortcut| store.mapi_identity_change_numbers.lock().unwrap()[&shortcut.id])
+        .collect::<Vec<_>>();
+
+    // [MS-OXCFXICS] sections 2.2.3.2.4.2.1 and 3.2.5.9.4.2:
+    // FailOnConflict is evaluated by ImportMessageChange itself. A conflicting
+    // WLink must return SyncConflict and must not expose a Message handle whose
+    // later Save could overwrite the durable Common Views FAI content.
+    let conflict_message_id = imported_shortcuts[0].0;
+    let conflict_source_key = crate::mapi::identity::source_key_for_object_id(conflict_message_id);
+    let mut conflict_change_key = vec![
+        0xA2, 0xD1, 0xCC, 0x5A, 0x17, 0xAB, 0x87, 0x4F, 0xB7, 0x18, 0xA2, 0xE4, 0xB8, 0xAB, 0x0A,
+        0xC2, 0x00, 0x00, 0x08, 0x20,
+    ];
+    conflict_change_key[0] = 0xB2;
+    conflict_change_key[19] = 0x33;
+    let mut conflict_pcl = vec![conflict_change_key.len() as u8];
+    conflict_pcl.extend_from_slice(&conflict_change_key);
+    let mut conflict_values = Vec::new();
+    append_mapi_binary_property(
+        &mut conflict_values,
+        PID_TAG_SOURCE_KEY,
+        &conflict_source_key,
+    );
+    append_mapi_i64_property(
+        &mut conflict_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        test_filetime("2026-07-19", "07:11"),
+    );
+    append_mapi_binary_property(
+        &mut conflict_values,
+        PID_TAG_CHANGE_KEY,
+        &conflict_change_key,
+    );
+    append_mapi_binary_property(
+        &mut conflict_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &conflict_pcl,
+    );
+    let mut conflict_rops = vec![
+        0x72, 0x00, 0x00, 0x01, 0x50, // associated FAI + FailOnConflict.
+    ];
+    conflict_rops.extend_from_slice(&4u16.to_le_bytes());
+    conflict_rops.extend_from_slice(&conflict_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &conflict_rops,
+                &[collector_handles[2], u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let conflict_body = response_bytes(response).await;
+    let (conflict_response, conflict_handles) =
+        response_rops_and_handles_from_execute_body(&conflict_body);
+    assert!(contains_bytes(
+        &conflict_response,
+        &[0x72, 0x01, 0x02, 0x08, 0x04, 0x80]
+    ));
+    assert_eq!(
+        conflict_handles[1],
+        u32::MAX,
+        "FailOnConflict must not expose an OutputServerObject handle"
+    );
+
+    let reserved_message_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER,
+    );
+    let reserved_source_key = crate::mapi::identity::source_key_for_object_id(reserved_message_id);
+    let reserved_change_key = vec![0xE2; 20];
+    let mut reserved_pcl = vec![reserved_change_key.len() as u8];
+    reserved_pcl.extend_from_slice(&reserved_change_key);
+    let mut reserved_values = Vec::new();
+    append_mapi_binary_property(
+        &mut reserved_values,
+        PID_TAG_SOURCE_KEY,
+        &reserved_source_key,
+    );
+    append_mapi_i64_property(
+        &mut reserved_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        test_filetime("2026-07-19", "07:12"),
+    );
+    append_mapi_binary_property(
+        &mut reserved_values,
+        PID_TAG_CHANGE_KEY,
+        &reserved_change_key,
+    );
+    append_mapi_binary_property(
+        &mut reserved_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &reserved_pcl,
+    );
+    let mut reserved_rops = vec![
+        0x72, 0x00, 0x00, 0x01, 0x10, // associated FAI.
+    ];
+    reserved_rops.extend_from_slice(&4u16.to_le_bytes());
+    reserved_rops.extend_from_slice(&reserved_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &reserved_rops,
+                &[collector_handles[2], u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let reserved_body = response_bytes(response).await;
+    let (reserved_response, reserved_handles) =
+        response_rops_and_handles_from_execute_body(&reserved_body);
+    assert!(contains_bytes(
+        &reserved_response,
+        &[0x72, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert_eq!(reserved_handles[1], u32::MAX);
+    assert_eq!(shortcuts.lock().unwrap().len(), 2);
+    assert!(shortcuts
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|shortcut| shortcut.subject == "My Contacts"));
+
+    // [MS-OXCFXICS] sections 3.1.5.6.2.2 and 3.2.5.9.4.2: an older
+    // conflicting FAI import is accepted without FailOnConflict, but the
+    // last-writer-wins server version remains canonical after Save.
+    let my_contacts_id = shortcuts
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|shortcut| shortcut.subject == "My Contacts")
+        .unwrap()
+        .id;
+    let server_change_key_before_conflict =
+        store.mapi_identity_change_keys.lock().unwrap()[&my_contacts_id].clone();
+    let server_change_number_before_conflict =
+        store.mapi_identity_change_numbers.lock().unwrap()[&my_contacts_id];
+    let mut older_conflict_change_key = server_change_key_before_conflict.clone();
+    older_conflict_change_key[0] = 0x92;
+    older_conflict_change_key[19] = 0x44;
+    let mut older_conflict_pcl = vec![older_conflict_change_key.len() as u8];
+    older_conflict_pcl.extend_from_slice(&older_conflict_change_key);
+    let mut older_conflict_identity_values = Vec::new();
+    append_mapi_binary_property(
+        &mut older_conflict_identity_values,
+        PID_TAG_SOURCE_KEY,
+        &conflict_source_key,
+    );
+    append_mapi_i64_property(
+        &mut older_conflict_identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        test_filetime("2026-07-19", "07:09"),
+    );
+    append_mapi_binary_property(
+        &mut older_conflict_identity_values,
+        PID_TAG_CHANGE_KEY,
+        &older_conflict_change_key,
+    );
+    append_mapi_binary_property(
+        &mut older_conflict_identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &older_conflict_pcl,
+    );
+    let mut older_conflict_import_rops = vec![
+        0x72, 0x00, 0x00, 0x01, 0x10, // associated FAI, accept conflicts.
+    ];
+    older_conflict_import_rops.extend_from_slice(&4u16.to_le_bytes());
+    older_conflict_import_rops.extend_from_slice(&older_conflict_identity_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &older_conflict_import_rops,
+                &[collector_handles[2], u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let older_conflict_body = response_bytes(response).await;
+    let (older_conflict_import_response, older_conflict_handles) =
+        response_rops_and_handles_from_execute_body(&older_conflict_body);
+    assert!(contains_bytes(
+        &older_conflict_import_response,
+        &[0x72, 0x01, 0, 0, 0, 0]
+    ));
+
+    let mut older_conflict_properties = Vec::new();
+    append_mapi_utf16_property(
+        &mut older_conflict_properties,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
+    append_mapi_utf16_property(
+        &mut older_conflict_properties,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "Older client copy must not replace server",
+    );
+    append_mapi_i32_property(
+        &mut older_conflict_properties,
+        0x6847_0003, // PidTagWlinkSaveStamp.
+        1_537_819_608,
+    );
+    append_mapi_i32_property(&mut older_conflict_properties, PID_TAG_WLINK_TYPE, 4);
+    append_mapi_i32_property(
+        &mut older_conflict_properties,
+        0x684A_0003, // PidTagWlinkFlags.
+        0,
+    );
+    append_mapi_binary_property(
+        &mut older_conflict_properties,
+        PID_TAG_WLINK_ORDINAL,
+        &[127],
+    );
+    append_mapi_binary_property(
+        &mut older_conflict_properties,
+        0x6842_0102, // PidTagWlinkGroupHeaderId.
+        group_id.as_bytes(),
+    );
+    append_mapi_binary_property(
+        &mut older_conflict_properties,
+        0x684F_0102, // PidTagWlinkFolderType, CLSID_ContactFolder.
+        &[
+            0x01, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ],
+    );
+    append_mapi_i32_property(
+        &mut older_conflict_properties,
+        0x6852_0003, // PidTagWlinkSection.
+        4,
+    );
+    let mut older_conflict_save_rops = Vec::new();
+    append_rop_set_properties(
+        &mut older_conflict_save_rops,
+        1,
+        9,
+        &older_conflict_properties,
+    );
+    append_rop_save_changes_message_with_flags(&mut older_conflict_save_rops, 0, 1, 0x08);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &older_conflict_save_rops,
+                &older_conflict_handles,
+            )),
+        )
+        .await
+        .unwrap();
+    let older_conflict_save_response = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&older_conflict_save_response, &[0x0C, 0x00, 0, 0, 0, 0]),
+        "older conflicting WLink Save response: {older_conflict_save_response:02x?}"
+    );
+    assert!(shortcuts
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|shortcut| shortcut.id == my_contacts_id && shortcut.subject == "My Contacts"));
+    assert!(!shortcuts
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|shortcut| shortcut.subject == "Older client copy must not replace server"));
+    let resolved_server_change_number =
+        store.mapi_identity_change_numbers.lock().unwrap()[&my_contacts_id];
+    assert_ne!(
+        resolved_server_change_number,
+        server_change_number_before_conflict
+    );
+    assert_eq!(
+        store.mapi_identity_change_keys.lock().unwrap()[&my_contacts_id],
+        server_change_key_before_conflict
+    );
+    assert!(test_mapi_pcl_includes_change_key(
+        &store.mapi_identity_predecessor_change_lists.lock().unwrap()[&my_contacts_id],
+        &older_conflict_change_key,
+    ));
+
+    let mut upload_state_rops = vec![
+        0x82, 0x00, 0x00, 0x01, // RopSynchronizationGetTransferState
+        0x4E, 0x00, 0x01, // RopFastTransferSourceGetBuffer
+    ];
+    upload_state_rops.extend_from_slice(&4096u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &upload_state_rops,
+                &[collector_handles[2], u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let upload_state_response = response_rops_from_execute_response(response).await;
+    assert_content_upload_final_state_includes(
+        &upload_state_response,
+        &[],
+        &imported_server_change_numbers,
+        &[],
+    );
+    let upload_state = &mapi_fast_transfer_chunks(&upload_state_response)[0].1;
+    let cnset_seen_fai = mapi_binary_property_value(upload_state, META_TAG_CNSET_SEEN_FAI);
+    for (message_id, ..) in imported_shortcuts {
+        let message_counter =
+            crate::mapi::identity::global_counter_from_store_id(message_id).unwrap();
+        assert!(
+            !strict_replguid_globset_contains_counter(
+                cnset_seen_fai,
+                &globcnt_bytes(message_counter),
+            )
+            .unwrap(),
+            "CnsetSeenFAI must contain the server CN, not the imported MID counter"
+        );
+    }
+    assert!(
+        !strict_replguid_globset_contains_counter(
+            cnset_seen_fai,
+            &globcnt_bytes(resolved_server_change_number),
+        )
+        .unwrap(),
+        "a server-winning conflict CN is not reflected in the client replica and must remain unseen"
+    );
+
+    // [MS-OXCFXICS] sections 2.2.1.1.3 and 3.2.5.3: replay the
+    // collector's returned state as the next content-download state. The
+    // server-winning WLink resolution remains eligible and is downloaded.
+    let uploaded_download_state = [
+        (META_TAG_IDSET_GIVEN, Vec::new()),
+        (
+            META_TAG_CNSET_SEEN,
+            mapi_binary_property_value(upload_state, META_TAG_CNSET_SEEN).to_vec(),
+        ),
+        (META_TAG_CNSET_SEEN_FAI, cnset_seen_fai.to_vec()),
+        (
+            META_TAG_CNSET_READ,
+            mapi_binary_property_value(upload_state, META_TAG_CNSET_READ).to_vec(),
+        ),
+    ];
+    let mut resolution_download_rops = Vec::new();
+    append_rop_open_folder(
+        &mut resolution_download_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    resolution_download_rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x39, 0xA1, // content sync, observed Outlook flags 0xa139
+        0x00, 0x00, // RestrictionDataSize
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
+        0x09, 0x00, // PropertyTagCount
+    ]);
+    for tag in [
+        0x1000_001F,
+        0x1006_0003,
+        0x1007_0003,
+        0x1008_001F,
+        0x1010_0003,
+        0x1011_0003,
+        0x3FF8_001F,
+        0x3FF9_0102,
+        0x300F_0102,
+    ] {
+        resolution_download_rops.extend_from_slice(&u32::to_le_bytes(tag));
+    }
+    for (state_tag, state_value) in uploaded_download_state {
+        resolution_download_rops.extend_from_slice(&[0x75, 0x00, 0x02]);
+        resolution_download_rops.extend_from_slice(&state_tag.to_le_bytes());
+        resolution_download_rops.extend_from_slice(&(state_value.len() as u32).to_le_bytes());
+        if !state_value.is_empty() {
+            resolution_download_rops.extend_from_slice(&[0x76, 0x00, 0x02]);
+            resolution_download_rops.extend_from_slice(&(state_value.len() as u32).to_le_bytes());
+            resolution_download_rops.extend_from_slice(&state_value);
+        }
+        resolution_download_rops.extend_from_slice(&[0x77, 0x00, 0x02]);
+    }
+    resolution_download_rops.extend_from_slice(&[0x4E, 0x00, 0x02]);
+    resolution_download_rops.extend_from_slice(&31_680u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &resolution_download_rops,
+                &[1, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let resolution_download_response = response_rops_from_execute_response(response).await;
+    let resolution_download =
+        strict_content_sync_transfer_from_response(&resolution_download_response).unwrap();
+    let downloaded_resolution = resolution_download
+        .message_changes
+        .iter()
+        .find(|message| message.subject == "My Contacts")
+        .expect("server-winning WLink resolution is downloaded");
+    assert_eq!(
+        downloaded_resolution.change_number,
+        Some(resolved_server_change_number)
+    );
+    assert_eq!(
+        downloaded_resolution.change_key,
+        server_change_key_before_conflict
+    );
+    assert!(test_mapi_pcl_includes_change_key(
+        &downloaded_resolution.predecessor_change_list,
+        &older_conflict_change_key,
+    ));
+
+    let stored = shortcuts.lock().unwrap().clone();
+    assert_eq!(stored.len(), 2);
+    let contacts = stored
+        .iter()
+        .find(|shortcut| shortcut.subject == "Suggested Contacts")
+        .unwrap();
+    assert_eq!(
+        contacts.target_folder_id,
+        Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID)
+    );
+    assert_eq!(contacts.shortcut_type, 0);
+    assert_eq!(contacts.flags, 1_048_576);
+    assert_eq!(contacts.section, 4);
+    assert_eq!(contacts.ordinal, vec![127]);
+    assert_eq!(contacts.group_header_id, Some(group_id));
+    assert_eq!(contacts.group_name, "My Contacts");
+    let mapped_ids = identities
+        .lock()
+        .unwrap()
+        .values()
+        .copied()
+        .collect::<Vec<_>>();
+    assert!(imported_shortcuts
+        .iter()
+        .all(|(message_id, ..)| mapped_ids.contains(message_id)));
+
+    let mut sync_rops = Vec::new();
+    append_rop_open_folder(
+        &mut sync_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    sync_rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x39, 0xA1, // content sync, observed Outlook flags 0xa139
+        0x00, 0x00, // RestrictionDataSize
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
+        0x09, 0x00, // PropertyTagCount
+    ]);
+    for tag in [
+        0x1000_001F,
+        0x1006_0003,
+        0x1007_0003,
+        0x1008_001F,
+        0x1010_0003,
+        0x1011_0003,
+        0x3FF8_001F,
+        0x3FF9_0102,
+        0x300F_0102,
+    ] {
+        sync_rops.extend_from_slice(&u32::to_le_bytes(tag));
+    }
+    for state_tag in [0x4017_0102u32, 0x6796_0102, 0x67DA_0102, 0x67D2_0102] {
+        sync_rops.extend_from_slice(&[0x75, 0x00, 0x02]);
+        sync_rops.extend_from_slice(&u32::to_le_bytes(state_tag));
+        sync_rops.extend_from_slice(&0u32.to_le_bytes());
+        sync_rops.extend_from_slice(&[0x77, 0x00, 0x02]);
+    }
+    sync_rops.extend_from_slice(&[0x4E, 0x00, 0x02]);
+    sync_rops.extend_from_slice(&31_680u16.to_le_bytes());
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&sync_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    for (message_id, subject, ..) in imported_shortcuts {
+        let change = stream
+            .message_changes
+            .iter()
+            .find(|message| message.subject == subject)
+            .unwrap();
+        let canonical_id = stored
+            .iter()
+            .find(|shortcut| shortcut.subject == subject)
+            .map(|shortcut| shortcut.id)
+            .unwrap();
+        let expected_change_number =
+            store.mapi_identity_change_numbers.lock().unwrap()[&canonical_id];
+        let expected_change_key =
+            store.mapi_identity_change_keys.lock().unwrap()[&canonical_id].clone();
+        let expected_predecessor_change_list =
+            store.mapi_identity_predecessor_change_lists.lock().unwrap()[&canonical_id].clone();
+        let expected_last_modification_time =
+            store.mapi_identity_last_modification_times.lock().unwrap()[&canonical_id];
+        assert!(change.associated);
+        assert_eq!(change.mid, Some(message_id));
+        assert_eq!(
+            change.source_key,
+            crate::mapi::identity::source_key_for_object_id(message_id)
+        );
+        assert_eq!(change.change_number, Some(expected_change_number));
+        assert_eq!(change.change_key, expected_change_key);
+        assert_eq!(
+            change.predecessor_change_list,
+            expected_predecessor_change_list
+        );
+        assert_eq!(
+            change.last_modification_time,
+            Some(expected_last_modification_time)
+        );
+    }
 }
 
 #[tokio::test]
@@ -6198,66 +8888,159 @@ async fn mapi_over_http_sync_upload_state_does_not_echo_multiple_streams() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_set_local_replica_midset_deleted_round_trips_in_transfer_state() {
-    let store = FakeStore {
-        session: Some(FakeStore::account()),
-        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            "55555555-5555-5555-5555-555555555555",
-            "inbox",
-            "Inbox",
-        )])),
-        ..Default::default()
+async fn mapi_over_http_set_local_replica_midset_deleted_persists_folder_scoped_ranges(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
     };
-    let service = ExchangeService::new(store);
+    let storage = fixture.storage.clone();
+    let service = ExchangeService::new(storage.clone());
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
-
-    let deleted_midset = b"deleted-local-replica-midset";
-    let mut rops = vec![
-        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
-    ];
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
-    rops.push(0);
-    rops.extend_from_slice(&[
-        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
-        0x01, 0x00, 0x00, 0x00, // content sync
-        0x00, 0x00, // RestrictionDataSize
-        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
-        0x00, 0x00, // PropertyTagCount
-        0x93, 0x00, 0x02, // RopSetLocalReplicaMidsetDeleted
-    ]);
-    rops.extend_from_slice(&(deleted_midset.len() as u16).to_le_bytes());
-    rops.extend_from_slice(deleted_midset);
-    rops.extend_from_slice(&[
-        0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
-        0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
-    ]);
-    rops.extend_from_slice(&4096u16.to_le_bytes());
-
+        .await?;
     let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]));
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let reservation_start = storage
+        .reserve_mapi_local_replica_ids(fixture.account_id, 0x0100)
+        .await?;
+    let min_counter = reservation_start + 0x20;
+    let max_counter = reservation_start + 0x2f;
+    let min_long_term_id = crate::mapi::identity::long_term_id_from_object_id(
+        crate::mapi::identity::mapi_store_id(min_counter),
+    )
+    .ok_or_else(|| anyhow::anyhow!("invalid minimum LongTermID fixture"))?;
+    let max_long_term_id = crate::mapi::identity::long_term_id_from_object_id(
+        crate::mapi::identity::mapi_store_id(max_counter),
+    )
+    .ok_or_else(|| anyhow::anyhow!("invalid maximum LongTermID fixture"))?;
+
+    let mut deleted_ranges = 1u32.to_le_bytes().to_vec();
+    deleted_ranges.extend_from_slice(&min_long_term_id);
+    deleted_ranges.extend_from_slice(&max_long_term_id);
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x93, 0x00, 0x01, // RopSetLocalReplicaMidsetDeleted on Folder
+    ]);
+    rops.extend_from_slice(&(deleted_ranges.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&deleted_ranges);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // OpenCollector from the Folder.
+        0x93, 0x00, 0x02, // SetLocalReplicaMidsetDeleted on Collector: invalid.
+    ]);
+    rops.extend_from_slice(&(deleted_ranges.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&deleted_ranges);
+
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
-        .await
-        .unwrap();
+        .await?;
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &[0x93, 0x02, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, deleted_midset));
+    assert!(contains_bytes(&response_rops, &[0x93, 0x01, 0, 0, 0, 0]));
+    assert!(
+        contains_bytes(&response_rops, &[0x93, 0x02, 0x02, 0x01, 0x04, 0x80]),
+        "[MS-OXCFXICS] section 2.2.3.2.4.8.1 requires a Folder input object: {response_rops:02x?}"
+    );
+    let persisted = sqlx::query_as::<_, (i64, Uuid, i64, i64)>(
+        r#"
+        SELECT folder_id, replica_guid, min_global_counter, max_global_counter
+        FROM mapi_local_replica_deleted_ranges
+        WHERE account_id = $1
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_all(storage.pool())
+    .await?;
+    assert_eq!(
+        persisted,
+        vec![(
+            crate::mapi::identity::COMMON_VIEWS_FOLDER_ID as i64,
+            Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID),
+            min_counter as i64,
+            max_counter as i64,
+        )]
+    );
+
+    let source_key = crate::mapi::identity::source_key_for_object_id(
+        crate::mapi::identity::mapi_store_id(min_counter),
+    );
+    let change_key = vec![0xB8; 20];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+    let replay = storage
+        .commit_mapi_navigation_shortcut_import(
+            crate::store::CommitMapiNavigationShortcutImportInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: None,
+                    account_id: fixture.account_id,
+                    subject: "Deleted range must not import".to_string(),
+                    target_folder_id: None,
+                    shortcut_type: 4,
+                    flags: 0,
+                    save_stamp: 1_537_819_608,
+                    section: 4,
+                    ordinal: vec![127],
+                    group_header_id: Some(Uuid::parse_str("b7f00600-0000-0000-c000-000000000046")?),
+                    group_name: "My Contacts".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+                identity: crate::store::MapiFaiImportedIdentity {
+                    source_key: source_key.clone(),
+                    change_key,
+                    predecessor_change_list,
+                    last_modification_time: test_filetime("2026-07-19", "14:00") as u64,
+                },
+                fail_on_conflict: false,
+            },
+        )
+        .await;
+    assert!(replay
+        .as_ref()
+        .err()
+        .is_some_and(|error| { error.is::<crate::store::MapiFaiImportObjectDeleted>() }));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                (SELECT COUNT(*) FROM mapi_navigation_shortcuts
+                 WHERE account_id = $1)
+              + (SELECT COUNT(*) FROM mapi_object_identities
+                 WHERE account_id = $1 AND object_kind = 'navigation_shortcut'
+                   AND source_key = $2)
+              + (SELECT COUNT(*) FROM mail_change_log
+                 WHERE account_id = $1 AND object_kind = 'navigation_shortcut')
+            "#,
+        )
+        .bind(fixture.account_id)
+        .bind(&source_key)
+        .fetch_one(storage.pool())
+        .await?,
+        0
+    );
+
+    fixture.cleanup().await?;
+    Ok(())
 }
 
 #[tokio::test]
@@ -6987,11 +9770,9 @@ async fn mapi_over_http_associated_message_uploads_do_not_create_visible_items()
 
 #[tokio::test]
 async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai() {
-    let associated_object_id = crate::mapi::identity::mapi_store_id(
-        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 42,
-    );
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
             "55555555-5555-4555-9555-555555555501",
             "inbox",
@@ -6999,6 +9780,19 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         )])),
         ..Default::default()
     };
+    *store.next_mapi_global_counter.lock().unwrap() =
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 42;
+    let reserved_start = store
+        .reserve_mapi_local_replica_ids(account.account_id, 1)
+        .await
+        .unwrap();
+    let associated_object_id = crate::mapi::identity::mapi_store_id(reserved_start);
+    let associated_source_key =
+        crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let imported_change_key = associated_source_key.clone();
+    let mut imported_pcl = vec![imported_change_key.len() as u8];
+    imported_pcl.extend_from_slice(&imported_change_key);
+    let imported_last_modification_time = test_filetime("2026-07-18", "15:16");
     let imported_emails = store.imported_emails.clone();
     let associated_configs = store.associated_configs.clone();
     let service = ExchangeService::new(store);
@@ -7012,7 +9806,12 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     append_mapi_binary_property(
         &mut property_values,
         PID_TAG_SOURCE_KEY,
-        &crate::mapi::identity::source_key_for_object_id(associated_object_id),
+        &associated_source_key,
+    );
+    append_mapi_i64_property(
+        &mut property_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time,
     );
     append_mapi_utf16_property(&mut property_values, 0x001A_001F, "IPM.Configuration");
     append_mapi_utf16_property(
@@ -7024,12 +9823,12 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     append_mapi_binary_property(
         &mut property_values,
         PID_TAG_CHANGE_KEY,
-        &crate::mapi::identity::source_key_for_object_id(associated_object_id),
+        &imported_change_key,
     );
     append_mapi_binary_property(
         &mut property_values,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
-        &strict_test_replid_globset(&[crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 42]),
+        &imported_pcl,
     );
     append_mapi_binary_property(&mut property_values, 0x7C07_0102, outlook_prefs_dictionary);
 
@@ -7040,7 +9839,7 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange
     ]);
     rops.push(0x10);
-    rops.extend_from_slice(&6u16.to_le_bytes());
+    rops.extend_from_slice(&7u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
     let mut update_values = Vec::new();
     append_mapi_utf16_property(&mut update_values, PID_TAG_BODY_W, "Client view payload");
@@ -7069,8 +9868,6 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     assert!(contains_bytes(&response_rops, &[0x0A, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x0C, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x07, 0x03, 0, 0, 0, 0]));
-    let associated_source_key =
-        crate::mapi::identity::source_key_for_object_id(associated_object_id);
     assert!(imported_emails.lock().unwrap().is_empty());
     {
         let configs = associated_configs.lock().unwrap();
@@ -7084,15 +9881,10 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         assert_eq!(config.folder_id, crate::mapi::identity::INBOX_FOLDER_ID);
         assert_eq!(config.message_class, "IPM.Configuration");
         assert_eq!(config.subject, "Outlook Inbox view state");
-        assert_eq!(
-            config.properties_json["0x65e00102"]["value"],
-            serde_json::Value::String(
-                associated_source_key
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect::<String>()
-            )
-        );
+        assert!(config.properties_json.get("0x65e00102").is_none());
+        assert!(config.properties_json.get("0x65e20102").is_none());
+        assert!(config.properties_json.get("0x65e30102").is_none());
+        assert!(config.properties_json.get("0x30080040").is_none());
         assert_eq!(
             config.properties_json["0x7c070102"]["value"],
             serde_json::Value::String(
@@ -7149,7 +9941,13 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         .expect("imported associated config should replay in FAI sync");
     assert!(message.associated);
     assert_eq!(message.subject, "Outlook Inbox view state");
-    assert!(message.mid.is_some());
+    assert_eq!(message.mid, Some(associated_object_id));
+    assert_eq!(message.change_key, imported_change_key);
+    assert_eq!(message.predecessor_change_list, imported_pcl);
+    assert_eq!(
+        message.last_modification_time,
+        Some(imported_last_modification_time as u64)
+    );
     assert!(message.body_tags.contains(&0x7C08_0102));
     assert!(contains_bytes(&sync_response_rops, b"OLPrefsVersion"));
     assert!(contains_bytes(&sync_response_rops, b"9-7"));
@@ -7196,18 +9994,19 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_i
     // Outlook trace 202607181515 imports the Inbox FAI at MID 0x23e and then
     // saves the otherwise-empty MessageListSettings payload. MS-OXCFXICS
     // sections 2.2.3.2.4.2.1 and 3.3.5.8.7 require the imported SourceKey,
-    // ChangeKey, and PCL to remain the identity of the saved FAI message.
-    let imported_message_id = crate::mapi::identity::mapi_store_id(0x023e);
-    let imported_source_key = crate::mapi::identity::source_key_for_object_id(imported_message_id);
+    // ChangeKey, PCL, and LastModificationTime to remain the identity of the
+    // saved FAI message through SaveChangesMessage.
     let imported_change_key = vec![
         0x51, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
         0x31, 0x00, 0x00, 0x00, 0x00, 0x04, 0x15,
     ];
     let mut imported_pcl = vec![imported_change_key.len() as u8];
     imported_pcl.extend_from_slice(&imported_change_key);
+    let imported_last_modification_time = test_filetime("2026-07-18", "15:15");
 
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
             "55555555-5555-4555-9555-555555555501",
             "inbox",
@@ -7215,10 +10014,22 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_i
         )])),
         ..Default::default()
     };
+    *store.next_mapi_global_counter.lock().unwrap() = 0x023e;
+    let reserved_start = store
+        .reserve_mapi_local_replica_ids(account.account_id, 1)
+        .await
+        .unwrap();
+    assert_eq!(reserved_start, 0x023e);
+    let imported_message_id = crate::mapi::identity::mapi_store_id(reserved_start);
+    let imported_source_key = crate::mapi::identity::source_key_for_object_id(imported_message_id);
     let associated_configs = store.associated_configs.clone();
     let mapi_identities = store.mapi_identities.clone();
     let mapi_identity_source_keys = store.mapi_identity_source_keys.clone();
-    let service = ExchangeService::new(store);
+    let mapi_identity_change_keys = store.mapi_identity_change_keys.clone();
+    let mapi_identity_predecessor_change_lists =
+        store.mapi_identity_predecessor_change_lists.clone();
+    let mapi_identity_last_modification_times = store.mapi_identity_last_modification_times.clone();
+    let service = ExchangeService::new(store.clone());
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
@@ -7227,7 +10038,11 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_i
 
     let mut import_values = Vec::new();
     append_mapi_binary_property(&mut import_values, PID_TAG_SOURCE_KEY, &imported_source_key);
-    append_mapi_i64_property(&mut import_values, PID_TAG_LAST_MODIFICATION_TIME, 0);
+    append_mapi_i64_property(
+        &mut import_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time,
+    );
     append_mapi_binary_property(&mut import_values, PID_TAG_CHANGE_KEY, &imported_change_key);
     append_mapi_binary_property(
         &mut import_values,
@@ -7248,7 +10063,7 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_i
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
         0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange.
-        0x10, // ImportFlagAssociated.
+        0x50, // ImportFlagAssociated | ImportFlagFailOnConflict.
     ]);
     rops.extend_from_slice(&4u16.to_le_bytes());
     rops.extend_from_slice(&import_values);
@@ -7294,26 +10109,36 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_i
             .cloned(),
         Some(imported_source_key.clone())
     );
-    let hex = |bytes: &[u8]| {
-        serde_json::Value::String(
-            bytes
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>(),
-        )
-    };
     assert_eq!(
-        config.properties_json["0x65e00102"]["value"],
-        hex(&imported_source_key)
+        mapi_identity_change_keys
+            .lock()
+            .unwrap()
+            .get(&config.id)
+            .cloned(),
+        Some(imported_change_key.clone())
     );
     assert_eq!(
-        config.properties_json["0x65e20102"]["value"],
-        hex(&imported_change_key)
+        mapi_identity_predecessor_change_lists
+            .lock()
+            .unwrap()
+            .get(&config.id)
+            .cloned(),
+        Some(imported_pcl.clone())
     );
     assert_eq!(
-        config.properties_json["0x65e30102"]["value"],
-        hex(&imported_pcl)
+        mapi_identity_last_modification_times
+            .lock()
+            .unwrap()
+            .get(&config.id)
+            .copied(),
+        Some(imported_last_modification_time as u64)
     );
+    for identity_tag in ["0x65e00102", "0x65e20102", "0x65e30102", "0x30080040"] {
+        assert!(
+            config.properties_json.get(identity_tag).is_none(),
+            "{identity_tag} must exist only in the durable identity record"
+        );
+    }
     assert_eq!(
         config.properties_json["0x7c060003"]["value"],
         serde_json::Value::Number(4.into())
@@ -7370,6 +10195,132 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_i
     assert!(contains_bytes(&reopen_response_rops, &imported_source_key));
     assert!(contains_bytes(&reopen_response_rops, &imported_change_key));
     assert!(contains_bytes(&reopen_response_rops, &imported_pcl));
+
+    let sync_response = content_sync_response_rops_for_store_with_flags(
+        store.clone(),
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        0x0010,
+    )
+    .await;
+    let sync = strict_content_sync_transfer_from_response(&sync_response)
+        .unwrap_or_else(|error| panic!("{error}: {sync_response:02x?}"));
+    let downloaded = sync
+        .message_changes
+        .iter()
+        .find(|message| message.source_key == imported_source_key)
+        .expect("imported MessageListSettings FAI in Inbox ICS");
+    assert!(downloaded.associated);
+    assert_eq!(downloaded.mid, Some(imported_message_id));
+    assert_eq!(downloaded.change_key, imported_change_key);
+    assert_eq!(downloaded.predecessor_change_list, imported_pcl);
+    assert_eq!(
+        downloaded.last_modification_time,
+        Some(imported_last_modification_time as u64)
+    );
+
+    let change_sequence_before_conflict = store
+        .mapi_sync_changes
+        .lock()
+        .unwrap()
+        .current_change_sequence;
+    let conflicting_change_key = vec![
+        0x61, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
+        0x31, 0x00, 0x00, 0x00, 0x00, 0x04, 0x16,
+    ];
+    let mut conflicting_pcl = vec![conflicting_change_key.len() as u8];
+    conflicting_pcl.extend_from_slice(&conflicting_change_key);
+    let mut conflicting_import_values = Vec::new();
+    append_mapi_binary_property(
+        &mut conflicting_import_values,
+        PID_TAG_SOURCE_KEY,
+        &imported_source_key,
+    );
+    append_mapi_i64_property(
+        &mut conflicting_import_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time + 10_000_000,
+    );
+    append_mapi_binary_property(
+        &mut conflicting_import_values,
+        PID_TAG_CHANGE_KEY,
+        &conflicting_change_key,
+    );
+    append_mapi_binary_property(
+        &mut conflicting_import_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &conflicting_pcl,
+    );
+    let mut conflicting_save_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut conflicting_save_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Configuration.MessageListSettings",
+    );
+    append_mapi_utf16_property(
+        &mut conflicting_save_values,
+        PID_TAG_SUBJECT_W,
+        "FailOnConflict must not overwrite Inbox FAI",
+    );
+    let mut conflicting_rops = Vec::new();
+    append_rop_open_folder(
+        &mut conflicting_rops,
+        0,
+        1,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    );
+    conflicting_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+        0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange.
+        0x50, // ImportFlagAssociated | ImportFlagFailOnConflict.
+    ]);
+    conflicting_rops.extend_from_slice(&4u16.to_le_bytes());
+    conflicting_rops.extend_from_slice(&conflicting_import_values);
+    append_rop_set_properties(&mut conflicting_rops, 3, 2, &conflicting_save_values);
+    append_rop_save_changes_message_with_flags(&mut conflicting_rops, 3, 3, 0x08);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &conflicting_rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let conflict_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &conflict_response,
+        &[0x0C, 0x03, 0x09, 0x01, 0x04, 0x80]
+    ));
+    assert_eq!(associated_configs.lock().unwrap().len(), 1);
+    assert_eq!(
+        store
+            .mapi_sync_changes
+            .lock()
+            .unwrap()
+            .current_change_sequence,
+        change_sequence_before_conflict,
+        "a rejected FAI import must not publish content or journal state"
+    );
+    assert_eq!(
+        mapi_identity_change_keys
+            .lock()
+            .unwrap()
+            .get(&config.id)
+            .cloned(),
+        Some(imported_change_key)
+    );
+    assert_eq!(
+        mapi_identity_predecessor_change_lists
+            .lock()
+            .unwrap()
+            .get(&config.id)
+            .cloned(),
+        Some(imported_pcl)
+    );
 }
 
 #[tokio::test]
@@ -7649,7 +10600,7 @@ async fn mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai()
 }
 
 #[tokio::test]
-async fn mapi_over_http_inbox_fai_sync_exports_folder_local_default_view() {
+async fn mapi_over_http_empty_inbox_fai_sync_exports_no_default_view() {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -7694,72 +10645,20 @@ async fn mapi_over_http_inbox_fai_sync_exports_folder_local_default_view() {
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops)
         .unwrap_or_else(|error| panic!("{error}: {response_rops:02x?}"));
-    assert_eq!(stream.message_changes.len(), 1);
-    assert!(stream
-        .message_changes
-        .iter()
-        .all(|message| message.associated));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Compact"));
-
-    let mut counters = Vec::new();
-    for message in &stream.message_changes {
-        assert!(!message.source_key.is_empty(), "{}", message.subject);
-        assert!(!message.parent_source_key.is_empty(), "{}", message.subject);
-        assert!(!message.entry_id.is_empty(), "{}", message.subject);
-        assert_eq!(message.entry_id.len(), 70, "{}", message.subject);
-        assert_eq!(&message.entry_id[4..20], account.account_id.as_bytes());
-        assert!(contains_bytes(
-            &message.entry_id,
-            &message.source_key[16..22]
-        ));
-        assert!(strict_replguid_globset_contains_counter(
-            &stream.idset_given,
-            &message.source_key[16..22]
-        )
-        .unwrap());
-        let change_number = message.change_number.expect("FAI change number");
-        assert!(strict_replguid_globset_contains_counter(
-            &stream.cnset_seen_fai,
-            &globcnt_bytes(change_number)
-        )
-        .unwrap());
-        counters.push(strict_globcnt_to_u64(&message.source_key[16..22]).unwrap());
-    }
-
-    assert!(contains_bytes(
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.FolderDesign.NamedView")
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("Compact")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Compact")));
     assert!(!contains_bytes(&response_rops, &utf16z("Messages")));
-    assert!(!counters.contains(&0x7FFF_FFFF_FFF7));
-    assert!(counters.contains(&0x7FFF_FFFF_FFE9));
-    for suppressed_counter in [
-        0x7FFF_FFFF_FFE3,
-        0x7FFF_FFFF_FFED,
-        0x7FFF_FFFF_FFF3,
-        0x7FFF_FFFF_FFF5,
-        0x7FFF_FFFF_FFF8,
-        0x7FFF_FFFF_FFFB,
-        0x7FFF_FFFF_FFFC,
-        0x7FFF_FFFF_FFFD,
-    ] {
-        assert!(
-            !counters.contains(&suppressed_counter),
-            "suppressed Inbox FAI counter 0x{suppressed_counter:012x} was emitted"
-        );
-    }
 }
 
 #[tokio::test]
-async fn mapi_over_http_contacts_fai_sync_exports_folder_local_default_view() {
-    // [MS-OXOCFG] sections 2.2.6 and 3.1.4.3 place a view definition in
-    // the displayed folder's FAI table. [MS-OXCFXICS] sections
-    // 2.2.3.2.1.1.1 and 3.2.5.3 require an unseen FAI message to be emitted
-    // when the client requests FAI content synchronization.
+async fn mapi_over_http_empty_contacts_fai_sync_exports_no_default_view() {
+    // [MS-OXOCFG] sections 2.2.6 and 3.1.4.3 make view definitions
+    // client-created FAI messages. [MS-OXCFXICS] section 3.2.5.3 exports
+    // only FAI messages that exist in the canonical folder state.
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -7804,48 +10703,12 @@ async fn mapi_over_http_contacts_fai_sync_exports_folder_local_default_view() {
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops)
         .unwrap_or_else(|error| panic!("{error}: {response_rops:02x?}"));
-    assert!(stream
-        .message_changes
-        .iter()
-        .all(|message| message.associated));
-
-    let view = stream
-        .message_changes
-        .iter()
-        .find(|message| message.subject == "Contacts")
-        .expect("Contacts default named-view FAI change");
-    let expected_view_id = crate::mapi_store::outlook_default_folder_named_view_id(
-        crate::mapi::identity::CONTACTS_FOLDER_ID,
-    );
-    assert!(view.mid.is_some());
-    assert_eq!(
-        view.source_key,
-        mapi_mailstore::source_key_for_store_id(expected_view_id)
-    );
-    assert_eq!(
-        view.parent_source_key,
-        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CONTACTS_FOLDER_ID)
-    );
-    assert_eq!(view.entry_id.len(), 70);
-    assert_eq!(&view.entry_id[4..20], account.account_id.as_bytes());
-    assert!(contains_bytes(&view.entry_id, &view.source_key[16..22]));
-    assert!(strict_replguid_globset_contains_counter(
-        &stream.idset_given,
-        &view.source_key[16..22]
-    )
-    .unwrap());
-    let change_number = view.change_number.expect("Contacts FAI change number");
-    assert!(strict_replguid_globset_contains_counter(
-        &stream.cnset_seen_fai,
-        &globcnt_bytes(change_number)
-    )
-    .unwrap());
-
-    assert!(contains_bytes(
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.FolderDesign.NamedView")
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("Contacts")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Contacts")));
 }
 
 #[tokio::test]
@@ -7855,6 +10718,7 @@ async fn mapi_over_http_open_associated_message_by_imported_source_key_id() {
     );
     let associated_source_key =
         crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let associated_config_id = Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a5").unwrap();
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -7864,7 +10728,7 @@ async fn mapi_over_http_open_associated_message_by_imported_source_key_id() {
             "Inbox",
         )])),
         associated_configs: Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
-            id: Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a5").unwrap(),
+            id: associated_config_id,
             account_id: account.account_id,
             folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
             message_class: "IPM.Configuration.MessageListSettings".to_string(),
@@ -7888,6 +10752,10 @@ async fn mapi_over_http_open_associated_message_by_imported_source_key_id() {
                 }
             }),
         }])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(
+            associated_config_id,
+            associated_object_id,
+        )]))),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -8021,7 +10889,7 @@ async fn mapi_over_http_missing_associated_config_identity_is_not_recreated() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_virtual_associated_config_write_preserves_default_class() {
+async fn mapi_over_http_persisted_associated_config_write_preserves_class_on_save() {
     let account = FakeStore::account();
     let config_id = Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000001);
     let config_object_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF8);
@@ -8076,6 +10944,7 @@ async fn mapi_over_http_virtual_associated_config_write_preserves_default_class(
         config_object_id,
     );
     append_rop_set_properties(&mut rops, 2, 1, &property_values);
+    append_rop_save_changes_message(&mut rops, 2, 2);
 
     let mut headers = mapi_headers("Execute");
     headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -8092,6 +10961,7 @@ async fn mapi_over_http_virtual_associated_config_write_preserves_default_class(
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x03, 0x02, 0, 0, 0, 0]));
     assert!(response_rops.contains(&0x0A), "{response_rops:02x?}");
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
 
     let configs = associated_configs.lock().unwrap();
     assert_eq!(configs.len(), 1, "{response_rops:02x?}");
@@ -8126,6 +10996,7 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
     );
     let associated_source_key =
         crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let associated_config_id = Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a7").unwrap();
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -8135,7 +11006,7 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
             "Inbox",
         )])),
         associated_configs: Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
-            id: Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a7").unwrap(),
+            id: associated_config_id,
             account_id: account.account_id,
             folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
             message_class: "IPM.Configuration.MessageListSettings".to_string(),
@@ -8163,6 +11034,10 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
                 }
             }),
         }])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(
+            associated_config_id,
+            associated_object_id,
+        )]))),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -8225,6 +11100,7 @@ async fn mapi_over_http_reads_empty_associated_config_body_stream() {
     );
     let associated_source_key =
         crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let associated_config_id = Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a6").unwrap();
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -8234,7 +11110,7 @@ async fn mapi_over_http_reads_empty_associated_config_body_stream() {
             "Inbox",
         )])),
         associated_configs: Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
-            id: Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a6").unwrap(),
+            id: associated_config_id,
             account_id: account.account_id,
             folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
             message_class: "IPM.Configuration.MessageListSettings".to_string(),
@@ -8254,6 +11130,10 @@ async fn mapi_over_http_reads_empty_associated_config_body_stream() {
                 }
             }),
         }])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(
+            associated_config_id,
+            associated_object_id,
+        )]))),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -9678,8 +12558,9 @@ async fn mapi_over_http_sync_import_delete_ignores_transient_trash_artifact() {
 async fn mapi_over_http_sync_import_deletes_removes_fai_by_outlook_source_key() {
     let account = FakeStore::account();
     let outlook_source_object_id = crate::mapi::identity::mapi_store_id(0xa00a_5207_3216);
+    let config_id = Uuid::parse_str("16161616-1616-4616-8616-161616161616").unwrap();
     let associated_configs = Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
-        id: Uuid::parse_str("16161616-1616-4616-8616-161616161616").unwrap(),
+        id: config_id,
         account_id: account.account_id,
         folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
         message_class: "IPM.Configuration.AccountPrefs".to_string(),
@@ -9699,6 +12580,10 @@ async fn mapi_over_http_sync_import_deletes_removes_fai_by_outlook_source_key() 
             "Inbox",
         )])),
         associated_configs: associated_configs.clone(),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(
+            config_id,
+            outlook_source_object_id,
+        )]))),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -9735,6 +12620,738 @@ async fn mapi_over_http_sync_import_deletes_removes_fai_by_outlook_source_key() 
     assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0]));
     assert_eq!(response_handles.len(), 3);
     assert!(associated_configs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_import_deletes_removes_common_views_wlink_by_source_key_and_reloads() {
+    let account = FakeStore::account();
+    let shortcut_id = Uuid::parse_str("adbbec46-a698-4684-a317-1ea7fd49067d").unwrap();
+    let shortcuts = Arc::new(Mutex::new(vec![
+        crate::store::MapiNavigationShortcutRecord {
+            id: shortcut_id,
+            account_id: account.account_id,
+            subject: "My Contacts".to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            save_stamp: 1_537_819_608,
+            section: 4,
+            ordinal: vec![127],
+            group_header_id: Some(Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap()),
+            group_name: "My Contacts".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
+        },
+    ]));
+    let store = FakeStore {
+        session: Some(account.clone()),
+        navigation_shortcuts: shortcuts.clone(),
+        ..Default::default()
+    };
+    let reservation_start = store
+        .reserve_mapi_local_replica_ids(account.account_id, 0x0100)
+        .await
+        .unwrap();
+    let source_counter = reservation_start + 0x074;
+    let message_id = crate::mapi::identity::mapi_store_id(source_counter);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let identity = store
+        .fetch_or_allocate_mapi_identities(
+            account.account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::NavigationShortcut,
+                canonical_id: shortcut_id,
+                reserved_global_counter: Some(source_counter),
+                source_key: Some(source_key.clone()),
+            }],
+        )
+        .await
+        .unwrap()
+        .remove(0);
+
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_body = response_bytes(response).await;
+    let (_, collector_handles) = response_rops_and_handles_from_execute_body(&response_body);
+
+    // Outlook supplies PidTagSourceKey to RopSynchronizationImportDeletes.
+    // [MS-OXCFXICS] sections 2.2.3.2.4.5 and 3.3.4.3.3.2.3 require the
+    // Common Views FAI object to be resolved and deleted by that identity.
+    let mut delete_rops = Vec::new();
+    append_rop_sync_import_deletes(&mut delete_rops, 0x00, 0x02, &[message_id]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&delete_rops, &[collector_handles[2]])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response_rops_from_execute_response(response).await,
+        [0x74, 0x00, 0, 0, 0, 0],
+        "[MS-OXCROPS] section 2.2.13.5.2 has no PartialCompletion field"
+    );
+    assert!(shortcuts.lock().unwrap().is_empty());
+
+    let mut checkpoint_rops = vec![
+        0x82, 0x00, 0x00, 0x01, // RopSynchronizationGetTransferState.
+        0x4E, 0x00, 0x01, // RopFastTransferSourceGetBuffer.
+    ];
+    checkpoint_rops.extend_from_slice(&4096u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &checkpoint_rops,
+                &[collector_handles[2], u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let checkpoint_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &checkpoint_response,
+        &[0x82, 0x01, 0, 0, 0, 0]
+    ));
+    assert_eq!(mapi_fast_transfer_chunks(&checkpoint_response).len(), 1);
+
+    let reloaded = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    assert!(reloaded
+        .navigation_shortcut_message_for_id(message_id)
+        .is_none());
+
+    let mut import_values = Vec::new();
+    append_mapi_binary_property(&mut import_values, PID_TAG_SOURCE_KEY, &source_key);
+    append_mapi_i64_property(
+        &mut import_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        identity.last_modification_time as i64,
+    );
+    append_mapi_binary_property(&mut import_values, PID_TAG_CHANGE_KEY, &identity.change_key);
+    append_mapi_binary_property(
+        &mut import_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &identity.predecessor_change_list,
+    );
+    let mut import_rops = vec![
+        0x72, 0x00, 0x00, 0x01, 0x10, // ImportMessageChange, associated FAI.
+    ];
+    import_rops.extend_from_slice(&4u16.to_le_bytes());
+    import_rops.extend_from_slice(&import_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&import_rops, &[collector_handles[2], u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_body = response_bytes(response).await;
+    let (import_response, import_handles) =
+        response_rops_and_handles_from_execute_body(&response_body);
+    assert!(contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]));
+
+    let mut wlink_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut wlink_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Microsoft.WunderBar.Link",
+    );
+    append_mapi_utf16_property(
+        &mut wlink_values,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "My Contacts",
+    );
+    append_mapi_i32_property(&mut wlink_values, PID_TAG_WLINK_TYPE, 4);
+    append_mapi_i32_property(&mut wlink_values, 0x6847_0003, 1_537_819_608);
+    append_mapi_i32_property(&mut wlink_values, 0x684A_0003, 0);
+    append_mapi_binary_property(&mut wlink_values, PID_TAG_WLINK_ORDINAL, &[0x7F]);
+    append_mapi_i32_property(&mut wlink_values, 0x6852_0003, 4); // PidTagWlinkSection.
+    append_mapi_binary_property(
+        &mut wlink_values,
+        0x6842_0102, // PidTagWlinkGroupHeaderId.
+        Uuid::parse_str("b7f00600-0000-0000-c000-000000000046")
+            .unwrap()
+            .as_bytes(),
+    );
+    append_mapi_binary_property(
+        &mut wlink_values,
+        0x684F_0102, // PidTagWlinkFolderType, CLSID_ContactFolder.
+        &[
+            0x01, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ],
+    );
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 1, 9, &wlink_values);
+    append_rop_save_changes_message_with_flags(&mut save_rops, 0, 1, 0x08);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &import_handles)),
+        )
+        .await
+        .unwrap();
+    let save_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &save_response,
+        &[0x0C, 0x00, 0x0A, 0x01, 0x04, 0x80]
+    ), "[MS-OXCFXICS] section 3.3.4.3.3.2.2.1 and [MS-OXCDATA] section 2.4 permit ecObjectDeleted on RopSaveChangesMessage and direct the client to ignore this warning: {save_response:02x?}");
+    assert!(shortcuts.lock().unwrap().is_empty());
+    assert_eq!(
+        store
+            .deleted_navigation_shortcut_ids
+            .lock()
+            .unwrap()
+            .as_slice(),
+        &[shortcut_id]
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_import_deletes_retry_ignores_online_unreserved_common_views_wlink(
+) -> anyhow::Result<()> {
+    // [MS-OXCFXICS] section 3.3.5.2.2 requires the server to allocate the
+    // identity of an online-created Message. Unlike an imported local MID,
+    // that identity is not backed by a RopGetLocalReplicaIds reservation.
+    // Section 3.2.5.9.4.5 requires a retry after deletion to be ignored.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let committed = storage
+        .commit_mapi_navigation_shortcut_create(
+            crate::store::CommitMapiNavigationShortcutCreateInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: Some(Uuid::new_v4()),
+                    account_id: fixture.account_id,
+                    subject: "Online WLink delete retry".to_string(),
+                    target_folder_id: Some(crate::mapi::identity::CONTACTS_FOLDER_ID),
+                    shortcut_type: 0,
+                    flags: 0x0010_0000,
+                    save_stamp: 1_537_819_608,
+                    section: 4,
+                    ordinal: vec![127],
+                    group_header_id: Some(Uuid::parse_str("b7f00600-0000-0000-c000-000000000046")?),
+                    group_name: "My Contacts".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+            },
+        )
+        .await?;
+    let source_counter =
+        crate::mapi::identity::global_counter_from_store_id(committed.identity.object_id)
+            .ok_or_else(|| anyhow::anyhow!("online WLink identity is not a store ID"))?;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM mapi_local_replica_id_ranges
+            WHERE account_id = $1
+              AND replica_guid = $2
+              AND first_global_counter <= $3
+              AND end_global_counter_exclusive > $3
+            "#,
+        )
+        .bind(fixture.account_id)
+        .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+        .bind(source_counter as i64)
+        .fetch_one(storage.pool())
+        .await?,
+        0,
+        "an online-created WLink must not consume a local-ID reservation"
+    );
+
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let mut collector_rops = Vec::new();
+    append_rop_open_folder(
+        &mut collector_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    collector_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // OpenCollector, contents.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let response_body = response_bytes(response).await;
+    let (_, collector_handles) = response_rops_and_handles_from_execute_body(&response_body);
+
+    let mut delete_rops = Vec::new();
+    append_rop_sync_import_deletes(
+        &mut delete_rops,
+        0x00,
+        0x02,
+        &[committed.identity.object_id],
+    );
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&delete_rops, &[collector_handles[2]])),
+        )
+        .await?;
+    assert_eq!(
+        response_rops_from_execute_response(response).await,
+        [0x74, 0x00, 0, 0, 0, 0]
+    );
+
+    let state_after_delete = sqlx::query_as::<_, (i64, i64, i64, i64)>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM mapi_navigation_shortcuts
+             WHERE account_id = $1 AND id = $2),
+            (SELECT COUNT(*) FROM mapi_object_identities
+             WHERE account_id = $1
+               AND object_kind = 'navigation_shortcut'
+               AND canonical_id = $2
+               AND source_key = $3
+               AND deleted_at IS NOT NULL),
+            (SELECT COUNT(*) FROM mail_change_log
+             WHERE account_id = $1
+               AND object_kind = 'navigation_shortcut'
+               AND object_id = $2),
+            (SELECT COUNT(*) FROM mapi_local_replica_deleted_ranges
+             WHERE account_id = $1
+               AND folder_id = $4
+               AND min_global_counter <= $5
+               AND max_global_counter >= $5)
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(committed.shortcut.id)
+    .bind(&committed.identity.source_key)
+    .bind(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID as i64)
+    .bind(source_counter as i64)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(state_after_delete, (0, 1, 2, 0));
+
+    // Simulate Outlook retrying after losing the first successful response.
+    // The refreshed snapshot no longer contains the WLink content, so this
+    // exercises the unknown-content tombstone path with the durable identity.
+    renew_mapi_request_id(&mut execute_headers);
+    let retry_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&delete_rops, &[collector_handles[2]])),
+        )
+        .await?;
+    assert_eq!(
+        response_rops_from_execute_response(retry_response).await,
+        [0x74, 0x00, 0, 0, 0, 0],
+        "an already-deleted online WLink must be an idempotent success"
+    );
+    let state_after_retry = sqlx::query_as::<_, (i64, i64, i64, i64)>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM mapi_navigation_shortcuts
+             WHERE account_id = $1 AND id = $2),
+            (SELECT COUNT(*) FROM mapi_object_identities
+             WHERE account_id = $1
+               AND object_kind = 'navigation_shortcut'
+               AND canonical_id = $2
+               AND source_key = $3
+               AND deleted_at IS NOT NULL),
+            (SELECT COUNT(*) FROM mail_change_log
+             WHERE account_id = $1
+               AND object_kind = 'navigation_shortcut'
+               AND object_id = $2),
+            (SELECT COUNT(*) FROM mapi_local_replica_deleted_ranges
+             WHERE account_id = $1
+               AND folder_id = $4
+               AND min_global_counter <= $5
+               AND max_global_counter >= $5)
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(committed.shortcut.id)
+    .bind(&committed.identity.source_key)
+    .bind(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID as i64)
+    .bind(source_counter as i64)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(state_after_retry, state_after_delete);
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_over_http_import_deletes_tombstones_reserved_unknown_common_views_wlink(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let reservation_start = storage
+        .reserve_mapi_local_replica_ids(fixture.account_id, 0x0100)
+        .await?;
+    let source_counter = reservation_start + 0x33;
+    let message_id = crate::mapi::identity::mapi_store_id(source_counter);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // OpenCollector, contents.
+    ]);
+    append_rop_sync_import_deletes(&mut rops, 0x02, 0x02, &[message_id]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0]));
+
+    // [MS-OXCFXICS] section 3.2.5.9.4.5 recommends retaining a deletion
+    // for an object that never existed so a later upload cannot resurrect it.
+    let tombstone = sqlx::query_as::<_, (Uuid, i64, i64, Vec<u8>, bool)>(
+        r#"
+        SELECT canonical_id, mapi_object_id, mapi_change_number,
+               source_key, deleted_at IS NOT NULL
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'navigation_shortcut'
+          AND source_key = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(&source_key)
+    .fetch_optional(storage.pool())
+    .await?;
+    let (canonical_id, persisted_object_id, persisted_change_number, persisted_source_key, deleted) =
+        tombstone
+            .ok_or_else(|| anyhow::anyhow!("unknown reserved WLink deletion was not tombstoned"))?;
+    assert_eq!(persisted_object_id as u64, message_id);
+    assert_ne!(persisted_change_number as u64, source_counter);
+    assert_eq!(persisted_source_key, source_key);
+    assert!(deleted);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM mapi_local_replica_deleted_ranges
+            WHERE account_id = $1
+              AND folder_id = $2
+              AND replica_guid = $3
+              AND min_global_counter = $4
+              AND max_global_counter = $4
+            "#,
+        )
+        .bind(fixture.account_id)
+        .bind(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID as i64)
+        .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+        .bind(source_counter as i64)
+        .fetch_one(storage.pool())
+        .await?,
+        1,
+        "the unknown reserved SourceKey must enter the Common Views deleted-item list"
+    );
+    let protocol_parallel_writes = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM mapi_navigation_shortcuts
+             WHERE account_id = $1 AND id = $2)
+          + (SELECT COUNT(*) FROM mail_change_log
+             WHERE account_id = $1 AND object_kind = 'navigation_shortcut'
+               AND object_id = $2)
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(canonical_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(protocol_parallel_writes, 0);
+
+    let change_key = vec![0xA7; 20];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+    let replay = storage
+        .commit_mapi_navigation_shortcut_import(
+            crate::store::CommitMapiNavigationShortcutImportInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: None,
+                    account_id: fixture.account_id,
+                    subject: "Must stay deleted".to_string(),
+                    target_folder_id: None,
+                    shortcut_type: 4,
+                    flags: 0,
+                    save_stamp: 1_537_819_608,
+                    section: 4,
+                    ordinal: vec![127],
+                    group_header_id: Some(Uuid::parse_str("b7f00600-0000-0000-c000-000000000046")?),
+                    group_name: "My Contacts".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+                identity: crate::store::MapiFaiImportedIdentity {
+                    source_key,
+                    change_key,
+                    predecessor_change_list,
+                    last_modification_time: test_filetime("2026-07-19", "14:00") as u64,
+                },
+                fail_on_conflict: false,
+            },
+        )
+        .await;
+    assert!(replay
+        .as_ref()
+        .err()
+        .is_some_and(|error| { error.is::<crate::store::MapiFaiImportObjectDeleted>() }));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                (SELECT COUNT(*) FROM mapi_navigation_shortcuts
+                 WHERE account_id = $1 AND id = $2)
+              + (SELECT COUNT(*) FROM mail_change_log
+                 WHERE account_id = $1 AND object_kind = 'navigation_shortcut'
+                   AND object_id = $2)
+            "#,
+        )
+        .bind(fixture.account_id)
+        .bind(canonical_id)
+        .fetch_one(storage.pool())
+        .await?,
+        0
+    );
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_over_http_import_deletes_prevalidates_common_views_batch_in_postgresql(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let committed = storage
+        .commit_mapi_navigation_shortcut_create(
+            crate::store::CommitMapiNavigationShortcutCreateInput {
+                shortcut: crate::store::UpsertMapiNavigationShortcutInput {
+                    id: Some(Uuid::parse_str("83a302f4-5b88-4687-96fe-4bef3d3cb5d2")?),
+                    account_id: fixture.account_id,
+                    subject: "Atomic ImportDeletes WLink".to_string(),
+                    target_folder_id: Some(crate::mapi::identity::CONTACTS_FOLDER_ID),
+                    shortcut_type: 0,
+                    flags: 0x0010_0000,
+                    save_stamp: 1_537_819_608,
+                    section: 4,
+                    ordinal: vec![127],
+                    group_header_id: Some(Uuid::parse_str("b7f00600-0000-0000-c000-000000000046")?),
+                    group_name: "My Contacts".to_string(),
+                    client_properties:
+                        crate::store::MapiNavigationShortcutClientProperties::default(),
+                },
+            },
+        )
+        .await?;
+    let unreserved_counter = crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER - 0x100;
+    let unreserved_object_id = crate::mapi::identity::mapi_store_id(unreserved_counter);
+    let unreserved_source_key =
+        crate::mapi::identity::source_key_for_object_id(unreserved_object_id);
+    let unreserved_precondition = sqlx::query_as::<_, (i64, i64)>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM mapi_local_replica_id_ranges
+             WHERE account_id = $1
+               AND replica_guid = $2
+               AND first_global_counter <= $3
+               AND end_global_counter_exclusive > $3),
+            (SELECT COUNT(*) FROM mapi_object_identities
+             WHERE account_id = $1
+               AND (mapi_object_id = $4 OR source_key = $5))
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+    .bind(unreserved_counter as i64)
+    .bind(unreserved_object_id as i64)
+    .bind(&unreserved_source_key)
+    .fetch_one(storage.pool())
+    .await?;
+
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    let logon_succeeded = logon_response.status() == StatusCode::OK;
+    renew_mapi_request_id(&mut execute_headers);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // OpenCollector, contents.
+    ]);
+    append_rop_sync_import_deletes(
+        &mut rops,
+        0x02,
+        0x02,
+        &[committed.identity.object_id, unreserved_object_id],
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    let batch_failed = contains_bytes(&response_rops, &[0x74, 0x02, 0x05, 0x40, 0, 0x80]);
+    let state_after = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM mapi_navigation_shortcuts
+             WHERE account_id = $1 AND id = $2),
+            (SELECT COUNT(*) FROM mapi_object_identities
+             WHERE account_id = $1
+               AND object_kind = 'navigation_shortcut'
+               AND canonical_id = $2
+               AND deleted_at IS NULL),
+            (SELECT COUNT(*) FROM mail_change_log
+             WHERE account_id = $1
+               AND object_kind = 'navigation_shortcut'
+               AND object_id = $2
+               AND change_kind = 'destroyed'),
+            (SELECT COUNT(*) FROM mapi_object_identities
+             WHERE account_id = $1
+               AND (mapi_object_id = $3 OR source_key = $4)),
+            (SELECT COUNT(*) FROM mapi_local_replica_deleted_ranges
+             WHERE account_id = $1
+               AND folder_id = $5
+               AND min_global_counter <= $6
+               AND max_global_counter >= $6)
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(committed.shortcut.id)
+    .bind(unreserved_object_id as i64)
+    .bind(&unreserved_source_key)
+    .bind(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID as i64)
+    .bind(unreserved_counter as i64)
+    .fetch_one(storage.pool())
+    .await?;
+    fixture.cleanup().await?;
+
+    assert!(logon_succeeded);
+    assert_eq!(unreserved_precondition, (0, 0));
+    assert!(batch_failed, "{response_rops:02x?}");
+    assert_eq!(
+        state_after,
+        (1, 1, 0, 0, 0),
+        "[MS-OXCFXICS] section 3.2.5.9.4.5 recommends rejecting a predictable failure before any deletion"
+    );
+    Ok(())
 }
 
 #[tokio::test]
@@ -9781,6 +13398,130 @@ async fn mapi_over_http_sync_import_read_state_ignores_transient_associated_arti
 
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x80, 0x02, 0, 0, 0, 0, 0]));
+}
+
+#[tokio::test]
+async fn mapi_over_http_import_deletes_rejects_unknown_flags_before_mutation() {
+    let message_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaad0";
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            &inbox_id.to_string(),
+            "inbox",
+            "Unknown ImportDeleteFlags",
+        )])),
+        ..Default::default()
+    };
+    let deleted_emails = store.deleted_emails.clone();
+    let canonical_emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    append_rop_sync_import_deletes(&mut rops, 0x02, 0x82, &[test_mapi_message_id(message_id)]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x74, 0x02, 0x05, 0x40, 0, 0x80]
+    ));
+    assert!(
+        deleted_emails.lock().unwrap().is_empty(),
+        "[MS-OXCFXICS] section 3.2.5.9.4.5 recommends rejecting unknown flag bits before mutation"
+    );
+    assert_eq!(canonical_emails.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn mapi_over_http_import_deletes_deduplicates_source_keys_before_mutation() {
+    let message_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaad1";
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            &inbox_id.to_string(),
+            "inbox",
+            "Duplicate ImportDeletes SourceKey",
+        )])),
+        ..Default::default()
+    };
+    let deleted_emails = store.deleted_emails.clone();
+    let canonical_emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let message_object_id = test_mapi_message_id(message_id);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+    ]);
+    append_rop_sync_import_deletes(
+        &mut rops,
+        0x02,
+        0x02,
+        &[message_object_id, message_object_id],
+    );
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0]));
+    assert_eq!(
+        deleted_emails.lock().unwrap().as_slice(),
+        &[Uuid::parse_str(message_id).unwrap()],
+        "[MS-OXCFXICS] section 3.2.5.9.4.5 makes a repeated deletion an idempotent no-op"
+    );
+    assert!(canonical_emails.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -10500,6 +14241,86 @@ async fn mapi_over_http_microsoft_oxcfxics_4_1_1_hierarchy_upload_returns_transf
     assert_eq!(created.len(), 1);
     assert_eq!(created[0].name, "MS-OXCFXICS 4.1.1 Folder");
     assert_eq!(created[0].parent_id, Some(parent_id));
+}
+
+#[tokio::test]
+async fn mapi_over_http_import_deletes_prevalidates_hierarchy_batch_before_mutation() {
+    let custom_folder_id = Uuid::parse_str("88888888-8888-4888-8888-8888888888d2").unwrap();
+    let custom_folder_object_id = test_mapi_uuid_id(&custom_folder_id);
+    crate::mapi::identity::remember_mapi_identity(custom_folder_id, custom_folder_object_id);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox"),
+            FakeStore::mailbox(
+                &custom_folder_id.to_string(),
+                "custom",
+                "Valid batch folder",
+            ),
+        ])),
+        ..Default::default()
+    };
+    store
+        .mapi_identities
+        .lock()
+        .unwrap()
+        .insert(custom_folder_id, custom_folder_object_id);
+    let destroyed_mailboxes = store.destroyed_mailboxes.clone();
+    let canonical_mailboxes = store.mailboxes.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x00, // RopSynchronizationOpenCollector, hierarchy.
+    ]);
+    append_rop_sync_import_deletes(
+        &mut rops,
+        0x02,
+        0x03,
+        &[
+            custom_folder_object_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        ],
+    );
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x74, 0x02, 0x05, 0x40, 0, 0x80]
+    ));
+    assert!(
+        destroyed_mailboxes.lock().unwrap().is_empty(),
+        "[MS-OXCFXICS] section 3.2.5.9.4.5 requires predictable batch failure before mutation"
+    );
+    assert!(canonical_mailboxes
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|mailbox| mailbox.id == custom_folder_id));
 }
 
 #[tokio::test]

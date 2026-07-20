@@ -1,12 +1,25 @@
 use lpe_storage::DelegateFreeBusyMessageObject;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::{
-    MapiAssociatedConfigMessage, MapiCommonViewNamedViewMessage, MapiDelegateFreeBusyMessage,
-    MapiNavigationShortcutMessage,
-};
+use super::{MapiAssociatedConfigMessage, MapiDelegateFreeBusyMessage};
 use crate::store::{MapiAssociatedConfigRecord, UpsertMapiAssociatedConfigInput};
+
+pub(crate) fn is_associated_config_identity_property_tag(property_tag: u32) -> bool {
+    matches!(
+        property_tag >> 16,
+        0x0FF6 // PidTagInstanceKey
+            | 0x0FF9 // PidTagRecordKey
+            | 0x3008 // PidTagLastModificationTime
+            | 0x300B // PidTagSearchKey
+            | 0x65E0 // PidTagSourceKey
+            | 0x65E2 // PidTagChangeKey
+            | 0x65E3 // PidTagPredecessorChangeList
+            | 0x6709 // PidTagLocalCommitTime
+            | 0x6748 // PidTagInstId
+            | 0x674A // PidTagMid
+            | 0x67A4 // PidTagChangeNumber
+    )
+}
 
 pub(super) const OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS: &str = "IPM.Configuration.AccountPrefs";
 pub(super) const OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID: u64 =
@@ -43,6 +56,7 @@ pub(crate) const OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID: u64 =
 pub(crate) const OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE9);
 const OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_COUNTER_BASE: u64 = 0x7FFF_FFFE_0000;
+#[cfg(test)]
 pub(crate) const OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE8);
 pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID: u64 =
@@ -80,11 +94,6 @@ pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_GROUP_HEADER_ID: u64 =
 pub(super) const OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_NAVIGATION_SHORTCUT_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFD3);
 pub(super) const OUTLOOK_MAIL_FAVORITES_GROUP_NAME: &str = "Favorites";
-const OUTLOOK_CALENDAR_GROUP_NAME: &str = "My Calendars";
-const OUTLOOK_CONTACTS_GROUP_NAME: &str = "My Contacts";
-const OUTLOOK_TASKS_GROUP_NAME: &str = "My Tasks";
-const OUTLOOK_NOTES_GROUP_NAME: &str = "My Notes";
-const OUTLOOK_JOURNAL_GROUP_NAME: &str = "My Journal";
 pub(super) const OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS: &str = "IPM.Sharing.Configuration";
 pub(super) const OUTLOOK_INBOX_SHARING_CONFIGURATION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF5);
@@ -95,27 +104,6 @@ pub(super) const OUTLOOK_INBOX_AGGREGATION_CLASS: &str = "IPM.Aggregation";
 pub(super) const OUTLOOK_INBOX_AGGREGATION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE3);
 pub(crate) const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS: &str = "IPM.Microsoft.CustomAction";
-pub(super) const OUTLOOK_CONTACT_SYNC_CONFIG_CLASS: &str = "IPM.Microsoft.OSC.ContactSync";
-pub(super) const OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF1);
-pub(super) const OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF0);
-pub(super) const OUTLOOK_QUICK_CONTACTS_OSC_CONTACT_SYNC_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEF);
-pub(super) const OUTLOOK_IM_CONTACT_LIST_OSC_CONTACT_SYNC_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEE);
-pub(super) const OUTLOOK_DYNAMIC_CONTACT_SYNC_CONFIG_COUNTER_BASE: u64 = 0x7FFF_FF00_0000;
-pub(super) const OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS: &str =
-    "IPM.Microsoft.ContactLink.TimeStamp";
-pub(super) const OUTLOOK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEC);
-pub(super) const OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEB);
-pub(super) const OUTLOOK_QUICK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEA);
-pub(super) const OUTLOOK_IM_CONTACT_LIST_CONTACT_LINK_TIMESTAMP_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE2);
-pub(super) const OUTLOOK_DYNAMIC_CONTACT_LINK_TIMESTAMP_COUNTER_BASE: u64 = 0x7FFF_FE00_0000;
 pub(super) const OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
 pub(super) const OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID: u64 =
@@ -152,46 +140,6 @@ pub(crate) fn is_outlook_inbox_virtual_only_associated_config_id(item_id: u64) -
     )
 }
 
-pub(crate) fn is_outlook_contact_default_associated_config_id(item_id: u64) -> bool {
-    if matches!(
-        item_id,
-        OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID
-            | OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID
-            | OUTLOOK_QUICK_CONTACTS_OSC_CONTACT_SYNC_ID
-            | OUTLOOK_IM_CONTACT_LIST_OSC_CONTACT_SYNC_ID
-            | OUTLOOK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID
-            | OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID
-            | OUTLOOK_QUICK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID
-            | OUTLOOK_IM_CONTACT_LIST_CONTACT_LINK_TIMESTAMP_ID
-    ) {
-        return true;
-    }
-    crate::mapi::identity::global_counter_from_store_id(item_id).is_some_and(|counter| {
-        let folder_counter = counter & 0x00FF_FFFF;
-        matches!(
-            counter & !0x00FF_FFFF,
-            OUTLOOK_DYNAMIC_CONTACT_SYNC_CONFIG_COUNTER_BASE
-                | OUTLOOK_DYNAMIC_CONTACT_LINK_TIMESTAMP_COUNTER_BASE
-        ) && folder_counter != 0
-            && folder_counter < 0x00FF_FF00
-    })
-}
-
-pub(crate) fn is_outlook_common_views_default_named_view_id(item_id: u64) -> bool {
-    matches!(
-        item_id,
-        OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID | OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID
-    )
-}
-
-pub(crate) fn is_outlook_default_folder_named_view_id(item_id: u64) -> bool {
-    item_id == OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID
-        || crate::mapi::identity::global_counter_from_store_id(item_id).is_some_and(|counter| {
-            counter >= OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_COUNTER_BASE
-                && counter < OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_COUNTER_BASE + 0x1_0000
-        })
-}
-
 pub(crate) fn outlook_default_folder_named_view_id(folder_id: u64) -> u64 {
     if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
         return OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID;
@@ -201,15 +149,6 @@ pub(crate) fn outlook_default_folder_named_view_id(folder_id: u64) -> u64 {
     crate::mapi::identity::mapi_store_id(
         OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_COUNTER_BASE | (folder_counter & 0xffff),
     )
-}
-
-pub(crate) fn outlook_default_folder_named_view_canonical_id(folder_id: u64) -> Uuid {
-    if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
-        return Uuid::from_u128(0x6d617069_6664_4e76_8000_000000000001);
-    }
-    let folder_counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
-        .unwrap_or(folder_id & 0xffff);
-    Uuid::from_u128(0x6d617069_6664_4e76_8000_000000000000 | u128::from(folder_counter & 0xffff))
 }
 
 pub(crate) fn outlook_default_folder_named_view_name(folder_id: u64) -> &'static str {
@@ -419,16 +358,6 @@ pub(crate) fn modeled_virtual_associated_config_message_for_canonical_id(
 ) -> Option<MapiAssociatedConfigMessage> {
     outlook_inbox_associated_config_sync_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
         .into_iter()
-        .chain(
-            [
-                crate::mapi::identity::CONTACTS_FOLDER_ID,
-                crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
-                crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
-                crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
-            ]
-            .into_iter()
-            .flat_map(outlook_contact_associated_config_defaults),
-        )
         .find(|message| message.canonical_id == canonical_id)
 }
 
@@ -509,18 +438,6 @@ pub(super) fn is_empty_synthetic_inbox_associated_config(
         })
 }
 
-pub(super) fn is_empty_outlook_inbox_named_view_placeholder(
-    config: &MapiAssociatedConfigRecord,
-) -> bool {
-    config.folder_id == crate::mapi::identity::INBOX_FOLDER_ID
-        && config.message_class == OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-        && config.subject == "Compact"
-        && config
-            .properties_json
-            .as_object()
-            .is_some_and(|object| object.is_empty())
-}
-
 pub(super) fn is_empty_outlook_rule_organizer_placeholder(
     config: &MapiAssociatedConfigRecord,
 ) -> bool {
@@ -572,373 +489,6 @@ pub(crate) fn is_outlook_configuration_message_class_name(
 
 pub(crate) fn is_outlook_umolk_user_options_message_class(message_class: &str) -> bool {
     message_class.eq_ignore_ascii_case(OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS)
-}
-
-pub(super) fn outlook_common_views_default_named_views() -> Vec<MapiCommonViewNamedViewMessage> {
-    vec![
-        MapiCommonViewNamedViewMessage {
-            id: OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_6376_4e76_8000_000000000001),
-            name: "Compact".to_string(),
-            view_flags: 14_745_605,
-            view_type: 8,
-        },
-        MapiCommonViewNamedViewMessage {
-            id: OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_6376_4e76_8000_000000000002),
-            name: "Sent To".to_string(),
-            view_flags: 15_269_893,
-            view_type: 8,
-        },
-    ]
-}
-
-pub(super) fn outlook_common_views_default_navigation_shortcuts(
-) -> Vec<MapiNavigationShortcutMessage> {
-    let outlook_group_id =
-        Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").expect("valid Outlook GUID");
-    vec![
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_MAIL_GROUP_HEADER_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: crate::mapi::properties::default_wlink_group_uuid(),
-            subject: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
-            target_folder_id: None,
-            shortcut_type: 4,
-            flags: 0,
-            save_stamp: 0,
-            section: 1,
-            ordinal: 0,
-            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-            group_name: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_NAVIGATION_SHORTCUT_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001),
-            subject: "Inbox".to_string(),
-            target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
-            shortcut_type: 0,
-            flags: 0,
-            save_stamp: 0,
-            section: 1,
-            ordinal: 127,
-            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-            group_name: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_SENT_NAVIGATION_SHORTCUT_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_536e_8000_000000000001),
-            subject: "Sent".to_string(),
-            target_folder_id: Some(crate::mapi::identity::SENT_FOLDER_ID),
-            shortcut_type: 0,
-            flags: 0,
-            save_stamp: 0,
-            section: 1,
-            ordinal: 128,
-            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-            group_name: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_TRASH_NAVIGATION_SHORTCUT_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_5472_8000_000000000001),
-            subject: "Trash".to_string(),
-            target_folder_id: Some(crate::mapi::identity::TRASH_FOLDER_ID),
-            shortcut_type: 0,
-            flags: 0,
-            save_stamp: 0,
-            section: 1,
-            ordinal: 129,
-            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-            group_name: OUTLOOK_MAIL_FAVORITES_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_GROUP_HEADER_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_4367_8000_000000000001),
-            subject: OUTLOOK_CALENDAR_GROUP_NAME.to_string(),
-            target_folder_id: None,
-            shortcut_type: 4,
-            flags: 0,
-            save_stamp: 0,
-            section: 3,
-            ordinal: 127,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_CALENDAR_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_CALENDAR_NAVIGATION_SHORTCUT_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_4361_8000_000000000001),
-            subject: "Calendar".to_string(),
-            target_folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
-            shortcut_type: 0,
-            flags: 1_048_576,
-            save_stamp: 0,
-            section: 3,
-            ordinal: 127,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_CALENDAR_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_GROUP_HEADER_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_4367_8000_000000000002),
-            subject: OUTLOOK_CONTACTS_GROUP_NAME.to_string(),
-            target_folder_id: None,
-            shortcut_type: 4,
-            flags: 0,
-            save_stamp: 0,
-            section: 4,
-            ordinal: 127,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_CONTACTS_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_SUGGESTED_CONTACTS_NAVIGATION_SHORTCUT_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_436f_8000_000000000001),
-            subject: "Suggested Contacts".to_string(),
-            target_folder_id: Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID),
-            shortcut_type: 0,
-            flags: 1_048_576,
-            save_stamp: 0,
-            section: 4,
-            ordinal: 15,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_CONTACTS_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_CONTACTS_NAVIGATION_SHORTCUT_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_436f_8000_000000000002),
-            subject: "Contacts".to_string(),
-            target_folder_id: Some(crate::mapi::identity::CONTACTS_FOLDER_ID),
-            shortcut_type: 0,
-            flags: 1_048_576,
-            save_stamp: 0,
-            section: 4,
-            ordinal: 31,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_CONTACTS_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_GROUP_HEADER_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_5467_8000_000000000001),
-            subject: OUTLOOK_TASKS_GROUP_NAME.to_string(),
-            target_folder_id: None,
-            shortcut_type: 4,
-            flags: 0,
-            save_stamp: 0,
-            section: 5,
-            ordinal: 127,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_TASKS_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_TASKS_NAVIGATION_SHORTCUT_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_5461_8000_000000000001),
-            subject: "Tasks".to_string(),
-            target_folder_id: Some(crate::mapi::identity::TASKS_FOLDER_ID),
-            shortcut_type: 0,
-            flags: 1_048_576,
-            save_stamp: 0,
-            section: 5,
-            ordinal: 127,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_TASKS_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_GROUP_HEADER_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_4e67_8000_000000000001),
-            subject: OUTLOOK_NOTES_GROUP_NAME.to_string(),
-            target_folder_id: None,
-            shortcut_type: 4,
-            flags: 0,
-            save_stamp: 0,
-            section: 6,
-            ordinal: 127,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_NOTES_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_NOTES_NAVIGATION_SHORTCUT_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_4e6f_8000_000000000001),
-            subject: "Notes".to_string(),
-            target_folder_id: Some(crate::mapi::identity::NOTES_FOLDER_ID),
-            shortcut_type: 0,
-            flags: 1_048_576,
-            save_stamp: 0,
-            section: 6,
-            ordinal: 127,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_NOTES_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_GROUP_HEADER_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_4a67_8000_000000000001),
-            subject: OUTLOOK_JOURNAL_GROUP_NAME.to_string(),
-            target_folder_id: None,
-            shortcut_type: 4,
-            flags: 0,
-            save_stamp: 0,
-            section: 7,
-            ordinal: 127,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_JOURNAL_GROUP_NAME.to_string(),
-        },
-        MapiNavigationShortcutMessage {
-            id: OUTLOOK_COMMON_VIEWS_DEFAULT_JOURNAL_NAVIGATION_SHORTCUT_ID,
-            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-            canonical_id: Uuid::from_u128(0x6d617069_776c_4a6f_8000_000000000001),
-            subject: "Journal".to_string(),
-            target_folder_id: Some(crate::mapi::identity::JOURNAL_FOLDER_ID),
-            shortcut_type: 0,
-            flags: 1_048_576,
-            save_stamp: 0,
-            section: 7,
-            ordinal: 127,
-            group_header_id: Some(outlook_group_id),
-            group_name: OUTLOOK_JOURNAL_GROUP_NAME.to_string(),
-        },
-    ]
-}
-
-pub(super) fn outlook_contact_sync_associated_config_default(
-    folder_id: u64,
-) -> Option<MapiAssociatedConfigMessage> {
-    let (id, canonical_id) = match folder_id {
-        crate::mapi::identity::CONTACTS_FOLDER_ID => (
-            OUTLOOK_CONTACTS_OSC_CONTACT_SYNC_ID,
-            Uuid::from_u128(0x6d617069_6f73_6343_8000_000000000001),
-        ),
-        crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID => (
-            OUTLOOK_SUGGESTED_CONTACTS_OSC_CONTACT_SYNC_ID,
-            Uuid::from_u128(0x6d617069_6f73_6343_8000_000000000002),
-        ),
-        crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID => (
-            OUTLOOK_QUICK_CONTACTS_OSC_CONTACT_SYNC_ID,
-            Uuid::from_u128(0x6d617069_6f73_6343_8000_000000000003),
-        ),
-        crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID => (
-            OUTLOOK_IM_CONTACT_LIST_OSC_CONTACT_SYNC_ID,
-            Uuid::from_u128(0x6d617069_6f73_6343_8000_000000000004),
-        ),
-        _ => (
-            outlook_dynamic_contact_sync_config_id(folder_id)?,
-            outlook_dynamic_contact_sync_canonical_id(folder_id),
-        ),
-    };
-    Some(MapiAssociatedConfigMessage {
-        id,
-        folder_id,
-        canonical_id,
-        message_class: OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string(),
-        subject: OUTLOOK_CONTACT_SYNC_CONFIG_CLASS.to_string(),
-        properties_json: serde_json::json!({}),
-    })
-}
-
-pub(super) fn outlook_contact_link_timestamp_associated_config_default(
-    folder_id: u64,
-) -> Option<MapiAssociatedConfigMessage> {
-    let (id, canonical_id) = match folder_id {
-        crate::mapi::identity::CONTACTS_FOLDER_ID => (
-            OUTLOOK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
-            Uuid::from_u128(0x6d617069_636c_7453_8000_000000000001),
-        ),
-        crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID => (
-            OUTLOOK_SUGGESTED_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
-            Uuid::from_u128(0x6d617069_636c_7453_8000_000000000002),
-        ),
-        crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID => (
-            OUTLOOK_QUICK_CONTACTS_CONTACT_LINK_TIMESTAMP_ID,
-            Uuid::from_u128(0x6d617069_636c_7453_8000_000000000003),
-        ),
-        crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID => (
-            OUTLOOK_IM_CONTACT_LIST_CONTACT_LINK_TIMESTAMP_ID,
-            Uuid::from_u128(0x6d617069_636c_7453_8000_000000000004),
-        ),
-        _ => (
-            outlook_dynamic_contact_link_timestamp_config_id(folder_id)?,
-            outlook_dynamic_contact_link_timestamp_canonical_id(folder_id),
-        ),
-    };
-    Some(MapiAssociatedConfigMessage {
-        id,
-        folder_id,
-        canonical_id,
-        message_class: OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string(),
-        subject: OUTLOOK_CONTACT_LINK_TIMESTAMP_CONFIG_CLASS.to_string(),
-        properties_json: serde_json::json!({}),
-    })
-}
-
-pub(super) fn outlook_contact_associated_config_defaults(
-    folder_id: u64,
-) -> Vec<MapiAssociatedConfigMessage> {
-    let contact_sync = (folder_id != crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID)
-        .then(|| outlook_contact_sync_associated_config_default(folder_id))
-        .flatten();
-    contact_sync
-        .into_iter()
-        .chain(outlook_contact_link_timestamp_associated_config_default(
-            folder_id,
-        ))
-        .collect()
-}
-
-pub(super) fn outlook_dynamic_contact_sync_config_id(folder_id: u64) -> Option<u64> {
-    let folder_counter = crate::mapi::identity::global_counter_from_store_id(folder_id)?;
-    if folder_counter == 0 || folder_counter >= 0x00FF_FF00 {
-        return None;
-    }
-    Some(crate::mapi::identity::mapi_store_id(
-        OUTLOOK_DYNAMIC_CONTACT_SYNC_CONFIG_COUNTER_BASE | folder_counter,
-    ))
-}
-
-pub(super) fn outlook_dynamic_contact_link_timestamp_config_id(folder_id: u64) -> Option<u64> {
-    let folder_counter = crate::mapi::identity::global_counter_from_store_id(folder_id)?;
-    if folder_counter == 0 || folder_counter >= 0x00FF_FF00 {
-        return None;
-    }
-    Some(crate::mapi::identity::mapi_store_id(
-        OUTLOOK_DYNAMIC_CONTACT_LINK_TIMESTAMP_COUNTER_BASE | folder_counter,
-    ))
-}
-
-pub(super) fn outlook_dynamic_contact_sync_canonical_id(folder_id: u64) -> Uuid {
-    let mut hash = Sha256::new();
-    hash.update(b"lpe:mapi:outlook-osc-contact-sync:v1");
-    hash.update(folder_id.to_le_bytes());
-    let digest = hash.finalize();
-    let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Uuid::from_bytes(bytes)
-}
-
-pub(super) fn outlook_dynamic_contact_link_timestamp_canonical_id(folder_id: u64) -> Uuid {
-    let mut hash = Sha256::new();
-    hash.update(b"lpe:mapi:outlook-contact-link-timestamp:v1");
-    hash.update(folder_id.to_le_bytes());
-    let digest = hash.finalize();
-    let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x80;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Uuid::from_bytes(bytes)
 }
 
 pub(super) fn virtual_local_freebusy_message() -> MapiDelegateFreeBusyMessage {

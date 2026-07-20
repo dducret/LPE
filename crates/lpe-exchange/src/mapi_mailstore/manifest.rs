@@ -999,11 +999,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 PID_TAG_RECORD_KEY,
             )
         {
-            write_binary_property(
-                &mut buffer,
-                PID_TAG_RECORD_KEY,
-                &source_key_for_store_id(object.item_id),
-            );
+            write_binary_property(&mut buffer, PID_TAG_RECORD_KEY, &source_key);
         }
         if object.associated
             && content_property_in_scope(

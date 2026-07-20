@@ -6,6 +6,13 @@ use crate::mapi::properties::MapiNamedProperty;
 
 pub(crate) const MAX_MAPI_LOCAL_REPLICA_ID_COUNT: u32 = 0x0001_0000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MapiLocalReplicaDeletedRange {
+    pub(crate) replica_guid: Uuid,
+    pub(crate) min_global_counter: u64,
+    pub(crate) max_global_counter: u64,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum MapiEventCreateOutcome {
     Created(lpe_storage::MapiEventCreateResult),
@@ -58,6 +65,15 @@ impl MapiIdentityObjectKind {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct MapiNavigationShortcutClientProperties {
+    pub(crate) calendar_color: Option<i32>,
+    pub(crate) address_book_entry_id: Option<Vec<u8>>,
+    pub(crate) address_book_store_entry_id: Option<Vec<u8>>,
+    pub(crate) client_id: Option<Vec<u8>>,
+    pub(crate) ro_group_type: Option<i32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiNavigationShortcutRecord {
     pub(crate) id: Uuid,
@@ -68,9 +84,10 @@ pub(crate) struct MapiNavigationShortcutRecord {
     pub(crate) flags: u32,
     pub(crate) save_stamp: u32,
     pub(crate) section: u32,
-    pub(crate) ordinal: u32,
+    pub(crate) ordinal: Vec<u8>,
     pub(crate) group_header_id: Option<Uuid>,
     pub(crate) group_name: String,
+    pub(crate) client_properties: MapiNavigationShortcutClientProperties,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,10 +100,79 @@ pub(crate) struct UpsertMapiNavigationShortcutInput {
     pub(crate) flags: u32,
     pub(crate) save_stamp: u32,
     pub(crate) section: u32,
-    pub(crate) ordinal: u32,
+    pub(crate) ordinal: Vec<u8>,
     pub(crate) group_header_id: Option<Uuid>,
     pub(crate) group_name: String,
+    pub(crate) client_properties: MapiNavigationShortcutClientProperties,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommitMapiNavigationShortcutCreateInput {
+    pub(crate) shortcut: UpsertMapiNavigationShortcutInput,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiNavigationShortcutCommit {
+    pub(crate) shortcut: MapiNavigationShortcutRecord,
+    pub(crate) identity: MapiIdentityRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiFaiImportedIdentity {
+    pub(crate) source_key: Vec<u8>,
+    pub(crate) change_key: Vec<u8>,
+    pub(crate) predecessor_change_list: Vec<u8>,
+    pub(crate) last_modification_time: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommitMapiNavigationShortcutImportInput {
+    pub(crate) shortcut: UpsertMapiNavigationShortcutInput,
+    pub(crate) identity: MapiFaiImportedIdentity,
+    pub(crate) fail_on_conflict: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MapiFaiImportDisposition {
+    Applied,
+    IgnoredOlderOrSame,
+    ConflictResolved { imported_wins: bool },
+}
+
+impl MapiFaiImportDisposition {
+    pub(crate) fn changes_server_replica(self) -> bool {
+        !matches!(self, Self::IgnoredOlderOrSame)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiNavigationShortcutImportCommit {
+    pub(crate) shortcut: MapiNavigationShortcutRecord,
+    pub(crate) identity: MapiIdentityRecord,
+    pub(crate) disposition: MapiFaiImportDisposition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MapiFaiImportConflict;
+
+impl std::fmt::Display for MapiFaiImportConflict {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("MAPI FAI import conflict")
+    }
+}
+
+impl std::error::Error for MapiFaiImportConflict {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MapiFaiImportObjectDeleted;
+
+impl std::fmt::Display for MapiFaiImportObjectDeleted {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("MAPI FAI import object deleted")
+    }
+}
+
+impl std::error::Error for MapiFaiImportObjectDeleted {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiAssociatedConfigRecord {
@@ -106,6 +192,26 @@ pub(crate) struct UpsertMapiAssociatedConfigInput {
     pub(crate) message_class: String,
     pub(crate) subject: String,
     pub(crate) properties_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommitMapiAssociatedConfigImportInput {
+    pub(crate) config: UpsertMapiAssociatedConfigInput,
+    pub(crate) identity: MapiFaiImportedIdentity,
+    pub(crate) fail_on_conflict: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiAssociatedConfigCommit {
+    pub(crate) config: MapiAssociatedConfigRecord,
+    pub(crate) identity: MapiIdentityRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiAssociatedConfigImportCommit {
+    pub(crate) config: MapiAssociatedConfigRecord,
+    pub(crate) identity: MapiIdentityRecord,
+    pub(crate) disposition: MapiFaiImportDisposition,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -398,7 +398,7 @@ fn inbox_contents_invariant_accepts_message_identity_columns() {
 }
 
 #[test]
-fn common_views_invariant_reports_decoded_row_identity() {
+fn empty_common_views_has_no_row_identity_invariant() {
     let mailbox_guid = Uuid::parse_str("bc737006-4413-49b9-aefc-3cb6e0088492").unwrap();
     let object = MapiObject::ContentsTable {
         folder_id: COMMON_VIEWS_FOLDER_ID,
@@ -424,11 +424,7 @@ fn common_views_invariant_reports_decoded_row_identity() {
         1,
     );
 
-    assert_eq!(summaries.len(), 1);
-    assert!(summaries[0].contains("kind=common_views_associated"));
-    assert!(summaries[0].contains("source_key_decoded=0x"));
-    assert!(summaries[0].contains("parent_source_key_decoded=0x0000000000090001"));
-    assert!(summaries[0].contains("issues=none"));
+    assert!(summaries.is_empty());
 }
 
 #[test]
@@ -4049,13 +4045,13 @@ fn microsoft_oxosrch_common_views_projects_search_folder_definition_messages() {
 
     assert_eq!(
         associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-        7
+        1
     );
     let response =
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], 0x15);
-    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 7);
+    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
     let mut shortcut_class = Vec::new();
     for code_unit in "IPM.Microsoft.WunderBar.Link".encode_utf16() {
         shortcut_class.extend_from_slice(&code_unit.to_le_bytes());
@@ -4068,12 +4064,15 @@ fn microsoft_oxosrch_common_views_projects_search_folder_definition_messages() {
     for code_unit in "IPM.Microsoft.FolderDesign.NamedView".encode_utf16() {
         named_view_class.extend_from_slice(&code_unit.to_le_bytes());
     }
-    assert!(response
+    assert!(!response
         .windows(shortcut_class.len())
         .any(|window| window == shortcut_class.as_slice()));
     assert!(response
         .windows(search_class.len())
         .any(|window| window == search_class.as_slice()));
+    assert!(!response
+        .windows(named_view_class.len())
+        .any(|window| window == named_view_class.as_slice()));
     assert!(response
         .windows(16)
         .any(|window| window == definition_id.as_bytes()));
@@ -4233,9 +4232,10 @@ fn common_views_find_row_honors_restriction() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 0x81,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(0x81),
             group_header_id: Some(default_wlink_group_uuid()),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
     let mut table = MapiObject::ContentsTable {
@@ -4600,7 +4600,7 @@ fn calendar_contents_find_row_matches_outlook_date_window() {
 }
 
 #[test]
-fn common_views_find_row_returns_default_compact_named_view() {
+fn common_views_find_row_does_not_invent_default_compact_named_view() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
@@ -4676,15 +4676,15 @@ fn common_views_find_row_returns_default_compact_named_view() {
         rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
 
     assert_eq!(response[0], RopId::FindRow.as_u8());
-    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_response_contains_utf16(&response, "Compact");
-    assert!(response
-        .windows(4)
-        .any(|window| window == 14_745_605u32.to_le_bytes()));
+    assert_eq!(
+        u32::from_le_bytes(response[2..6].try_into().unwrap()),
+        0x8004_010F
+    );
+    assert_eq!(response.len(), 6);
 }
 
 #[test]
-fn common_views_find_row_returns_default_sent_to_named_view() {
+fn common_views_find_row_does_not_invent_default_sent_to_named_view() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
@@ -4762,11 +4762,11 @@ fn common_views_find_row_returns_default_sent_to_named_view() {
         rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
 
     assert_eq!(response[0], RopId::FindRow.as_u8());
-    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_response_contains_utf16(&response, "Sent To");
-    assert!(response
-        .windows(4)
-        .any(|window| window == 15_269_893u32.to_le_bytes()));
+    assert_eq!(
+        u32::from_le_bytes(response[2..6].try_into().unwrap()),
+        0x8004_010F
+    );
+    assert_eq!(response.len(), 6);
 }
 
 #[test]
@@ -4789,9 +4789,10 @@ fn common_views_find_row_matches_mail_wlink_folder_type() {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 0x81,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(0x81),
             group_header_id: Some(default_wlink_group_uuid()),
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
     let mut table = MapiObject::ContentsTable {
@@ -4879,7 +4880,7 @@ fn common_views_query_rows_uses_account_bound_wlink_entry_ids() {
 }
 
 #[test]
-fn common_views_wlink_query_rows_keep_named_views_without_restriction() {
+fn common_views_wlink_query_rows_do_not_add_named_views_without_restriction() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = common_views_sort_snapshot(account_id);
     let mut table = MapiObject::ContentsTable {
@@ -4930,8 +4931,8 @@ fn common_views_wlink_query_rows_keep_named_views_without_restriction() {
         full_common_views_count
     );
     assert_eq!(response[6], 0x02);
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
-    assert!(utf16_position(&response, "Compact").is_some());
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+    assert!(utf16_position(&response, "Compact").is_none());
 
     let end_response =
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
@@ -4944,7 +4945,7 @@ fn common_views_wlink_query_rows_keep_named_views_without_restriction() {
 }
 
 #[test]
-fn common_views_restricted_named_view_query_rows_remain_available() {
+fn common_views_restricted_named_view_query_rows_are_empty_without_persisted_fai() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let snapshot = common_views_sort_snapshot(account_id);
     let mut table = MapiObject::ContentsTable {
@@ -4975,8 +4976,9 @@ fn common_views_restricted_named_view_query_rows_remain_available() {
     let response =
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
 
-    assert_response_contains_utf16(&response, "IPM.Microsoft.FolderDesign.NamedView");
-    assert_response_contains_utf16(&response, "Compact");
+    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
+    assert!(utf16_position(&response, "Compact").is_none());
 }
 
 #[test]
@@ -5042,9 +5044,10 @@ fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
             flags: 0x0010_0000,
             save_stamp: 0x4f30_48f7,
             section: 3,
-            ordinal: 127,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(127),
             group_header_id: None,
             group_name: "My Calendars".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
         crate::store::MapiNavigationShortcutRecord {
             id: contacts_shortcut_id,
@@ -5055,9 +5058,10 @@ fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
             flags: 0,
             save_stamp: 0,
             section: 4,
-            ordinal: 127,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(127),
             group_header_id: None,
             group_name: "My Contacts".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ]);
     let columns = vec![
@@ -5100,7 +5104,7 @@ fn captured_common_views_query_rows_flags_heterogeneous_missing_columns() {
             })
             .unwrap()
     };
-    assert!(display_name_position("Compact") < display_name_position("Contacts"));
+    assert!(display_name_position("Calendar") < display_name_position("Contacts"));
     let calendar_shortcut = expected
         .iter()
         .find(|message| {
@@ -5194,7 +5198,27 @@ fn common_views_query_rows_projects_mailbox_store_object_entry_id() {
         quota_mb: None,
         quota_used_octets: None,
     };
-    let snapshot = MapiMailStoreSnapshot::empty();
+    let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000099);
+    let shortcut_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 99,
+    );
+    crate::mapi::identity::remember_mapi_identity(shortcut_id, shortcut_object_id);
+    let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+        crate::store::MapiNavigationShortcutRecord {
+            id: shortcut_id,
+            account_id,
+            subject: "Pinned Inbox".to_string(),
+            target_folder_id: Some(INBOX_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            save_stamp: 0,
+            section: 1,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(127),
+            group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+            group_name: "Favorites".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
+        },
+    ]);
     let mut table = MapiObject::ContentsTable {
         folder_id: COMMON_VIEWS_FOLDER_ID,
         associated: true,
@@ -5242,12 +5266,14 @@ fn inbox_associated_find_row_returns_not_found_for_unstored_elc_config() {
 }
 
 #[test]
-fn inbox_associated_find_row_returns_folder_local_default_named_view() {
-    assert_inbox_associated_find_row_returns_message_class("IPM.Microsoft.FolderDesign.NamedView");
+fn inbox_associated_find_row_does_not_invent_folder_local_default_named_view() {
+    assert_inbox_associated_find_row_no_match_for_message_class(
+        "IPM.Microsoft.FolderDesign.NamedView",
+    );
 }
 
 #[test]
-fn inbox_associated_named_view_find_row_flags_missing_configuration_columns() {
+fn inbox_associated_named_view_find_row_is_not_found_without_persisted_fai() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let columns = [
         PID_TAG_ROAMING_DATATYPES,
@@ -5292,20 +5318,11 @@ fn inbox_associated_named_view_find_row_flags_missing_configuration_columns() {
         Uuid::nil(),
     );
 
-    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_eq!(&response[6..8], &[0, 1]);
-    let mut cursor = Cursor::new(&response[8..]);
-    assert_eq!(cursor.read_u8().unwrap(), 1);
-    assert_eq!(cursor.read_u8().unwrap(), 0x0A);
-    assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F);
-    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
-        parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_CLASS_W).unwrap(),
-        MapiValue::String("IPM.Microsoft.FolderDesign.NamedView".to_string())
+        u32::from_le_bytes(response[2..6].try_into().unwrap()),
+        0x8004_010F
     );
-    assert_eq!(cursor.read_u8().unwrap(), 0x0A);
-    assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F);
-    assert!(cursor.remaining_is_zero_padding());
+    assert_eq!(response.len(), 6);
 }
 
 #[test]
@@ -5511,8 +5528,11 @@ fn inbox_associated_find_row_does_not_create_a_broad_startup_default() {
         rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::FindRow.as_u8());
-    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_response_contains_utf16(&response, "IPM.Microsoft.FolderDesign.NamedView");
+    assert_eq!(
+        u32::from_le_bytes(response[2..6].try_into().unwrap()),
+        0x8004_010F
+    );
+    assert_eq!(response.len(), 6);
     assert_eq!(table_position(&table), Some(0));
 }
 
@@ -5571,13 +5591,17 @@ fn quick_step_associated_find_row_does_not_return_synthetic_custom_action() {
 }
 
 #[test]
-fn contacts_associated_find_row_returns_osc_contact_sync_config() {
-    assert_contact_folder_associated_find_row_returns_osc_contact_sync(CONTACTS_FOLDER_ID);
+fn contacts_associated_find_row_does_not_invent_osc_contact_sync_config() {
+    assert_contact_folder_associated_find_row_does_not_return_config(
+        CONTACTS_FOLDER_ID,
+        "IPM.Microsoft.OSC.ContactSync",
+        &MapiMailStoreSnapshot::empty(),
+    );
 }
 
 #[test]
-fn contacts_associated_find_row_returns_contact_link_timestamp_config() {
-    assert_contact_folder_associated_find_row_returns_config(
+fn contacts_associated_find_row_does_not_invent_contact_link_timestamp_config() {
+    assert_contact_folder_associated_find_row_does_not_return_config(
         CONTACTS_FOLDER_ID,
         "IPM.Microsoft.ContactLink.TimeStamp",
         &MapiMailStoreSnapshot::empty(),
@@ -5588,10 +5612,17 @@ fn contacts_associated_find_row_returns_contact_link_timestamp_config() {
 fn contacts_associated_find_row_preserves_table_position_for_contact_link_timestamp() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let contact_prefs_id = Uuid::from_u128(0x6d617069_6370_7266_8000_000000000001);
+    let contact_link_id = Uuid::from_u128(0x6d617069_636c_696e_8000_000000000001);
     crate::mapi::identity::remember_mapi_identity(
         contact_prefs_id,
         crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 83,
+        ),
+    );
+    crate::mapi::identity::remember_mapi_identity(
+        contact_link_id,
+        crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 84,
         ),
     );
     let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
@@ -5602,6 +5633,16 @@ fn contacts_associated_find_row_preserves_table_position_for_contact_link_timest
             message_class: "IPM.Configuration.ContactPrefs".to_string(),
             subject: "IPM.Configuration.ContactPrefs".to_string(),
             properties_json: serde_json::json!({}),
+        },
+        crate::store::MapiAssociatedConfigRecord {
+            id: contact_link_id,
+            account_id,
+            folder_id: CONTACTS_FOLDER_ID,
+            message_class: "IPM.Microsoft.ContactLink.TimeStamp".to_string(),
+            subject: "IPM.Microsoft.ContactLink.TimeStamp".to_string(),
+            properties_json: serde_json::json!({
+                "0x80ec001f": {"type": "string", "value": "2026-07-19T14:00:00Z"}
+            }),
         },
     ]);
     let mut table = MapiObject::ContentsTable {
@@ -5665,7 +5706,7 @@ fn contacts_associated_find_row_preserves_table_position_for_contact_link_timest
     );
     assert_eq!(
         u32::from_le_bytes(position_response[10..14].try_into().unwrap()),
-        4
+        2
     );
 }
 
@@ -5687,19 +5728,18 @@ fn suggested_contacts_associated_table_does_not_expose_folder_default_named_view
         Uuid::nil(),
     );
 
-    assert_eq!(rows.len(), 1);
-    assert!(matches!(rows[0], AssociatedTableRow::Config(_)));
+    assert!(rows.is_empty());
     assert_eq!(
         associated_folder_message_count(
             SUGGESTED_CONTACTS_FOLDER_ID,
             &MapiMailStoreSnapshot::empty()
         ),
-        1
+        0
     );
 }
 
 #[test]
-fn inbox_associated_table_exposes_folder_local_default_named_view_for_exact_lookup() {
+fn inbox_associated_table_does_not_expose_folder_local_default_named_view_for_exact_lookup() {
     let restriction = MapiRestriction::Property {
         relop: 0x04,
         property_tag: PID_TAG_MESSAGE_CLASS_W,
@@ -5714,13 +5754,7 @@ fn inbox_associated_table_exposes_folder_local_default_named_view_for_exact_look
         Uuid::nil(),
     );
 
-    assert_eq!(rows.len(), 1);
-    assert!(matches!(
-        rows.first(),
-        Some(AssociatedTableRow::NamedView(view)) if view.folder_id == INBOX_FOLDER_ID
-            && view.id == crate::mapi_store::outlook_default_folder_named_view_id(INBOX_FOLDER_ID)
-            && view.name == "Compact"
-    ));
+    assert!(rows.is_empty());
     assert_eq!(
         restricted_associated_folder_message_count(
             INBOX_FOLDER_ID,
@@ -5728,12 +5762,12 @@ fn inbox_associated_table_exposes_folder_local_default_named_view_for_exact_look
             Some(&restriction),
             Uuid::nil()
         ),
-        1
+        0
     );
 }
 
 #[test]
-fn inbox_associated_table_exposes_folder_local_default_named_view_without_restriction() {
+fn inbox_associated_table_does_not_expose_folder_local_default_named_view_without_restriction() {
     let rows = associated_table_rows(
         INBOX_FOLDER_ID,
         &MapiMailStoreSnapshot::empty(),
@@ -5741,14 +5775,12 @@ fn inbox_associated_table_exposes_folder_local_default_named_view_without_restri
         Uuid::nil(),
     );
 
-    assert_eq!(
-        rows.iter()
-            .filter(
-                |row| matches!(row, AssociatedTableRow::NamedView(view) if view.name == "Compact")
-            )
-            .count(),
-        1
-    );
+    assert!(rows
+        .iter()
+        .filter_map(associated_table_row_config)
+        .all(|message| !message
+            .message_class
+            .eq_ignore_ascii_case("IPM.Microsoft.FolderDesign.NamedView")));
     assert_eq!(
         restricted_associated_folder_message_count(
             INBOX_FOLDER_ID,
@@ -5761,17 +5793,25 @@ fn inbox_associated_table_exposes_folder_local_default_named_view_without_restri
 }
 
 #[test]
-fn quick_contacts_associated_find_row_returns_osc_contact_sync_config() {
-    assert_contact_folder_associated_find_row_returns_osc_contact_sync(QUICK_CONTACTS_FOLDER_ID);
+fn quick_contacts_associated_find_row_does_not_invent_osc_contact_sync_config() {
+    assert_contact_folder_associated_find_row_does_not_return_config(
+        QUICK_CONTACTS_FOLDER_ID,
+        "IPM.Microsoft.OSC.ContactSync",
+        &MapiMailStoreSnapshot::empty(),
+    );
 }
 
 #[test]
-fn im_contact_list_associated_find_row_returns_osc_contact_sync_config() {
-    assert_contact_folder_associated_find_row_returns_osc_contact_sync(IM_CONTACT_LIST_FOLDER_ID);
+fn im_contact_list_associated_find_row_does_not_invent_osc_contact_sync_config() {
+    assert_contact_folder_associated_find_row_does_not_return_config(
+        IM_CONTACT_LIST_FOLDER_ID,
+        "IPM.Microsoft.OSC.ContactSync",
+        &MapiMailStoreSnapshot::empty(),
+    );
 }
 
 #[test]
-fn dynamic_contacts_associated_find_row_returns_osc_contact_sync_config() {
+fn dynamic_contacts_associated_find_row_does_not_invent_osc_contact_sync_config() {
     let folder_id = crate::mapi::identity::mapi_store_id(0x4e);
     let collection = CollaborationCollection {
         id: "outlook-log-dynamic-contacts-table".to_string(),
@@ -5809,8 +5849,10 @@ fn dynamic_contacts_associated_find_row_returns_osc_contact_sync_config() {
         Vec::new(),
     );
 
-    assert_contact_folder_associated_find_row_returns_osc_contact_sync_for_snapshot(
-        folder_id, &snapshot,
+    assert_contact_folder_associated_find_row_does_not_return_config(
+        folder_id,
+        "IPM.Microsoft.OSC.ContactSync",
+        &snapshot,
     );
 
     let folder = snapshot
@@ -5828,11 +5870,11 @@ fn dynamic_contacts_associated_find_row_returns_osc_contact_sync_config() {
         Uuid::nil(),
     );
 
-    assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), 2);
+    assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), 0);
 }
 
 #[test]
-fn mailbox_backed_quick_contacts_associated_find_row_returns_osc_contact_sync_config() {
+fn mailbox_backed_quick_contacts_associated_find_row_does_not_invent_osc_contact_sync_config() {
     let folder_id = crate::mapi::identity::mapi_store_id(0x55);
     let mailbox_id = Uuid::parse_str("aaaaaaaa-7777-4111-8111-aaaaaaaaaaaa").unwrap();
     crate::mapi::identity::remember_mapi_identity(mailbox_id, folder_id);
@@ -5860,8 +5902,10 @@ fn mailbox_backed_quick_contacts_associated_find_row_returns_osc_contact_sync_co
         Vec::new(),
     );
 
-    assert_contact_folder_associated_find_row_returns_osc_contact_sync_for_snapshot(
-        folder_id, &snapshot,
+    assert_contact_folder_associated_find_row_does_not_return_config(
+        folder_id,
+        "IPM.Microsoft.OSC.ContactSync",
+        &snapshot,
     );
 }
 
@@ -6200,14 +6244,14 @@ fn inbox_associated_broad_configuration_find_row_projects_single_followup_row() 
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        2
+        1
     );
     assert_response_contains_utf16(&query_response, "IPM.Configuration.AccountPrefs");
     assert!(utf16_position(&query_response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.ELC").is_none());
     assert!(utf16_position(&query_response, "IPM.RuleOrganizer").is_none());
     assert!(utf16_position(&query_response, "IPM.Sharing.Configuration").is_none());
-    assert_response_contains_utf16(&query_response, "IPM.Microsoft.FolderDesign.NamedView");
+    assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
 }
 
 #[test]
@@ -6400,11 +6444,11 @@ fn inbox_associated_find_row_followup_uses_the_original_rowset() {
     assert_eq!(query_response[0], RopId::QueryRows.as_u8());
     assert_eq!(
         u16::from_le_bytes([query_response[7], query_response[8]]),
-        2
+        1
     );
     assert!(utf16_position(&query_response, "IPM.Configuration.ClientOptions").is_none());
     assert_response_contains_utf16(&query_response, "IPM.Configuration.MessageListSettings");
-    assert_response_contains_utf16(&query_response, "IPM.Microsoft.FolderDesign.NamedView");
+    assert!(utf16_position(&query_response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     assert!(utf16_position(&query_response, "IPM.Configuration.AccountPrefs").is_none());
 }
 
@@ -6418,8 +6462,7 @@ fn inbox_associated_greater_than_restriction_uses_normal_property_semantics() {
     };
 
     let rows = associated_table_rows(INBOX_FOLDER_ID, &snapshot, Some(&restriction), Uuid::nil());
-    assert_eq!(rows.len(), 1);
-    assert!(matches!(rows[0], AssociatedTableRow::NamedView(_)));
+    assert!(rows.is_empty());
     let mut classes = rows
         .iter()
         .filter_map(associated_table_row_config)
@@ -6642,10 +6685,10 @@ fn inbox_associated_query_rows_uses_sort_order() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.EAS").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
@@ -6661,7 +6704,7 @@ fn inbox_associated_open_count_includes_unrestricted_persisted_configuration_row
         associated_folder_message_count(INBOX_FOLDER_ID, &snapshot) as usize,
         rows.len()
     );
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), 1);
     assert!(rows.iter().any(|row| matches!(
         row,
         AssociatedTableRow::Config(message)
@@ -6700,12 +6743,12 @@ fn inbox_associated_query_rows_includes_persisted_extended_rule_message() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 2);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
     assert!(utf16_position(&response, "IPM.ExtendedRule.Message").is_some());
     assert!(utf16_position(&response, "IPM.Configuration.AccountPrefs").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.UMOLK.UserOptions").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.ELC").is_none());
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
     assert!(utf16_position(&response, "IPM.Configuration.MessageListSettings").is_none());
 }
 
@@ -6784,7 +6827,7 @@ fn inbox_associated_query_rows_suppresses_duplicate_persisted_compact_named_view
 }
 
 #[test]
-fn inbox_associated_query_rows_replaces_empty_persisted_compact_named_view() {
+fn inbox_associated_query_rows_preserves_empty_persisted_compact_named_view() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let account_prefs_id = Uuid::from_u128(0x6d617069_6163_6350_8000_000000000111);
     let persisted_view_id = Uuid::from_u128(0x6d617069_696e_4e76_8000_000000000111);
@@ -6860,7 +6903,7 @@ fn inbox_associated_query_rows_replaces_empty_persisted_compact_named_view() {
 }
 
 #[test]
-fn junk_associated_query_rows_exposes_default_named_view() {
+fn junk_associated_query_rows_do_not_invent_default_named_view() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: JUNK_FOLDER_ID,
@@ -6890,12 +6933,12 @@ fn junk_associated_query_rows_exposes_default_named_view() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
 }
 
 #[test]
-fn contacts_associated_query_rows_expose_contact_default_named_view() {
+fn contacts_associated_query_rows_do_not_invent_default_named_view_or_helpers() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: CONTACTS_FOLDER_ID,
@@ -6925,8 +6968,8 @@ fn contacts_associated_query_rows_expose_contact_default_named_view() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 3);
-    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_some());
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+    assert!(utf16_position(&response, "IPM.Microsoft.FolderDesign.NamedView").is_none());
 }
 
 #[test]
@@ -7994,7 +8037,7 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
 }
 
 #[test]
-fn contact_link_timestamp_config_projects_outlook_osc_defaults() {
+fn empty_contact_link_timestamp_config_does_not_invent_osc_properties() {
     let message = MapiAssociatedConfigMessage {
         id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFEC),
         folder_id: CONTACTS_FOLDER_ID,
@@ -8006,51 +8049,51 @@ fn contact_link_timestamp_config_projects_outlook_osc_defaults() {
 
     assert_eq!(
         associated_config_property_value(&message, PID_NAME_OSC_CONTACT_SOURCES_TAG),
-        Some(MapiValue::MultiString(Vec::new()))
+        None
     );
     assert_eq!(
         associated_config_property_value(
             &message,
             (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1 << 16) | 0x0102
         ),
-        Some(MapiValue::Binary(Vec::new()))
+        None
     );
     assert_eq!(
         associated_config_property_value(
             &message,
             (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1 << 16) | 0x0040
         ),
-        Some(MapiValue::I64(0))
+        None
     );
     assert_eq!(
         associated_config_property_value(
             &message,
             (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC << 16) | 0x001F
         ),
-        Some(MapiValue::String(String::new()))
+        None
     );
     assert_eq!(
         associated_config_property_value(
             &message,
             (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA << 16) | 0x0003
         ),
-        Some(MapiValue::U32(0))
+        None
     );
     assert_eq!(
         associated_config_property_value(
             &message,
             (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED << 16) | 0x000B
         ),
-        Some(MapiValue::Bool(false))
+        None
     );
     assert_eq!(
         associated_config_property_value(&message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
-        Some(MapiValue::Binary(Vec::new()))
+        None
     );
 }
 
 #[test]
-fn contacts_helper_associated_configs_project_table_config_columns() {
+fn persisted_contacts_helper_configs_project_only_stored_helper_properties() {
     for message_class in [
         "IPM.Microsoft.ContactLink.TimeStamp",
         "IPM.Microsoft.OSC.ContactSync",
@@ -8061,63 +8104,34 @@ fn contacts_helper_associated_configs_project_table_config_columns() {
             canonical_id: Uuid::nil(),
             message_class: message_class.to_string(),
             subject: message_class.to_string(),
-            properties_json: serde_json::json!({}),
+            properties_json: serde_json::json!({
+                "0x80ec001f": {"type": "string", "value": "2026-07-19T14:00:00Z"}
+            }),
         };
 
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_ROAMING_DATATYPES),
-            Some(MapiValue::U32(0))
+            None
         );
-        assert!(matches!(
+        assert_eq!(
             associated_config_property_value(&message, 0x685D_0003),
-            Some(MapiValue::U32(value)) if value != 0
-        ));
+            None
+        );
         assert_eq!(
             associated_config_property_value(&message, PID_NAME_OSC_CONTACT_SOURCES_TAG),
-            Some(MapiValue::MultiString(Vec::new()))
+            None
         );
         assert_eq!(
             associated_config_property_value(
                 &message,
-                (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC << 16) | 0x0003
+                (PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC << 16) | 0x001F
             ),
-            Some(MapiValue::U32(0))
+            Some(MapiValue::String("2026-07-19T14:00:00Z".to_string()))
         );
-
-        let row = serialize_associated_config_row_with_mailbox_guid(
-            &message,
-            Uuid::nil(),
-            &[
-                PID_TAG_FOLDER_ID,
-                PID_TAG_MID,
-                PID_TAG_INST_ID,
-                PID_TAG_INSTANCE_NUM,
-                PID_TAG_ROAMING_DATATYPES,
-                PID_TAG_MESSAGE_CLASS_W,
-                0x685D_0003,
-                PID_TAG_LAST_MODIFICATION_TIME,
-            ],
-        );
-        let mut row_cursor = Cursor::new(&row);
-        for column in [
-            PID_TAG_FOLDER_ID,
-            PID_TAG_MID,
-            PID_TAG_INST_ID,
-            PID_TAG_INSTANCE_NUM,
-        ] {
-            parse_mapi_property_value(&mut row_cursor, column).unwrap();
-        }
         assert_eq!(
-            parse_mapi_property_value(&mut row_cursor, PID_TAG_ROAMING_DATATYPES).unwrap(),
-            MapiValue::I32(0)
+            associated_config_property_value(&message, PID_TAG_MESSAGE_CLASS_W),
+            Some(MapiValue::String(message_class.to_string()))
         );
-        parse_mapi_property_value(&mut row_cursor, PID_TAG_MESSAGE_CLASS_W).unwrap();
-        assert!(matches!(
-            parse_mapi_property_value(&mut row_cursor, 0x685D_0003).unwrap(),
-            MapiValue::I32(value) if value != 0
-        ));
-        parse_mapi_property_value(&mut row_cursor, PID_TAG_LAST_MODIFICATION_TIME).unwrap();
-        assert_eq!(row_cursor.position() as usize, row.len());
     }
 }
 
@@ -8341,16 +8355,6 @@ fn assert_inbox_associated_find_row_no_match_for_message_class(message_class: &s
     assert_eq!(response.len(), 6);
 }
 
-fn assert_inbox_associated_find_row_returns_message_class(message_class: &str) {
-    let response = inbox_associated_find_row_response_for_message_class(message_class);
-
-    assert_eq!(response[0], RopId::FindRow.as_u8());
-    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_eq!(response[6], 0);
-    assert_eq!(response[7], 1);
-    assert_response_contains_utf16(&response, message_class);
-}
-
 fn inbox_associated_find_row_response_for_message_class(message_class: &str) -> Vec<u8> {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
@@ -8384,41 +8388,6 @@ fn inbox_associated_find_row_response_for_message_class(message_class: &str) -> 
     };
 
     rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil())
-}
-
-fn assert_contact_folder_associated_find_row_returns_osc_contact_sync(folder_id: u64) {
-    let snapshot = MapiMailStoreSnapshot::empty();
-    assert_contact_folder_associated_find_row_returns_osc_contact_sync_for_snapshot(
-        folder_id, &snapshot,
-    );
-}
-
-fn assert_contact_folder_associated_find_row_returns_osc_contact_sync_for_snapshot(
-    folder_id: u64,
-    snapshot: &MapiMailStoreSnapshot,
-) {
-    assert_contact_folder_associated_find_row_returns_config(
-        folder_id,
-        "IPM.Microsoft.OSC.ContactSync",
-        snapshot,
-    );
-}
-
-fn assert_contact_folder_associated_find_row_returns_config(
-    folder_id: u64,
-    message_class: &str,
-    snapshot: &MapiMailStoreSnapshot,
-) {
-    let response = contact_folder_associated_find_row_response(folder_id, message_class, snapshot);
-
-    assert_eq!(response[0], RopId::FindRow.as_u8());
-    assert_eq!(u32::from_le_bytes(response[3..7].try_into().unwrap()), 0);
-    assert_eq!(response[7], 1);
-    let mut encoded_message_class = Vec::new();
-    write_utf16z(&mut encoded_message_class, message_class);
-    assert!(response
-        .windows(encoded_message_class.len())
-        .any(|window| window == encoded_message_class.as_slice()));
 }
 
 fn assert_contact_folder_associated_find_row_does_not_return_config(
@@ -8556,9 +8525,10 @@ fn common_views_sort_snapshot(account_id: Uuid) -> MapiMailStoreSnapshot {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 0x20,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(0x20),
             group_header_id,
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
         crate::store::MapiNavigationShortcutRecord {
             id: alpha_id,
@@ -8569,9 +8539,10 @@ fn common_views_sort_snapshot(account_id: Uuid) -> MapiMailStoreSnapshot {
             flags: 0,
             save_stamp: 0,
             section: 1,
-            ordinal: 0x10,
+            ordinal: crate::mapi::properties::wlink_ordinal_bytes(0x10),
             group_header_id,
             group_name: "Mail".to_string(),
+            client_properties: crate::store::MapiNavigationShortcutClientProperties::default(),
         },
     ])
 }
@@ -9072,7 +9043,7 @@ fn special_folder_property_omits_unconfigured_archive_policy_identities() {
 }
 
 #[test]
-fn special_folder_property_projects_view_defaults_for_outlook_folders() {
+fn special_folder_property_does_not_project_unpersisted_default_views() {
     let account_id = Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa);
     for folder_id in [
         INBOX_FOLDER_ID,
@@ -9089,12 +9060,10 @@ fn special_folder_property_projects_view_defaults_for_outlook_folders() {
         NOTES_FOLDER_ID,
         TASKS_FOLDER_ID,
     ] {
-        assert!(
-            matches!(
-                special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
-                Some(MapiValue::Binary(value)) if !value.is_empty()
-            ),
-            "folder 0x{folder_id:016x} should project a default view entry id"
+        assert_eq!(
+            special_folder_property_value(folder_id, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
+            None,
+            "folder 0x{folder_id:016x} must not point to a synthetic view"
         );
     }
     for folder_id in [

@@ -307,21 +307,6 @@ where
         .filter(|identity| identity.object_kind == MapiIdentityObjectKind::NavigationShortcut)
         .map(|identity| identity.canonical_id)
         .collect::<Vec<_>>();
-    let associated_config_identity_ids = identities
-        .iter()
-        .filter(|identity| {
-            identity.object_kind == MapiIdentityObjectKind::AssociatedConfig
-                && (associated_config_ids.contains(&identity.canonical_id)
-                    || mapi_store::modeled_virtual_associated_config_message_for_canonical_id(
-                        identity.canonical_id,
-                    )
-                    .is_some())
-        })
-        .map(|identity| mapi_store::MapiAssociatedConfigIdentity {
-            canonical_id: identity.canonical_id,
-            object_id: identity.object_id,
-        })
-        .collect::<Vec<_>>();
     let navigation_shortcuts = if snapshot_backed_contents || !navigation_shortcut_ids.is_empty() {
         log_mapi_store_load_step(
             account_id,
@@ -714,6 +699,19 @@ where
         .chain(allocated_non_message_identities.iter())
         .cloned()
         .collect::<Vec<_>>();
+    let associated_config_identity_ids = snapshot_identities
+        .iter()
+        .filter(|identity| {
+            identity.object_kind == MapiIdentityObjectKind::AssociatedConfig
+                && (associated_config_ids.contains(&identity.canonical_id)
+                    || mapi_store::modeled_virtual_associated_config_message_for_canonical_id(
+                        identity.canonical_id,
+                    )
+                    .is_some())
+        })
+        .cloned()
+        .map(|record| mapi_store::MapiAssociatedConfigIdentity { record })
+        .collect::<Vec<_>>();
     let loaded_event_ids = events
         .iter()
         .chain(deleted_events.iter())
@@ -774,7 +772,7 @@ where
             .filter(|event| matches!(event.collection_id.as_str(), "default" | "calendar"))
             .count(),
     );
-    Ok(MapiMailStoreSnapshot::new_with_scoped_calendar_identities(
+    let snapshot = MapiMailStoreSnapshot::new_with_scoped_calendar_identities(
         mailboxes,
         emails,
         attachments,
@@ -794,6 +792,7 @@ where
     .with_search_folder_definitions(search_folder_definitions)
     .with_conversation_actions(conversation_actions)
     .with_navigation_shortcuts(navigation_shortcuts)
+    .with_navigation_shortcut_identities(&snapshot_identities)?
     .with_named_property_mappings(named_property_mappings)
     .with_associated_configs(associated_configs)
     .with_associated_config_identity_ids(associated_config_identity_ids)
@@ -801,7 +800,8 @@ where
     .with_recoverable_items(recoverable_items)
     .with_reminders(reminders)
     .with_content_windows(content_windows)
-    .with_calendar_attachments(calendar_attachments))
+    .with_calendar_attachments(calendar_attachments);
+    Ok(snapshot)
 }
 
 fn requested_identity_has_backing_row(
@@ -1112,15 +1112,6 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
     if mapi_store::is_outlook_inbox_default_associated_config_id(object_id) {
         return "virtual_inbox_associated_config";
     }
-    if mapi_store::is_outlook_contact_default_associated_config_id(object_id) {
-        return "virtual_contact_associated_config";
-    }
-    if mapi_store::is_outlook_common_views_default_named_view_id(object_id) {
-        return "virtual_common_view_named_view";
-    }
-    if mapi_store::is_outlook_default_folder_named_view_id(object_id) {
-        return "virtual_folder_named_view";
-    }
     if mapi_store::is_outlook_common_views_default_navigation_shortcut_id(object_id) {
         return "virtual_common_view_navigation_shortcut";
     }
@@ -1140,9 +1131,6 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
 fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
     is_advertised_special_folder(object_id)
         || mapi_store::is_outlook_inbox_default_associated_config_id(object_id)
-        || mapi_store::is_outlook_contact_default_associated_config_id(object_id)
-        || mapi_store::is_outlook_common_views_default_named_view_id(object_id)
-        || mapi_store::is_outlook_default_folder_named_view_id(object_id)
         || mapi_store::is_outlook_common_views_default_navigation_shortcut_id(object_id)
         || mapi_store::is_outlook_default_conversation_action_id(object_id)
         || mapi_store::is_outlook_local_freebusy_message_id(object_id)

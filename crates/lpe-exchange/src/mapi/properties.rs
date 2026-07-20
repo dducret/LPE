@@ -28,6 +28,7 @@ mod contact;
 mod folder;
 mod message;
 mod named;
+mod navigation_shortcut;
 mod notes;
 mod recurrence;
 mod reminders;
@@ -42,9 +43,10 @@ mod views;
 pub(in crate::mapi) use attachments::*;
 pub(in crate::mapi) use calendar::*;
 pub(in crate::mapi) use contact::*;
-pub(in crate::mapi) use folder::*;
+pub(crate) use folder::*;
 pub(in crate::mapi) use message::*;
 pub(crate) use named::*;
+pub(in crate::mapi) use navigation_shortcut::*;
 pub(in crate::mapi) use notes::*;
 use recurrence::*;
 pub(in crate::mapi) use reminders::*;
@@ -880,179 +882,6 @@ pub(in crate::mapi) fn public_folder_property_value(
     }
 }
 
-pub(in crate::mapi) fn navigation_shortcut_property_value(
-    message: &MapiNavigationShortcutMessage,
-    account_id: Uuid,
-    property_tag: u32,
-) -> Option<MapiValue> {
-    navigation_shortcut_property_value_with_store_entry_id(message, account_id, None, property_tag)
-}
-
-pub(in crate::mapi) fn navigation_shortcut_property_value_for_principal(
-    message: &MapiNavigationShortcutMessage,
-    principal: &AccountPrincipal,
-    property_tag: u32,
-) -> Option<MapiValue> {
-    let store_entry_id = super::identity::principal_mailbox_store_entry_id(principal);
-    navigation_shortcut_property_value_with_store_entry_id(
-        message,
-        principal.account_id,
-        Some(&store_entry_id),
-        property_tag,
-    )
-}
-
-fn navigation_shortcut_property_value_with_store_entry_id(
-    message: &MapiNavigationShortcutMessage,
-    account_id: Uuid,
-    store_entry_id: Option<&[u8]>,
-    property_tag: u32,
-) -> Option<MapiValue> {
-    let requested_property_tag = property_tag;
-    let property_tag = canonical_property_storage_tag(property_tag);
-    match property_tag {
-        PID_TAG_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
-        PID_TAG_MID => Some(MapiValue::U64(message.id)),
-        PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
-        PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
-        PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
-            account_id,
-            message.folder_id,
-            message.id,
-        )
-        .map(MapiValue::Binary),
-        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
-            crate::mapi::identity::instance_key_for_object_id(message.id),
-        )),
-        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
-            Some(MapiValue::String(message.subject.clone()))
-        }
-        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
-            "IPM.Microsoft.WunderBar.Link".to_string(),
-        )),
-        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_FAI)),
-        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(128)),
-        PID_TAG_MESSAGE_SIZE_EXTENDED => Some(MapiValue::I64(128)),
-        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
-        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
-        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
-        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
-        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
-            message.id,
-        ))),
-        PID_TAG_RECORD_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
-            message.id,
-        ))),
-        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
-            mapi_mailstore::change_key_for_change_number(
-                mapi_mailstore::change_number_for_store_id(message.id),
-            ),
-        )),
-        PID_TAG_PREDECESSOR_CHANGE_LIST => {
-            Some(MapiValue::Binary(mapi_mailstore::predecessor_change_list(
-                mapi_mailstore::change_number_for_store_id(message.id),
-            )))
-        }
-        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
-            mapi_mailstore::source_key_for_store_id(message.folder_id),
-        )),
-        PID_TAG_PARENT_ENTRY_ID => {
-            crate::mapi::identity::folder_entry_id_from_object_id(account_id, message.folder_id)
-                .map(MapiValue::Binary)
-        }
-        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(mapi_mailstore::change_number_for_store_id(
-            message.id,
-        ))),
-        PID_TAG_WLINK_SAVE_STAMP => Some(MapiValue::U32(wlink_save_stamp(message))),
-        PID_TAG_WLINK_TYPE => Some(MapiValue::U32(message.shortcut_type)),
-        PID_TAG_WLINK_FLAGS => Some(MapiValue::U32(message.flags)),
-        PID_TAG_WLINK_SECTION => Some(MapiValue::U32(message.section)),
-        PID_TAG_WLINK_ORDINAL => Some(MapiValue::Binary(wlink_ordinal_bytes(message.ordinal))),
-        property_tag
-            if property_tag_id(property_tag) == property_tag_id(PID_TAG_WLINK_GROUP_HEADER_ID) =>
-        {
-            let group_id = message
-                .group_header_id
-                .map(|group_id| *group_id.as_bytes())
-                .unwrap_or_else(default_wlink_group_guid);
-            Some(wlink_guid_property_value(requested_property_tag, group_id))
-        }
-        property_tag
-            if property_tag_id(property_tag) == property_tag_id(PID_TAG_WLINK_GROUP_CLSID) =>
-        {
-            let group_id = message
-                .group_header_id
-                .map(|group_id| *group_id.as_bytes())
-                .unwrap_or_else(default_wlink_group_guid);
-            Some(wlink_guid_property_value(requested_property_tag, group_id))
-        }
-        PID_TAG_WLINK_GROUP_NAME_W => Some(MapiValue::String(wlink_group_name(message))),
-        PID_TAG_WLINK_ENTRY_ID if message.shortcut_type != 4 => message
-            .target_folder_id
-            .and_then(|folder_id| {
-                crate::mapi::identity::folder_entry_id_from_object_id(account_id, folder_id)
-            })
-            .map(MapiValue::Binary),
-        property_tag
-            if is_sharing_local_folder_id_property_tag(property_tag)
-                && message.shortcut_type != 4 =>
-        {
-            message
-                .target_folder_id
-                .and_then(|folder_id| {
-                    crate::mapi::identity::folder_entry_id_from_object_id(account_id, folder_id)
-                })
-                .map(MapiValue::Binary)
-        }
-        PID_TAG_WLINK_RECORD_KEY if message.shortcut_type != 4 => message
-            .target_folder_id
-            .map(mapi_mailstore::source_key_for_store_id)
-            .map(MapiValue::Binary),
-        PID_TAG_WLINK_STORE_ENTRY_ID if message.shortcut_type != 4 => {
-            store_entry_id.map(|value| MapiValue::Binary(value.to_vec()))
-        }
-        PID_TAG_WLINK_CALENDAR_COLOR if navigation_shortcut_targets_calendar(message) => {
-            Some(MapiValue::I32(-1))
-        }
-        // [MS-OXOCFG] sections 2.2.9.16, 2.2.9.18, and 3.1.3.1 make
-        // these optional values client-owned. A server-created shortcut cannot
-        // synthesize either the owner's NSPI EntryID or an Outlook Client ID.
-        PID_TAG_WLINK_ADDRESS_BOOK_EID | PID_TAG_WLINK_CLIENT_ID
-            if navigation_shortcut_targets_calendar(message) =>
-        {
-            None
-        }
-        PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID if message.shortcut_type != 4 => {
-            store_entry_id.map(|value| MapiValue::Binary(value.to_vec()))
-        }
-        PID_TAG_WLINK_RO_GROUP_TYPE if navigation_shortcut_targets_calendar(message) => {
-            Some(MapiValue::I32(-1))
-        }
-        property_tag
-            if property_tag_id(property_tag) == property_tag_id(PID_TAG_WLINK_FOLDER_TYPE) =>
-        {
-            Some(wlink_guid_property_value(
-                requested_property_tag,
-                wlink_folder_type_guid(message),
-            ))
-        }
-        _ => None,
-    }
-}
-
-fn navigation_shortcut_targets_calendar(message: &MapiNavigationShortcutMessage) -> bool {
-    message.shortcut_type != 4
-        && (message.section == 3 || message.target_folder_id == Some(CALENDAR_FOLDER_ID))
-}
-
-fn is_sharing_local_folder_id_property_tag(property_tag: u32) -> bool {
-    matches!(
-        property_tag,
-        PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG
-            | OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG
-    )
-}
-
 pub(in crate::mapi) fn common_view_named_view_property_value(
     message: &MapiCommonViewNamedViewMessage,
     account_id: Uuid,
@@ -1246,6 +1075,34 @@ fn wlink_mail_folder_type_guid() -> [u8; 16] {
     ]
 }
 
+fn wlink_contact_folder_type_guid() -> [u8; 16] {
+    [
+        0x01, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ]
+}
+
+fn wlink_task_folder_type_guid() -> [u8; 16] {
+    [
+        0x03, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ]
+}
+
+fn wlink_note_folder_type_guid() -> [u8; 16] {
+    [
+        0x04, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ]
+}
+
+fn wlink_journal_folder_type_guid() -> [u8; 16] {
+    [
+        0x08, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ]
+}
+
 pub(in crate::mapi) fn common_view_named_view_folder_type_guid() -> [u8; 16] {
     [
         0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1254,19 +1111,40 @@ pub(in crate::mapi) fn common_view_named_view_folder_type_guid() -> [u8; 16] {
 }
 
 pub(in crate::mapi) fn wlink_folder_type_guid(message: &MapiNavigationShortcutMessage) -> [u8; 16] {
-    if message.target_folder_id.is_some_and(|folder_id| {
-        matches!(
-            folder_id,
-            INBOX_FOLDER_ID
-                | OUTBOX_FOLDER_ID
-                | SENT_FOLDER_ID
-                | DRAFTS_FOLDER_ID
-                | TRASH_FOLDER_ID
-                | JUNK_FOLDER_ID
-                | ARCHIVE_FOLDER_ID
-        )
-    }) {
+    // [MS-OXOCFG] section 2.2.9.11 assigns a distinct folder CLSID to
+    // each navigation module. Section headers have no target EntryID, so
+    // their WlinkSection is also required to select the correct CLSID.
+    if message.section == 1
+        || message.target_folder_id.is_some_and(|folder_id| {
+            matches!(
+                folder_id,
+                INBOX_FOLDER_ID
+                    | OUTBOX_FOLDER_ID
+                    | SENT_FOLDER_ID
+                    | DRAFTS_FOLDER_ID
+                    | TRASH_FOLDER_ID
+                    | JUNK_FOLDER_ID
+                    | ARCHIVE_FOLDER_ID
+            )
+        })
+    {
         return wlink_mail_folder_type_guid();
+    }
+    if message.section == 4
+        || message.target_folder_id.is_some_and(|folder_id| {
+            matches!(folder_id, CONTACTS_FOLDER_ID | SUGGESTED_CONTACTS_FOLDER_ID)
+        })
+    {
+        return wlink_contact_folder_type_guid();
+    }
+    if message.section == 5 || message.target_folder_id == Some(TASKS_FOLDER_ID) {
+        return wlink_task_folder_type_guid();
+    }
+    if message.section == 6 || message.target_folder_id == Some(NOTES_FOLDER_ID) {
+        return wlink_note_folder_type_guid();
+    }
+    if message.section == 7 || message.target_folder_id == Some(JOURNAL_FOLDER_ID) {
+        return wlink_journal_folder_type_guid();
     }
     [
         0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1274,23 +1152,25 @@ pub(in crate::mapi) fn wlink_folder_type_guid(message: &MapiNavigationShortcutMe
     ]
 }
 
+#[cfg(test)]
 pub(in crate::mapi) fn wlink_ordinal_bytes(value: u32) -> Vec<u8> {
-    let mut bytes = if value <= u8::MAX as u32 {
-        vec![value as u8]
+    let full_bytes = value.to_be_bytes();
+    let first_nonzero = full_bytes
+        .iter()
+        .position(|byte| *byte != 0)
+        .unwrap_or(full_bytes.len() - 1);
+    let compact = &full_bytes[first_nonzero..];
+
+    // [MS-OXOCFG] section 2.2.9.7 reserves 0x00 and 0xFF as final bytes.
+    // Keep valid compact projections stable and escape only reserved endings
+    // into a distinct fixed-width namespace so the mapping remains injective.
+    if matches!(compact.last(), Some(0 | 0xff)) {
+        let mut escaped = full_bytes.to_vec();
+        escaped.push(0x80);
+        escaped
     } else {
-        value
-            .to_be_bytes()
-            .into_iter()
-            .skip_while(|byte| *byte == 0)
-            .collect()
-    };
-    match bytes.last_mut() {
-        Some(last) if *last == 0 => *last = 1,
-        Some(last) if *last == u8::MAX => *last = u8::MAX - 1,
-        None => bytes.push(1),
-        _ => {}
+        compact.to_vec()
     }
-    bytes
 }
 
 pub(in crate::mapi) fn conversation_action_property_value(

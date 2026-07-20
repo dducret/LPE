@@ -2156,6 +2156,54 @@ CREATE TABLE mapi_mailbox_replicas (
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
+CREATE TABLE mapi_local_replica_id_ranges (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    replica_guid UUID NOT NULL,
+    first_global_counter BIGINT NOT NULL CHECK (first_global_counter >= 43 AND first_global_counter < 140737454800896),
+    end_global_counter_exclusive BIGINT NOT NULL CHECK (end_global_counter_exclusive > 43 AND end_global_counter_exclusive <= 140737454800896),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, replica_guid, first_global_counter),
+    CHECK (first_global_counter < end_global_counter_exclusive),
+    FOREIGN KEY (tenant_id, account_id, replica_guid)
+        REFERENCES mapi_mailbox_replicas (tenant_id, account_id, replica_guid)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_local_replica_id_ranges_membership_idx
+    ON mapi_local_replica_id_ranges (
+        tenant_id,
+        account_id,
+        replica_guid,
+        first_global_counter,
+        end_global_counter_exclusive
+    );
+
+CREATE TABLE mapi_local_replica_deleted_ranges (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    folder_id BIGINT NOT NULL CHECK (folder_id > 0),
+    replica_guid UUID NOT NULL,
+    min_global_counter BIGINT NOT NULL CHECK (min_global_counter >= 43 AND min_global_counter < 140737454800896),
+    max_global_counter BIGINT NOT NULL CHECK (max_global_counter >= 43 AND max_global_counter < 140737454800896),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, folder_id, replica_guid, min_global_counter, max_global_counter),
+    CHECK (min_global_counter <= max_global_counter),
+    FOREIGN KEY (tenant_id, account_id, replica_guid)
+        REFERENCES mapi_mailbox_replicas (tenant_id, account_id, replica_guid)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_local_replica_deleted_ranges_folder_idx
+    ON mapi_local_replica_deleted_ranges (
+        tenant_id,
+        account_id,
+        folder_id,
+        replica_guid,
+        min_global_counter,
+        max_global_counter
+    );
+
 CREATE TABLE mapi_object_identities (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
@@ -2282,12 +2330,28 @@ CREATE TABLE mapi_navigation_shortcuts (
     flags BIGINT NOT NULL DEFAULT 0 CHECK (flags >= 0 AND flags <= 4294967295),
     save_stamp BIGINT NOT NULL DEFAULT 0 CHECK (save_stamp >= 0 AND save_stamp <= 4294967295),
     section BIGINT NOT NULL DEFAULT 0 CHECK (section >= 0 AND section <= 4294967295),
-    ordinal BIGINT NOT NULL DEFAULT 0 CHECK (ordinal >= 0 AND ordinal <= 4294967295),
+    ordinal BYTEA NOT NULL,
     group_header_id UUID,
     group_name TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    calendar_color INTEGER CONSTRAINT mapi_navigation_shortcuts_calendar_color_check
+        CHECK (calendar_color >= -1 AND calendar_color <= 14),
+    address_book_entry_id BYTEA CONSTRAINT mapi_navigation_shortcuts_address_book_entry_id_check
+        CHECK (octet_length(address_book_entry_id) > 0 AND octet_length(address_book_entry_id) <= 65535),
+    address_book_store_entry_id BYTEA CONSTRAINT mapi_navigation_shortcuts_address_book_store_entry_id_check
+        CHECK (octet_length(address_book_store_entry_id) > 0 AND octet_length(address_book_store_entry_id) <= 65535),
+    client_id BYTEA CONSTRAINT mapi_navigation_shortcuts_client_id_check
+        CHECK (octet_length(client_id) > 0 AND octet_length(client_id) <= 65535),
+    ro_group_type INTEGER CONSTRAINT mapi_navigation_shortcuts_ro_group_type_check
+        CHECK (ro_group_type >= -1 AND ro_group_type <= 4),
     PRIMARY KEY (tenant_id, id),
+    CONSTRAINT mapi_navigation_shortcuts_ordinal_check CHECK (
+        octet_length(ordinal) > 0
+        AND octet_length(ordinal) <= 65535
+        AND get_byte(ordinal, octet_length(ordinal) - 1) <> 0
+        AND get_byte(ordinal, octet_length(ordinal) - 1) <> 255
+    ),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
@@ -2326,7 +2390,7 @@ CREATE TABLE mapi_associated_config_messages (
 CREATE INDEX mapi_associated_config_messages_account_folder_idx
     ON mapi_associated_config_messages (tenant_id, account_id, folder_id, subject, id);
 
-CREATE UNIQUE INDEX mapi_associated_config_messages_logical_idx
+CREATE INDEX mapi_associated_config_messages_logical_idx
     ON mapi_associated_config_messages (tenant_id, account_id, folder_id, message_class, subject);
 
 CREATE TABLE submission_queue (
