@@ -188,47 +188,20 @@ where
         .as_ref()
         .map(|_| associated_config_uuid(properties));
     let normalized = normalized_associated_config_persisted_properties(&message_class, properties);
-    let mut input =
-        if is_empty_inbox_message_list_settings_placeholder(folder_id, &message_class, &normalized)
-        {
-            let default = crate::mapi_store::outlook_inbox_message_list_settings_default();
-            let mut persisted_properties =
-                message_list_settings_placeholder_persisted_properties(&default);
-            // MS-OXCFXICS 2.2.3.2.4.2.1 and 3.3.5.8.7: normalizing an
-            // otherwise-empty FAI payload must not replace its imported ICS
-            // identity. The defaults enrich only the content payload; the
-            // imported SourceKey/ChangeKey/PCL remain canonical in the separate
-            // durable identity record.
-            for (tag, value) in &normalized {
-                persisted_properties
-                    .entry(*tag)
-                    .or_insert_with(|| value.clone());
-            }
-            UpsertMapiAssociatedConfigInput {
-                id: Some(if imported_identity.is_some() {
-                    imported_canonical_id.expect("imported FAI canonical ID")
-                } else {
-                    default.canonical_id
-                }),
-                account_id: principal.account_id,
-                folder_id: default.folder_id,
-                message_class: default.message_class.clone(),
-                subject: default.subject.clone(),
-                properties_json: mapi_properties_to_json(&persisted_properties),
-            }
-        } else {
-            UpsertMapiAssociatedConfigInput {
-                // [MS-OXCMSG] sections 2.2.3.2 and 2.2.3.3: each newly
-                // created Message has its own identity even when its payload
-                // is byte-for-byte equal to another FAI message.
-                id: Some(imported_canonical_id.unwrap_or_else(Uuid::new_v4)),
-                account_id: principal.account_id,
-                folder_id,
-                message_class,
-                subject,
-                properties_json: mapi_properties_to_json(&normalized),
-            }
-        };
+    // [MS-OXCPRPT] section 3.2.5.4, [MS-OXCMSG] section 3.2.5.3, and
+    // [MS-OXOCFG] sections 2.2.2.1 and 2.2.5.1: a successful Save commits
+    // the client's configuration-property values. In particular, an explicit
+    // zero PidTagRoamingDatatypes value declares that no roaming stream exists.
+    let mut input = UpsertMapiAssociatedConfigInput {
+        // [MS-OXCMSG] sections 2.2.3.2 and 2.2.3.3: each newly created Message
+        // has its own identity even when its payload equals another FAI message.
+        id: Some(imported_canonical_id.unwrap_or_else(Uuid::new_v4)),
+        account_id: principal.account_id,
+        folder_id,
+        message_class,
+        subject,
+        properties_json: mapi_properties_to_json(&normalized),
+    };
 
     // mapi_object_identities is the sole durable ICS identity. Content JSON
     // contains only user/configuration properties and receives the identity
@@ -576,56 +549,6 @@ pub(super) fn normalized_associated_config_content_properties(
     // Never re-persist that projection when an existing FAI is mutated.
     remove_associated_config_identity_properties(&mut normalized);
     normalized
-}
-
-pub(super) fn message_list_settings_placeholder_persisted_properties(
-    default: &crate::mapi_store::MapiAssociatedConfigMessage,
-) -> HashMap<u32, MapiValue> {
-    HashMap::from([
-        (
-            PID_TAG_MESSAGE_CLASS_W,
-            MapiValue::String(default.message_class.clone()),
-        ),
-        (
-            PID_TAG_ORIGINAL_MESSAGE_CLASS_W,
-            MapiValue::String(default.message_class.clone()),
-        ),
-        (
-            PID_TAG_SUBJECT_W,
-            MapiValue::String(default.subject.clone()),
-        ),
-        (
-            PID_TAG_NORMALIZED_SUBJECT_W,
-            MapiValue::String(default.subject.clone()),
-        ),
-        (PID_TAG_ROAMING_DATATYPES, MapiValue::U32(0x0000_0004)),
-        (
-            PID_TAG_ROAMING_DICTIONARY,
-            MapiValue::Binary(minimal_roaming_dictionary_stream()),
-        ),
-    ])
-}
-
-pub(super) fn is_empty_inbox_message_list_settings_placeholder(
-    folder_id: u64,
-    message_class: &str,
-    properties: &HashMap<u32, MapiValue>,
-) -> bool {
-    folder_id == INBOX_FOLDER_ID
-        && crate::mapi_store::is_outlook_configuration_message_class_name(
-            message_class,
-            "IPM.Configuration.MessageListSettings",
-        )
-        && properties
-            .get(&PID_TAG_ROAMING_DATATYPES)
-            .cloned()
-            .and_then(MapiValue::into_u32)
-            .unwrap_or(0)
-            == 0
-        && !properties.contains_key(&PID_TAG_ROAMING_DICTIONARY)
-        && !properties.contains_key(&PID_TAG_ROAMING_XML_STREAM)
-        && !properties.contains_key(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B)
-        && !properties.contains_key(&0x7C09_0102)
 }
 
 pub(super) fn associated_config_uuid(properties: &HashMap<u32, MapiValue>) -> Uuid {

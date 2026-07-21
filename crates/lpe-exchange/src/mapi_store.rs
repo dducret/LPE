@@ -234,9 +234,8 @@ pub(crate) use associated_config::{
     outlook_default_folder_named_view_id, outlook_default_folder_named_view_name,
     outlook_inbox_broad_startup_associated_config_defaults,
     outlook_inbox_exact_virtual_associated_config_for_message_class,
-    outlook_inbox_message_list_settings_default, OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID,
-    OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS, OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
-    OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS,
+    OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID, OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS,
+    OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS, OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS,
 };
 #[cfg(test)]
 pub(crate) use associated_config::{

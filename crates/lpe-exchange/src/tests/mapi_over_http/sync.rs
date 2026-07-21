@@ -10312,12 +10312,15 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
 }
 
 #[tokio::test]
-async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_ics_identity() {
-    // Outlook trace 202607181515 imports the Inbox FAI at MID 0x23e and then
-    // saves the otherwise-empty MessageListSettings payload. MS-OXCFXICS
-    // sections 2.2.3.2.4.2.1 and 3.3.5.8.7 require the imported SourceKey,
-    // ChangeKey, PCL, and LastModificationTime to remain the identity of the
-    // saved FAI message through SaveChangesMessage.
+async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_and_content() {
+    // Outlook traces 202607181515 and 202607211751 import the Inbox FAI and
+    // save MessageListSettings with PidTagRoamingDatatypes explicitly set to
+    // zero and no roaming stream. MS-OXCFXICS section 2.2.3.2.4.2.1 defines
+    // that upload, section 3.1.5.3 defines the server identity handling, and
+    // section 3.3.5.8.7 describes the corresponding client workflow.
+    // MS-OXCPRPT section 3.2.5.4 and MS-OXCMSG section 3.2.5.3 require the
+    // accepted property change to be committed, while MS-OXOCFG sections
+    // 2.2.2.1 and 2.2.5.1 define zero as no dictionary stream.
     let imported_change_key = vec![
         0x51, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
         0x31, 0x00, 0x00, 0x00, 0x00, 0x04, 0x15,
@@ -10462,12 +10465,12 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_i
         );
     }
     assert_eq!(
-        config.properties_json["0x7c060003"]["value"],
-        serde_json::Value::Number(4.into())
+        config.properties_json["0x7c060003"],
+        serde_json::json!({"type": "i32", "value": 0})
     );
-    assert!(config.properties_json["0x7c070102"]["value"]
-        .as_str()
-        .is_some_and(|dictionary| !dictionary.is_empty()));
+    assert!(config.properties_json.get("0x7c070102").is_none());
+    assert!(config.properties_json.get("0x7c080102").is_none());
+    assert!(config.properties_json.get("0x0e0b0102").is_none());
 
     let reconnect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -10509,7 +10512,11 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_i
         )
         .await
         .unwrap();
-    let reopen_response_rops = response_rops_from_execute_response(reopen_response).await;
+    let reopen_response_body = response_bytes(reopen_response).await;
+    let (reopen_response_rops, reopen_response_handles) =
+        response_rops_and_handles_from_execute_body(&reopen_response_body);
+    assert_eq!(reopen_response_handles.len(), 3);
+    assert_ne!(reopen_response_handles[2], u32::MAX);
     assert!(
         contains_bytes(&reopen_response_rops, &[0x03, 0x02, 0, 0, 0, 0]),
         "OpenMessage for imported MID 0x23e failed: {reopen_response_rops:02x?}"
@@ -10517,6 +10524,70 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_i
     assert!(contains_bytes(&reopen_response_rops, &imported_source_key));
     assert!(contains_bytes(&reopen_response_rops, &imported_change_key));
     assert!(contains_bytes(&reopen_response_rops, &imported_pcl));
+
+    // Exact second Execute from trace 202607211751: the Message handle opened
+    // above is reused for direct messageContent CopyTo with BestBody and
+    // ForceUnicode, followed by the extended 0x7BC0-byte GetBuffer form.
+    let mut copy_rops = Vec::new();
+    copy_rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]);
+    copy_rops.push(0);
+    copy_rops.extend_from_slice(&0x0000_2000u32.to_le_bytes());
+    copy_rops.push(0x09);
+    copy_rops.extend_from_slice(&0u16.to_le_bytes());
+    copy_rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
+    copy_rops.extend_from_slice(&0xBABEu16.to_le_bytes());
+    copy_rops.extend_from_slice(&0x7BC0u16.to_le_bytes());
+    renew_mapi_request_id(&mut reopen_headers);
+    let copy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &reopen_headers,
+            &execute_body(&rop_buffer(
+                &copy_rops,
+                &[
+                    reopen_response_handles[0],
+                    reopen_response_handles[1],
+                    reopen_response_handles[2],
+                    u32::MAX,
+                ],
+            )),
+        )
+        .await
+        .unwrap();
+    let copy_response_rops = response_rops_from_execute_response(copy_response).await;
+    let chunks = mapi_fast_transfer_chunks(&copy_response_rops);
+    assert_eq!(chunks.len(), 1, "{copy_response_rops:02x?}");
+    assert_eq!(chunks[0].0, 0x0003);
+    let transfer = &chunks[0].1;
+    let mut offset = 0;
+    let mut properties = Vec::new();
+    while offset < transfer.len() {
+        let property = strict_parse_fast_transfer_property(transfer, offset)
+            .unwrap_or_else(|error| panic!("{error}: {transfer:02x?}"));
+        offset = property.next_offset;
+        properties.push(property);
+    }
+    let roaming_datatypes = properties
+        .iter()
+        .filter(|property| property.tag == 0x7C06_0003)
+        .collect::<Vec<_>>();
+    assert_eq!(roaming_datatypes.len(), 1, "{transfer:02x?}");
+    assert_eq!(strict_decode_i32_property(roaming_datatypes[0]).unwrap(), 0);
+    assert!(!properties
+        .iter()
+        .any(|property| property.tag == 0x7C07_0102));
+    assert!(!properties
+        .iter()
+        .any(|property| property.tag == 0x7C08_0102));
+    assert!(!properties
+        .iter()
+        .any(|property| property.tag == 0x0E0B_0102));
+    assert!(!properties
+        .iter()
+        .any(|property| property.tag == 0x801F_001F));
+    assert!(!properties
+        .iter()
+        .any(|property| property.tag == 0x836B_001F));
 
     let sync_response = content_sync_response_rops_for_store_with_flags(
         store.clone(),
@@ -10540,6 +10611,16 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_mid_and_i
         downloaded.last_modification_time,
         Some(imported_last_modification_time as u64)
     );
+    assert!(downloaded.body_tags.contains(&0x7C06_0003));
+    for absent_tag in [
+        0x7C07_0102,
+        0x7C08_0102,
+        0x0E0B_0102,
+        0x801F_001F,
+        0x836B_001F,
+    ] {
+        assert!(!downloaded.body_tags.contains(&absent_tag));
+    }
 
     let change_sequence_before_conflict = store
         .mapi_sync_changes

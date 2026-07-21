@@ -304,7 +304,7 @@ fn associated_config_stream_write_summary_names_roaming_xml() {
 }
 
 #[test]
-fn empty_inbox_message_list_settings_save_gets_persistable_stream_defaults() {
+fn empty_inbox_message_list_settings_save_preserves_client_stream_mask() {
     let properties = HashMap::from([
         (
             PID_TAG_MESSAGE_CLASS_W,
@@ -313,46 +313,19 @@ fn empty_inbox_message_list_settings_save_gets_persistable_stream_defaults() {
         (PID_TAG_ROAMING_DATATYPES, MapiValue::I32(0)),
     ]);
 
-    assert!(is_empty_inbox_message_list_settings_placeholder(
-        INBOX_FOLDER_ID,
+    let persisted = normalized_associated_config_persisted_properties(
         "IPM.Configuration.MessageListSettings",
-        &properties
-    ));
-
-    let with_payload = HashMap::from([
-        (
-            PID_TAG_MESSAGE_CLASS_W,
-            MapiValue::String("IPM.Configuration.MessageListSettings".to_string()),
-        ),
-        (
-            PID_TAG_ROAMING_DICTIONARY,
-            MapiValue::Binary(b"<xml/>".to_vec()),
-        ),
-    ]);
-    assert!(!is_empty_inbox_message_list_settings_placeholder(
-        INBOX_FOLDER_ID,
-        "IPM.Configuration.MessageListSettings",
-        &with_payload
-    ));
-
-    let default = crate::mapi_store::outlook_inbox_message_list_settings_default();
-    let persisted = message_list_settings_placeholder_persisted_properties(&default);
+        &properties,
+    );
     assert_eq!(
         persisted
             .get(&PID_TAG_ROAMING_DATATYPES)
             .cloned()
             .and_then(MapiValue::into_u32),
-        Some(0x0000_0004)
+        Some(0)
     );
-    assert!(matches!(
-        persisted.get(&PID_TAG_ROAMING_DICTIONARY),
-        Some(MapiValue::Binary(bytes)) if !bytes.is_empty()
-    ));
-    assert!(!is_empty_inbox_message_list_settings_placeholder(
-        INBOX_FOLDER_ID,
-        "IPM.Configuration.MessageListSettings",
-        &persisted
-    ));
+    assert!(!persisted.contains_key(&PID_TAG_ROAMING_DICTIONARY));
+    assert!(!persisted.contains_key(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B));
 }
 
 #[test]

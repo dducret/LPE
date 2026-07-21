@@ -581,6 +581,7 @@ used_for = [
   "Property mutation and deletion semantics for an existing Outlook Calendar Message object",
   "Per-handle staging of writable Calendar properties and deletions until RopSaveChangesMessage",
   "Per-handle Contact property staging after ICS ImportMessageChange until atomic RopSaveChangesMessage persistence",
+  "Application of an accepted client-written PidTagRoamingDatatypes value by RopSetProperties",
   "Same-handle staging and reread of PidTagScheduleInfoAppointmentTombstone through direct properties and writable streams",
   "RopGetPropertiesSpecific response-buffer budgeting, per-property NotEnoughMemory, and stream fallback for oversized Outlook Calendar HTML",
 ]
@@ -770,6 +771,7 @@ used_for = [
   "Canonical message read-state flags and Outlook standalone rfClearReadFlag interoperability",
   "Message-object acceptance of additional MS-OXPROPS properties during Outlook appointment creation",
   "RopSaveChangesMessage ignores invalid or unknown SaveFlags values while still committing the message",
+  "Commit of accepted client-written associated-configuration properties through RopSaveChangesMessage",
 ]
 sections = [
   "1.3.2 Folder Associated Information Messages",
@@ -869,6 +871,7 @@ used_for = [
   "FolderDesign.NamedView selection contract contrasted with Outlook's additional registered view CLSID requirement",
   "Persisted-only Contacts helper and NamedView parity between the live FAI table and cached-mode synchronization",
   "Conversation Action Settings FAI projection only from canonical conversation action rows",
+  "Zero PidTagRoamingDatatypes as a complete declaration that no roaming dictionary or XML stream exists on a client-owned configuration FAI",
 ]
 sections = [
   "2.2.2.1 PidTagRoamingDatatypes Property",
@@ -1001,6 +1004,7 @@ used_for = [
   "Complete retained hierarchy tombstone download without storage-page truncation",
   "Exact MetaTagIdsetDeleted property tag and hierarchy deletion-section wire encoding",
   "Message CopyTo and CopyProperties subobject filters, empty collection directives, and provider-internal property exclusion",
+  "Direct Message CopyTo replay of the persisted client-owned configuration FAI property set without synthetic stream or content metadata",
 ]
 sections = [
   "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",

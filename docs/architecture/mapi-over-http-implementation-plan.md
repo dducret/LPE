@@ -331,11 +331,17 @@ non-canonical LPE state.
   keys, and descriptor CLSIDs. Modeled folder families use folder-specific
   identities. Real Calendar configuration FAI rows remain canonical and are
   exposed independently of the folder-local Calendar NamedView. When Outlook
-  imports the modeled Inbox `MessageListSettings` FAI, default properties enrich
-  the saved row without replacing its imported SourceKey, ChangeKey, PCL, or
-  MID. The imported identity therefore survives reconnect and
-  `RopOpenMessage`, following `[MS-OXCFXICS]` sections 2.2.3.2.4.2.1 and
-  3.3.5.8.7.
+  imports the Inbox `MessageListSettings` FAI, LPE preserves both its imported
+  SourceKey, ChangeKey, PCL, and MID and its exact client-written content. An
+  explicit zero `PidTagRoamingDatatypes` remains zero; absent roaming streams,
+  undocumented `0x0E0B0102`, and named content metadata remain absent from the
+  saved row and FastTransfer projection. Reconnect and `RopOpenMessage` retain
+  the same identity; Save and direct Message CopyTo retain the persisted
+  configuration-property set,
+  following `[MS-OXCPRPT]` section 3.2.5.4, `[MS-OXCMSG]` section 3.2.5.3,
+  `[MS-OXOCFG]` sections 2.2.2.1 and 2.2.5.1, and `[MS-OXCFXICS]` sections
+  2.2.3.1.1.1.1, 2.2.3.2.4.2.1, 2.2.4.3.16, 2.2.4.4, 3.1.5.3,
+  3.2.5.8.1.1, 3.2.5.10, and 3.3.5.8.7.
   Mutations to one open associated-configuration message are cumulative on that
   message handle through `RopSaveChangesMessage`; a later `RopSetProperties` or
   `RopDeletePropertiesNoReplicate` in the same batch must use the updated handle
@@ -398,11 +404,10 @@ non-canonical LPE state.
   not canonical mailbox messages and must not be exposed through normal message
   lists, JMAP mail, IMAP, search, AI pipelines, or mailbox export as user mail.
   `PidTagRoamingDictionary` values, including the `[MS-OXOCFG]` reserved
-  `OLPrefsVersion` entry, are preserved as Outlook writes them. For
-  LPE-synthesized minimal Inbox `IPM.Configuration.*` compatibility rows, LPE
-  emits only `OLPrefsVersion = 1`, encoded as `9-1`, so Outlook treats the
-  dictionary as valid per `[MS-OXOCFG]` section 2.2.5.1 instead of being forced
-  into the documented local-default rewrite path before the Inbox table handoff.
+  `OLPrefsVersion` entry, are preserved as Outlook writes them. The separately
+  modeled Inbox UMOLK compatibility row carries its own bounded dictionary with
+  `OLPrefsVersion = 1`, encoded as `9-1`; that server-owned projection never
+  enriches or replaces an imported client's `IPM.Configuration.*` property bag.
   Inbox associated-content
   sync does not emit broad synthetic or virtual-only rows such as aggregation,
   sharing, EAS, ELC, rule organizer, account preferences, message-list

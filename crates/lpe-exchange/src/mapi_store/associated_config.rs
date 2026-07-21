@@ -338,13 +338,6 @@ pub(super) fn outlook_inbox_exact_virtual_associated_config_for_id(
         })
 }
 
-pub(crate) fn outlook_inbox_message_list_settings_default() -> MapiAssociatedConfigMessage {
-    outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
-        .into_iter()
-        .find(|message| message.message_class == OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS)
-        .expect("Inbox MessageListSettings default")
-}
-
 pub(crate) fn outlook_inbox_broad_startup_associated_config_defaults(
 ) -> Vec<MapiAssociatedConfigMessage> {
     outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)

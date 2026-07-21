@@ -892,7 +892,7 @@ fn associated_config_sync_object(
             named_properties.push((tag, value));
         }
     }
-    for &tag in associated_config_default_sync_tags(message) {
+    for &tag in associated_config_default_sync_tags(message, &stored_properties) {
         let canonical_tag = canonical_property_storage_tag(tag);
         if associated_config_standard_sync_tag(canonical_tag)
             || stored_properties.contains_key(&canonical_tag)
@@ -940,8 +940,16 @@ fn associated_config_sync_object(
 
 fn associated_config_default_sync_tags(
     message: &crate::mapi_store::MapiAssociatedConfigMessage,
+    stored_properties: &HashMap<u32, MapiValue>,
 ) -> &'static [u32] {
     if crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
+        // [MS-OXOCFG] sections 2.2.2.1 and 2.2.5.1: a persisted
+        // PidTagRoamingDatatypes value is the client's complete declaration of
+        // the streams that exist. LPE therefore preserves the client-owned bag
+        // in CopyTo/ICS instead of adding absent compatibility properties.
+        if stored_properties.contains_key(&PID_TAG_ROAMING_DATATYPES) {
+            return &[];
+        }
         &[
             PID_TAG_ROAMING_DATATYPES,
             PID_TAG_ROAMING_DICTIONARY,

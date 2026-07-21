@@ -567,19 +567,7 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             1,
             "CopyTo must preserve exactly one PidTagSearchKey on {message_class}"
         );
-        for (tag, guid, name) in [
-            (
-                PID_NAME_CONTENT_CLASS_W_TAG,
-                PS_INTERNET_HEADERS_GUID,
-                "content-class",
-            ),
-            (
-                PID_NAME_CONTENT_TYPE_W_TAG,
-                PS_INTERNET_HEADERS_GUID,
-                "content-type",
-            ),
-            (0x9001_001F, PS_PUBLIC_STRINGS_GUID, "OutlookConfigToken"),
-        ] {
+        for (tag, guid, name) in [(0x9001_001Fu32, PS_PUBLIC_STRINGS_GUID, "OutlookConfigToken")] {
             let mut expected_property_info = tag.to_le_bytes().to_vec();
             expected_property_info.extend_from_slice(&guid);
             expected_property_info.push(0x01);
@@ -1510,12 +1498,11 @@ fn inbox_associated_content_sync_payload_emits_required_fai_properties() {
         .expect("persisted UMOLK user options");
     assert_has_tags(
         umolk,
-        &[
-            PID_TAG_ROAMING_DATATYPES,
-            PID_TAG_ROAMING_DICTIONARY,
-            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
-        ],
+        &[PID_TAG_ROAMING_DATATYPES, PID_TAG_ROAMING_DICTIONARY],
     );
+    assert!(!umolk
+        .property_tags
+        .contains(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B));
     for class in [
         "IPM.Configuration.AccountPrefs",
         "IPM.Configuration.ConversationPrefs",
