@@ -241,12 +241,17 @@ pub(super) fn append_fast_transfer_source_copy_messages_response(
             checkpoint_skip_reason: "",
             checkpoint_zero_delta: false,
             sync_type: 0,
+            sync_flags: 0,
             initial_state: Vec::new(),
             state: Vec::new(),
             state_upload_property_tag: None,
             state_upload_buffer: Vec::new(),
             client_state_uploaded_bytes: 0,
             client_state_uploaded_marker_mask: 0,
+            client_state_selection_enabled: false,
+            client_state_selection_invalidated: false,
+            client_state_selection_applied: false,
+            download_change_facts: Vec::new(),
             incremental_transfer_buffer: None,
             transfer_buffer,
             transfer_position: 0,
@@ -278,6 +283,9 @@ pub(super) fn append_fast_transfer_source_copy_response(
     };
     let Some((folder_id, transfer_buffer)) = fast_transfer_manifest_for_object(
         request.rop_id,
+        request
+            .fast_transfer_source_send_options()
+            .unwrap_or_default(),
         &object,
         principal,
         mailboxes,
@@ -303,12 +311,17 @@ pub(super) fn append_fast_transfer_source_copy_response(
             checkpoint_skip_reason: "",
             checkpoint_zero_delta: false,
             sync_type: 0,
+            sync_flags: 0,
             initial_state: Vec::new(),
             state: Vec::new(),
             state_upload_property_tag: None,
             state_upload_buffer: Vec::new(),
             client_state_uploaded_bytes: 0,
             client_state_uploaded_marker_mask: 0,
+            client_state_selection_enabled: false,
+            client_state_selection_invalidated: false,
+            client_state_selection_applied: false,
+            download_change_facts: Vec::new(),
             incremental_transfer_buffer: None,
             transfer_buffer,
             transfer_position: 0,
@@ -330,6 +343,13 @@ pub(super) fn append_synchronization_get_transfer_state_response(
     output_handles: &mut Vec<u32>,
 ) {
     let source_object = input_object(session, handle_slots, request);
+    let client_state_selection_invalidated = matches!(
+        source_object,
+        Some(MapiObject::SynchronizationSource {
+            client_state_selection_invalidated: true,
+            ..
+        })
+    );
     let Some((
         folder_id,
         mailbox_id,
@@ -404,12 +424,17 @@ pub(super) fn append_synchronization_get_transfer_state_response(
             checkpoint_skip_reason,
             checkpoint_zero_delta: false,
             sync_type,
+            sync_flags: 0,
             initial_state: transfer_buffer.clone(),
             state: transfer_buffer.clone(),
             state_upload_property_tag: None,
             state_upload_buffer: Vec::new(),
             client_state_uploaded_bytes,
             client_state_uploaded_marker_mask,
+            client_state_selection_enabled: false,
+            client_state_selection_invalidated,
+            client_state_selection_applied: false,
+            download_change_facts: Vec::new(),
             incremental_transfer_buffer: None,
             transfer_buffer,
             transfer_position: 0,

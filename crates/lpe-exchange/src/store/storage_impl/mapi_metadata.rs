@@ -1303,6 +1303,9 @@ macro_rules! store_impl_mapi_metadata {
             }
 
             if checkpoint_kind == MapiCheckpointKind::Hierarchy {
+                // [MS-OXCFXICS] section 3.2.5.3 requires folders that have
+                // never been reported as deleted to remain eligible. Fetch
+                // every retained identity; a storage page is not an ICS state.
                 let mailbox_tombstones = sqlx::query(
                     r#"
                     SELECT DISTINCT identity.mapi_object_id
@@ -1318,7 +1321,6 @@ macro_rules! store_impl_mapi_metadata {
                       AND tombstone.change_cursor > $3
                       AND (tombstone.retained_until IS NULL OR tombstone.retained_until > NOW())
                     ORDER BY identity.mapi_object_id
-                    LIMIT 1000
                     "#,
                 )
                 .bind(&tenant_id)
@@ -1347,7 +1349,6 @@ macro_rules! store_impl_mapi_metadata {
                       AND tombstone.change_cursor > $3
                       AND (tombstone.retained_until IS NULL OR tombstone.retained_until > NOW())
                     ORDER BY identity.mapi_object_id
-                    LIMIT 1000
                     "#,
                 )
                 .bind(&tenant_id)

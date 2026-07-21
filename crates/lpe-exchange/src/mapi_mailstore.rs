@@ -7,12 +7,17 @@ use lpe_domain::{
 use lpe_storage::{JmapEmail, JmapMailbox};
 use uuid::Uuid;
 
+mod client_state;
 mod diagnostics;
 mod folders;
 mod manifest;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use client_state::{
+    download_change_facts, select_download_manifest_for_client_state,
+    validate_download_state_property, DownloadChangeFact,
+};
 pub(crate) use folders::*;
 
 #[cfg(test)]
@@ -88,6 +93,7 @@ const PID_TAG_BODY_W: u32 = 0x1000_001F;
 const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
+const PID_TAG_MESSAGE_DELIVERY_TIME: u32 = 0x0E06_0040;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
 const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
@@ -125,6 +131,8 @@ const MSGFLAG_UNMODIFIED: u32 = 0x0000_0002;
 const MSGFLAG_UNSENT: u32 = 0x0000_0008;
 const MSGFLAG_HASATTACH: u32 = 0x0000_0010;
 const MSGFLAG_FAI: u32 = 0x0000_0040;
+const FAST_TRANSFER_SEND_OPTION_UNICODE: u8 = 0x01;
+const FAST_TRANSFER_SEND_OPTION_FORCE_UNICODE: u8 = 0x08;
 const ATTACH_BY_VALUE: i32 = 1;
 const ATTACH_EMBEDDED_MESSAGE: i32 = 5;
 const FOLLOWUP_FLAGGED: u32 = 0x0000_0002;
@@ -158,6 +166,7 @@ const SYNC_EXTRA_FLAG_EID: u32 = 0x0000_0001;
 // bit 0x08 is OrderByDeliveryTime.
 const SYNC_EXTRA_FLAG_MESSAGE_SIZE: u32 = 0x0000_0002;
 const SYNC_EXTRA_FLAG_CHANGE_NUMBER: u32 = 0x0000_0004;
+const SYNC_EXTRA_FLAG_ORDER_BY_DELIVERY_TIME: u32 = 0x0000_0008;
 const GLOBSET_RANGE_COMMAND: u8 = 0x52;
 const GLOBSET_BITMASK_COMMAND: u8 = 0x42;
 const GLOBSET_POP_COMMAND: u8 = 0x50;
@@ -330,9 +339,6 @@ pub(crate) fn sync_state_stream_with_uploaded_property(
     property_tag: u32,
     value: &[u8],
 ) -> Vec<u8> {
-    if !value.is_empty() && replguid_globset_counters(value).is_err() {
-        return current_state.to_vec();
-    }
     let normalized_property_tag = match property_tag {
         META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => META_TAG_IDSET_GIVEN,
         tag => tag,
@@ -830,9 +836,10 @@ fn fast_transfer_email_matches_folder(
 pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
     folder_id: u64,
     object: &SpecialMessageSyncFact,
+    send_options: u8,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
-    write_fast_transfer_special_message_content(&mut buffer, folder_id, object);
+    write_fast_transfer_special_message_content(&mut buffer, folder_id, object, send_options);
     buffer
 }
 
@@ -840,6 +847,7 @@ fn write_fast_transfer_special_message_content(
     buffer: &mut Vec<u8>,
     folder_id: u64,
     object: &SpecialMessageSyncFact,
+    send_options: u8,
 ) {
     let source_key = manifest::special_message_source_key(object);
     let change_key = manifest::special_message_change_key(object);
@@ -861,9 +869,25 @@ fn write_fast_transfer_special_message_content(
     write_bool_property(buffer, PID_TAG_ASSOCIATED, object.associated);
     write_u32(buffer, PID_TAG_MID);
     write_object_id(buffer, object.item_id);
-    write_i32_property(buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_READ as i32);
+    // [MS-OXCMSG] section 2.2.1.6 and [MS-OXCFXICS] section 2.2.1.5:
+    // keep CopyTo/CopyProperties consistent with the ICS and GetProps views.
+    let message_flags = if object.associated {
+        MSGFLAG_FAI
+    } else {
+        MSGFLAG_READ
+    };
+    write_i32_property(buffer, PID_TAG_MESSAGE_FLAGS, message_flags as i32);
     write_utf16_property(buffer, PID_TAG_SUBJECT_W, &object.subject);
-    write_string8_property(buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
+    // [MS-OXCFXICS] sections 2.2.3.1.1.1.1 and 3.2.5.8.1.1:
+    // canonical subjects are stored as Unicode, so Unicode/ForceUnicode
+    // select PtypUnicode; without either flag use PtypString8.
+    if send_options & (FAST_TRANSFER_SEND_OPTION_UNICODE | FAST_TRANSFER_SEND_OPTION_FORCE_UNICODE)
+        != 0
+    {
+        write_utf16_property(buffer, PID_TAG_NORMALIZED_SUBJECT_W, &object.subject);
+    } else {
+        write_string8_property(buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
+    }
     write_utf16_property(buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
     write_utf16_property(buffer, PID_TAG_BODY_W, &object.body_text);
     write_i32_property(buffer, PID_TAG_MESSAGE_SIZE, object.message_size as i32);

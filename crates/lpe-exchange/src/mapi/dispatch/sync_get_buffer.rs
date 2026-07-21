@@ -21,15 +21,78 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
             checkpoint_skip_reason,
             checkpoint_zero_delta,
             sync_type,
+            sync_flags,
+            initial_state,
             state,
             state_upload_buffer,
             client_state_uploaded_bytes,
             client_state_uploaded_marker_mask,
+            client_state_selection_enabled,
+            client_state_selection_invalidated,
+            client_state_selection_applied,
+            download_change_facts,
             incremental_transfer_buffer,
             transfer_buffer,
             transfer_position,
             ..
         }) => {
+            if *client_state_selection_invalidated {
+                // [MS-OXCFXICS] sections 3.1.5.4.3.2 and 3.1.5.4.3.2.4:
+                // a malformed GLOBSET is rejected with RpcFormat. It cannot
+                // subsequently serve as the ICS-state basis described in
+                // section 3.2.5.2 for this configured download context.
+                responses.extend_from_slice(&rop_error_response(
+                    0x4E,
+                    request.response_handle_index(),
+                    0x0000_04B6,
+                ));
+                return None;
+            }
+            let checkpoint_delta_available_before_client_selection =
+                incremental_transfer_buffer.is_some();
+            if *client_state_selection_enabled
+                && !*client_state_selection_applied
+                && matches!(*sync_type, 0x01 | 0x02)
+            {
+                // [MS-OXCFXICS] sections 3.2.5.2 and 3.2.5.3: the uploaded
+                // client state, including valid zero-length streams, is the
+                // sole semantic input to the download delta. Checkpoints are
+                // retained only as completion telemetry.
+                match mapi_mailstore::select_download_manifest_for_client_state(
+                    *sync_type,
+                    *sync_flags,
+                    transfer_buffer,
+                    initial_state,
+                    download_change_facts,
+                ) {
+                    Ok((selected, selected_final_state)) => {
+                        *transfer_buffer = selected;
+                        *state = selected_final_state;
+                        *transfer_position = 0;
+                        *client_state_selection_applied = true;
+                        incremental_transfer_buffer.take();
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            mapi_request_id = request_id,
+                            request_rop_id = "0x4e",
+                            folder_id = format_args!("0x{:016x}", *folder_id),
+                            sync_type = format_args!("0x{:02x}", *sync_type),
+                            error = %error,
+                            "cannot select ICS download from uploaded client state"
+                        );
+                        responses.extend_from_slice(&rop_error_response(
+                            0x4E,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        return None;
+                    }
+                }
+            }
             let requested_buffer_bytes = request.fast_transfer_buffer_size();
             let previous_transfer_position = *transfer_position;
             let empty_content_sync_state_only =
@@ -38,21 +101,10 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
                 uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask);
             let checkpoint_delta_available_before_get_buffer =
                 incremental_transfer_buffer.is_some();
-            let checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor =
-                checkpoint_delta_available_before_get_buffer && !upload_state_has_delta_anchor;
-            let active_transfer_selection = if *checkpoint_zero_delta
-                && !checkpoint_delta_available_before_get_buffer
-            {
-                "checkpoint_delta_zero_delta_initial"
-            } else if checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor {
-                "full_pending_upload_state_delta_anchor"
-            } else if upload_state_has_delta_anchor && !checkpoint_delta_available_before_get_buffer
-            {
-                "checkpoint_delta_or_full_after_delta_anchor"
-            } else if checkpoint_delta_available_before_get_buffer {
-                "full_with_checkpoint_delta_available"
+            let active_transfer_selection = if *client_state_selection_applied {
+                "uploaded_client_state_delta"
             } else {
-                "full_or_static"
+                "full_without_uploaded_client_state"
             };
             let response = rop_fast_transfer_source_get_buffer_response(
                 &request,
@@ -76,7 +128,7 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
                 completed_hierarchy_sync = Some((
                     *folder_id,
                     format!(
-                        "folder=0x{:016x};checkpoint_kind={};checkpoint_mailbox={};seq={};modseq={};state={};state_summary={};upload_buffer={};client_state={};upload_delta_anchor={};incremental={};delta_blocked_no_anchor={};selection={};requested={};response={};payload={};status={};completed={};position={}/{};{}",
+                        "folder=0x{:016x};checkpoint_kind={};checkpoint_mailbox={};seq={};modseq={};state={};state_summary={};upload_buffer={};client_state={};upload_delta_anchor={};incremental={};checkpoint_candidate_before_selection={};selection={};requested={};response={};payload={};status={};completed={};position={}/{};{}",
                         *folder_id,
                         checkpoint_kind.as_str(),
                         (*mailbox_id).map(|id| id.to_string()).unwrap_or_default(),
@@ -88,7 +140,7 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
                         *client_state_uploaded_bytes,
                         upload_state_has_delta_anchor,
                         incremental_transfer_buffer.is_some(),
-                        checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor,
+                        checkpoint_delta_available_before_client_selection,
                         active_transfer_selection,
                         requested_buffer_bytes,
                         response.len(),
@@ -137,9 +189,9 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
                     .as_ref()
                     .map(|buffer| buffer.len())
                     .unwrap_or_default(),
-                checkpoint_delta_selection_gate = "upload_state_delta_anchor",
+                checkpoint_delta_selection_gate = "disabled_client_state_is_authoritative",
+                checkpoint_delta_available_before_client_selection,
                 checkpoint_delta_available_before_get_buffer,
-                checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor,
                 active_transfer_selection,
                 requested_buffer_bytes,
                 transfer_position_before = previous_transfer_position,

@@ -1700,16 +1700,15 @@ fn uploaded_state_delta_anchor_requires_idset_and_cnset_seen() {
 }
 
 #[test]
-fn uploaded_state_empty_stream_does_not_create_delta_anchor() {
+fn uploaded_state_empty_streams_create_delta_anchor() {
     let mut marker_mask = 0;
-    let uploaded_bytes = 0usize;
 
-    if uploaded_bytes > 0 {
-        mark_uploaded_state_stream(&mut marker_mask, 0x4017_0003);
-        mark_uploaded_state_stream(&mut marker_mask, 0x6796_0102);
-    }
+    // [MS-OXCFXICS] section 3.1.5.2: a zero-length state property is a
+    // present, empty IDSET/CNSET and is authoritative for an initial sync.
+    mark_uploaded_state_stream(&mut marker_mask, 0x4017_0003);
+    mark_uploaded_state_stream(&mut marker_mask, 0x6796_0102);
 
-    assert!(!uploaded_state_has_delta_anchor(marker_mask));
+    assert!(uploaded_state_has_delta_anchor(marker_mask));
 }
 
 #[test]

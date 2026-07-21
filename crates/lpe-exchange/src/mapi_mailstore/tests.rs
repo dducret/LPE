@@ -227,7 +227,7 @@ fn hierarchy_download_keeps_imported_change_key_and_predecessor_lineage() {
         &[],
         &[],
         &[],
-        &[version],
+        std::slice::from_ref(&version),
         1,
     );
     let binary_property = |property_tag: u32| {
@@ -248,6 +248,23 @@ fn hierarchy_download_keeps_imported_change_key_and_predecessor_lineage() {
     );
     assert_eq!(summary.final_state_idset_given_counters, vec![8]);
     assert_eq!(summary.final_state_cnset_seen_counters, vec![58]);
+
+    let (selected, _) = select_download_manifest_for_client_state(
+        SYNC_TYPE_HIERARCHY,
+        0x0100,
+        &buffer,
+        &initial_sync_state_stream(SYNC_TYPE_HIERARCHY),
+        &[DownloadChangeFact {
+            object_id: version.folder_id,
+            change_number: version.change_number,
+            associated: false,
+            source_key: source_key_for_store_id(version.folder_id),
+        }],
+    )
+    .expect("imported ChangeKey must not replace the server CN used for selection");
+    let selected_summary = decode_hierarchy_transfer_debug_summary(&selected).unwrap();
+    assert_eq!(selected_summary.folder_change_count, 1);
+    assert_eq!(selected_summary.final_state_cnset_seen_counters, vec![58]);
 }
 
 #[test]
@@ -482,6 +499,237 @@ fn sync_manifest_serializes_content_message_header_in_fixed_order() {
 }
 
 #[test]
+fn microsoft_oxcfxics_order_by_delivery_time_sorts_newest_message_changes_first() {
+    let mut oldest = test_email();
+    oldest.id = Uuid::parse_str("11111111-1111-1111-1111-111111111151").unwrap();
+    oldest.thread_id = Uuid::parse_str("22222222-2222-2222-2222-222222222251").unwrap();
+    oldest.subject = "Delivery 09:00".to_string();
+    oldest.received_at = "2026-07-20T09:00:00Z".to_string();
+    oldest.modseq = 93;
+    oldest.mailbox_states[0].modseq = 93;
+
+    let mut newest = test_email();
+    newest.id = Uuid::parse_str("11111111-1111-1111-1111-111111111153").unwrap();
+    newest.thread_id = Uuid::parse_str("22222222-2222-2222-2222-222222222253").unwrap();
+    newest.subject = "Delivery 12:00".to_string();
+    newest.received_at = "2026-07-20T12:00:00Z".to_string();
+    newest.modseq = 91;
+    newest.mailbox_states[0].modseq = 91;
+
+    let mut middle = test_email();
+    middle.id = Uuid::parse_str("11111111-1111-1111-1111-111111111152").unwrap();
+    middle.thread_id = Uuid::parse_str("22222222-2222-2222-2222-222222222252").unwrap();
+    middle.subject = "Delivery 10:30".to_string();
+    middle.received_at = "2026-07-20T10:30:00Z".to_string();
+    middle.modseq = 92;
+    middle.mailbox_states[0].modseq = 92;
+
+    for (counter, email) in [51, 53, 52].into_iter().zip([&oldest, &newest, &middle]) {
+        crate::mapi::identity::remember_mapi_identity(
+            email.id,
+            crate::mapi::identity::mapi_store_id(counter),
+        );
+    }
+
+    // Outlook trace 202607202136 used SynchronizationFlags 0xA139 and
+    // SynchronizationExtraFlags 0x0000000D (Eid | CN | OrderByDeliveryTime).
+    let buffer = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_CONTENTS,
+        0xA139,
+        0x0000_000D,
+        &[],
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        &[oldest, newest, middle],
+        &[],
+        &[],
+        94,
+    );
+
+    let subject_offset = |subject: &str| {
+        let value = utf16z(subject);
+        let mut encoded = PID_TAG_SUBJECT_W.to_le_bytes().to_vec();
+        encoded.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        encoded.extend_from_slice(&value);
+        buffer
+            .windows(encoded.len())
+            .position(|window| window == encoded)
+            .expect("subject property is present in the messageChange sequence")
+    };
+
+    let newest_offset = subject_offset("Delivery 12:00");
+    let middle_offset = subject_offset("Delivery 10:30");
+    let oldest_offset = subject_offset("Delivery 09:00");
+    assert!(
+        newest_offset < middle_offset && middle_offset < oldest_offset,
+        "[MS-OXCFXICS] 3.2.5.9.1.1 requires newest-to-oldest messageChange ordering"
+    );
+}
+
+#[test]
+fn microsoft_oxcfxics_order_by_delivery_time_interleaves_normal_and_fai_changes() {
+    let mut email = test_email();
+    email.id = Uuid::parse_str("11111111-1111-4111-8111-111111111261").unwrap();
+    email.thread_id = Uuid::parse_str("22222222-2222-4222-8222-222222222261").unwrap();
+    email.subject = "Mail middle".to_string();
+    email.received_at = "2026-07-20T11:00:00Z".to_string();
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(261),
+    );
+    let newest = SpecialMessageSyncFact {
+        folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+        item_id: crate::mapi::identity::mapi_store_id(263),
+        canonical_id: Uuid::parse_str("33333333-3333-4333-8333-333333333263").unwrap(),
+        associated: true,
+        subject: "FAI newest".to_string(),
+        body_text: String::new(),
+        message_class: "IPM.Configuration.Test".to_string(),
+        last_modified_filetime: filetime_from_rfc3339_utc("2026-07-20T12:00:00Z"),
+        message_size: 64,
+        read_state: None,
+        named_properties: Vec::new(),
+        named_property_definitions: Default::default(),
+    };
+    let oldest = SpecialMessageSyncFact {
+        folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+        item_id: crate::mapi::identity::mapi_store_id(262),
+        canonical_id: Uuid::parse_str("33333333-3333-4333-8333-333333333262").unwrap(),
+        associated: true,
+        subject: "FAI oldest".to_string(),
+        body_text: String::new(),
+        message_class: "IPM.Configuration.Test".to_string(),
+        last_modified_filetime: filetime_from_rfc3339_utc("2026-07-20T10:00:00Z"),
+        message_size: 64,
+        read_state: None,
+        named_properties: Vec::new(),
+        named_property_definitions: Default::default(),
+    };
+    let specials = [oldest, newest];
+    let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+        Uuid::nil(),
+        SYNC_TYPE_CONTENTS,
+        0xA139,
+        0x0000_000D,
+        &[],
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        std::slice::from_ref(&email),
+        &[],
+        &specials,
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&email),
+        &[],
+        &specials,
+        std::slice::from_ref(&email),
+        &[],
+        264,
+    );
+    let subject_offset = |subject: &str| {
+        let value = utf16z(subject);
+        let mut encoded = PID_TAG_SUBJECT_W.to_le_bytes().to_vec();
+        encoded.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        encoded.extend_from_slice(&value);
+        buffer
+            .windows(encoded.len())
+            .position(|window| window == encoded)
+            .expect("subject property is present in the messageChange sequence")
+    };
+
+    assert!(
+        subject_offset("FAI newest") < subject_offset("Mail middle")
+            && subject_offset("Mail middle") < subject_offset("FAI oldest"),
+        "OrderByDeliveryTime applies to the complete normal/FAI messageChange sequence"
+    );
+}
+
+#[test]
+fn microsoft_oxcfxics_order_by_delivery_time_uses_calendar_delivery_property() {
+    let appointment =
+        |counter: u64, canonical_id: &str, subject: &str, delivery: &str, modified: &str| {
+            SpecialMessageSyncFact {
+                folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+                item_id: crate::mapi::identity::mapi_store_id(counter),
+                canonical_id: Uuid::parse_str(canonical_id).unwrap(),
+                associated: false,
+                subject: subject.to_string(),
+                body_text: String::new(),
+                message_class: "IPM.Appointment".to_string(),
+                last_modified_filetime: filetime_from_rfc3339_utc(modified),
+                message_size: 128,
+                read_state: None,
+                named_properties: vec![(
+                    PID_TAG_MESSAGE_DELIVERY_TIME,
+                    SpecialMessagePropertyValue::I64(filetime_from_rfc3339_utc(delivery) as i64),
+                )],
+                named_property_definitions: Default::default(),
+            }
+        };
+    let appointments = [
+        appointment(
+            271,
+            "44444444-4444-4444-8444-444444444271",
+            "Appointment 09:00",
+            "2026-07-20T09:00:00Z",
+            "2026-07-20T13:00:00Z",
+        ),
+        appointment(
+            273,
+            "44444444-4444-4444-8444-444444444273",
+            "Appointment 12:00",
+            "2026-07-20T12:00:00Z",
+            "2026-07-20T08:00:00Z",
+        ),
+        appointment(
+            272,
+            "44444444-4444-4444-8444-444444444272",
+            "Appointment 10:30",
+            "2026-07-20T10:30:00Z",
+            "2026-07-20T11:00:00Z",
+        ),
+    ];
+    let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+        Uuid::nil(),
+        SYNC_TYPE_CONTENTS,
+        0xA139,
+        0x0000_000D,
+        &[],
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        &appointments,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &appointments,
+        &[],
+        &[],
+        274,
+    );
+    let subject_offset = |subject: &str| {
+        let value = utf16z(subject);
+        let mut encoded = PID_TAG_SUBJECT_W.to_le_bytes().to_vec();
+        encoded.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        encoded.extend_from_slice(&value);
+        buffer
+            .windows(encoded.len())
+            .position(|window| window == encoded)
+            .expect("appointment subject is present in the messageChange sequence")
+    };
+
+    assert!(
+        subject_offset("Appointment 12:00") < subject_offset("Appointment 10:30")
+            && subject_offset("Appointment 10:30") < subject_offset("Appointment 09:00"),
+        "PidTagMessageDeliveryTime takes precedence over LastModificationTime"
+    );
+}
+
+#[test]
 fn microsoft_oxcfxics_content_sync_uses_recipient_markers() {
     let email_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
     crate::mapi::identity::remember_mapi_identity(
@@ -711,6 +959,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     let buffer = fast_transfer_message_content_buffer_with_special_object(
         crate::mapi::identity::INBOX_FOLDER_ID,
         &special,
+        0x00,
     );
 
     assert_tag_sequence(
@@ -734,13 +983,48 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         .any(|window| window == END_MESSAGE.to_le_bytes()));
     assert!(!buffer.starts_with(b"LPE-MAPI-FASTTRANSFER\0"));
     assert_bool_property(&buffer, PID_TAG_ASSOCIATED, true);
+    assert_i32_property(&buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_FAI as i32);
     assert_variable_property_present(
         &buffer,
         PID_TAG_SUBJECT_W,
         &utf16z("Outlook Inbox view state"),
     );
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_NORMALIZED_SUBJECT_A,
+        b"Outlook Inbox view state\0",
+    );
+    assert!(!buffer
+        .windows(4)
+        .any(|window| window == PID_TAG_NORMALIZED_SUBJECT_W.to_le_bytes()));
     assert_variable_property_present(&buffer, PID_TAG_BODY_W, &utf16z("Client view payload"));
     assert_variable_property_present(&buffer, 0x7C08_0102, b"view-extra");
+
+    let outlook_buffer = fast_transfer_message_content_buffer_with_special_object(
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &special,
+        0x09,
+    );
+    assert_bool_property(&outlook_buffer, PID_TAG_ASSOCIATED, true);
+    assert_i32_property(&outlook_buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_FAI as i32);
+    assert_variable_property_present(
+        &outlook_buffer,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        &utf16z("Outlook Inbox view state"),
+    );
+    assert!(!outlook_buffer
+        .windows(4)
+        .any(|window| window == PID_TAG_NORMALIZED_SUBJECT_A.to_le_bytes()));
+
+    let mut normal = special;
+    normal.associated = false;
+    let normal_buffer = fast_transfer_message_content_buffer_with_special_object(
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &normal,
+        0x09,
+    );
+    assert_bool_property(&normal_buffer, PID_TAG_ASSOCIATED, false);
+    assert_i32_property(&normal_buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_READ as i32);
 }
 
 #[test]
@@ -1089,6 +1373,270 @@ fn ipm_hierarchy_transfer_excludes_sync_root_and_zeros_direct_child_parent_key()
     assert_eq!(summary.rows[0].parent_source_key_len, 0);
     assert_eq!(summary.final_state_idset_given_counters, vec![5]);
     assert_eq!(summary.final_state_cnset_seen_counters, vec![5]);
+}
+
+#[test]
+fn hierarchy_download_selection_uses_uploaded_empty_client_state() {
+    let inbox = virtual_special_mailbox(crate::mapi::identity::INBOX_FOLDER_ID)
+        .expect("virtual Inbox folder");
+    let manifest = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_HIERARCHY,
+        0x0101,
+        0x0000_0001,
+        &[
+            PID_TAG_FOLDER_TYPE,
+            PID_TAG_CONTENT_COUNT,
+            PID_TAG_CONTENT_UNREAD_COUNT,
+            PID_TAG_MESSAGE_SIZE,
+            PID_TAG_ACCESS,
+            0x3FE0_0102, // PidTagMappingSignature
+            PID_TAG_RECORD_KEY,
+            0x0E27_0102, // PidTagOrdinalMost
+        ],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        std::slice::from_ref(&inbox),
+        &[],
+        &[],
+        &[],
+        1,
+    );
+
+    let (selected, final_state) = select_download_manifest_for_client_state(
+        SYNC_TYPE_HIERARCHY,
+        0x0101,
+        &manifest,
+        &initial_sync_state_stream(SYNC_TYPE_HIERARCHY),
+        &[DownloadChangeFact {
+            object_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            change_number: canonical_hierarchy_change_number(
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                &inbox,
+            ),
+            associated: false,
+            source_key: source_key_for_store_id(crate::mapi::identity::INBOX_FOLDER_ID),
+        }],
+    )
+    .expect("select hierarchy baseline from empty client state");
+
+    let summary = decode_hierarchy_transfer_debug_summary(&selected).unwrap();
+    assert_eq!(summary.folder_change_count, 1);
+    assert_eq!(summary.first_folder_name(), "Inbox");
+    assert_eq!(summary.final_state_idset_given_counters, vec![5]);
+    assert_eq!(summary.final_state_cnset_seen_counters, vec![5]);
+    assert!(selected.ends_with(&INCR_SYNC_END.to_le_bytes()));
+    assert!(!final_state.ends_with(&INCR_SYNC_END.to_le_bytes()));
+}
+
+#[test]
+fn hierarchy_download_selection_preserves_foreign_replica_and_uses_local_cnset() {
+    let inbox = virtual_special_mailbox(crate::mapi::identity::INBOX_FOLDER_ID)
+        .expect("virtual Inbox folder");
+    let object_counter =
+        crate::mapi::identity::global_counter_from_store_id(crate::mapi::identity::INBOX_FOLDER_ID)
+            .expect("local Inbox GLOBCNT");
+    let change_number =
+        canonical_hierarchy_change_number(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID, &inbox);
+    let foreign_guid = [0x11; 16];
+    assert!(foreign_guid < STORE_REPLICA_GUID);
+    let replguid_singletons = |replicas: &[([u8; 16], u64)]| {
+        let mut value = Vec::new();
+        for (guid, counter) in replicas {
+            value.extend_from_slice(guid);
+            value.push(GLOBSET_RANGE_COMMAND);
+            value.extend_from_slice(&globcnt_bytes(*counter));
+            value.extend_from_slice(&globcnt_bytes(*counter));
+            value.push(GLOBSET_END_COMMAND);
+        }
+        value
+    };
+    let idset_given = replguid_singletons(&[
+        (foreign_guid, object_counter),
+        (STORE_REPLICA_GUID, object_counter),
+    ]);
+    let foreign_cnset_seen = replguid_singletons(&[(foreign_guid, change_number)]);
+    let expected_cnset_seen = replguid_singletons(&[
+        (foreign_guid, change_number),
+        (STORE_REPLICA_GUID, change_number),
+    ]);
+    let client_state = sync_state_stream_with_uploaded_property(
+        SYNC_TYPE_HIERARCHY,
+        &initial_sync_state_stream(SYNC_TYPE_HIERARCHY),
+        META_TAG_IDSET_GIVEN,
+        &idset_given,
+    );
+    let client_state = sync_state_stream_with_uploaded_property(
+        SYNC_TYPE_HIERARCHY,
+        &client_state,
+        META_TAG_CNSET_SEEN,
+        &foreign_cnset_seen,
+    );
+    let manifest = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_HIERARCHY,
+        0x0101,
+        0,
+        &[],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        std::slice::from_ref(&inbox),
+        &[],
+        &[],
+        &[],
+        1,
+    );
+    let facts = [DownloadChangeFact {
+        object_id: crate::mapi::identity::INBOX_FOLDER_ID,
+        change_number,
+        associated: false,
+        source_key: source_key_for_store_id(crate::mapi::identity::INBOX_FOLDER_ID),
+    }];
+
+    // [MS-OXCFXICS] sections 2.2.2.4.2 and 3.2.5.3: XIDs with the
+    // same GLOBCNT remain distinct by REPLGUID, and the local replica's
+    // CnsetSeen determines whether the local server change is downloaded.
+    let (selected, final_state) = select_download_manifest_for_client_state(
+        SYNC_TYPE_HIERARCHY,
+        0x0101,
+        &manifest,
+        &client_state,
+        &facts,
+    )
+    .expect("select change unseen by the local replica set");
+    assert_eq!(
+        decode_hierarchy_transfer_debug_summary(&selected)
+            .unwrap()
+            .folder_change_count,
+        1
+    );
+    assert_variable_property(&final_state, META_TAG_IDSET_GIVEN, &idset_given);
+    assert_variable_property(&final_state, META_TAG_CNSET_SEEN, &expected_cnset_seen);
+
+    let (selected_again, final_state_again) = select_download_manifest_for_client_state(
+        SYNC_TYPE_HIERARCHY,
+        0x0101,
+        &manifest,
+        &final_state,
+        &facts,
+    )
+    .expect("select change already seen by the local replica set");
+    assert_eq!(
+        decode_hierarchy_transfer_debug_summary(&selected_again)
+            .unwrap()
+            .folder_change_count,
+        0
+    );
+    assert_variable_property(&final_state_again, META_TAG_IDSET_GIVEN, &idset_given);
+    assert_variable_property(
+        &final_state_again,
+        META_TAG_CNSET_SEEN,
+        &expected_cnset_seen,
+    );
+}
+
+#[test]
+fn hierarchy_download_no_deletions_keeps_missing_id_without_tombstone() {
+    let missing_id = crate::mapi::identity::mapi_store_id(0x1234);
+    let client_idset = replguid_idset_from_counters(&[0x1234]);
+    let client_state = sync_state_stream_with_uploaded_property(
+        SYNC_TYPE_HIERARCHY,
+        &initial_sync_state_stream(SYNC_TYPE_HIERARCHY),
+        META_TAG_IDSET_GIVEN,
+        &client_idset,
+    );
+    let manifest = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_HIERARCHY,
+        0x0002, // NoDeletions
+        0,
+        &[],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        &[],
+        1,
+    );
+
+    // [MS-OXCFXICS] section 3.2.5.3: NoDeletions suppresses deletion
+    // output, so a client ID missing from the current scope stays in IdsetGiven.
+    let (selected, final_state) = select_download_manifest_for_client_state(
+        SYNC_TYPE_HIERARCHY,
+        0x0002,
+        &manifest,
+        &client_state,
+        &[],
+    )
+    .expect("select hierarchy with NoDeletions");
+    assert_absent_property(&selected, META_TAG_IDSET_DELETED);
+    assert_variable_property(&final_state, META_TAG_IDSET_GIVEN, &client_idset);
+    assert_eq!(
+        crate::mapi::identity::global_counter_from_store_id(missing_id),
+        Some(0x1234)
+    );
+}
+
+#[test]
+fn hierarchy_download_emits_explicit_tombstone_absent_from_client_idset() {
+    let deleted_id = crate::mapi::identity::mapi_store_id(0x2345);
+    let expected_tombstone = replid_idset_from_object_ids(&[deleted_id]);
+    let manifest = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_HIERARCHY,
+        0x0100,
+        0,
+        &[],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        &[deleted_id],
+        1,
+    );
+
+    // [MS-OXCFXICS] section 3.2.5.3: an explicit hierarchy deletion is
+    // emitted even when that folder was absent from the uploaded IdsetGiven.
+    let (selected, final_state) = select_download_manifest_for_client_state(
+        SYNC_TYPE_HIERARCHY,
+        0x0100,
+        &manifest,
+        &initial_sync_state_stream(SYNC_TYPE_HIERARCHY),
+        &[],
+    )
+    .expect("select explicit hierarchy tombstone");
+    assert_variable_property_present(&selected, META_TAG_IDSET_DELETED, &expected_tombstone);
+    assert_variable_property(&final_state, META_TAG_IDSET_GIVEN, &[]);
+}
+
+#[test]
+fn hierarchy_download_rejects_malformed_client_globset() {
+    let mut malformed_cnset = STORE_REPLICA_GUID.to_vec();
+    malformed_cnset.push(GLOBSET_RANGE_COMMAND);
+    let client_state = sync_state_stream_with_uploaded_property(
+        SYNC_TYPE_HIERARCHY,
+        &initial_sync_state_stream(SYNC_TYPE_HIERARCHY),
+        META_TAG_CNSET_SEEN,
+        &malformed_cnset,
+    );
+    let manifest = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_HIERARCHY,
+        0x0100,
+        0,
+        &[],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        &[],
+        1,
+    );
+
+    // [MS-OXCFXICS] section 2.2.2.4.2: every REPLGUID is followed by a
+    // complete GLOBSET; a truncated range is not a valid client state.
+    let error = select_download_manifest_for_client_state(
+        SYNC_TYPE_HIERARCHY,
+        0x0100,
+        &manifest,
+        &client_state,
+        &[],
+    )
+    .expect_err("reject truncated client GLOBSET");
+    assert_eq!(error, "truncated GLOBSET range low value");
 }
 
 #[test]
@@ -1916,6 +2464,90 @@ fn content_sync_manifest_starts_fai_message_before_item_properties() {
     assert_eq!(item.message_class, "IPM.Microsoft.WunderBar.Link");
     assert!(item.source_key_len > 0);
     assert!(item.parent_source_key_len > 0);
+}
+
+#[test]
+fn fai_foreign_source_key_identity_is_used_by_selected_and_full_idset_given() {
+    let canonical_id = Uuid::parse_str("99999999-9999-4999-8999-999999999397").unwrap();
+    let item_id = crate::mapi::identity::mapi_store_id(397);
+    crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+    let foreign_guid = [0x31; 16];
+    let foreign_counter = 0x0000_1020_3040_5060;
+    let mut foreign_source_key = foreign_guid.to_vec();
+    foreign_source_key.extend_from_slice(&globcnt_bytes(foreign_counter));
+    assert_ne!(foreign_guid, STORE_REPLICA_GUID);
+    assert_ne!(
+        crate::mapi::identity::global_counter_from_store_id(item_id),
+        Some(foreign_counter)
+    );
+    let special = SpecialMessageSyncFact {
+        folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        item_id,
+        canonical_id,
+        associated: true,
+        subject: "Foreign persisted FAI view".to_string(),
+        body_text: String::new(),
+        message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+        last_modified_filetime: filetime_from_rfc3339_utc("2026-07-20T21:36:00Z"),
+        message_size: 256,
+        read_state: None,
+        named_properties: vec![(
+            PID_TAG_SOURCE_KEY,
+            SpecialMessagePropertyValue::Binary(foreign_source_key.clone()),
+        )],
+        named_property_definitions: Default::default(),
+    };
+    let manifest = sync_manifest_buffer_with_special_objects_and_final_state(
+        Uuid::nil(),
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_FAI,
+        SYNC_EXTRA_FLAG_EID | SYNC_EXTRA_FLAG_CHANGE_NUMBER,
+        &[],
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&special),
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&special),
+        &[],
+        &[],
+        1,
+    );
+    let facts = download_change_facts(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_FAI,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&special),
+        &[],
+    );
+    let (_, selected_state) = select_download_manifest_for_client_state(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_FAI,
+        &manifest,
+        &initial_sync_state_stream(SYNC_TYPE_CONTENTS),
+        &facts,
+    )
+    .expect("select FAI with its persisted foreign SourceKey");
+    let mut expected_idset_given = foreign_guid.to_vec();
+    expected_idset_given.push(GLOBSET_RANGE_COMMAND);
+    expected_idset_given.extend_from_slice(&globcnt_bytes(foreign_counter));
+    expected_idset_given.extend_from_slice(&globcnt_bytes(foreign_counter));
+    expected_idset_given.push(GLOBSET_END_COMMAND);
+
+    // [MS-OXCFXICS] sections 2.2.1.1.1, 2.2.1.2.5, 2.2.2.4.2,
+    // and 3.2.5.3: change.Id is the GID carried by the emitted SourceKey;
+    // IdsetGivenC adds that exact REPLGUID/GLOBCNT identity.
+    assert_variable_property(&selected_state, META_TAG_IDSET_GIVEN, &expected_idset_given);
+    assert_variable_property(&manifest, PID_TAG_SOURCE_KEY, &foreign_source_key);
+    assert_variable_property(&manifest, META_TAG_IDSET_GIVEN, &expected_idset_given);
 }
 
 #[test]

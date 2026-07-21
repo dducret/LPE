@@ -420,10 +420,19 @@ async fn mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canon
     // [MS-OXCFXICS] sections 2.2.4.3 and 2.2.4.4: the source hierarchy emits
     // the retired MID as a deletion while Deleted Items emits a new message
     // change with the destination MID and SourceKey.
-    let source_sync = content_sync_response_rops_for_store(
+    let source_state = vec![
+        (
+            META_TAG_IDSET_GIVEN,
+            strict_test_replguid_globset(&[event_mapi_id >> 16]),
+        ),
+        (META_TAG_CNSET_SEEN, Vec::new()),
+        (META_TAG_CNSET_SEEN_FAI, Vec::new()),
+        (META_TAG_CNSET_READ, Vec::new()),
+    ];
+    let source_sync = outlook_content_sync_response_rops_for_store(
         store.clone(),
         crate::mapi::identity::CALENDAR_FOLDER_ID,
-        b"client-content-state",
+        &source_state,
     )
     .await;
     let source_stream = strict_content_sync_transfer_from_response(&source_sync).unwrap();
@@ -433,12 +442,9 @@ async fn mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canon
     )
     .unwrap());
 
-    let destination_sync = content_sync_response_rops_for_store(
-        store,
-        crate::mapi::identity::TRASH_FOLDER_ID,
-        b"client-content-state",
-    )
-    .await;
+    let destination_sync =
+        content_sync_response_rops_for_store(store, crate::mapi::identity::TRASH_FOLDER_ID, &[])
+            .await;
     assert!(contains_bytes(
         &destination_sync,
         &crate::mapi::wire::FastTransferMarker::NewAttach
@@ -3857,6 +3863,7 @@ async fn mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request() 
     append_mapi_utf16_property(&mut property_values, 0x0C1A_001F, "Alice Organizer");
     append_mapi_utf16_property(&mut property_values, 0x0C1F_001F, "alice@example.test");
     append_mapi_utf16_property(&mut property_values, 0x0E04_001F, "Bob Attendee");
+    append_mapi_i32_property(&mut property_values, 0x8217_0003, 0x0000_0001);
     let mut rops = Vec::new();
     append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
     append_rop_set_properties(&mut rops, 1, 7, &property_values);
@@ -3884,6 +3891,7 @@ async fn mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request() 
     assert_eq!(stored[0].time, "09:30");
     assert_eq!(stored[0].duration_minutes, 30);
     assert!(stored[0].organizer_json.contains("alice@example.test"));
+    assert!(stored[0].organizer_json.contains(r#""is_meeting":true"#));
     assert!(stored[0].attendees_json.contains("Bob Attendee"));
 }
 
@@ -6468,6 +6476,135 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
             .and_then(|id| id.as_u64()),
         Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
     );
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_download_uses_uploaded_ics_state_without_server_checkpoint() {
+    let account = FakeStore::account();
+    let calendar = FakeStore::collection("default", "calendar", "Calendar");
+    let event_id = Uuid::parse_str("71717171-7171-4171-9171-717171710050").unwrap();
+    let config_id = Uuid::parse_str("71717171-7171-4171-9171-717171710051").unwrap();
+    let event_object_id = crate::mapi::identity::mapi_store_id(198_425);
+    let config_object_id = crate::mapi::identity::mapi_store_id(198_426);
+    let event_change_number = 262_471;
+    let config_change_number = 262_472;
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![calendar])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-07-21".to_string(),
+            time: "08:00".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 1,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Uploaded ICS state appointment".to_string(),
+            location: "Room 21".to_string(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: "Calendar client already has this item".to_string(),
+            body_html: String::new(),
+        }])),
+        associated_configs: Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
+            id: config_id,
+            account_id: account.account_id,
+            folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+            message_class: "IPM.Configuration.Calendar".to_string(),
+            subject: "IPM.Configuration.Calendar".to_string(),
+            properties_json: serde_json::json!({
+                "0x001a001f": {
+                    "type": "string",
+                    "value": "IPM.Configuration.Calendar"
+                },
+                "0x0037001f": {
+                    "type": "string",
+                    "value": "IPM.Configuration.Calendar"
+                },
+                "0x7c060003": {"type": "integer", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "01020304"}
+            }),
+        }])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([
+            (event_id, event_object_id),
+            (config_id, config_object_id),
+        ]))),
+        mapi_identity_change_numbers: Arc::new(Mutex::new(HashMap::from([
+            (event_id, event_change_number),
+            (config_id, config_change_number),
+        ]))),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 77,
+        current_modseq: 77,
+        ..Default::default()
+    };
+    let empty_state = vec![
+        (META_TAG_IDSET_GIVEN, Vec::new()),
+        (META_TAG_CNSET_SEEN, Vec::new()),
+        (META_TAG_CNSET_SEEN_FAI, Vec::new()),
+        (META_TAG_CNSET_READ, Vec::new()),
+    ];
+    let initial_response = outlook_content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &empty_state,
+    )
+    .await;
+    let initial_stream = strict_content_sync_transfer_from_response(&initial_response).unwrap();
+    assert_eq!(initial_stream.message_changes.len(), 2);
+    let uploaded_state = vec![
+        (META_TAG_IDSET_GIVEN, initial_stream.idset_given.clone()),
+        (META_TAG_CNSET_SEEN, initial_stream.cnset_seen.clone()),
+        (
+            META_TAG_CNSET_SEEN_FAI,
+            initial_stream.cnset_seen_fai.clone(),
+        ),
+        (META_TAG_CNSET_READ, initial_stream.cnset_read.clone()),
+    ];
+
+    // Reproduce an OST carrying a complete state while the server-side
+    // optimization checkpoint is absent. [MS-OXCFXICS] section 3.2.5.3
+    // requires the uploaded ICS state, not a persisted server cursor, to
+    // determine the messageChange elements to download.
+    store.mapi_checkpoints.lock().unwrap().clear();
+    let response = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &uploaded_state,
+    )
+    .await;
+    let stream = strict_content_sync_transfer_from_response(&response).unwrap();
+
+    assert!(
+        stream.message_changes.is_empty(),
+        "Outlook already reported every normal and FAI Calendar change as present"
+    );
+    assert!(stream.deleted_idset.is_none());
+    assert!(stream.read_idset.is_none());
+    assert!(stream.unread_idset.is_none());
+    assert_eq!(
+        stream.idset_given.as_slice(),
+        uploaded_state[0].1.as_slice()
+    );
+    assert_eq!(stream.cnset_seen.as_slice(), uploaded_state[1].1.as_slice());
+    assert_eq!(
+        stream.cnset_seen_fai.as_slice(),
+        uploaded_state[2].1.as_slice()
+    );
+    assert_eq!(stream.cnset_read.as_slice(), uploaded_state[3].1.as_slice());
 }
 
 #[tokio::test]

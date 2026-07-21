@@ -3750,6 +3750,129 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
 }
 
 #[test]
+fn calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting() {
+    let mut event = default_event_for_mapping(Uuid::nil(), "default");
+    event.owner_email = "test@example.test".to_string();
+    event.owner_display_name = "Test".to_string();
+    event.organizer_json = r#"{"email":"","common_name":"test"}"#.to_string();
+    event.attendees_json =
+        serialize_calendar_participants_metadata(&CalendarParticipantsMetadata {
+            organizer: Some(lpe_storage::CalendarOrganizerMetadata {
+                email: String::new(),
+                common_name: "test".to_string(),
+            }),
+            attendees: Vec::new(),
+        });
+
+    // [MS-OXOCAL] sections 2.2.1.10 and 3.1.4.2: asfMeeting identifies
+    // a Meeting object, not an appointment carrying only owner metadata.
+    assert_eq!(
+        event_property_value(
+            &event,
+            1,
+            CALENDAR_FOLDER_ID,
+            PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
+        ),
+        Some(MapiValue::I32(0)),
+    );
+
+    let mut properties = HashMap::new();
+    properties.insert(PID_TAG_SENDER_NAME_W, MapiValue::String("test".to_string()));
+    properties.insert(PID_LID_APPOINTMENT_STATE_FLAGS_TAG, MapiValue::I32(0));
+    let input = event_input_from_mapi(Uuid::nil(), Some(event.id), &event, &properties).unwrap();
+    let organizer: serde_json::Value = serde_json::from_str(&input.organizer_json).unwrap();
+
+    assert_eq!(organizer["is_meeting"], false);
+}
+
+#[test]
+fn calendar_projection_keeps_a_named_exchange_recipient_as_a_meeting() {
+    let existing = default_event_for_mapping(Uuid::nil(), "default");
+    let mut properties = HashMap::new();
+    properties.insert(
+        PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
+        MapiValue::I32(0x0000_0001),
+    );
+    properties.insert(
+        PID_LID_TO_ATTENDEES_STRING_W_TAG,
+        MapiValue::String(
+            "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=Bob".to_string(),
+        ),
+    );
+    let input =
+        event_input_from_mapi(Uuid::nil(), Some(existing.id), &existing, &properties).unwrap();
+    let organizer: serde_json::Value = serde_json::from_str(&input.organizer_json).unwrap();
+    let mut projected = existing;
+    projected.organizer_json = input.organizer_json;
+    projected.attendees = input.attendees;
+    projected.attendees_json = input.attendees_json;
+
+    assert_eq!(organizer["is_meeting"], true);
+    assert_eq!(
+        event_property_value(
+            &projected,
+            1,
+            CALENDAR_FOLDER_ID,
+            PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
+        ),
+        Some(MapiValue::I32(0x0000_0001)),
+    );
+}
+
+#[test]
+fn calendar_projection_keeps_meeting_state_after_all_attendees_are_removed() {
+    let mut existing = default_event_for_mapping(Uuid::nil(), "default");
+    existing.organizer_json =
+        r#"{"email":"alice@example.test","common_name":"Alice","is_meeting":true}"#.to_string();
+    existing.attendees = "Bob".to_string();
+    existing.attendees_json =
+        serialize_calendar_participants_metadata(&CalendarParticipantsMetadata {
+            organizer: Some(lpe_storage::CalendarOrganizerMetadata {
+                email: "alice@example.test".to_string(),
+                common_name: "Alice".to_string(),
+            }),
+            attendees: vec![lpe_storage::CalendarParticipantMetadata {
+                email: String::new(),
+                common_name: "Bob Exchange".to_string(),
+                role: "REQ-PARTICIPANT".to_string(),
+                partstat: "needs-action".to_string(),
+                rsvp: false,
+            }],
+        });
+    let mut properties = HashMap::new();
+    properties.insert(PID_LID_APPOINTMENT_STATE_FLAGS_TAG, MapiValue::I32(0));
+    properties.insert(
+        PID_LID_TO_ATTENDEES_STRING_W_TAG,
+        MapiValue::String(String::new()),
+    );
+    properties.insert(
+        PID_LID_CC_ATTENDEES_STRING_W_TAG,
+        MapiValue::String(String::new()),
+    );
+    let input =
+        event_input_from_mapi(Uuid::nil(), Some(existing.id), &existing, &properties).unwrap();
+    let organizer: serde_json::Value = serde_json::from_str(&input.organizer_json).unwrap();
+    let mut projected = existing;
+    projected.organizer_json = input.organizer_json;
+    projected.attendees = input.attendees;
+    projected.attendees_json = input.attendees_json;
+
+    // [MS-OXOCAL] section 3.1.4.2: removing every recipient does not convert
+    // the Meeting object back into an Appointment object.
+    assert!(projected.attendees.is_empty());
+    assert_eq!(organizer["is_meeting"], true);
+    assert_eq!(
+        event_property_value(
+            &projected,
+            1,
+            CALENDAR_FOLDER_ID,
+            PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
+        ),
+        Some(MapiValue::I32(0x0000_0001)),
+    );
+}
+
+#[test]
 fn calendar_projection_backs_outlook_table_identity_and_status_columns() {
     let event = default_event_for_mapping(Uuid::nil(), "default");
     let item_id = 0x0000_0000_0044_0001;

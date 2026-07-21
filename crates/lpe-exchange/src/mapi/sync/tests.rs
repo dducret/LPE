@@ -432,6 +432,7 @@ fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
     let copy_buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
         CALENDAR_FOLDER_ID,
         &objects[0],
+        0x09,
     );
 
     for transfer in [&buffer, &copy_buffer] {
@@ -518,7 +519,7 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             .find(|object| object.message_class == message_class)
             .unwrap();
         let copy_buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-            folder_id, object,
+            folder_id, object, 0x09,
         );
         let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
         let item = summary
@@ -700,6 +701,7 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
     let buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
         CALENDAR_FOLDER_ID,
         &object,
+        0x09,
     );
     let mut expected = PID_LID_BUSY_STATUS_TAG.to_le_bytes().to_vec();
     expected.extend_from_slice(&PSETID_APPOINTMENT_GUID);
@@ -1613,6 +1615,7 @@ fn fast_transfer_manifest_rejects_unbacked_common_views_shortcut() {
 
     assert!(fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
+        0x09,
         &object,
         &sync_principal(account_id),
         &[],
@@ -1633,6 +1636,7 @@ fn fast_transfer_manifest_rejects_unpersisted_common_views_named_view() {
 
     assert!(fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
+        0x09,
         &object,
         &sync_principal(account_id),
         &[],
@@ -1709,6 +1713,7 @@ fn fast_transfer_manifest_rejects_associated_config_default_from_wrong_folder() 
 
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
+        0x09,
         &object,
         &sync_principal(account_id),
         &[],
@@ -1731,6 +1736,7 @@ fn fast_transfer_manifest_rejects_common_views_shortcut_from_wrong_folder() {
 
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
+        0x09,
         &object,
         &sync_principal(account_id),
         &[],
@@ -1751,6 +1757,7 @@ fn fast_transfer_manifest_rejects_common_views_named_view_from_wrong_folder() {
 
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
+        0x09,
         &object,
         &sync_principal(account_id),
         &[],
@@ -1771,6 +1778,7 @@ fn fast_transfer_manifest_rejects_conversation_action_default_from_wrong_folder(
 
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
+        0x09,
         &object,
         &sync_principal(account_id),
         &[],
@@ -1813,6 +1821,7 @@ fn fast_transfer_manifest_rejects_delegate_freebusy_from_wrong_folder() {
 
     let manifest = fast_transfer_manifest_for_object(
         RopId::FastTransferSourceCopyTo.as_u8(),
+        0x09,
         &object,
         &sync_principal(account_id),
         &[],

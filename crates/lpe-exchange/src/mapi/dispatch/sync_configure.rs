@@ -121,10 +121,12 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         .map(|checkpoint| checkpoint.last_modseq)
         .unwrap_or_default();
     let checkpoint = checkpoint.filter(|_| checkpoint_status == "usable");
-    let since = checkpoint
-        .as_ref()
-        .map(|checkpoint| checkpoint.last_change_sequence)
-        .unwrap_or(0);
+    // The operational checkpoint cannot bound client-visible tombstones: a
+    // different OST can upload an older IdsetGiven, and hierarchy deletions
+    // that were already observed by another session still have to be eligible
+    // for that client. [MS-OXCFXICS] section 3.2.5.3 derives the download only
+    // from the initial client state, never from server-side per-client state.
+    let since = 0;
     let changes = match store
         .fetch_mapi_sync_changes(
             principal.account_id,
@@ -198,14 +200,6 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         snapshot,
     )
     .await;
-    let delta_attachment_facts = sync_attachment_facts_for_with_embedded_content(
-        store,
-        principal.account_id,
-        folder_id,
-        &delta_sync_emails,
-        snapshot,
-    )
-    .await;
     let aggregate_sync_emails = if sync_type == 0x02 {
         emails.to_vec()
     } else {
@@ -214,18 +208,15 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     let state_attachment_facts = sync_attachment_facts_for(folder_id, &all_sync_emails, snapshot);
     let aggregate_attachment_facts =
         sync_attachment_facts_for(folder_id, &aggregate_sync_emails, snapshot);
-    let mut deleted_message_ids = if checkpoint.is_some() {
+    let mut deleted_message_ids =
         mapi_message_ids_for_deleted_changes(store, principal, &changes.deleted_message_ids)
             .await
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-    if checkpoint.is_some() && checkpoint_kind == MapiCheckpointKind::Hierarchy {
+            .unwrap_or_default();
+    if checkpoint_kind == MapiCheckpointKind::Hierarchy {
         deleted_message_ids.extend(changes.deleted_mailbox_object_ids.iter().copied());
         deleted_message_ids.extend(changes.deleted_search_folder_object_ids.iter().copied());
     }
-    if checkpoint.is_some() && folder_id == NOTES_FOLDER_ID {
+    if folder_id == NOTES_FOLDER_ID {
         deleted_message_ids.extend(
             mapi_object_ids_for_deleted_changes(
                 store,
@@ -237,7 +228,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
             .unwrap_or_default(),
         );
     }
-    if checkpoint.is_some() && folder_id == JOURNAL_FOLDER_ID {
+    if folder_id == JOURNAL_FOLDER_ID {
         deleted_message_ids.extend(
             mapi_object_ids_for_deleted_changes(
                 store,
@@ -249,13 +240,11 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
             .unwrap_or_default(),
         );
     }
-    if checkpoint.is_some() {
-        deleted_message_ids.extend(
-            deleted_special_object_ids_for_folder(store, principal, folder_id, snapshot, &changes)
-                .await,
-        );
-    }
-    if checkpoint.is_some() && folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+    deleted_message_ids.extend(
+        deleted_special_object_ids_for_folder(store, principal, folder_id, snapshot, &changes)
+            .await,
+    );
+    if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
         deleted_message_ids.extend(
             mapi_object_ids_for_deleted_changes(
                 store,
@@ -277,6 +266,16 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         &all_special_sync_objects,
     );
     let folder_versions = snapshot.folder_versions();
+    let download_change_facts = mapi_mailstore::download_change_facts(
+        sync_type,
+        sync_flags,
+        folder_id,
+        &all_sync_mailboxes,
+        &all_sync_emails,
+        &sync_attachment_facts,
+        &all_special_sync_objects,
+        &folder_versions,
+    );
     let initial_state = mapi_mailstore::initial_sync_state_stream(sync_type);
     let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions(
         principal.account_id,
@@ -289,7 +288,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         &all_sync_emails,
         &sync_attachment_facts,
         &all_special_sync_objects,
-        &[],
+        &deleted_message_ids,
         mailboxes,
         &state_sync_mailboxes,
         &all_sync_emails,
@@ -327,30 +326,10 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
             active_transfer_selection: "initial_full_candidate",
         },
     );
-    let incremental_transfer_buffer = checkpoint.as_ref().map(|_| {
-        mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions(
-            principal.account_id,
-            sync_type,
-            sync_flags,
-            sync_extra_flags,
-            &sync_property_tags,
-            folder_id,
-            &delta_sync_mailboxes,
-            &delta_sync_emails,
-            &delta_attachment_facts,
-            &delta_special_sync_objects,
-            &deleted_message_ids,
-            mailboxes,
-            &state_sync_mailboxes,
-            &all_sync_emails,
-            &state_attachment_facts,
-            &all_special_sync_objects,
-            &aggregate_sync_emails,
-            &aggregate_attachment_facts,
-            &folder_versions,
-            changes.current_change_sequence,
-        )
-    });
+    // [MS-OXCFXICS] sections 3.2.5.2 and 3.2.5.3: the client-uploaded
+    // ICS state, not LPE's operational checkpoint, selects the download.
+    // Keep the checkpoint below for completion diagnostics only.
+    let incremental_transfer_buffer: Option<Vec<u8>> = None;
     let checkpoint_delta_mailbox_count = delta_sync_mailboxes.len();
     let checkpoint_delta_email_count = delta_sync_emails.len();
     let checkpoint_delta_special_object_count = delta_special_sync_objects.len();
@@ -364,18 +343,9 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         + checkpoint_delta_special_object_count
         + checkpoint_deleted_message_count;
     let checkpoint_zero_delta = checkpoint.is_some() && checkpoint_delta_total_count == 0;
-    let checkpoint_incremental_response_candidate =
-        checkpoint.is_some() && incremental_transfer_buffer.is_some();
+    let checkpoint_incremental_response_candidate = false;
     let initial_checkpoint_delta_selected = false;
-    let initial_transfer_selection = if initial_checkpoint_delta_selected {
-        "checkpoint_delta_zero_delta_initial"
-    } else if checkpoint_incremental_response_candidate {
-        "full_until_upload_state_delta_anchor"
-    } else if checkpoint.is_some() {
-        "full_checkpoint_without_incremental_candidate"
-    } else {
-        "full_no_checkpoint"
-    };
+    let initial_transfer_selection = "full_pending_client_state_selection";
     let scope_flags_present = sync_type != 0x01 || sync_flags & 0x0030 != 0;
     let default_fai_scope_requested = all_sync_emails.is_empty()
         && all_special_sync_objects
@@ -427,7 +397,6 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         && wire_sync_email_count == 0
         && wire_sync_special_object_count == 0
         && checkpoint_deleted_message_count == 0
-        && incremental_transfer_buffer_bytes == transfer_buffer.len()
         && transfer_buffer.len() == state.len().saturating_add(4);
     tracing::info!(
         rca_debug = true,
@@ -494,7 +463,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         checkpoint_zero_delta,
         checkpoint_incremental_response_candidate,
         initial_checkpoint_delta_selected,
-        checkpoint_delta_selection_gate = "upload_state_delta_anchor",
+        checkpoint_delta_selection_gate = "disabled_client_state_is_authoritative",
         initial_transfer_selection,
         checkpoint_changed_contact_count = changes.changed_contact_ids.len(),
         checkpoint_changed_calendar_event_count =
@@ -514,19 +483,6 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         incremental_transfer_buffer_bytes,
         "rca debug mapi sync configure"
     );
-    let active_transfer_buffer = if initial_checkpoint_delta_selected {
-        incremental_transfer_buffer
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| transfer_buffer.clone())
-    } else {
-        transfer_buffer
-    };
-    let deferred_incremental_transfer_buffer = if initial_checkpoint_delta_selected {
-        None
-    } else {
-        incremental_transfer_buffer
-    };
     let handle = session.allocate_output_handle(
         request.output_handle_index,
         MapiObject::SynchronizationSource {
@@ -539,14 +495,19 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
             checkpoint_skip_reason,
             checkpoint_zero_delta,
             sync_type,
+            sync_flags,
+            state: initial_state.clone(),
             initial_state,
-            state,
             state_upload_property_tag: None,
             state_upload_buffer: Vec::new(),
             client_state_uploaded_bytes: 0,
             client_state_uploaded_marker_mask: 0,
-            incremental_transfer_buffer: deferred_incremental_transfer_buffer,
-            transfer_buffer: active_transfer_buffer,
+            client_state_selection_enabled: true,
+            client_state_selection_invalidated: false,
+            client_state_selection_applied: false,
+            download_change_facts,
+            incremental_transfer_buffer,
+            transfer_buffer,
             transfer_position: 0,
         },
     );

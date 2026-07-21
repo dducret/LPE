@@ -550,6 +550,18 @@ pub(in crate::mapi) fn simulate_table_access(
             }
         }
         0x82 => {
+            let Some(source_object) =
+                input_handle(handle_slots, request).and_then(|handle| handles.get(&handle))
+            else {
+                return;
+            };
+            let client_state_selection_invalidated = matches!(
+                source_object,
+                MapiObject::SynchronizationSource {
+                    client_state_selection_invalidated: true,
+                    ..
+                }
+            );
             let Some((
                 folder_id,
                 mailbox_id,
@@ -560,9 +572,7 @@ pub(in crate::mapi) fn simulate_table_access(
                 checkpoint_skip_reason,
                 sync_type,
                 state,
-            )) = input_handle(handle_slots, request)
-                .and_then(|handle| handles.get(&handle))
-                .and_then(|object| synchronization_context_state(Some(object)))
+            )) = synchronization_context_state(Some(source_object))
             else {
                 return;
             };
@@ -580,12 +590,17 @@ pub(in crate::mapi) fn simulate_table_access(
                     checkpoint_skip_reason,
                     checkpoint_zero_delta: false,
                     sync_type,
+                    sync_flags: 0,
                     initial_state: state.clone(),
                     state: state.clone(),
                     state_upload_property_tag: None,
                     state_upload_buffer: Vec::new(),
                     client_state_uploaded_bytes: 0,
                     client_state_uploaded_marker_mask: 0,
+                    client_state_selection_enabled: false,
+                    client_state_selection_invalidated,
+                    client_state_selection_applied: false,
+                    download_change_facts: Vec::new(),
                     incremental_transfer_buffer: None,
                     transfer_buffer: state,
                     transfer_position: 0,

@@ -75,6 +75,32 @@ fn normalized_subject_tag(sync_flags: u16) -> u32 {
     }
 }
 
+fn email_delivery_sort_time(email: &JmapEmail, attachments: &[AttachmentSyncFact]) -> u64 {
+    parse_rfc3339_utc_filetime(&email.received_at).unwrap_or_else(|| {
+        filetime_from_change_number(canonical_message_change_number_with_attachments(
+            email,
+            attachments,
+        ))
+    })
+}
+
+fn special_message_delivery_sort_time(object: &SpecialMessageSyncFact) -> u64 {
+    object
+        .named_properties
+        .iter()
+        .find_map(|(tag, value)| {
+            (canonical_property_storage_tag(*tag) == PID_TAG_MESSAGE_DELIVERY_TIME)
+                .then(|| match value {
+                    SpecialMessagePropertyValue::I64(value) => u64::try_from(*value).ok(),
+                    SpecialMessagePropertyValue::U64(value) => Some(*value),
+                    SpecialMessagePropertyValue::Time(value) => parse_rfc3339_utc_filetime(value),
+                    _ => None,
+                })
+                .flatten()
+        })
+        .unwrap_or(object.last_modified_filetime)
+}
+
 fn write_normalized_subject_property(buffer: &mut Vec<u8>, property_tag: u32, subject: &str) {
     // [MS-OXCFXICS] sections 3.2.5.8.1.1 and 3.2.5.9.1.1: canonical
     // Unicode strings remain Unicode when the synchronization advertises Unicode.
@@ -215,6 +241,17 @@ pub(crate) fn special_message_source_key(object: &SpecialMessageSyncFact) -> Vec
         .unwrap_or_else(|| source_key_for_store_id(object.item_id))
 }
 
+pub(super) fn special_message_sync_source_key(
+    object: &SpecialMessageSyncFact,
+    sync_flags: u16,
+) -> Vec<u8> {
+    if sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0 {
+        source_key_for_store_id(object.item_id)
+    } else {
+        special_message_source_key(object)
+    }
+}
+
 fn special_message_parent_source_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
     special_message_binary_property(object, PID_TAG_PARENT_SOURCE_KEY)
         .map(ToOwned::to_owned)
@@ -240,7 +277,7 @@ pub(super) fn special_message_predecessor_change_list(object: &SpecialMessageSyn
         .unwrap_or_else(|| predecessor_change_list(change_number_for_store_id(object.item_id)))
 }
 
-fn special_message_change_number(object: &SpecialMessageSyncFact) -> u64 {
+pub(super) fn special_message_change_number(object: &SpecialMessageSyncFact) -> u64 {
     object
         .named_properties
         .iter()
@@ -383,7 +420,13 @@ pub(crate) fn sync_state_token_with_special_objects(
     } else {
         &[]
     };
-    let normal_object_ids = sync_state_object_ids(sync_type, folder_id, mailboxes, scoped_emails);
+    let mut source_key_identities = scoped_emails
+        .iter()
+        .filter_map(|email| {
+            let object_id = crate::mapi::identity::mapped_mapi_object_id(&email.id)?;
+            Some((source_key_for_uuid(&email.id), object_id))
+        })
+        .collect::<Vec<_>>();
     let normal_change_numbers = sync_state_change_numbers(
         sync_type,
         folder_id,
@@ -404,8 +447,12 @@ pub(crate) fn sync_state_token_with_special_objects(
             )
         })
         .collect::<Vec<_>>();
-    let mut object_ids = normal_object_ids;
-    object_ids.extend(scoped_special_objects.iter().map(|object| object.item_id));
+    source_key_identities.extend(scoped_special_objects.iter().map(|object| {
+        (
+            special_message_sync_source_key(object, sync_flags),
+            object.item_id,
+        )
+    }));
     let mut normal_change_numbers = normal_change_numbers;
     // [MS-OXCFXICS] sections 2.2.1.1.2, 2.2.1.1.3, and 3.2.5.3 require
     // the final CnsetSeen/CnsetSeenFAI to contain the CN of each downloaded
@@ -421,11 +468,19 @@ pub(crate) fn sync_state_token_with_special_objects(
         .filter(|object| object.associated)
         .map(|object| special_message_change_number(object))
         .collect::<Vec<_>>();
-    final_content_sync_state_stream(
-        &object_ids,
-        &normal_change_numbers,
-        &fai_change_numbers,
-        &normal_change_numbers,
+    // [MS-OXCFXICS] sections 2.2.1.1.1, 2.2.1.2.5, 2.2.2.4.2,
+    // and 3.2.5.3: the complete state uses the GID from each SourceKey that
+    // this synchronization emits, including persisted foreign replicas.
+    sync_state_stream_from_raw_properties(
+        SYNC_TYPE_CONTENTS,
+        &super::client_state::replguid_idset_from_source_keys(
+            source_key_identities
+                .iter()
+                .map(|(source_key, object_id)| (source_key.as_slice(), *object_id)),
+        ),
+        &replguid_idset_from_counters(&normal_change_numbers),
+        &replguid_idset_from_counters(&fai_change_numbers),
+        &replguid_idset_from_counters(&normal_change_numbers),
     )
 }
 
@@ -832,8 +887,11 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
     if sync_type == SYNC_TYPE_CONTENTS && sync_flags & SYNC_FLAG_PROGRESS != 0 {
         write_content_sync_progress_mode(&mut buffer, &messages, &special_objects);
     }
+    let mut message_changes = Vec::with_capacity(messages.len() + special_objects.len());
     for email in messages {
         let attachments = attachments_for_message(email.id, attachment_facts);
+        let delivery_sort_time = email_delivery_sort_time(email, attachments);
+        let mut buffer = Vec::new();
         let change_number = canonical_message_change_number_with_attachments(email, attachments);
         let message_size = email.size_octets.min(i32::MAX as i64) as i32;
         let source_key = source_key_for_uuid(&email.id);
@@ -926,20 +984,20 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             write_fast_transfer_visible_recipients(&mut buffer, email);
             write_fast_transfer_attachments(&mut buffer, attachments);
         }
+        let original_order = message_changes.len();
+        message_changes.push((delivery_sort_time, original_order, buffer));
     }
 
     for object in &special_objects {
         let attachments = attachments_for_message(object.canonical_id, attachment_facts);
+        let delivery_sort_time = special_message_delivery_sort_time(object);
+        let mut buffer = Vec::new();
         let change_number = special_message_change_number(object);
         // [MS-OXCFXICS] section 3.2.5.9.1.1: NoForeignIdentifiers requires
         // local replica identifiers even when the canonical object retains an
         // imported SourceKey for a synchronization without that flag.
         let no_foreign_identifiers = sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0;
-        let source_key = if no_foreign_identifiers {
-            source_key_for_store_id(object.item_id)
-        } else {
-            special_message_source_key(object)
-        };
+        let source_key = special_message_sync_source_key(object, sync_flags);
         let parent_source_key = if no_foreign_identifiers {
             source_key_for_store_id(object.folder_id)
         } else {
@@ -1024,6 +1082,8 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             // [MS-OXCMSG] section 2.2.1.6: mfFAI identifies an FAI message.
             let message_flags = if object.associated {
                 MSGFLAG_FAI
+            } else if object.read_state == Some(false) {
+                0
             } else {
                 MSGFLAG_READ
             };
@@ -1080,6 +1140,19 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             // to canonical mail and must not be reduced to PidTagHasAttachments.
             write_fast_transfer_attachments(&mut buffer, attachments);
         }
+        let original_order = message_changes.len();
+        message_changes.push((delivery_sort_time, original_order, buffer));
+    }
+
+    if sync_extra_flags & SYNC_EXTRA_FLAG_ORDER_BY_DELIVERY_TIME != 0 {
+        // [MS-OXCFXICS] section 3.2.5.9.1.1: sort the complete sequence of
+        // normal and FAI messageChange elements from newest to oldest by
+        // PidTagMessageDeliveryTime, falling back to LastModificationTime.
+        message_changes
+            .sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    }
+    for (_, _, message_change) in message_changes {
+        buffer.extend_from_slice(&message_change);
     }
 
     if !deleted_message_ids.is_empty() {
@@ -1089,48 +1162,6 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             META_TAG_IDSET_DELETED,
             &replid_idset_from_object_ids(deleted_message_ids),
         );
-    }
-
-    if sync_type == SYNC_TYPE_CONTENTS && sync_flags & 0x0008 != 0 {
-        let mut read_message_ids = emails
-            .iter()
-            .filter(|email| !email.unread)
-            .filter_map(|email| crate::mapi::identity::mapped_mapi_object_id(&email.id))
-            .collect::<Vec<_>>();
-        read_message_ids.extend(
-            special_objects
-                .iter()
-                .filter(|object| object.read_state == Some(true))
-                .map(|object| object.item_id),
-        );
-        let mut unread_message_ids = emails
-            .iter()
-            .filter(|email| email.unread)
-            .filter_map(|email| crate::mapi::identity::mapped_mapi_object_id(&email.id))
-            .collect::<Vec<_>>();
-        unread_message_ids.extend(
-            special_objects
-                .iter()
-                .filter(|object| object.read_state == Some(false))
-                .map(|object| object.item_id),
-        );
-        if !read_message_ids.is_empty() || !unread_message_ids.is_empty() {
-            write_u32(&mut buffer, INCR_SYNC_READ);
-            if !read_message_ids.is_empty() {
-                write_binary_property(
-                    &mut buffer,
-                    META_TAG_IDSET_READ,
-                    &replid_idset_from_object_ids(&read_message_ids),
-                );
-            }
-            if !unread_message_ids.is_empty() {
-                write_binary_property(
-                    &mut buffer,
-                    META_TAG_IDSET_UNREAD,
-                    &replid_idset_from_object_ids(&unread_message_ids),
-                );
-            }
-        }
     }
 
     buffer.extend_from_slice(&sync_state_token_with_special_objects(

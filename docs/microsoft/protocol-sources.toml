@@ -687,6 +687,7 @@ used_for = [
   "Separation of Calendar PidLidLocation from address-book PidTagLocation and PidTagLastModifierEntryId",
   "PidTagLocalCommitTime identity and UTC PtypTime value projected after Calendar Event Save",
   "PSETID_Address and PSETID_Common identities plus Contact LIDs used by the Outlook Contacts named-property pre-map batch",
+  "PidTagLastModificationTime fallback key for OrderByDeliveryTime content synchronization",
 ]
 sections = [
   "1.3.2 Commonly Used Property Sets",
@@ -706,6 +707,7 @@ sections = [
   "2.717 PidTagHasAttachments",
   "2.734 PidTagHtml",
   "2.739 PidTagImportance",
+  "2.766 PidTagLastModificationTime",
   "2.767 PidTagLastModifierEntryId",
   "2.774 PidTagLocalCommitTime",
   "2.778 PidTagLocation",
@@ -986,6 +988,11 @@ used_for = [
   "Upload state ignores MetaTagIdsetGiven and returns only applicable CN sets",
   "RopFastTransferSourceCopyTo and CopyProperties Message-object messageContent root without StartMessage or StartFAIMsg wrappers",
   "FAI content synchronization excludes unpersisted folder-local views and Contacts helper messages",
+  "Authoritative cached-mode download selection from the client-uploaded IdsetGiven, CnsetSeen, CnsetSeenFAI, and CnsetRead, including valid zero-length state streams",
+  "Exact emitted SourceKey GID and REPLGUID identity in final IdsetGiven, including preserved foreign FAI identifiers",
+  "Validation and decoding of REPLGUID-based IDSET/GLOBSET state streams, with RpcFormat and configured-context invalidation for malformed uploads",
+  "OrderByDeliveryTime content synchronization ordering by delivery time with last-modification fallback, newest first",
+  "Complete retained hierarchy tombstone download without storage-page truncation",
 ]
 sections = [
   "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",
@@ -1000,7 +1007,10 @@ sections = [
   "2.2.2.2 XID Structure",
   "2.2.2.3 PredecessorChangeList Structure",
   "2.2.2.3.1 SizedXid Structure",
+  "2.2.2.4.2 Serialized IDSET Structure Containing a REPLGUID Structure",
   "2.2.2.5 GLOBCNT Structure",
+  "2.2.2.6 GLOBSET Structure",
+  "2.2.2.6.4 Range Command (0x52)",
   "2.2.2.7 ProgressInformation Structure",
   "2.2.3.1.1.1.1 RopFastTransferSourceCopyTo ROP Request Buffer",
   "2.2.3.1.1.1 RopFastTransferSourceCopyTo ROP",
@@ -1041,24 +1051,29 @@ sections = [
   "2.2.3.2.4.4.2 RopSynchronizationImportMessageMove ROP Response Buffer",
   "2.2.3.2.4.7 RopGetLocalReplicaIds ROP",
   "2.2.3.2.4.7.1 RopGetLocalReplicaIds ROP Request Buffer",
-  "3.2.5.9.4.7 Receiving a RopGetLocalReplicaIds ROP Request",
-  "3.2.5.9.4.8 Receiving a RopSetLocalReplicaMidsetDeleted ROP Request",
+  "3.1.5.2 Managing ICS State Properties",
   "3.1.5.3 Identifying Objects and Maintaining Change Numbers",
+  "3.1.5.4.3.2 Decoding",
+  "3.1.5.4.3.2.4 Range Command (0x52)",
   "3.1.5.6.1 Detection",
   "3.1.5.6.2 Resolution",
   "3.1.5.6.2.2 Last Writer Wins Algorithm",
-  "3.2.5.3 Determining What Differences To Download",
+  "3.2.5.2 Managing the ICS State on the Server",
   "3.2.5.2.1 Receiving the MetaTagIdsetGiven ICS State Property",
-  "3.2.5.6 Tracking Read State Changes",
+  "3.2.5.3 Determining What Differences To Download",
   "3.2.5.5 Generating the PidTagSourceKey Value",
+  "3.2.5.6 Tracking Read State Changes",
   "3.2.5.7 Working with Property Groups and Partial Changes",
   "3.2.5.8.1.1 Receiving a RopFastTransferSourceCopyTo ROP Request",
+  "3.2.5.8.1.2 Receiving a RopFastTransferSourceCopyProperties ROP Request",
   "3.2.5.9.1.1 Receiving a RopSynchronizationConfigure ROP Request",
-  "3.2.5.9.4.2 Receiving a RopSynchronizationImportMessageChange ROP Request",
   "3.2.5.9.3.1 Receiving a RopSynchronizationGetTransferState ROP Request",
+  "3.2.5.9.4.2 Receiving a RopSynchronizationImportMessageChange ROP Request",
   "3.2.5.9.4.3 Receiving a RopSynchronizationImportHierarchyChange ROP Request",
   "3.2.5.9.4.4 Receiving a RopSynchronizationImportMessageMove ROP Request",
   "3.2.5.9.4.5 Receiving a RopSynchronizationImportDeletes ROP Request",
+  "3.2.5.9.4.7 Receiving a RopGetLocalReplicaIds ROP Request",
+  "3.2.5.9.4.8 Receiving a RopSetLocalReplicaMidsetDeleted ROP Request",
   "3.3.4.3.3.2.1.1 Moves and Modifications",
   "3.3.4.3.3 Uploading Changes Using ICS",
   "3.3.4.3.3.1 Hierarchy Upload",
@@ -1589,6 +1604,7 @@ sha256 = "30b42f33ee5e6c8650b1a7e772ec3be37881ff5262990c8038852ee57bcbab78"
 used_for = [
   "Bounded Outlook mail item property projection, message create/open/save/sync behavior, recipient visibility, and follow-up field boundaries",
   "PidTagReplyRecipientEntries relationship to PidTagReplyRecipientNames",
+  "PidTagMessageDeliveryTime primary key for OrderByDeliveryTime content synchronization",
 ]
 sections = [
   "2.2.1 E-Mail Object Properties",
@@ -1609,6 +1625,7 @@ sections = [
   "2.2.1.70 Flags",
   "2.2.1.71 Reminders",
   "2.2.1.72 Recipients",
+  "2.2.3.9 PidTagMessageDeliveryTime Property",
 ]
 
 [[protocol]]
@@ -1684,6 +1701,7 @@ used_for = [
   "Windows TZDEFINITION wire keys at the canonical IANA calendar-storage boundary",
   "Existing appointment update property set including start, end, ClipStart, ClipEnd, and common start/end values",
   "Validation of the exact empty Outlook LocalFreebusy appointment-tombstone stream and rejection of nonempty records without a canonical calendar mapping",
+  "AppointmentStateFlags distinction between a standalone appointment and a Meeting object with recipients",
 ]
 sections = [
   "2.2.1 Common Properties",
@@ -1691,6 +1709,7 @@ sections = [
   "2.2.1.5 PidLidAppointmentStartWhole Property",
   "2.2.1.6 PidLidAppointmentEndWhole Property",
   "2.2.1.7 PidLidAppointmentDuration Property",
+  "2.2.1.10 PidLidAppointmentStateFlags Property",
   "2.2.1.14 PidLidClipStart Property",
   "2.2.1.15 PidLidClipEnd Property",
   "2.2.1.27 PidLidGlobalObjectId Property",
@@ -1712,6 +1731,7 @@ sections = [
   "2.2.3 Appointment Object",
   "2.2.12.5 PidTagScheduleInfoAppointmentTombstone Property",
   "2.2.12.5.1 Record Structure",
+  "3.1.4.2 Converting an Appointment Object to a Meeting Object",
   "4.2.2.1 Creating the Meeting",
 ]
 

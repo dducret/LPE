@@ -11774,15 +11774,13 @@ fn assert_content_final_state_includes_counters(
         );
     }
 
-    for tag in [META_TAG_CNSET_SEEN, META_TAG_CNSET_READ] {
-        let cnset = mapi_binary_property_value(bytes, tag);
-        for change_number in change_numbers {
-            assert!(
-                strict_replguid_globset_contains_counter(cnset, &globcnt_bytes(*change_number))
-                    .unwrap(),
-                "final content CNSET 0x{tag:08x} missing change {change_number}"
-            );
-        }
+    let cnset_seen = mapi_binary_property_value(bytes, META_TAG_CNSET_SEEN);
+    for change_number in change_numbers {
+        assert!(
+            strict_replguid_globset_contains_counter(cnset_seen, &globcnt_bytes(*change_number))
+                .unwrap(),
+            "final MetaTagCnsetSeen missing change {change_number}"
+        );
     }
 }
 
@@ -12698,6 +12696,9 @@ fn strict_test_xid(counter: u64) -> Vec<u8> {
 }
 
 fn strict_test_replguid_globset(counters: &[u64]) -> Vec<u8> {
+    if counters.is_empty() {
+        return Vec::new();
+    }
     let mut value = mapi_mailstore::STORE_REPLICA_GUID.to_vec();
     for counter in counters {
         value.push(0x52);
@@ -12717,6 +12718,32 @@ fn strict_test_replid_globset(counters: &[u64]) -> Vec<u8> {
     }
     value.push(0);
     value
+}
+
+fn outlook_content_sync_state_properties(
+    object_counters: &[u64],
+    normal_change_numbers: &[u64],
+    fai_change_numbers: &[u64],
+    read_change_numbers: &[u64],
+) -> Vec<(u32, Vec<u8>)> {
+    vec![
+        (
+            META_TAG_IDSET_GIVEN,
+            strict_test_replguid_globset(object_counters),
+        ),
+        (
+            META_TAG_CNSET_SEEN,
+            strict_test_replguid_globset(normal_change_numbers),
+        ),
+        (
+            META_TAG_CNSET_SEEN_FAI,
+            strict_test_replguid_globset(fai_change_numbers),
+        ),
+        (
+            META_TAG_CNSET_READ,
+            strict_test_replguid_globset(read_change_numbers),
+        ),
+    ]
 }
 
 fn mapi_binary_property(tag: u32, value: &[u8]) -> Vec<u8> {
@@ -14207,6 +14234,60 @@ fn append_rop_sync_manifest_get_buffer_with_state_and_flags(
     rops.extend_from_slice(&buffer_size.to_le_bytes());
 }
 
+fn append_rop_outlook_content_sync_manifest_get_buffer_with_state(
+    rops: &mut Vec<u8>,
+    input: u8,
+    output: u8,
+    buffer_size: u16,
+    state_properties: &[(u32, Vec<u8>)],
+) {
+    rops.extend_from_slice(&[
+        0x70, 0x00, input, output, // RopSynchronizationConfigure
+        0x01,   // contents synchronization
+        0x1D,   // Unicode | RecoverMode | PartialItem
+    ]);
+    rops.extend_from_slice(&0xA139u16.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x00, 0x00, // RestrictionDataSize
+        0x0D, 0x00, 0x00, 0x00, // Eid | CN | OrderByDeliveryTime
+        0x09, 0x00, // PropertyTagCount
+    ]);
+    for tag in [
+        0x1000_001F,
+        0x1006_0003,
+        0x1007_0003,
+        0x1008_001F,
+        0x1010_0003,
+        0x1011_0003,
+        0x3FF8_001F,
+        0x3FF9_0102,
+        0x300F_0102,
+    ] {
+        rops.extend_from_slice(&u32::to_le_bytes(tag));
+    }
+    for (property_tag, value) in state_properties {
+        rops.extend_from_slice(&[
+            0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
+        ]);
+        rops.extend_from_slice(&property_tag.to_le_bytes());
+        rops.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        if !value.is_empty() {
+            rops.extend_from_slice(&[
+                0x76, 0x00, output, // RopSynchronizationUploadStateStreamContinue
+            ]);
+            rops.extend_from_slice(&(value.len() as u32).to_le_bytes());
+            rops.extend_from_slice(value);
+        }
+        rops.extend_from_slice(&[
+            0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
+        ]);
+    }
+    rops.extend_from_slice(&[
+        0x4E, 0x00, output, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&buffer_size.to_le_bytes());
+}
+
 async fn content_sync_response_rops(
     store: FakeStore,
     folder_global_counter: u64,
@@ -14277,6 +14358,44 @@ where
     response_rops_from_execute_response(response).await
 }
 
+async fn outlook_content_sync_response_rops_for_store<S>(
+    store: S,
+    folder_id: u64,
+    state_properties: &[(u32, Vec<u8>)],
+) -> Vec<u8>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+{
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, folder_id);
+    append_rop_outlook_content_sync_manifest_get_buffer_with_state(
+        &mut rops,
+        1,
+        2,
+        31_680,
+        state_properties,
+    );
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    response_rops_from_execute_response(response).await
+}
+
 fn append_rop_outlook_hierarchy_sync_manifest_get_buffer(
     rops: &mut Vec<u8>,
     input: u8,
@@ -14289,6 +14408,7 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer(
         output,
         buffer_size,
         &[],
+        &[],
     );
 }
 
@@ -14297,7 +14417,8 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
     input: u8,
     output: u8,
     buffer_size: u16,
-    state: &[u8],
+    idset_given: &[u8],
+    cnset_seen: &[u8],
 ) {
     let buffer_size = buffer_size.max(8192);
     rops.extend_from_slice(&[
@@ -14319,26 +14440,26 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
         0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
     ]);
     rops.extend_from_slice(&0x4017_0003u32.to_le_bytes());
-    rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
-    if !state.is_empty() {
+    rops.extend_from_slice(&(idset_given.len() as u32).to_le_bytes());
+    if !idset_given.is_empty() {
         rops.extend_from_slice(&[
             0x76, 0x00, output, // RopSynchronizationUploadStateStreamContinue
         ]);
-        rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
-        rops.extend_from_slice(state);
+        rops.extend_from_slice(&(idset_given.len() as u32).to_le_bytes());
+        rops.extend_from_slice(idset_given);
     }
     rops.extend_from_slice(&[
         0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
         0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
     ]);
     rops.extend_from_slice(&0x6796_0102u32.to_le_bytes());
-    rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
-    if !state.is_empty() {
+    rops.extend_from_slice(&(cnset_seen.len() as u32).to_le_bytes());
+    if !cnset_seen.is_empty() {
         rops.extend_from_slice(&[
             0x76, 0x00, output, // RopSynchronizationUploadStateStreamContinue
         ]);
-        rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
-        rops.extend_from_slice(state);
+        rops.extend_from_slice(&(cnset_seen.len() as u32).to_le_bytes());
+        rops.extend_from_slice(cnset_seen);
     }
     rops.extend_from_slice(&[
         0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
@@ -14677,5 +14798,6 @@ async fn fake_store_rejects_invalid_public_folder_permission_rights() {
 }
 
 mod ews;
+mod hierarchy_tombstones;
 mod mapi_over_http;
 mod rpc_proxy;

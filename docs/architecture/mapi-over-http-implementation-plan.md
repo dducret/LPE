@@ -652,6 +652,11 @@ not by itself authorize broad client publication.
   action FAI rows, destroyed conversation actions as `IncrSyncDel`, tombstones,
   read-state changes, and final state. It emits no conversation action row when
   canonical `conversation_actions` is empty.
+- When `SynchronizationExtraFlags.OrderByDeliveryTime` is set, the complete
+  normal/FAI `messageChange` sequence is ordered newest to oldest by
+  `PidTagMessageDeliveryTime`, falling back to `PidTagLastModificationTime` when
+  delivery time is absent. This follows `[MS-OXCFXICS]` section 3.2.5.9.1.1,
+  `[MS-OXOMSG]` section 2.2.3.9, and `[MS-OXPROPS]` section 2.766.
 - A Calendar `RopSynchronizationImportMessageChange` creates a pending canonical
   Event. Its following property/stream writes and `RopSaveChangesMessage` commit
   that Event with the imported SourceKey, ChangeKey, and PCL while allocating a
@@ -788,8 +793,10 @@ Durable compatibility metadata is intentionally narrower than canonical state:
   Their logical key includes folder, message class, and subject because
   MS-OXOCFG view definitions can share `IPM.Microsoft.FolderDesign.NamedView`
   while representing different folder views.
-- `mapi_sync_checkpoints` stores EMSMDB/ICS cursor state only. Checkpoints may
-  resume canonical change replay, but they do not store mailbox content.
+- `mapi_sync_checkpoints` stores operational EMSMDB/ICS completion cursors only.
+  They support diagnostics and bounded canonical change-journal work, but they
+  never replace the client-uploaded ICS state or select the wire delta. They do
+  not store mailbox content.
 
 When a MAPI operation appears to update both Outlook compatibility metadata and
 canonical state, the implementation must perform the canonical mutation through
@@ -811,7 +818,7 @@ this plan explicitly documents that compatibility behavior.
 | Navigation shortcuts | `mapi_navigation_shortcuts` | Common Views shortcut and group-header FAI rows are durable canonical profile-visible state for cached-mode profile creation and reopen. |
 | Folder display flags | `mapi_folder_profile_property_values` | Outlook-written `PidTagExtendedFolderFlags` folder UI streams are persisted per account and MAPI folder id, then overlaid on folder open so display-option writes survive reconnect. This store is bounded to Outlook profile folder flags, not arbitrary Exchange folder truth. |
 | Associated configuration FAI | `mapi_associated_config_messages` | Outlook-created folder associated/config messages are durable MAPI-only compatibility state for view/form/client configuration sync replay. Direct associated-message deletes are supported and folder-scoped incremental content sync exports associated-config delete idsets. |
-| Sync checkpoints | `mapi_sync_checkpoints` | Durable EMSMDB/ICS cursors for hierarchy/content/read-state reuse; they do not store mailbox content. |
+| Sync checkpoints | `mapi_sync_checkpoints` | Durable operational EMSMDB/ICS completion cursors for hierarchy/content/read-state diagnostics; they neither store mailbox content nor select a client download delta. |
 | IPM subtree OST identity | `mapi_profile_settings.ipm_subtree_ost_id` | Outlook-written cached-mode profile identity is persisted account-wide and reloaded on IPM subtree open after reconnect. |
 | Default-folder EntryID writes | computed canonical folder projections plus `mapi_special_folder_aliases` for validated alternate identity | Valid writes are accepted for compatibility. Canonical values stay computed; a validated alternate FID/SourceKey is retained only as a durable account-scoped alias, and invalid values are rejected. |
 
@@ -846,6 +853,12 @@ canonical `from` identity.
 - Transient deleted/read/unread sets use REPLID-scoped IDSET/GLOBSET encoding.
   These transient sets must not be confused with durable REPLGUID checkpoint
   state.
+- Canonical mail currently has one per-folder modification sequence rather than
+  a distinct durable read-state CN. A read/unread transition therefore advances
+  the normal message CN and is downloaded as a full `messageChange` carrying
+  `PidTagMessageFlags`; LPE must not synthesize a later `IncrSyncRead` from an
+  unchanged snapshot. A separate read-state CN remains an optional optimization
+  under `[MS-OXCFXICS]` section 3.2.5.6, not parallel mailbox truth.
 - Content sync honors Outlook's extra flag contract for `Eid`, message size,
   and change number; when Outlook requests message size in the change header,
   LPE emits a non-zero value for projected normal and associated messages.
@@ -869,12 +882,41 @@ canonical `from` identity.
   synchronization root; it does not emit the synchronization root itself.
   Hierarchy final state scopes `MetaTagIdsetGiven` and `MetaTagCnsetSeen` to
   the emitted descendant folder changes.
+- Hierarchy sync loads the complete set of retention-live canonical mailbox and
+  search-folder tombstones in scope, without an arbitrary storage page cap, so
+  every folder not yet reported as deleted can be downloaded. This follows
+  `[MS-OXCFXICS]` section 3.2.5.3.
 
-### Checkpoint Selection and Advancement
+### Client-State Selection and Checkpoint Advancement
 
-- Zero-length client ICS state forces a baseline transfer.
-- Non-empty uploaded client ICS state may select a delta transfer when it is
-  parseable and compatible with the requested mailbox, folder, and sync scope.
+- Download differences are selected only from the initial ICS state uploaded by
+  that synchronization context. A zero-length property stream is a valid empty
+  set; a server checkpoint is never substituted for it. Malformed
+  REPLGUID/GLOBSET state fails the upload-state ROP instead of silently selecting
+  a server-side delta. After that `RpcFormat` failure, the configured download
+  context remains invalid and neither `RopFastTransferSourceGetBuffer` nor a
+  transfer-state handle derived from it can expose the unfiltered manifest; the
+  client has to issue a new `RopSynchronizationConfigure`. This follows
+  `[MS-OXCFXICS]` sections 3.1.5.4.3.2, 3.1.5.4.3.2.4, and 3.2.5.2.
+- For content synchronization, LPE applies `MetaTagIdsetGiven`,
+  `MetaTagCnsetSeen`, `MetaTagCnsetSeenFAI`, and `MetaTagCnsetRead`; hierarchy
+  applies the first two. Final state is reconstructed from the uploaded sets and
+  only the changes and deletions actually downloaded, preserving foreign-replica
+  sets. Each downloaded object's `MetaTagIdsetGiven` identity is the exact GID
+  carried by its emitted `PidTagSourceKey`, including its foreign REPLGUID when
+  `NoForeignIdentifiers` is absent, rather than LPE's internal MID. This follows
+  `[MS-OXCFXICS]` sections 2.2.1.1.1, 2.2.1.2.5, 2.2.2.4.2, and 3.2.5.3.
+  `MetaTagCnsetRead` remains client-derived unless the transfer contains a
+  real separate read-state stream; the current canonical read transition is
+  delivered as a full message change with `PidTagMessageFlags`.
+  `RopSynchronizationGetTransferState` returns
+  the initial state until completion and the same client-derived final state
+  afterward. This follows `[MS-OXCFXICS]` sections 2.2.1.1.1 through
+  2.2.1.1.4, 3.1.5.2, 3.2.5.2, 3.2.5.3, 3.2.5.6, and 3.2.5.9.3.1.
+- `mapi_mailstore/client_state.rs` owns both state selection and the new
+  REPLGUID/GLOBSET/FastTransfer wire codec. Before adding further behavior, split
+  the codec into `mapi_mailstore/client_state/wire.rs`; keep selection and final
+  state reconstruction in `client_state.rs`, with focused tests on each side.
 - Uploaded client CN sets are parsed as the initial upload checkpoint, not
   copied as opaque bytes or substituted for server-generated state. The final
   upload checkpoint is the semantic set union of each applicable initial CN set
@@ -908,8 +950,10 @@ canonical `from` identity.
   mailbox/folder scoped. Canonical folders use the real mailbox id as the
   durable scope. Virtual special folders, including Calendar, Contacts, Tasks,
   and Reminders, use their stable projected folder UUID as the durable scope.
-- On `RopSynchronizationConfigure`, the server reads the compatible checkpoint
-  and replays canonical change log entries and tombstones after that cursor.
+- On `RopSynchronizationConfigure`, a compatible operational checkpoint can be
+  read for diagnostics and completion accounting, but the full current
+  canonical scope is compared with the uploaded client ICS sets before any
+  FastTransfer bytes are returned.
 - The durable checkpoint advances only after `RopFastTransferSourceGetBuffer`
   drains the corresponding ICS download stream.
 - Transfer-state handles from download sources retain their checkpoint sequence

@@ -2864,7 +2864,7 @@ async fn mapi_over_http_microsoft_oxocfg_same_target_wlinks_round_trip_distinctl
 }
 
 #[tokio::test]
-async fn mapi_over_http_ics_transient_deleted_read_and_unread_sets_use_replid_encoding() {
+async fn mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets() {
     let inbox_id = Uuid::parse_str("52525252-5252-4525-9252-525252525202").unwrap();
     let read_id = Uuid::parse_str("65656565-6565-4565-9565-656565656502").unwrap();
     let unread_id = Uuid::parse_str("66666666-6666-4666-9666-666666666602").unwrap();
@@ -2887,7 +2887,9 @@ async fn mapi_over_http_ics_transient_deleted_read_and_unread_sets_use_replid_en
         "Unread transient state",
     );
     unread.unread = true;
+    unread.modseq = 42;
     unread.mailbox_states[0].unread = true;
+    unread.mailbox_states[0].modseq = 42;
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
@@ -2907,34 +2909,63 @@ async fn mapi_over_http_ics_transient_deleted_read_and_unread_sets_use_replid_en
         .unwrap();
     *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
         current_change_sequence: 21,
-        current_modseq: 41,
+        current_modseq: 42,
         changed_message_ids: vec![read_id, unread_id],
         deleted_message_ids: vec![deleted_id],
         ..Default::default()
     };
 
-    let response_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+    let client_state = vec![
+        (
+            META_TAG_IDSET_GIVEN,
+            strict_test_replguid_globset(&[
+                mapi_message_global_counter(&read_id),
+                mapi_message_global_counter(&unread_id),
+                mapi_message_global_counter(&deleted_id),
+            ]),
+        ),
+        (META_TAG_CNSET_SEEN, Vec::new()),
+        (META_TAG_CNSET_SEEN_FAI, Vec::new()),
+        (META_TAG_CNSET_READ, strict_test_replguid_globset(&[40])),
+    ];
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &client_state,
+    )
+    .await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    for value in [
-        stream.deleted_idset.as_deref().unwrap(),
-        stream.read_idset.as_deref().unwrap(),
-        stream.unread_idset.as_deref().unwrap(),
-    ] {
-        strict_validate_replid_globset(value).unwrap();
-        assert!(strict_validate_replguid_globset(value).is_err());
-    }
+    let deleted_idset = stream.deleted_idset.as_deref().unwrap();
+    strict_validate_replid_globset(deleted_idset).unwrap();
+    assert!(strict_validate_replguid_globset(deleted_idset).is_err());
     assert!(contains_bytes(
         &response_rops,
         &mapi_deleted_message_idset_property(&[deleted_id])
     ));
-    assert!(contains_bytes(
+    assert_eq!(stream.message_changes.len(), 2);
+    assert!(stream
+        .message_changes
+        .iter()
+        .all(|message| message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS)));
+    assert!(stream
+        .message_changes
+        .iter()
+        .any(|message| message.change_number == Some(41)));
+    assert!(stream
+        .message_changes
+        .iter()
+        .any(|message| message.change_number == Some(42)));
+    assert!(stream.read_idset.is_none());
+    assert!(stream.unread_idset.is_none());
+    assert!(!contains_bytes(
         &response_rops,
         &mapi_read_message_idset_property(&[read_id])
     ));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &mapi_unread_message_idset_property(&[unread_id])
     ));
+    assert_eq!(stream.cnset_read, strict_test_replguid_globset(&[40]));
 }
 
 #[tokio::test]
@@ -2945,16 +2976,19 @@ async fn mapi_over_http_ics_client_state_controls_baseline_versus_delta_selectio
     let deleted_id = Uuid::parse_str("67676767-6767-4767-9767-676767676703").unwrap();
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
     inbox.total_emails = 2;
+    let mut unchanged = FakeStore::email(
+        &unchanged_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Client state baseline unchanged",
+    );
+    unchanged.modseq = 40;
+    unchanged.mailbox_states[0].modseq = 40;
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         emails: Arc::new(Mutex::new(vec![
-            FakeStore::email(
-                &unchanged_id.to_string(),
-                &inbox_id.to_string(),
-                "inbox",
-                "Client state baseline unchanged",
-            ),
+            unchanged,
             FakeStore::email(
                 &changed_id.to_string(),
                 &inbox_id.to_string(),
@@ -2998,13 +3032,33 @@ async fn mapi_over_http_ics_client_state_controls_baseline_versus_delta_selectio
         &mapi_deleted_message_idset_property(&[deleted_id])
     ));
 
-    let delta_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+    let client_state = vec![
+        (
+            META_TAG_IDSET_GIVEN,
+            strict_test_replguid_globset(&[
+                mapi_message_global_counter(&unchanged_id),
+                mapi_message_global_counter(&changed_id),
+                mapi_message_global_counter(&deleted_id),
+            ]),
+        ),
+        (META_TAG_CNSET_SEEN, strict_test_replguid_globset(&[40])),
+        (META_TAG_CNSET_SEEN_FAI, Vec::new()),
+        (META_TAG_CNSET_READ, Vec::new()),
+    ];
+    let delta_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &client_state,
+    )
+    .await;
     assert_eq!(mapi_sync_manifest_counts(&delta_rops), Some((0, 1)));
     assert!(!contains_bytes(
         &delta_rops,
         b"Client state baseline unchanged"
     ));
-    assert!(contains_bytes(&delta_rops, b"Client state delta changed"));
+    let delta_stream = strict_content_sync_transfer_from_response(&delta_rops).unwrap();
+    assert_eq!(delta_stream.message_changes.len(), 1);
+    assert_eq!(delta_stream.message_changes[0].change_number, Some(41));
     assert!(contains_bytes(
         &delta_rops,
         &mapi_deleted_message_idset_property(&[deleted_id])

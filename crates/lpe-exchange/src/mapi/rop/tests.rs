@@ -4771,6 +4771,34 @@ fn microsoft_oxctabl_get_contents_table_example_round_trips_through_typed_parser
 }
 
 #[test]
+fn fast_transfer_source_copy_requests_preserve_send_options() {
+    let copy_to = [
+        0x4D, 0x00, 0x02, 0x03, // RopId, LogonId, input/output handles
+        0x00, // Level
+        0x00, 0x20, 0x00, 0x00, // CopyFlags: BestBody
+        0x09, // SendOptions: Unicode | ForceUnicode
+        0x00, 0x00, // excluded PropertyTagCount
+    ];
+    let mut cursor = Cursor::new(&copy_to);
+    let request = read_rop_request(&mut cursor).unwrap();
+    assert_eq!(request.fast_transfer_source_send_options(), Some(0x09));
+    assert_eq!(cursor.remaining(), 0);
+
+    let copy_properties = [
+        0x69, 0x00, 0x02, 0x03, // RopId, LogonId, input/output handles
+        0x00, // Level
+        0x00, // CopyFlags
+        0x00, // SendOptions: connection code page
+        0x01, 0x00, // PropertyTagCount
+        0x1F, 0x00, 0x37, 0x00, // PidTagSubject
+    ];
+    let mut cursor = Cursor::new(&copy_properties);
+    let request = read_rop_request(&mut cursor).unwrap();
+    assert_eq!(request.fast_transfer_source_send_options(), Some(0x00));
+    assert_eq!(cursor.remaining(), 0);
+}
+
+#[test]
 fn microsoft_oxctabl_set_columns_example_round_trips_through_typed_parser() {
     let golden = vec![
         0x12, 0x00, 0x01, 0x00, 0x06, 0x00, 0x14, 0x00, 0x48, 0x67, 0x14, 0x00, 0x4A, 0x67, 0x14,

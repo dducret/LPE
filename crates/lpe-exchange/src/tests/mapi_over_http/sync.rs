@@ -4907,10 +4907,16 @@ async fn mapi_over_http_conversation_action_content_sync_exports_deletes() {
         ..Default::default()
     };
 
-    let response_rops = content_sync_response_rops(
+    let client_state = outlook_content_sync_state_properties(
+        &[mapi_message_global_counter(&action_id)],
+        &[],
+        &[],
+        &[],
+    );
+    let response_rops = outlook_content_sync_response_rops_for_store(
         store,
-        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID >> 16,
-        b"client-content-state",
+        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        &client_state,
     )
     .await;
 
@@ -4965,7 +4971,14 @@ async fn mapi_over_http_associated_config_content_sync_exports_deletes() {
         ..Default::default()
     };
 
-    let response_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+    let client_state =
+        outlook_content_sync_state_properties(&[config_object_id >> 16], &[], &[], &[]);
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &client_state,
+    )
+    .await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert!(stream.message_changes.is_empty());
@@ -5010,7 +5023,13 @@ async fn mapi_over_http_associated_config_delete_does_not_allocate_identity() {
         ..Default::default()
     };
 
-    let response_rops = content_sync_response_rops(store.clone(), 5, b"client-content-state").await;
+    let client_state = outlook_content_sync_state_properties(&[], &[], &[], &[]);
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &client_state,
+    )
+    .await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert!(stream.message_changes.is_empty());
@@ -5270,23 +5289,26 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
     let deleted_id = Uuid::parse_str("43434343-4343-4343-4343-434343434343").unwrap();
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
     inbox.total_emails = 2;
+    let mut unchanged = FakeStore::email(
+        &unchanged_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Checkpoint unchanged",
+    );
+    unchanged.modseq = 40;
+    unchanged.mailbox_states[0].modseq = 40;
+    let mut changed = FakeStore::email(
+        &changed_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Checkpoint changed",
+    );
+    changed.modseq = 41;
+    changed.mailbox_states[0].modseq = 41;
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
-        emails: Arc::new(Mutex::new(vec![
-            FakeStore::email(
-                &unchanged_id.to_string(),
-                &inbox_id.to_string(),
-                "inbox",
-                "Checkpoint unchanged",
-            ),
-            FakeStore::email(
-                &changed_id.to_string(),
-                &inbox_id.to_string(),
-                "inbox",
-                "Checkpoint changed",
-            ),
-        ])),
+        emails: Arc::new(Mutex::new(vec![unchanged, changed])),
         ..Default::default()
     };
     store
@@ -5308,32 +5330,24 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
         ..Default::default()
     };
 
-    let service = ExchangeService::new(store.clone());
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    let client_state = outlook_content_sync_state_properties(
+        &[
+            mapi_message_global_counter(&unchanged_id),
+            mapi_message_global_counter(&changed_id),
+            mapi_message_global_counter(&deleted_id),
+        ],
+        &[40],
+        &[],
+        &[40],
     );
-    let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
-    append_rop_sync_manifest_get_buffer_with_state(&mut rops, 1, 2, 4096, b"client-content-state");
-    let response = service
-        .handle_mapi(
-            MapiEndpoint::Emsmdb,
-            &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
-        )
-        .await
-        .unwrap();
-    let response_rops = response_rops_from_execute_response(response).await;
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &client_state,
+    )
+    .await;
 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
-    assert!(contains_bytes(&response_rops, b"Checkpoint changed"));
-    assert!(!contains_bytes(&response_rops, b"Checkpoint unchanged"));
     assert!(contains_bytes(
         &response_rops,
         &0x4013_0003u32.to_le_bytes()
@@ -5348,6 +5362,21 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
     deleted_property.extend_from_slice(&(deleted_idset.len() as u32).to_le_bytes());
     deleted_property.extend_from_slice(&deleted_idset);
     assert!(contains_bytes(&response_rops, &deleted_property));
+    let first_stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(first_stream.message_changes.len(), 1);
+    assert_eq!(
+        first_stream.message_changes[0].mid.unwrap() >> 16,
+        mapi_message_global_counter(&changed_id)
+    );
+    assert_eq!(first_stream.message_changes[0].change_number, Some(41));
+    assert!(first_stream.read_idset.is_none());
+    assert!(first_stream.unread_idset.is_none());
+    let restart_state = vec![
+        (META_TAG_IDSET_GIVEN, first_stream.idset_given.clone()),
+        (META_TAG_CNSET_SEEN, first_stream.cnset_seen.clone()),
+        (META_TAG_CNSET_SEEN_FAI, first_stream.cnset_seen_fai.clone()),
+        (META_TAG_CNSET_READ, first_stream.cnset_read.clone()),
+    ];
 
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
@@ -5366,38 +5395,23 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
         current_modseq: 6,
         ..Default::default()
     };
-    let restarted = ExchangeService::new(store.clone());
-    let connect = restarted
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut restarted_headers = mapi_headers("Execute");
-    restarted_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
-    let mut restart_rops = Vec::new();
-    append_rop_open_folder(&mut restart_rops, 0, 1, test_mapi_folder_id(5));
-    append_rop_sync_manifest_get_buffer_with_state(
-        &mut restart_rops,
-        1,
-        2,
-        4096,
-        b"client-content-state",
-    );
-    let response = restarted
-        .handle_mapi(
-            MapiEndpoint::Emsmdb,
-            &restarted_headers,
-            &execute_body(&rop_buffer(&restart_rops, &[1, u32::MAX, u32::MAX])),
-        )
-        .await
-        .unwrap();
-    let response_rops = response_rops_from_execute_response(response).await;
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &restart_state,
+    )
+    .await;
 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), None);
-    assert!(!contains_bytes(&response_rops, b"Checkpoint changed"));
-    assert!(!contains_bytes(&response_rops, b"LPE-MAPI-SYNC\0"));
+    let restarted_stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert!(restarted_stream.message_changes.is_empty());
+    assert!(restarted_stream.deleted_idset.is_none());
+    assert!(restarted_stream.read_idset.is_none());
+    assert!(restarted_stream.unread_idset.is_none());
+    assert_eq!(restarted_stream.idset_given, first_stream.idset_given);
+    assert_eq!(restarted_stream.cnset_seen, first_stream.cnset_seen);
+    assert_eq!(restarted_stream.cnset_seen_fai, first_stream.cnset_seen_fai);
+    assert_eq!(restarted_stream.cnset_read, first_stream.cnset_read);
     assert!(contains_bytes(
         &response_rops,
         &0x403A_0003u32.to_le_bytes()
@@ -5495,24 +5509,17 @@ async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_change
 
     assert_eq!(stream.message_changes.len(), 2);
     assert!(stream.deleted_idset.is_none());
-    assert!(stream.read_idset.is_some());
-    assert!(stream.unread_idset.is_some());
+    // [MS-OXCFXICS] section 3.2.5.3 forbids a message from appearing in
+    // both messageChange and readStateChanges during the same download.
+    assert!(stream.read_idset.is_none());
+    assert!(stream.unread_idset.is_none());
     assert!(!stream.idset_given.is_empty());
     assert!(!stream.cnset_seen.is_empty());
     assert!(stream.cnset_seen_fai.is_empty());
-    assert!(!stream.cnset_read.is_empty());
-    assert!(strict_replid_globset_contains_counter(
-        stream.read_idset.as_deref().unwrap(),
-        &globcnt_bytes(mapi_message_global_counter(&first_id))
-    )
-    .unwrap());
-    assert!(strict_replid_globset_contains_counter(
-        stream.unread_idset.as_deref().unwrap(),
-        &globcnt_bytes(mapi_message_global_counter(&second_id))
-    )
-    .unwrap());
+    assert!(stream.cnset_read.is_empty());
     let inbox_source_key = mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(5));
     for message in &stream.message_changes {
+        assert!(message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS));
         assert_eq!(message.parent_source_key, inbox_source_key);
         assert!(message.mid.is_some());
         assert!(message.change_number.is_some());
@@ -5624,9 +5631,7 @@ async fn mapi_over_http_ics_final_and_transfer_state_use_replguid_state_encoding
 async fn mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape() {
     let inbox_id = Uuid::parse_str("52525252-5252-4525-9252-525252525204").unwrap();
     let message_id = Uuid::parse_str("65656565-6565-4565-9565-656565656504").unwrap();
-    let attachment_id = Uuid::parse_str("abababab-abab-4bab-8bab-ababababab04").unwrap();
     let deleted_id = Uuid::parse_str("67676767-6767-4767-9767-676767676704").unwrap();
-    let file_reference = format!("attachment:{message_id}:{attachment_id}");
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
     inbox.total_emails = 1;
     let mut email = FakeStore::email(
@@ -5635,39 +5640,12 @@ async fn mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape() {
         "inbox",
         "MS-OXCFXICS 4.5 stream",
     );
-    email.has_attachments = true;
-    email.unread = false;
-    email.mailbox_states[0].unread = false;
-    email.to.push(JmapEmailAddress {
-        address: "carol@example.test".to_string(),
-        display_name: Some("Carol".to_string()),
-    });
+    email.modseq = 61;
+    email.mailbox_states[0].modseq = 61;
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         emails: Arc::new(Mutex::new(vec![email])),
-        attachments: Arc::new(Mutex::new(HashMap::from([(
-            message_id,
-            vec![ActiveSyncAttachment {
-                id: attachment_id,
-                message_id,
-                file_name: "Embedded child.msg".to_string(),
-                media_type: "application/vnd.ms-outlook".to_string(),
-                disposition: None,
-                content_id: None,
-                size_octets: 91,
-                file_reference: file_reference.clone(),
-            }],
-        )]))),
-        attachment_contents: Arc::new(Mutex::new(HashMap::from([(
-            file_reference.clone(),
-            ActiveSyncAttachmentContent {
-                file_reference,
-                file_name: "Embedded child.msg".to_string(),
-                media_type: "application/vnd.ms-outlook".to_string(),
-                blob_bytes: b"LPE-MAPI-EMBEDDED-MESSAGE\0Subject:Embedded 4.5 child\r\nBody-Length:14\r\nEmbedded body.\r\nHtml-Length:0\r\n".to_vec(),
-            },
-        )]))),
         ..Default::default()
     };
     store
@@ -5688,74 +5666,37 @@ async fn mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape() {
         deleted_message_ids: vec![deleted_id],
         ..Default::default()
     };
-    let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
-    let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
-    rops.extend_from_slice(&[
-        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
-        0x01, // content sync
-        0x15, // SendOptions: Unicode | RecoverMode | PartialItem
-    ]);
-    rops.extend_from_slice(&0xA139u16.to_le_bytes()); // Unicode | ReadState | FAI | Normal | NoForeignIdentifiers | BestBody | Progress
-    rops.extend_from_slice(&0u16.to_le_bytes()); // RestrictionDataSize
-    rops.extend_from_slice(&0x0Du32.to_le_bytes()); // SynchronizationExtraFlags: Eid | CN | OrderByDeliveryTime
-    rops.extend_from_slice(&0u16.to_le_bytes()); // PropertyTagCount
-    rops.extend_from_slice(&[
-        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
-    ]);
-    rops.extend_from_slice(&0x4017_0102u32.to_le_bytes());
-    rops.extend_from_slice(&(b"client-content-state".len() as u32).to_le_bytes());
-    rops.extend_from_slice(&[
-        0x76, 0x00, 0x02, // RopSynchronizationUploadStateStreamContinue
-    ]);
-    rops.extend_from_slice(&(b"client-content-state".len() as u32).to_le_bytes());
-    rops.extend_from_slice(b"client-content-state");
-    rops.extend_from_slice(&[
-        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
-        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
-    ]);
-    rops.extend_from_slice(&0x6796_0102u32.to_le_bytes());
-    rops.extend_from_slice(&(b"client-content-state".len() as u32).to_le_bytes());
-    rops.extend_from_slice(&[
-        0x76, 0x00, 0x02, // RopSynchronizationUploadStateStreamContinue
-    ]);
-    rops.extend_from_slice(&(b"client-content-state".len() as u32).to_le_bytes());
-    rops.extend_from_slice(b"client-content-state");
-    rops.extend_from_slice(&[
-        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
-        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
-    ]);
-    rops.extend_from_slice(&4096u16.to_le_bytes());
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let response = service
-        .handle_mapi(
-            MapiEndpoint::Emsmdb,
-            &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let response_rops = response_rops_from_execute_response(response).await;
+    let client_state = outlook_content_sync_state_properties(
+        &[
+            mapi_message_global_counter(&message_id),
+            mapi_message_global_counter(&deleted_id),
+        ],
+        &[60],
+        &[],
+        &[],
+    );
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &client_state,
+    )
+    .await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 1);
-    assert_eq!(stream.message_changes[0].subject, "MS-OXCFXICS 4.5 stream");
+    assert_eq!(
+        stream.message_changes[0].mid.unwrap() >> 16,
+        mapi_message_global_counter(&message_id)
+    );
+    assert_eq!(stream.message_changes[0].change_number, Some(61));
     assert!(stream.deleted_idset.is_some());
-    assert!(stream.read_idset.is_some());
+    // [MS-OXCFXICS] section 3.2.5.3: an object exported as a
+    // messageChange cannot also appear in readStateChanges.
+    assert!(stream.read_idset.is_none());
+    assert!(stream.unread_idset.is_none());
+    assert!(stream.cnset_read.is_empty());
     assert!(contains_bytes(
         &response_rops,
         &mapi_deleted_message_idset_property(&[deleted_id])
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_read_message_idset_property(&[message_id])
     ));
     assert_mapi_fast_transfer_marker_sequence(
         &mapi_fast_transfer_chunks(&response_rops)[0].1,
@@ -5764,14 +5705,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape() {
             FX_INCR_SYNC_PROGRESS_PER_MSG,
             FX_INCR_SYNC_CHG,
             FX_INCR_SYNC_MESSAGE,
-            FX_START_RECIP,
-            FX_END_TO_RECIP,
-            FX_NEW_ATTACH,
-            FX_START_EMBED,
-            FX_END_EMBED,
-            FX_END_ATTACH,
             FX_INCR_SYNC_DEL,
-            FX_INCR_SYNC_READ,
             FX_INCR_SYNC_STATE_BEGIN,
             FX_INCR_SYNC_STATE_END,
             FX_INCR_SYNC_END,
@@ -5786,23 +5720,26 @@ async fn mapi_over_http_content_sync_incremental_after_client_state_exports_delt
     let changed_id = Uuid::parse_str("65656565-6565-6565-6565-656565656565").unwrap();
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
     inbox.total_emails = 2;
+    let mut unchanged = FakeStore::email(
+        &unchanged_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Incremental unchanged",
+    );
+    unchanged.modseq = 40;
+    unchanged.mailbox_states[0].modseq = 40;
+    let mut changed = FakeStore::email(
+        &changed_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Incremental changed",
+    );
+    changed.modseq = 41;
+    changed.mailbox_states[0].modseq = 41;
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
-        emails: Arc::new(Mutex::new(vec![
-            FakeStore::email(
-                &unchanged_id.to_string(),
-                &inbox_id.to_string(),
-                "inbox",
-                "Incremental unchanged",
-            ),
-            FakeStore::email(
-                &changed_id.to_string(),
-                &inbox_id.to_string(),
-                "inbox",
-                "Incremental changed",
-            ),
-        ])),
+        emails: Arc::new(Mutex::new(vec![unchanged, changed])),
         ..Default::default()
     };
     store
@@ -5823,11 +5760,32 @@ async fn mapi_over_http_content_sync_incremental_after_client_state_exports_delt
         ..Default::default()
     };
 
-    let response_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+    let client_state = outlook_content_sync_state_properties(
+        &[
+            mapi_message_global_counter(&unchanged_id),
+            mapi_message_global_counter(&changed_id),
+        ],
+        &[40],
+        &[],
+        &[40],
+    );
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &client_state,
+    )
+    .await;
 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
-    assert!(contains_bytes(&response_rops, b"Incremental changed"));
-    assert!(!contains_bytes(&response_rops, b"Incremental unchanged"));
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(
+        stream.message_changes[0].mid.unwrap() >> 16,
+        mapi_message_global_counter(&changed_id)
+    );
+    assert_eq!(stream.message_changes[0].change_number, Some(41));
+    assert!(stream.read_idset.is_none());
+    assert!(stream.unread_idset.is_none());
     assert_content_final_state_includes(&response_rops, &[unchanged_id, changed_id], &[41]);
 }
 
@@ -5873,20 +5831,21 @@ async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombston
         ..Default::default()
     };
 
-    let source_rops = content_sync_response_rops(store.clone(), 5, b"client-content-state").await;
-    let target_rops = content_sync_response_rops(
+    let moved_counter = mapi_message_global_counter(&moved_id);
+    let source_state = outlook_content_sync_state_properties(&[moved_counter], &[], &[], &[]);
+    let target_state = outlook_content_sync_state_properties(&[], &[], &[], &[]);
+    let source_rops = outlook_content_sync_response_rops_for_store(
         store.clone(),
-        crate::mapi::identity::ARCHIVE_FOLDER_ID >> 16,
-        b"client-content-state",
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &source_state,
     )
     .await;
-    let moved_counter = store
-        .mapi_identities
-        .lock()
-        .unwrap()
-        .get(&moved_id)
-        .and_then(|object_id| crate::mapi::identity::global_counter_from_store_id(*object_id))
-        .unwrap();
+    let target_rops = outlook_content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::ARCHIVE_FOLDER_ID,
+        &target_state,
+    )
+    .await;
 
     assert_eq!(mapi_sync_manifest_counts(&source_rops), None);
     assert!(contains_bytes(
@@ -5895,7 +5854,15 @@ async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombston
     ));
     assert_content_final_state_includes(&source_rops, &[], &[]);
     assert_eq!(mapi_sync_manifest_counts(&target_rops), Some((0, 1)));
-    assert!(contains_bytes(&target_rops, b"Moved canonical message"));
+    let target_stream = strict_content_sync_transfer_from_response(&target_rops).unwrap();
+    assert_eq!(target_stream.message_changes.len(), 1);
+    assert_eq!(
+        target_stream.message_changes[0].mid.unwrap() >> 16,
+        moved_counter
+    );
+    assert_eq!(target_stream.message_changes[0].change_number, Some(41));
+    assert!(target_stream.read_idset.is_none());
+    assert!(target_stream.unread_idset.is_none());
     assert_content_final_state_includes_counters(&target_rops, &[moved_counter], &[41]);
 }
 
@@ -5928,7 +5895,18 @@ async fn mapi_over_http_content_sync_hard_delete_exports_tombstone_and_empty_fin
         ..Default::default()
     };
 
-    let response_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+    let client_state = outlook_content_sync_state_properties(
+        &[mapi_message_global_counter(&deleted_id)],
+        &[],
+        &[],
+        &[],
+    );
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &client_state,
+    )
+    .await;
 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), None);
     assert!(contains_bytes(
@@ -5947,7 +5925,7 @@ async fn mapi_over_http_content_sync_hard_delete_exports_tombstone_and_empty_fin
 }
 
 #[tokio::test]
-async fn mapi_over_http_content_sync_read_flag_update_exports_read_state() {
+async fn mapi_over_http_content_sync_read_flag_update_exports_message_change_without_read_state() {
     let inbox_id = Uuid::parse_str("57575757-5757-5757-5757-575757575757").unwrap();
     let message_id = Uuid::parse_str("68686868-6868-6868-6868-686868686868").unwrap();
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
@@ -5986,25 +5964,35 @@ async fn mapi_over_http_content_sync_read_flag_update_exports_read_state() {
         ..Default::default()
     };
 
-    let response_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+    let client_state = outlook_content_sync_state_properties(
+        &[mapi_message_global_counter(&message_id)],
+        &[46],
+        &[],
+        &[46],
+    );
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &client_state,
+    )
+    .await;
 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
-    assert!(contains_bytes(
-        &response_rops,
-        &0x402F_0003u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_read_message_idset_property(&[message_id])
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        b"Read flag canonical update"
-    ));
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(
+        stream.message_changes[0].mid.unwrap() >> 16,
+        mapi_message_global_counter(&message_id)
+    );
+    assert_eq!(stream.message_changes[0].change_number, Some(47));
+    // [MS-OXCFXICS] section 3.2.5.3: the canonical read transition is
+    // represented by this new object CN, not a duplicate IncrSyncRead row.
+    assert!(stream.read_idset.is_none());
+    assert!(stream.unread_idset.is_none());
     assert_content_final_state_includes(&response_rops, &[message_id], &[47]);
     assert!(contains_bytes(
         &response_rops,
-        &mapi_message_cnset_property(META_TAG_CNSET_READ, &[47])
+        &mapi_message_cnset_property(META_TAG_CNSET_READ, &[46])
     ));
 }
 
@@ -6048,10 +6036,29 @@ async fn mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc() {
         ..Default::default()
     };
 
-    let response_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+    let client_state = outlook_content_sync_state_properties(
+        &[mapi_message_global_counter(&message_id)],
+        &[40],
+        &[],
+        &[40],
+    );
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &client_state,
+    )
+    .await;
 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
-    assert!(contains_bytes(&response_rops, b"Protected Bcc sync"));
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(
+        stream.message_changes[0].mid.unwrap() >> 16,
+        mapi_message_global_counter(&message_id)
+    );
+    assert_eq!(stream.message_changes[0].change_number, Some(41));
+    assert!(stream.read_idset.is_none());
+    assert!(stream.unread_idset.is_none());
     assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
     assert!(!contains_bytes(&response_rops, b"Hidden Bcc"));
     assert_content_final_state_includes(&response_rops, &[message_id], &[41]);
@@ -7420,7 +7427,8 @@ async fn mapi_over_http_hierarchy_sync_uses_baseline_for_stale_root_checkpoint_w
         1,
         2,
         4096,
-        b"client-hierarchy-state",
+        &[],
+        &[],
     );
     let response = service
         .handle_mapi(
@@ -7446,7 +7454,7 @@ async fn mapi_over_http_hierarchy_sync_uses_baseline_for_stale_root_checkpoint_w
 }
 
 #[tokio::test]
-async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_download() {
+async fn mapi_over_http_hierarchy_sync_client_state_resumes_after_completed_download() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
     inbox.total_emails = 3;
@@ -7490,6 +7498,8 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT, 0))
     );
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
+    let completed_state = strict_hierarchy_sync_transfer_from_response(&response_rops)
+        .expect("completed hierarchy state");
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -7545,7 +7555,8 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         1,
         2,
         4096,
-        b"client-hierarchy-state",
+        &completed_state.idset_given,
+        &completed_state.cnset_seen,
     );
     let response = restarted
         .handle_mapi(
@@ -7585,6 +7596,7 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         1,
         2,
         4096,
+        &[],
         &[],
     );
     let response = restarted
@@ -8093,10 +8105,32 @@ async fn mapi_over_http_content_sync_after_empty_folder_advances_empty_final_sta
         deleted_message_ids: vec![first_message_id, second_message_id],
         ..Default::default()
     };
-    let response_rops = content_sync_response_rops(store.clone(), 8, b"trash-state").await;
+    let client_state = outlook_content_sync_state_properties(
+        &[
+            mapi_message_global_counter(&first_message_id),
+            mapi_message_global_counter(&second_message_id),
+        ],
+        &[],
+        &[],
+        &[],
+    );
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::TRASH_FOLDER_ID,
+        &client_state,
+    )
+    .await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert!(stream.message_changes.is_empty());
+    let deleted = stream.deleted_idset.as_deref().expect("deleted IDSET");
+    for message_id in [first_message_id, second_message_id] {
+        assert!(strict_replid_globset_contains_counter(
+            deleted,
+            &globcnt_bytes(mapi_message_global_counter(&message_id))
+        )
+        .unwrap());
+    }
     assert!(stream.idset_given.is_empty());
     assert!(stream.cnset_seen.is_empty());
     assert!(stream.cnset_seen_fai.is_empty());
@@ -8184,7 +8218,7 @@ async fn mapi_over_http_empty_folder_reports_partial_completion_when_membership_
 }
 
 #[tokio::test]
-async fn mapi_over_http_sync_source_transfer_state_does_not_echo_uploaded_client_state() {
+async fn mapi_over_http_sync_source_transfer_state_returns_client_derived_final_state() {
     let message_id = Uuid::parse_str("45454545-4545-4545-4545-454545454545").unwrap();
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
@@ -8219,33 +8253,23 @@ async fn mapi_over_http_sync_source_transfer_state_does_not_echo_uploaded_client
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let client_state = b"client-uploaded-content-state";
-    let mut rops = vec![
-        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
-    ];
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
-    rops.push(0);
+    const STALE_CLIENT_COUNTER: u64 = 0x0000_0000_4321;
+    let client_state =
+        outlook_content_sync_state_properties(&[STALE_CLIENT_COUNTER], &[], &[], &[]);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_outlook_content_sync_manifest_get_buffer_with_state(
+        &mut rops,
+        1,
+        2,
+        31_680,
+        &client_state,
+    );
     rops.extend_from_slice(&[
-        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
-        0x01, 0x00, 0x00, 0x00, // content sync
-        0x00, 0x00, // RestrictionDataSize
-        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
-        0x00, 0x00, // PropertyTagCount
-        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
-    ]);
-    rops.extend_from_slice(&META_TAG_IDSET_GIVEN.to_le_bytes());
-    rops.extend_from_slice(&(client_state.len() as u32).to_le_bytes());
-    rops.extend_from_slice(&[
-        0x76, 0x00, 0x02, // RopSynchronizationUploadStateStreamContinue
-    ]);
-    rops.extend_from_slice(&(client_state.len() as u32).to_le_bytes());
-    rops.extend_from_slice(client_state);
-    rops.extend_from_slice(&[
-        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
         0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
         0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
     ]);
-    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&31_680u16.to_le_bytes());
 
     let response = service
         .handle_mapi(
@@ -8259,11 +8283,22 @@ async fn mapi_over_http_sync_source_transfer_state_does_not_echo_uploaded_client
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x82, 0x03, 0, 0, 0, 0]));
-    assert!(!contains_bytes(&response_rops, client_state));
-    assert!(!contains_bytes(
-        &response_rops,
+    let chunks = mapi_fast_transfer_chunks(&response_rops);
+    assert_eq!(chunks.len(), 2);
+    let final_state = &chunks[1].1;
+    let idset_given = mapi_binary_property_value(final_state, META_TAG_IDSET_GIVEN);
+    assert!(strict_replguid_globset_contains_counter(
+        idset_given,
         &globcnt_bytes(mapi_message_global_counter(&message_id))
-    ));
+    )
+    .unwrap());
+    assert!(!strict_replguid_globset_contains_counter(
+        idset_given,
+        &globcnt_bytes(STALE_CLIENT_COUNTER)
+    )
+    .unwrap());
+    let cnset_seen = mapi_binary_property_value(final_state, META_TAG_CNSET_SEEN);
+    assert!(strict_replguid_globset_contains_counter(cnset_seen, &globcnt_bytes(41)).unwrap());
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -8271,8 +8306,10 @@ async fn mapi_over_http_sync_source_transfer_state_does_not_echo_uploaded_client
             MapiCheckpointKind::Content,
         )
         .await
+        .unwrap()
         .unwrap();
-    assert!(checkpoint.is_none());
+    assert_eq!(checkpoint.last_change_sequence, 88);
+    assert_eq!(checkpoint.last_modseq, 44);
 }
 
 #[tokio::test]
@@ -8618,6 +8655,88 @@ async fn mapi_over_http_sync_upload_state_returns_server_transfer_state() {
         .unwrap();
     assert_eq!(checkpoint.last_change_sequence, 55);
     assert_eq!(checkpoint.last_modseq, 22);
+}
+
+#[tokio::test]
+async fn mapi_over_http_invalid_download_state_upload_poison_context_before_get_buffer() {
+    let mailbox_id = "55555555-5555-4555-9555-555555555531";
+    let subject = "Invalid upload must not leak this manifest";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "inbox", "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "42424242-4242-4242-8242-424242424531",
+            mailbox_id,
+            "inbox",
+            subject,
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut malformed_cnset = mapi_mailstore::STORE_REPLICA_GUID.to_vec();
+    malformed_cnset.extend_from_slice(&[0x52, 0x01]); // truncated GLOBSET Range command
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, // Contents, SendOptions
+        0x20, 0x00, // SynchronizationFlags: Normal
+        0x00, 0x00, // RestrictionDataSize
+        0x05, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN
+        0x00, 0x00, // PropertyTagCount
+        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    rops.extend_from_slice(&META_TAG_CNSET_SEEN.to_le_bytes());
+    rops.extend_from_slice(&(malformed_cnset.len() as u32).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x76, 0x00, 0x02, // RopSynchronizationUploadStateStreamContinue
+    ]);
+    rops.extend_from_slice(&(malformed_cnset.len() as u32).to_le_bytes());
+    rops.extend_from_slice(&malformed_cnset);
+    rops.extend_from_slice(&[
+        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer on the same context
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    // [MS-OXCFXICS] sections 3.1.5.4.3.2, 3.1.5.4.3.2.4, and 3.2.5.2:
+    // a malformed Range is not a valid basis for a download context.
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x77, 0x02, 0xB6, 0x04, 0x00, 0x00]
+    ));
+    assert!(
+        contains_bytes(&response_rops, &[0x4E, 0x02, 0xB6, 0x04, 0x00, 0x00]),
+        "GetBuffer reused an ICS context after RpcFormat: {response_rops:02x?}"
+    );
+    assert!(
+        mapi_fast_transfer_chunks(&response_rops).is_empty(),
+        "an invalidated download context must not return FastTransfer payload"
+    );
+    assert!(!contains_bytes(&response_rops, &utf16z(subject)));
 }
 
 #[tokio::test]
@@ -10858,6 +10977,112 @@ async fn mapi_over_http_empty_inbox_fai_sync_exports_no_default_view() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_inbox_fai_download_honors_uploaded_state_with_empty_normal_cnset() {
+    let account = FakeStore::account();
+    let config_id = Uuid::parse_str("e0fdf7ca-15f8-4c62-bf51-d543d69a1401").unwrap();
+    let config_object_id = crate::mapi::identity::mapi_store_id(197_401);
+    let config_change_number = 262_425;
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-4555-9555-555555555501",
+            "inbox",
+            "Inbox",
+        )])),
+        associated_configs: Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
+            id: config_id,
+            account_id: account.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "Outlook Inbox view state".to_string(),
+            properties_json: serde_json::json!({
+                "0x001a001f": {
+                    "type": "string",
+                    "value": "IPM.Configuration.MessageListSettings"
+                },
+                "0x0037001f": {
+                    "type": "string",
+                    "value": "Outlook Inbox view state"
+                },
+                "0x1000001f": {
+                    "type": "string",
+                    "value": "Client view payload"
+                }
+            }),
+        }])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(config_id, config_object_id)]))),
+        mapi_identity_change_numbers: Arc::new(Mutex::new(HashMap::from([(
+            config_id,
+            config_change_number,
+        )]))),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 88,
+        current_modseq: 88,
+        ..Default::default()
+    };
+    let empty_state = vec![
+        (META_TAG_IDSET_GIVEN, Vec::new()),
+        (META_TAG_CNSET_SEEN, Vec::new()),
+        (META_TAG_CNSET_SEEN_FAI, Vec::new()),
+        (META_TAG_CNSET_READ, Vec::new()),
+    ];
+    let initial_response = outlook_content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &empty_state,
+    )
+    .await;
+    let initial_stream = strict_content_sync_transfer_from_response(&initial_response).unwrap();
+    assert!(!initial_stream.message_changes.is_empty());
+    assert!(initial_stream
+        .message_changes
+        .iter()
+        .all(|message| message.associated));
+    assert!(initial_stream.cnset_seen.is_empty());
+    assert!(initial_stream.cnset_read.is_empty());
+    let uploaded_state = vec![
+        (META_TAG_IDSET_GIVEN, initial_stream.idset_given.clone()),
+        (META_TAG_CNSET_SEEN, initial_stream.cnset_seen.clone()),
+        (
+            META_TAG_CNSET_SEEN_FAI,
+            initial_stream.cnset_seen_fai.clone(),
+        ),
+        (META_TAG_CNSET_READ, initial_stream.cnset_read.clone()),
+    ];
+
+    // Outlook legitimately uploads zero-length normal/read CNSET streams for
+    // this FAI-only scope. Their presence does not make the FAI CNSET optional.
+    store.mapi_checkpoints.lock().unwrap().clear();
+    let response = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &uploaded_state,
+    )
+    .await;
+    let stream = strict_content_sync_transfer_from_response(&response).unwrap();
+
+    assert!(
+        stream.message_changes.is_empty(),
+        "Outlook already reported every Inbox FAI change in MetaTagCnsetSeenFAI"
+    );
+    assert!(stream.deleted_idset.is_none());
+    assert!(stream.read_idset.is_none());
+    assert!(stream.unread_idset.is_none());
+    assert_eq!(
+        stream.idset_given.as_slice(),
+        uploaded_state[0].1.as_slice()
+    );
+    assert_eq!(stream.cnset_seen.as_slice(), uploaded_state[1].1.as_slice());
+    assert_eq!(
+        stream.cnset_seen_fai.as_slice(),
+        uploaded_state[2].1.as_slice()
+    );
+    assert_eq!(stream.cnset_read.as_slice(), uploaded_state[3].1.as_slice());
+}
+
+#[tokio::test]
 async fn mapi_over_http_empty_contacts_fai_sync_exports_no_default_view() {
     // [MS-OXOCFG] sections 2.2.6 and 3.1.4.3 make view definitions
     // client-created FAI messages. [MS-OXCFXICS] section 3.2.5.3 exports
@@ -11262,7 +11487,7 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
     rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]);
     rops.push(0);
     rops.extend_from_slice(&0u32.to_le_bytes());
-    rops.push(0x01);
+    rops.push(0x09); // Unicode | ForceUnicode, as sent by Outlook.
     rops.extend_from_slice(&0u16.to_le_bytes());
     rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
@@ -11294,6 +11519,21 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
     ));
     assert!(contains_bytes(transfer, &utf16z("Client view payload")));
     assert!(contains_bytes(transfer, b"view-extra"));
+    let normalized_subject_value = utf16z("Outlook Inbox view state");
+    let mut normalized_subject = PID_TAG_NORMALIZED_SUBJECT_W.to_le_bytes().to_vec();
+    normalized_subject.extend_from_slice(&(normalized_subject_value.len() as u32).to_le_bytes());
+    normalized_subject.extend_from_slice(&normalized_subject_value);
+    assert!(
+        contains_bytes(transfer, &normalized_subject),
+        "missing Unicode normalized subject in {transfer:02x?}"
+    );
+    assert!(!contains_bytes(
+        transfer,
+        &PID_TAG_NORMALIZED_SUBJECT_A.to_le_bytes()
+    ));
+    let mut message_flags = PID_TAG_MESSAGE_FLAGS.to_le_bytes().to_vec();
+    message_flags.extend_from_slice(&0x0000_0040u32.to_le_bytes());
+    assert!(contains_bytes(transfer, &message_flags));
 }
 
 #[tokio::test]

@@ -1036,6 +1036,7 @@ fn calendar_sync_object(
     for property_tag in [
         PID_TAG_START_DATE,
         PID_TAG_END_DATE,
+        PID_TAG_MESSAGE_DELIVERY_TIME,
         PID_LID_COMMON_START_TAG,
         PID_LID_COMMON_END_TAG,
         PID_LID_BUSY_STATUS_TAG,
@@ -1169,6 +1170,7 @@ pub(in crate::mapi) fn sync_attachment_facts_for(
 
 pub(in crate::mapi) fn fast_transfer_manifest_for_object(
     rop_id: u8,
+    send_options: u8,
     object: &MapiObject,
     principal: &AccountPrincipal,
     mailboxes: &[JmapMailbox],
@@ -1263,6 +1265,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         associated_config_sync_object(&message),
                         snapshot,
                     ),
+                    send_options,
                 ),
             ))
         }
@@ -1283,6 +1286,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         conversation_action_sync_object(&message),
                         snapshot,
                     ),
+                    send_options,
                 ),
             ))
         }
@@ -1303,6 +1307,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         navigation_shortcut_sync_object(&message, principal),
                         snapshot,
                     ),
+                    send_options,
                 ),
             ))
         }
@@ -1316,6 +1321,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         common_view_named_view_sync_object(&message, principal.account_id),
                         snapshot,
                     ),
+                    send_options,
                 ),
             ))
         }
@@ -1336,6 +1342,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         delegate_freebusy_sync_object(&message),
                         snapshot,
                     ),
+                    send_options,
                 ),
             ))
         }
@@ -1351,6 +1358,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         public_folder_item_sync_object(&item),
                         snapshot,
                     ),
+                    send_options,
                 ),
             ))
         }

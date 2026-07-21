@@ -1,5 +1,45 @@
 use super::*;
 
+fn append_public_folder_content_sync_with_state(
+    rops: &mut Vec<u8>,
+    input: u8,
+    output: u8,
+    synchronization_flags: u16,
+    state_properties: &[(u32, Vec<u8>)],
+) {
+    rops.extend_from_slice(&[
+        0x70, 0x00, input, output, // RopSynchronizationConfigure
+        0x01, 0x00, // content sync, SendOptions
+    ]);
+    rops.extend_from_slice(&synchronization_flags.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x00, 0x00, // PropertyTagCount
+    ]);
+    for (property_tag, value) in state_properties {
+        rops.extend_from_slice(&[
+            0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
+        ]);
+        rops.extend_from_slice(&property_tag.to_le_bytes());
+        rops.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        if !value.is_empty() {
+            rops.extend_from_slice(&[
+                0x76, 0x00, output, // RopSynchronizationUploadStateStreamContinue
+            ]);
+            rops.extend_from_slice(&(value.len() as u32).to_le_bytes());
+            rops.extend_from_slice(value);
+        }
+        rops.extend_from_slice(&[
+            0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
+        ]);
+    }
+    rops.extend_from_slice(&[
+        0x4E, 0x00, output, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+}
+
 #[tokio::test]
 async fn mapi_over_http_public_folder_logon_allocates_public_folder_store_handle() {
     let store = FakeStore {
@@ -2233,17 +2273,15 @@ async fn mapi_over_http_public_folder_content_sync_exports_canonical_items() {
 
     let root_mapi_id =
         crate::mapi::identity::mapped_mapi_object_id(&Uuid::parse_str(root_id).unwrap()).unwrap();
+    let empty_client_state = vec![
+        (META_TAG_IDSET_GIVEN, Vec::new()),
+        (META_TAG_CNSET_SEEN, Vec::new()),
+        (META_TAG_CNSET_SEEN_FAI, Vec::new()),
+        (META_TAG_CNSET_READ, Vec::new()),
+    ];
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, root_mapi_id);
-    rops.extend_from_slice(&[
-        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
-        0x01, 0x00, 0x00, 0x00, // content sync
-        0x00, 0x00, // RestrictionDataSize
-        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
-        0x00, 0x00, // PropertyTagCount
-        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
-    ]);
-    rops.extend_from_slice(&4096u16.to_le_bytes());
+    append_public_folder_content_sync_with_state(&mut rops, 1, 2, 0x0020, &empty_client_state);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -2337,17 +2375,27 @@ async fn mapi_over_http_public_folder_content_sync_exports_canonical_read_state(
 
     let root_mapi_id =
         crate::mapi::identity::mapped_mapi_object_id(&Uuid::parse_str(root_id).unwrap()).unwrap();
+    let read_item_id = Uuid::parse_str(read_item_id).unwrap();
+    let unread_item_id = Uuid::parse_str(unread_item_id).unwrap();
+    let read_item_mapi_id = crate::mapi::identity::mapped_mapi_object_id(&read_item_id).unwrap();
+    let unread_item_mapi_id =
+        crate::mapi::identity::mapped_mapi_object_id(&unread_item_id).unwrap();
+    let client_cnset_read =
+        strict_test_replguid_globset(&[mapi_mailstore::change_number_for_store_id(
+            read_item_mapi_id,
+        )]);
+    let client_state = vec![
+        (
+            META_TAG_IDSET_GIVEN,
+            strict_test_replguid_globset(&[read_item_mapi_id >> 16, unread_item_mapi_id >> 16]),
+        ),
+        (META_TAG_CNSET_SEEN, Vec::new()),
+        (META_TAG_CNSET_SEEN_FAI, Vec::new()),
+        (META_TAG_CNSET_READ, client_cnset_read.clone()),
+    ];
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, root_mapi_id);
-    rops.extend_from_slice(&[
-        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
-        0x01, 0x00, 0x08, 0x00, // content sync, ReadState
-        0x00, 0x00, // RestrictionDataSize
-        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
-        0x00, 0x00, // PropertyTagCount
-        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
-    ]);
-    rops.extend_from_slice(&4096u16.to_le_bytes());
+    append_public_folder_content_sync_with_state(&mut rops, 1, 2, 0x0028, &client_state);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -2362,19 +2410,21 @@ async fn mapi_over_http_public_folder_content_sync_exports_canonical_read_state(
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    let read_item_id = Uuid::parse_str(read_item_id).unwrap();
-    let unread_item_id = Uuid::parse_str(unread_item_id).unwrap();
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_read_message_idset_property(&[read_item_id])
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_unread_message_idset_property(&[unread_item_id])
-    ));
+    let mut read_flags_property = PID_TAG_MESSAGE_FLAGS.to_le_bytes().to_vec();
+    read_flags_property.extend_from_slice(&1u32.to_le_bytes());
+    let mut unread_flags_property = PID_TAG_MESSAGE_FLAGS.to_le_bytes().to_vec();
+    unread_flags_property.extend_from_slice(&0u32.to_le_bytes());
+    assert!(contains_bytes(&response_rops, &read_flags_property));
+    assert!(contains_bytes(&response_rops, &unread_flags_property));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert!(stream.read_idset.is_some());
-    assert!(stream.unread_idset.is_some());
+    assert_eq!(stream.message_changes.len(), 2);
+    assert!(stream
+        .message_changes
+        .iter()
+        .all(|message| message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS)));
+    assert!(stream.read_idset.is_none());
+    assert!(stream.unread_idset.is_none());
+    assert_eq!(stream.cnset_read, client_cnset_read);
 }
 
 #[tokio::test]

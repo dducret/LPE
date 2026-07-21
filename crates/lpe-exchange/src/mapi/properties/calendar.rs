@@ -1,4 +1,7 @@
+mod meeting;
+
 use super::*;
+use meeting::{appointment_state_flags, organizer_json_from_mapi};
 
 pub(in crate::mapi) fn event_property_value(
     event: &AccessibleEvent,
@@ -234,18 +237,6 @@ fn appointment_busy_status(event: &AccessibleEvent) -> i32 {
     } else {
         2
     }
-}
-
-fn appointment_state_flags(event: &AccessibleEvent) -> i32 {
-    let participants = parse_calendar_participants_metadata(&event.attendees_json);
-    let mut flags = 0;
-    if participants.organizer.is_some() || !participants.attendees.is_empty() {
-        flags |= 0x0000_0001;
-    }
-    if event.status.eq_ignore_ascii_case("cancelled") {
-        flags |= 0x0000_0004;
-    }
-    flags
 }
 
 fn appointment_duration(event: &AccessibleEvent) -> i32 {
@@ -821,11 +812,12 @@ fn event_participants_from_mapi(
         metadata.attendees = attendees;
     }
     let attendees_json = serialize_calendar_participants_metadata(&metadata);
-    let organizer_json = metadata
-        .organizer
-        .as_ref()
-        .and_then(|organizer| serde_json::to_string(organizer).ok())
-        .unwrap_or_else(|| existing.organizer_json.clone());
+    let organizer_json = organizer_json_from_mapi(
+        existing,
+        metadata.organizer.as_ref(),
+        !metadata.attendees.is_empty(),
+        properties,
+    );
     MapiEventParticipants {
         organizer_json,
         attendees: calendar_attendee_labels(&metadata),
@@ -848,18 +840,20 @@ fn organizer_from_mapi(properties: &HashMap<u32, MapiValue>) -> Option<CalendarO
 fn attendees_from_mapi(
     properties: &HashMap<u32, MapiValue>,
 ) -> Option<Vec<CalendarParticipantMetadata>> {
-    let required = optional_pending_text_property(
-        properties,
-        &[
-            PID_TAG_DISPLAY_TO_W,
-            PID_LID_TO_ATTENDEES_STRING_W_TAG,
-            PID_LID_ALL_ATTENDEES_STRING_W_TAG,
-        ],
-    );
-    let optional = optional_pending_text_property(
-        properties,
-        &[PID_TAG_DISPLAY_CC_W, PID_LID_CC_ATTENDEES_STRING_W_TAG],
-    );
+    let required_tags = [
+        PID_TAG_DISPLAY_TO_W,
+        PID_LID_TO_ATTENDEES_STRING_W_TAG,
+        PID_LID_ALL_ATTENDEES_STRING_W_TAG,
+    ];
+    let optional_tags = [PID_TAG_DISPLAY_CC_W, PID_LID_CC_ATTENDEES_STRING_W_TAG];
+    let required = required_tags
+        .iter()
+        .any(|tag| properties.contains_key(tag))
+        .then(|| pending_text_property(properties, &required_tags));
+    let optional = optional_tags
+        .iter()
+        .any(|tag| properties.contains_key(tag))
+        .then(|| pending_text_property(properties, &optional_tags));
     if required.is_none() && optional.is_none() {
         return None;
     }

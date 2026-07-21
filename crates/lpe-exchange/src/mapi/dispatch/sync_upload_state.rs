@@ -211,6 +211,7 @@ pub(super) fn append_upload_state_stream_end_response(
             state_upload_buffer,
             client_state_uploaded_bytes,
             client_state_uploaded_marker_mask,
+            client_state_selection_invalidated,
             incremental_transfer_buffer,
             transfer_buffer,
             transfer_position,
@@ -225,7 +226,13 @@ pub(super) fn append_upload_state_stream_end_response(
             let property_tag = state_upload_property_tag.take().unwrap_or_default();
             let upload_state_empty_stream_after_client_state =
                 uploaded_bytes == 0 && *client_state_uploaded_bytes > 0;
-            if uploaded_bytes > 0 {
+            let validation = mapi_mailstore::validate_download_state_property(
+                *sync_type,
+                property_tag,
+                state_upload_buffer,
+            );
+            let valid_state_property = validation.is_ok();
+            if valid_state_property {
                 mark_uploaded_state_stream(client_state_uploaded_marker_mask, property_tag);
                 let updated_initial_state =
                     mapi_mailstore::sync_state_stream_with_uploaded_property(
@@ -235,31 +242,19 @@ pub(super) fn append_upload_state_stream_end_response(
                         state_upload_buffer,
                     );
                 *initial_state = updated_initial_state;
+                *client_state_uploaded_bytes =
+                    (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
+            } else {
+                *checkpoint_store_allowed = false;
+                *checkpoint_skip_reason = "invalid_uploaded_client_state";
+                *client_state_selection_invalidated = true;
             }
             state_upload_buffer.clear();
-            *client_state_uploaded_bytes =
-                (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
             let has_delta_anchor =
                 uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask);
-            if *client_state_uploaded_bytes > 0 && !has_delta_anchor {
-                *checkpoint_store_allowed = false;
-                *checkpoint_skip_reason = "uploaded_client_state_transfer";
-            } else if has_delta_anchor
-                && *checkpoint_skip_reason == "uploaded_client_state_transfer"
-            {
-                *checkpoint_store_allowed = true;
-                *checkpoint_skip_reason = "";
-            }
-            let mut selected_checkpoint_delta = false;
             let checkpoint_delta_available_before_upload_state =
                 incremental_transfer_buffer.is_some();
-            if has_delta_anchor {
-                if let Some(buffer) = incremental_transfer_buffer.take() {
-                    *transfer_buffer = buffer;
-                    *transfer_position = 0;
-                    selected_checkpoint_delta = true;
-                }
-            }
+            let client_state_validation_error = validation.err().unwrap_or_default();
             tracing::info!(
                 rca_debug = true,
                 adapter = "mapi",
@@ -293,25 +288,25 @@ pub(super) fn append_upload_state_stream_end_response(
                     %uploaded_state_marker_summary(*client_state_uploaded_marker_mask),
                 upload_state_has_delta_anchor = has_delta_anchor,
                 checkpoint_delta_available_before_upload_state,
-                upload_state_selected_checkpoint_delta = selected_checkpoint_delta,
-                checkpoint_delta_selection_gate = "upload_state_delta_anchor",
-                checkpoint_delta_selection_blocked_by_missing_upload_state_delta_anchor =
-                    checkpoint_delta_available_before_upload_state && !has_delta_anchor,
-                active_transfer_selection = if selected_checkpoint_delta {
-                    "checkpoint_delta_after_upload_state_delta_anchor"
-                } else if *checkpoint_zero_delta && !checkpoint_delta_available_before_upload_state
-                {
-                    "checkpoint_delta_zero_delta_initial"
-                } else if checkpoint_delta_available_before_upload_state {
-                    "full_pending_upload_state_delta_anchor"
-                } else {
-                    "full_or_static"
-                },
+                upload_state_property_valid = valid_state_property,
+                upload_state_client_state_validation_error = %client_state_validation_error,
+                checkpoint_delta_selection_gate = "disabled_client_state_is_authoritative",
+                active_transfer_selection = "full_pending_get_buffer_client_state_selection",
                 transfer_buffer_bytes = transfer_buffer.len(),
                 transfer_position = *transfer_position,
                 "rca debug mapi sync upload state end"
             );
-            responses.extend_from_slice(&rop_upload_state_success_response(request));
+            if valid_state_property {
+                responses.extend_from_slice(&rop_upload_state_success_response(request));
+            } else {
+                // [MS-OXCFXICS] section 3.1.5.4.3.2 recommends
+                // RpcFormat when an IDSET/GLOBSET cannot be decoded.
+                responses.extend_from_slice(&rop_error_response(
+                    0x77,
+                    request.response_handle_index(),
+                    0x0000_04B6,
+                ));
+            }
         }
         Some(MapiObject::SynchronizationCollector {
             folder_id,
@@ -330,18 +325,17 @@ pub(super) fn append_upload_state_stream_end_response(
         }) => {
             let uploaded_bytes = state_upload_buffer.len();
             let property_tag = state_upload_property_tag.take().unwrap_or_default();
-            if uploaded_bytes > 0 {
-                let idset_given = matches!(property_tag, 0x4017_0003 | 0x4017_0102);
+            let idset_given = matches!(property_tag, 0x4017_0003 | 0x4017_0102);
+            let valid_state_property = upload_state_marker_bit(property_tag) != 0;
+            if valid_state_property {
                 if !idset_given {
                     mark_uploaded_state_stream(client_state_uploaded_marker_mask, property_tag);
-                }
-                *state = mapi_mailstore::upload_sync_state_stream_with_uploaded_property(
-                    *sync_type,
-                    state,
-                    property_tag,
-                    state_upload_buffer,
-                );
-                if !idset_given {
+                    *state = mapi_mailstore::upload_sync_state_stream_with_uploaded_property(
+                        *sync_type,
+                        state,
+                        property_tag,
+                        state_upload_buffer,
+                    );
                     if let Ok(counters) =
                         mapi_mailstore::replguid_globset_counters(state_upload_buffer)
                     {

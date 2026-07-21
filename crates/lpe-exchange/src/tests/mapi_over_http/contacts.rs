@@ -1092,16 +1092,25 @@ async fn mapi_over_http_contacts_sync_exports_associated_config_deletes() {
         ..Default::default()
     };
 
-    let response_rops = content_sync_response_rops_for_store(
+    let contact_object_id = crate::mapi::identity::legacy_migration_object_id(&contact_id);
+    let client_state = vec![
+        (
+            META_TAG_IDSET_GIVEN,
+            strict_test_replguid_globset(&[contact_object_id >> 16, config_object_id >> 16]),
+        ),
+        (META_TAG_CNSET_SEEN, Vec::new()),
+        (META_TAG_CNSET_SEEN_FAI, Vec::new()),
+        (META_TAG_CNSET_READ, Vec::new()),
+    ];
+    let response_rops = outlook_content_sync_response_rops_for_store(
         store,
         crate::mapi::identity::CONTACTS_FOLDER_ID,
-        b"client-content-state",
+        &client_state,
     )
     .await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     let deleted_idset = stream.deleted_idset.as_deref().unwrap();
-    let contact_object_id = crate::mapi::identity::legacy_migration_object_id(&contact_id);
     assert!(strict_replid_globset_contains_counter(
         deleted_idset,
         &globcnt_bytes(config_object_id >> 16)
@@ -1146,10 +1155,20 @@ async fn mapi_over_http_contact_content_sync_exports_deletes() {
         ..Default::default()
     };
 
-    let response_rops = content_sync_response_rops_for_store(
+    let contact_object_id = crate::mapi::identity::legacy_migration_object_id(&contact_id);
+    let client_state = vec![
+        (
+            META_TAG_IDSET_GIVEN,
+            strict_test_replguid_globset(&[contact_object_id >> 16]),
+        ),
+        (META_TAG_CNSET_SEEN, Vec::new()),
+        (META_TAG_CNSET_SEEN_FAI, Vec::new()),
+        (META_TAG_CNSET_READ, Vec::new()),
+    ];
+    let response_rops = outlook_content_sync_response_rops_for_store(
         store,
         crate::mapi::identity::CONTACTS_FOLDER_ID,
-        b"client-content-state",
+        &client_state,
     )
     .await;
 
@@ -1161,6 +1180,88 @@ async fn mapi_over_http_contact_content_sync_exports_deletes() {
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert!(stream.message_changes.is_empty());
     assert!(stream.deleted_idset.is_some());
+}
+
+#[tokio::test]
+async fn mapi_over_http_outlook_contact_sync_orders_special_messages_by_last_modification() {
+    let oldest_id = Uuid::parse_str("71717171-7171-4171-9171-717171710161").unwrap();
+    let newest_id = Uuid::parse_str("71717171-7171-4171-9171-717171710163").unwrap();
+    let middle_id = Uuid::parse_str("71717171-7171-4171-9171-717171710162").unwrap();
+    let oldest_time = mapi_mailstore::filetime_from_rfc3339_utc("2026-07-20T09:00:00Z");
+    let newest_time = mapi_mailstore::filetime_from_rfc3339_utc("2026-07-20T12:00:00Z");
+    let middle_time = mapi_mailstore::filetime_from_rfc3339_utc("2026-07-20T10:30:00Z");
+    let config =
+        |id, subject: &str, last_modification_time| crate::store::MapiAssociatedConfigRecord {
+            id,
+            account_id: FakeStore::account().account_id,
+            folder_id: crate::mapi::identity::CONTACTS_FOLDER_ID,
+            message_class: "IPM.Configuration.ContactOrderFixture".to_string(),
+            subject: subject.to_string(),
+            properties_json: serde_json::json!({
+                "0x30080040": {"type": "i64", "value": last_modification_time as i64}
+            }),
+        };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        associated_configs: Arc::new(Mutex::new(vec![
+            config(oldest_id, "Contact config Alpha", oldest_time),
+            config(newest_id, "Contact config Charlie", newest_time),
+            config(middle_id, "Contact config Bravo", middle_time),
+        ])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([
+            (oldest_id, crate::mapi::identity::mapi_store_id(198_463)),
+            (newest_id, crate::mapi::identity::mapi_store_id(198_461)),
+            (middle_id, crate::mapi::identity::mapi_store_id(198_462)),
+        ]))),
+        mapi_identity_last_modification_times: Arc::new(Mutex::new(HashMap::from([
+            (oldest_id, oldest_time),
+            (newest_id, newest_time),
+            (middle_id, middle_time),
+        ]))),
+        ..Default::default()
+    };
+    let empty_state = vec![
+        (META_TAG_IDSET_GIVEN, Vec::new()),
+        (META_TAG_CNSET_SEEN, Vec::new()),
+        (META_TAG_CNSET_SEEN_FAI, Vec::new()),
+        (META_TAG_CNSET_READ, Vec::new()),
+    ];
+
+    // The Outlook helper reproduces trace 202607202136 with
+    // SynchronizationFlags 0xA139 and SynchronizationExtraFlags 0x0000000D.
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+        &empty_state,
+    )
+    .await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    let subjects = stream
+        .message_changes
+        .iter()
+        .map(|message| message.subject.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        subjects,
+        [
+            "Contact config Charlie",
+            "Contact config Bravo",
+            "Contact config Alpha",
+        ],
+        "[MS-OXCFXICS] 3.2.5.9.1.1 requires newest-to-oldest fallback ordering by PidTagLastModificationTime"
+    );
+    assert_eq!(
+        stream
+            .message_changes
+            .iter()
+            .map(|message| message.last_modification_time.unwrap())
+            .collect::<Vec<_>>(),
+        [newest_time, middle_time, oldest_time]
+    );
 }
 
 #[tokio::test]
