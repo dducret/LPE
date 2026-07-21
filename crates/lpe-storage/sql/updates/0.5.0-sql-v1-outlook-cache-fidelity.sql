@@ -77,7 +77,7 @@ DECLARE
 BEGIN
     IF to_regclass('public.mapi_navigation_shortcuts') IS NULL THEN
         RAISE EXCEPTION
-            'MAPI navigation shortcut table is missing; initialize a fresh LPE 0.5.0 database';
+            'MAPI navigation shortcut table is missing; initialize a fresh LPE 0.5.1 database';
     END IF;
 
     SELECT data_type
@@ -209,7 +209,7 @@ DECLARE
 BEGIN
     IF to_regclass('public.mapi_associated_config_messages') IS NULL THEN
         RAISE EXCEPTION
-            'MAPI associated configuration table is missing; initialize a fresh LPE 0.5.0 database';
+            'MAPI associated configuration table is missing; initialize a fresh LPE 0.5.1 database';
     END IF;
 
     SELECT replace(pg_get_indexdef(index_row.indexrelid), 'public.', ''), index_row.indisunique
@@ -330,7 +330,7 @@ BEGIN
 
     IF NOT local_replica_range_shape_ok THEN
         RAISE EXCEPTION
-            'MAPI local replica range table shape is incomplete; initialize a fresh LPE 0.5.0 database';
+            'MAPI local replica range table shape is incomplete; initialize a fresh LPE 0.5.1 database';
     END IF;
 
     SELECT
@@ -398,7 +398,7 @@ BEGIN
 
     IF NOT wlink_fidelity_shape_ok THEN
         RAISE EXCEPTION
-            'MAPI WLink/configuration FAI fidelity shape is incomplete; initialize a fresh LPE 0.5.0 database';
+            'MAPI WLink/configuration FAI fidelity shape is incomplete; initialize a fresh LPE 0.5.1 database';
     END IF;
 END
 $validation$;

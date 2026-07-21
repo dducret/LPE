@@ -53,7 +53,7 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
   - mailbox synchronization must use canonical message, folder, flag, attachment, and sync-state mappings; import/read/delete/move operations must mutate canonical state only
 - Autodiscover:
   - `EWS` publication requires `LPE_AUTOCONFIG_EWS_ENABLED`
-  - `mapiHttp` publication requires `LPE_AUTOCONFIG_MAPI_ENABLED` and a supported positive Outlook `X-MapiHttpCapability` probe; 0.5.0 new installations enable the deployment flag after the successful profile/sync/reconnect milestone, while live RCA and real Outlook evidence remain release-quality checks rather than a second runtime switch
+  - `mapiHttp` publication requires `LPE_AUTOCONFIG_MAPI_ENABLED` and a supported positive Outlook `X-MapiHttpCapability` probe; 0.5.1 new installations enable the deployment flag, while live RCA and real Outlook evidence remain release-quality checks rather than a second runtime switch
   - legacy `EXCH` publication requires `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED`
   - legacy `EXPR` publication requires `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`; this is a later legacy compatibility gate and not the first MAPI over HTTP publication path
 

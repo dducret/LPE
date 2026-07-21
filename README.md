@@ -2,11 +2,14 @@
 
 `LPE` is a modern mail and collaboration platform written primarily in Rust.
 
-The repository is aligned for release `0.5.0`.
+The repository is aligned for release `0.5.1`.
 
-Release `0.5.0` requires a fresh empty SQL database initialized from the canonical schema. Upgrades from pre-0.5 releases are not supported.
+New `0.5.1` deployments require an empty SQL database initialized from the
+canonical `0.5.1-sql` schema. `update-lpe.sh` supports only the exact
+late canonical physical form of `0.5.0-sql-v1` to `0.5.1-sql`; earlier
+same-label shapes and upgrades from pre-0.5 releases remain unsupported.
 
-See `docs/releases/0.5.0.md` for the short release note.
+See `docs/releases/0.5.1.md` for the short release note.
 
 ## Initial Principles
 
@@ -54,7 +57,7 @@ The current repository already contains:
 - an explicit internal `LPE` / `LPE-CT` HTTP integration contract
 - MVP protocol adapters for `JMAP Mail`, `JMAP Contacts`, `JMAP Calendars`, `IMAP`, `ActiveSync`, `EWS`, `Sieve` / `ManageSieve`, `CardDAV`, and `CalDAV`
 - canonical personal tasks exposed through the account workspace model
-- public client autoconfiguration for `Thunderbird`, `Outlook`, `ActiveSync`, opt-in `EWS`, and enabled-by-default `MAPI over HTTP` on new 0.5.0 installations
+- public client autoconfiguration for `Thunderbird`, `Outlook`, `ActiveSync`, opt-in `EWS`, and enabled-by-default `MAPI over HTTP` on new 0.5.1 installations
 - a web client backed by persistent account authentication and mailbox/workspace APIs
 - first observability foundations with metrics and structured tracing
 

@@ -868,18 +868,21 @@ compatible. They do not replace canonical mail or collaboration tables.
 
 ## Implementation Notes
 
-- `schema.sql` creates the fresh `0.5.0-sql-v1` baseline.
+- `schema.sql` creates the fresh `0.5.1-sql` baseline.
 - `schema.sql` is the dense canonical DDL definition and is the documented
   source-size exception. Before adding another schema-contract family, split
   `schema_contract.rs` into feature-scoped checks (core ownership, mail and
   collaboration, and MAPI cache/identity) while retaining one central public
   contract runner.
-- `0.5.0` installations start from an empty SQL database initialized by
+- New `0.5.1` installations start from an empty SQL database initialized by
   `init-schema.sh`. Databases from pre-0.5 releases are not upgraded in place.
-- A database initialized from an earlier 0.5.0 checkout can receive only an
-  explicitly reviewed, forward-only, transactional, idempotent SQL update for
-  the same `0.5.0-sql-v1` label. The ordered
-  `0.5.0-sql-v1-outlook-cache-fidelity.sql` update adds
+- The only supported in-place release transition is from the late canonical
+  physical form of `0.5.0-sql-v1` to `0.5.1-sql`.
+  `update-lpe.sh` first runs the read-only, version-bounded
+  `0.5.0-sql-v1-to-0.5.1-sql-preflight.sql`; earlier physical forms carrying
+  the same label are rejected before service stop or mutation. It then applies
+  the reviewed, forward-only, transactional, idempotent
+  `0.5.0-sql-v1-outlook-cache-fidelity.sql` update. It adds
   `mapi_local_replica_id_ranges` and `mapi_local_replica_deleted_ranges`,
   converts each legacy `mapi_navigation_shortcuts.ordinal` integer without
   collapsing distinct values. A compact projection whose final byte is already
@@ -892,10 +895,15 @@ compatible. They do not replace canonical mail or collaboration tables.
   nullable canonical columns for the five client-written Calendar WLink
   properties, and replaces the stale unique associated-configuration label
   index with a non-unique lookup index.
-  Databases from before 0.5 remain unsupported, and `schema.sql` remains the
-  canonical complete source for every new database.
-- `update-lpe.sh` rejects every schema version other than the current one
-  before applying the bounded 0.5.0 forward-only update. `init-schema.sh`, `check-lpe.sh`, and
+  After the updater validates the complete target shape, the version-bounded,
+  transactional, idempotent `0.5.0-sql-v1-to-0.5.1-sql.sql` update changes the
+  label. Databases from before 0.5 and every other source label remain
+  unsupported, and `schema.sql`
+  remains the canonical complete source for every new database.
+- `update-lpe.sh` accepts only `0.5.1-sql` or the exact supported
+  late physical form of the `0.5.0-sql-v1` source, and rejects earlier
+  same-label shapes plus every other schema version before stopping LPE or
+  applying SQL. `init-schema.sh`, `check-lpe.sh`, and
   `update-lpe.sh` validate the alias table's required columns, bounded FID,
   SourceKey, and server-CN checks, account foreign key, alias/SourceKey/CN
   uniqueness, and absence

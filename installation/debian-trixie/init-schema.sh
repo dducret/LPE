@@ -73,7 +73,7 @@ if [[ "${existing_non_public_objects}" != "0" ]]; then
 fi
 
 if [[ "${existing_public_objects}" != "0" && "${LPE_RESET_SCHEMA:-false}" != "true" ]]; then
-  echo "The target database is not empty. LPE 0.5.0 requires an empty SQL database." >&2
+  echo "The target database is not empty. LPE 0.5.1 requires an empty SQL database." >&2
   echo "Create a new empty database, or set LPE_RESET_SCHEMA=true only for an intentional destructive reset." >&2
   exit 1
 fi
@@ -126,7 +126,7 @@ if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${mapi_calendar_event_move_change_key_constraint_count}" != "2" \
   || "${mapi_special_folder_alias_shape_ok}" != "1" ]]; then
   echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, MAPI local replica range table shape=${mapi_local_replica_range_shape_ok}, MAPI WLink/configuration FAI fidelity shape=${mapi_outlook_cache_fidelity_shape_ok}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}, MAPI special-folder alias shape=${mapi_special_folder_alias_shape_ok}." >&2
-  echo "Initialize a fresh LPE 0.5.0 database after correcting the canonical schema source." >&2
+  echo "Initialize a fresh LPE 0.5.1 database after correcting the canonical schema source." >&2
   exit 1
 fi
 

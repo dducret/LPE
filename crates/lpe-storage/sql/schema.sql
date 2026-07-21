@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.5.0-sql-v1'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.5.1-sql'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -3574,6 +3574,6 @@ SELECT
 FROM mail_search_documents msd;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.5.0-sql-v1');
+VALUES (TRUE, '0.5.1-sql');
 
 COMMIT;

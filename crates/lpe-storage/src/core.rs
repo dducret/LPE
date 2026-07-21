@@ -102,7 +102,7 @@ impl Storage {
 
             if !present {
                 bail!(
-                    "required table {schema_name}.{table} is missing; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                    "required table {schema_name}.{table} is missing; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
                 );
             }
         }
@@ -143,7 +143,7 @@ impl Storage {
 
         if !invalid_columns.is_empty() {
             bail!(
-                "required column shapes {} are missing or incompatible in {schema_name}.mapi_object_identities; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+                "required column shapes {} are missing or incompatible in {schema_name}.mapi_object_identities; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
                 invalid_columns.join(", ")
             );
         }
@@ -186,7 +186,7 @@ impl Storage {
         }
         if !invalid_alias_columns.is_empty() {
             bail!(
-                "required column shapes {} are missing or incompatible in {schema_name}.mapi_special_folder_aliases; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+                "required column shapes {} are missing or incompatible in {schema_name}.mapi_special_folder_aliases; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
                 invalid_alias_columns.join(", ")
             );
         }
@@ -247,7 +247,7 @@ impl Storage {
                 && has_alias_constraint("c", &["alias_folder_id <> canonical_folder_id"]);
         if !mapi_alias_checks_are_current {
             bail!(
-                "required MAPI special-folder alias CHECK constraints are missing or incompatible in {schema_name}; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required MAPI special-folder alias CHECK constraints are missing or incompatible in {schema_name}; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -262,7 +262,7 @@ impl Storage {
                 });
         if !mapi_alias_unique_constraints_are_current {
             bail!(
-                "required MAPI special-folder alias UNIQUE constraints are missing or incompatible in {schema_name}; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required MAPI special-folder alias UNIQUE constraints are missing or incompatible in {schema_name}; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -279,7 +279,7 @@ impl Storage {
         );
         if !mapi_alias_scope_constraints_are_current {
             bail!(
-                "required MAPI special-folder alias primary key or account foreign key is missing or incompatible in {schema_name}; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required MAPI special-folder alias primary key or account foreign key is missing or incompatible in {schema_name}; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -367,7 +367,7 @@ impl Storage {
         })?;
         if !mapi_outlook_cache_fidelity_shape_is_current {
             bail!(
-                "required MAPI WLink/configuration FAI fidelity shape is missing or incompatible in {schema_name}; run the reviewed 0.5.0 update or initialize an empty database from crates/lpe-storage/sql/schema.sql"
+                "required MAPI WLink/configuration FAI fidelity shape is missing or incompatible in {schema_name}; run the reviewed 0.5.1 update or initialize an empty database from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -412,7 +412,7 @@ impl Storage {
         })?;
         if mapi_change_key_constraint_count != 3 {
             bail!(
-                "required 17-24-byte MAPI ChangeKey XID constraints are missing or incompatible in {schema_name}; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required 17-24-byte MAPI ChangeKey XID constraints are missing or incompatible in {schema_name}; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -450,7 +450,7 @@ impl Storage {
         }
         if !invalid_calendar_lifecycle_columns.is_empty() {
             bail!(
-                "required column shapes {} are missing or incompatible in {schema_name}.calendar_events; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+                "required column shapes {} are missing or incompatible in {schema_name}.calendar_events; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
                 invalid_calendar_lifecycle_columns.join(", ")
             );
         }
@@ -475,7 +475,7 @@ impl Storage {
         })?;
         if deleted_object_kind_tables != 2 {
             bail!(
-                "required deleted_calendar_event object-kind constraints are missing or incompatible in {schema_name}; LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required deleted_calendar_event object-kind constraints are missing or incompatible in {schema_name}; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -735,7 +735,7 @@ mod tests {
             let error = Storage::new(pool.clone())
                 .assert_required_schema_objects(&schema_name)
                 .await
-                .expect_err("startup must reject an incomplete tagged 0.5.0 schema");
+                .expect_err("startup must reject an incomplete tagged 0.5.1 schema");
             let message = format!("{error:#}");
             anyhow::ensure!(
                 message.contains("mapi_object_identities")

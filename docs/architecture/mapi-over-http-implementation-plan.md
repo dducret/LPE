@@ -19,7 +19,7 @@ before it is advertised.
   publish the MAPI endpoint only when the MAPI gate is enabled and the documented
   interop gate has passed for the deployment.
 - MAPI over HTTP startup and publication require both the exact
-  `0.5.0-sql-v1` schema label and every required physical MAPI table and
+  `0.5.1-sql` schema label and every required physical MAPI table and
   column. A tagged but incomplete schema is a fatal storage-startup and
   readiness failure; LPE must reject it before accepting or advertising a MAPI
   session rather than exposing the database failure through an Outlook

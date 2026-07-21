@@ -2,7 +2,7 @@
 
 ## Current State/Functionality Overview
 
-`LPE` publishes client autoconfiguration only for endpoints that are implemented and explicitly exposed. New 0.5.0 installations enable MAPI over HTTP for capable Outlook desktop clients; legacy Exchange provider blocks remain separately gated.
+`LPE` publishes client autoconfiguration only for endpoints that are implemented and explicitly exposed. New 0.5.1 installations enable MAPI over HTTP for capable Outlook desktop clients; legacy Exchange provider blocks remain separately gated.
 
 ## Implementation/Usage
 
@@ -17,7 +17,7 @@
   ActiveSync/MobileSync probes, but it must not imply support for older
   ActiveSync protocol versions.
 - Publish `EWS` only when `LPE_AUTOCONFIG_EWS_ENABLED` is true.
-- Publish `mapiHttp` when `LPE_AUTOCONFIG_MAPI_ENABLED` is true and the client sends a supported positive `X-MapiHttpCapability` value. New 0.5.0 installations enable this setting. The capability header never enables a deployment-disabled endpoint, and legacy `EXCH` / `EXPR` metadata is suppressed only when `mapiHttp` metadata is actually emitted.
+- Publish `mapiHttp` when `LPE_AUTOCONFIG_MAPI_ENABLED` is true and the client sends a supported positive `X-MapiHttpCapability` value. New 0.5.1 installations enable this setting. The capability header never enables a deployment-disabled endpoint, and legacy `EXCH` / `EXPR` metadata is suppressed only when `mapiHttp` metadata is actually emitted.
 - Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is true and an Exchange-style surface is enabled.
 - Publish top-level `EXPR` only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true and `/rpc/rpcproxy.dll` is implemented and exposed.
 - Publish SOAP `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is true and an `EWS` or `MAPI` surface is enabled.
@@ -69,7 +69,7 @@
 | `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE` | `SSL` |
 | `LPE_AUTOCONFIG_EWS_ENABLED` | true values: `true`, `1`, `yes`, `on` |
 | `LPE_AUTOCONFIG_EWS_URL` | `{public_scheme}://{public_host}/EWS/Exchange.asmx` |
-| `LPE_AUTOCONFIG_MAPI_ENABLED` | true values: `true`, `1`, `yes`, `on`; new 0.5.0 installations set `true` |
+| `LPE_AUTOCONFIG_MAPI_ENABLED` | true values: `true`, `1`, `yes`, `on`; new 0.5.1 installations set `true` |
 | `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` | legacy `EXPR`/RPC over HTTP release gate; it does not control MAPI over HTTP publication |
 | `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` | true values: `true`, `1`, `yes`, `on` |
 | `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` | true values: `true`, `1`, `yes`, `on` |

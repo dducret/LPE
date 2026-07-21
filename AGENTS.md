@@ -196,11 +196,17 @@ Web interfaces must support at least `en`, `fr`, `de`, `it`, and `es`, with Engl
 - the initial Linux deployment target is `Debian Trixie`
 - installation scripts must first target deployment from the Git repository
 - Windows Server support is deferred and must not be assumed in Linux scripts
-- new `LPE` `0.5.0` deployments start from an empty SQL database
+- new `LPE` `0.5.1` deployments start from an empty SQL database initialized
+  with the canonical `0.5.1-sql` schema
 - upgrades from pre-0.5 releases are unsupported; `update-lpe.sh` must reject
   their schema versions without mutation
-- during 0.5.0 interoperability testing, an explicitly reviewed 0.5.x schema
-  fix may use a forward-only, transactional, idempotent SQL update for the
-  existing `0.5.0-sql-v1` label; `update-lpe.sh` must reject pre-0.5 schemas
-  before running it, `schema.sql` remains canonical for new databases, and the
-  matching architecture and installation documentation must change with it
+- `update-lpe.sh` supports exactly one in-place release transition:
+  the late canonical physical form of `0.5.0-sql-v1` to `0.5.1-sql`; it must
+  run a read-only physical preflight before stopping LPE or mutating the
+  database, use the reviewed forward-only transactional/idempotent SQL
+  updates, reject earlier same-label shapes and every other source version,
+  write the new label only after target-shape validation, and keep `schema.sql`
+  canonical for new databases
+- during 0.5.1 interoperability testing, any additional schema fix requires an
+  explicitly reviewed forward-only, transactional, idempotent SQL update and
+  matching architecture and installation documentation

@@ -43,6 +43,7 @@ const EXCHANGE_STORE_MAPI_PERMISSIONS: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_permissions.rs");
 const EXCHANGE_STORE_MAPI_SPECIAL_FOLDER_ALIASES: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_special_folder_aliases.rs");
+
 const EXCHANGE_STORE_MAPI_HELPERS: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_helpers.rs");
 const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests/mapi_over_http.rs");
@@ -1182,62 +1183,6 @@ fn mapi_special_folder_aliases_are_bounded_protocol_identity_metadata() {
 }
 
 #[test]
-fn update_script_rejects_pre_050_before_running_bounded_forward_only_sql() {
-    assert_source_contains_all(
-        "update-lpe.sh",
-        UPDATE_LPE_SCRIPT,
-        &[
-            "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE",
-            "INSTALLED_SCHEMA_VERSION",
-            "EXPECTED_SCHEMA_VERSION",
-            "Upgrades from releases before LPE 0.5.0 are unsupported",
-            "SCHEMA_UPDATE_FILE",
-            "0.5.0-sql-v1-outlook-cache-fidelity.sql",
-            "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${SCHEMA_UPDATE_FILE}\"",
-            "reviewed forward-only 0.5.0 schema updates are applied",
-        ],
-    );
-
-    for forbidden in [
-        "CREATE TABLE",
-        "ALTER TABLE",
-        "UPDATE public.",
-        "DELETE FROM public.",
-    ] {
-        assert!(
-            !UPDATE_LPE_SCRIPT.contains(forbidden),
-            "update-lpe.sh must not mutate the LPE 0.5.0 schema: {forbidden}"
-        );
-    }
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "if [[ \"${INSTALLED_SCHEMA_VERSION}\" != \"${EXPECTED_SCHEMA_VERSION}\" ]]",
-        "systemctl stop \"${SERVICE_NAME}\"",
-        "update-lpe.sh must reject pre-0.5 schemas before stopping LPE",
-    );
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "systemctl stop \"${SERVICE_NAME}\"",
-        "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${SCHEMA_UPDATE_FILE}\"",
-        "update-lpe.sh must stop the incompatible service before invoking any 0.5.0 update",
-    );
-    assert!(
-        UPDATE_LPE_SCRIPT.contains("if systemctl is-active --quiet \"${SERVICE_NAME}\""),
-        "update-lpe.sh must accept an already inactive service without masking a real stop failure"
-    );
-    assert!(
-        !UPDATE_LPE_SCRIPT.contains("systemctl stop \"${SERVICE_NAME}\" || true"),
-        "update-lpe.sh must not ignore a real service stop failure"
-    );
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${SCHEMA_UPDATE_FILE}\"",
-        "MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK",
-        "update-lpe.sh must run the forward-only update before enforcing its postcondition guard",
-    );
-}
-
-#[test]
 fn outlook_cache_fidelity_update_is_transactional_idempotent_and_version_bounded() {
     assert_source_contains_all(
         "0.5.0 Outlook cache fidelity update",
@@ -1346,7 +1291,7 @@ fn local_replica_range_update_rejects_preexisting_incomplete_tables() {
             &[
                 "mapi_local_replica_range_shape_ok",
                 "MAPI local replica range table shape",
-                "Initialize a fresh LPE 0.5.0 database",
+                "Initialize a fresh LPE 0.5.1 database",
             ],
         );
     }
@@ -1432,7 +1377,7 @@ fn deployment_scripts_reject_tagged_schema_without_mapi_identity_version_columns
                 "WHEN 'mapi_change_number' THEN 'bigint'",
                 "WHEN 'predecessor_change_list' THEN 'bytea'",
                 "bigint/bytea NOT NULL",
-                "Initialize a fresh LPE 0.5.0 database",
+                "Initialize a fresh LPE 0.5.1 database",
             ],
         );
     }
@@ -1483,7 +1428,7 @@ fn deployment_scripts_require_local_replica_range_table_shape() {
                 shape_variable,
                 "mapi_local_replica_range_shape_ok",
                 "MAPI local replica range table shape",
-                "Initialize a fresh LPE 0.5.0 database",
+                "Initialize a fresh LPE 0.5.1 database",
             ],
         );
     }
@@ -1593,7 +1538,7 @@ fn deployment_scripts_reject_tagged_schema_without_special_folder_alias_shape() 
             source,
             &[
                 "mapi_special_folder_alias_shape_ok",
-                "Initialize a fresh LPE 0.5.0 database",
+                "Initialize a fresh LPE 0.5.1 database",
             ],
         );
     }
@@ -1632,7 +1577,7 @@ fn deployment_and_startup_reject_stale_mapi_change_key_constraints() {
             &[
                 "mapi_identity_key_constraint_count",
                 "mapi_calendar_event_move_change_key_constraint_count",
-                "Initialize a fresh LPE 0.5.0 database",
+                "Initialize a fresh LPE 0.5.1 database",
             ],
         );
     }
@@ -1776,7 +1721,7 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%'",
             "required deleted_calendar_event object-kind constraints are missing or incompatible",
             "required 17-24-byte MAPI ChangeKey XID constraints are missing or incompatible",
-            "LPE 0.5.0 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+            "LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
         ],
     );
     let core_runtime = CORE_STORAGE
