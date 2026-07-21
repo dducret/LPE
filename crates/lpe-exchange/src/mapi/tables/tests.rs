@@ -7920,6 +7920,21 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
         associated_config_property_value(&explicit_no_streams, PID_TAG_ROAMING_DICTIONARY),
         None
     );
+    assert_eq!(
+        associated_config_property_value(
+            &explicit_no_streams,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        ),
+        None
+    );
+    assert_eq!(
+        associated_config_property_value(&explicit_no_streams, PID_NAME_CONTENT_CLASS_W_TAG),
+        None
+    );
+    assert_eq!(
+        associated_config_property_value(&explicit_no_streams, PID_NAME_CONTENT_TYPE_W_TAG),
+        None
+    );
     let work_hours = MapiAssociatedConfigMessage {
         id: crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 93,

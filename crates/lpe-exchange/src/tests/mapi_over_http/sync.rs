@@ -10554,7 +10554,11 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         )
         .await
         .unwrap();
-    let copy_response_rops = response_rops_from_execute_response(copy_response).await;
+    let copy_response_body = response_bytes(copy_response).await;
+    let (copy_response_rops, copy_response_handles) =
+        response_rops_and_handles_from_execute_body(&copy_response_body);
+    assert_eq!(copy_response_handles.len(), 4);
+    assert_ne!(copy_response_handles[3], u32::MAX);
     let chunks = mapi_fast_transfer_chunks(&copy_response_rops);
     assert_eq!(chunks.len(), 1, "{copy_response_rops:02x?}");
     assert_eq!(chunks[0].0, 0x0003);
@@ -10588,6 +10592,87 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert!(!properties
         .iter()
         .any(|property| property.tag == 0x836B_001F));
+
+    // Exact third Execute from trace 202607211931: Outlook releases the
+    // FastTransfer handle, then directly reads the persisted Message handle.
+    // The client did not write 0x0E0B0102, so the requested property is absent
+    // and must be returned as ecNotFound in a FlaggedPropertyRow, following
+    // [MS-OXCPRPT] section 3.2.5.1 and [MS-OXCDATA] sections 2.4.2,
+    // 2.8.1.2, and 2.11.5.
+    let direct_tags = [
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        0x0E0B_0102,
+        PID_TAG_MESSAGE_CLASS_W,
+    ];
+    let mut direct_get_rops = vec![0x01, 0x00, 0x00]; // RopRelease FastTransfer handle.
+    direct_get_rops.extend_from_slice(&[0x07, 0x00, 0x01]);
+    direct_get_rops.extend_from_slice(&0u16.to_le_bytes()); // PropertySizeLimit.
+    direct_get_rops.extend_from_slice(&0u16.to_le_bytes()); // WantUnicode.
+    direct_get_rops.extend_from_slice(&(direct_tags.len() as u16).to_le_bytes());
+    for tag in direct_tags {
+        direct_get_rops.extend_from_slice(&tag.to_le_bytes());
+    }
+    renew_mapi_request_id(&mut reopen_headers);
+    let direct_get_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &reopen_headers,
+            &execute_body(&rop_buffer(
+                &direct_get_rops,
+                &[copy_response_handles[3], reopen_response_handles[2]],
+            )),
+        )
+        .await
+        .unwrap();
+    let direct_get_response_rops = response_rops_from_execute_response(direct_get_response).await;
+    assert_eq!(
+        direct_get_response_rops.get(..6),
+        Some(&[0x07, 0x01, 0, 0, 0, 0][..]),
+        "GetPropertiesSpecific must use the success response from [MS-OXCROPS] section 2.2.8.3.2: {direct_get_response_rops:02x?}"
+    );
+    assert_eq!(
+        direct_get_response_rops.get(6),
+        Some(&1),
+        "GetPropertiesSpecific must return a FlaggedPropertyRow: {direct_get_response_rops:02x?}"
+    );
+    let mut cell_offset = 7;
+    for tag in [PID_TAG_CHANGE_KEY, PID_TAG_PREDECESSOR_CHANGE_LIST] {
+        assert_eq!(
+            direct_get_response_rops[cell_offset], 0,
+            "{tag:#010x} must have a value: {direct_get_response_rops:02x?}"
+        );
+        cell_offset += 1;
+        let value_len = u16::from_le_bytes(
+            direct_get_response_rops[cell_offset..cell_offset + 2]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        cell_offset += 2 + value_len;
+    }
+    assert_eq!(
+        direct_get_response_rops[cell_offset], 0,
+        "PidTagLastModificationTime must have a value: {direct_get_response_rops:02x?}"
+    );
+    cell_offset += 1 + 8;
+    assert_eq!(
+        direct_get_response_rops[cell_offset], 0x0A,
+        "absent 0x0E0B0102 must be a flagged error: {direct_get_response_rops:02x?}"
+    );
+    assert_eq!(
+        u32::from_le_bytes(
+            direct_get_response_rops[cell_offset + 1..cell_offset + 5]
+                .try_into()
+                .unwrap(),
+        ),
+        0x8004_010F,
+        "absent 0x0E0B0102 must be ecNotFound: {direct_get_response_rops:02x?}"
+    );
+    assert!(!contains_bytes(
+        &direct_get_response_rops,
+        b"OLPrefsVersion"
+    ));
 
     let sync_response = content_sync_response_rops_for_store_with_flags(
         store.clone(),

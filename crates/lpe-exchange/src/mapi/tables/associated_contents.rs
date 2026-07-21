@@ -395,6 +395,51 @@ pub(in crate::mapi) fn associated_config_property_value(
     associated_config_property_value_with_mailbox_guid(message, Uuid::nil(), property_tag)
 }
 
+pub(in crate::mapi) fn associated_config_property_is_client_absent(
+    message: Option<&MapiAssociatedConfigMessage>,
+    property_tag: u32,
+) -> bool {
+    message.is_some_and(|message| {
+        crate::mapi_store::is_outlook_configuration_message_class(&message.message_class)
+            && mapi_properties_from_json(&message.properties_json)
+                .contains_key(&PID_TAG_ROAMING_DATATYPES)
+            && matches!(
+                property_tag,
+                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                    | PID_NAME_CONTENT_CLASS_W_TAG
+                    | PID_NAME_CONTENT_TYPE_W_TAG
+            )
+    })
+}
+
+pub(in crate::mapi) fn associated_config_modeled_empty_property(
+    message: Option<&MapiAssociatedConfigMessage>,
+    property_tag: u32,
+) -> bool {
+    let storage_tag = canonical_property_storage_tag(property_tag);
+    if storage_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B {
+        return !associated_config_property_is_client_absent(message, storage_tag);
+    }
+    let Some(message) = message else {
+        return false;
+    };
+    if !matches!(
+        message.message_class.as_str(),
+        "IPM.Microsoft.ContactLink.TimeStamp" | "IPM.Microsoft.OSC.ContactSync"
+    ) {
+        return false;
+    }
+    let property_id = u32::from(MapiPropertyTag::new(property_tag).property_id());
+    property_id == u32::from(MapiPropertyTag::new(PID_NAME_OSC_CONTACT_SOURCES_TAG).property_id())
+        || matches!(
+            property_id,
+            PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80E1
+                | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EA
+                | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80EC
+                | PID_LID_OUTLOOK_OSC_CONTACT_SOURCE_80ED
+        )
+}
+
 pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
     message: &MapiAssociatedConfigMessage,
     mailbox_guid: Uuid,
@@ -409,6 +454,13 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             sanitize_configuration_property_value(&message.message_class, lookup_tag, value)
         })
         .or_else(|| {
+            if associated_config_property_is_client_absent(Some(message), lookup_tag) {
+                // The persisted client configuration establishes that this
+                // compatibility property was not supplied; do not invent it.
+                // Once absent, [MS-OXCDATA] sections 2.4.2, 2.8.1.2, and
+                // 2.11.5 encode it as ecNotFound in a flagged property cell.
+                return None;
+            }
             if crate::mapi_store::is_outlook_umolk_user_options_message_class(
                 &message.message_class,
             ) && !is_umolk_computed_property(lookup_tag)
