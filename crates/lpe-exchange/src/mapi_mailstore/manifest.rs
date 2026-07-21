@@ -33,7 +33,7 @@ pub(crate) struct SpecialMessageSyncFact {
     pub(crate) canonical_id: Uuid,
     pub(crate) associated: bool,
     pub(crate) subject: String,
-    pub(crate) body_text: String,
+    pub(crate) body_text: Option<String>,
     pub(crate) message_class: String,
     pub(crate) last_modified_filetime: u64,
     pub(crate) message_size: i64,
@@ -286,6 +286,30 @@ pub(super) fn special_message_change_number(object: &SpecialMessageSyncFact) -> 
             _ => None,
         })
         .unwrap_or_else(|| change_number_for_store_id(object.item_id))
+}
+
+pub(super) fn special_message_flags(object: &SpecialMessageSyncFact) -> u32 {
+    let flags = object
+        .named_properties
+        .iter()
+        .find_map(|(tag, value)| match (*tag, value) {
+            (PID_TAG_MESSAGE_FLAGS, SpecialMessagePropertyValue::I32(value)) => Some(*value as u32),
+            (PID_TAG_MESSAGE_FLAGS, SpecialMessagePropertyValue::U32(value)) => Some(*value),
+            _ => None,
+        });
+    match flags {
+        Some(flags) if object.associated => flags | MSGFLAG_FAI,
+        Some(flags) => flags,
+        None => {
+            if object.associated {
+                MSGFLAG_FAI
+            } else if object.read_state == Some(false) {
+                0
+            } else {
+                MSGFLAG_READ
+            }
+        }
+    }
 }
 
 pub(super) fn special_message_property_is_ics_identity(property_tag: u32) -> bool {
@@ -1080,13 +1104,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             PID_TAG_MESSAGE_FLAGS,
         ) {
             // [MS-OXCMSG] section 2.2.1.6: mfFAI identifies an FAI message.
-            let message_flags = if object.associated {
-                MSGFLAG_FAI
-            } else if object.read_state == Some(false) {
-                0
-            } else {
-                MSGFLAG_READ
-            };
+            let message_flags = special_message_flags(object);
             write_i32_property(&mut buffer, PID_TAG_MESSAGE_FLAGS, message_flags as i32);
         }
         let subject_in_scope =
@@ -1112,7 +1130,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             write_utf16_property(&mut buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
         }
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_BODY_W) {
-            write_utf16_property(&mut buffer, PID_TAG_BODY_W, &object.body_text);
+            if let Some(body_text) = &object.body_text {
+                write_utf16_property(&mut buffer, PID_TAG_BODY_W, body_text);
+            }
         }
         if content_property_in_scope(
             sync_type,
@@ -1128,6 +1148,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         }
         for (tag, value) in &object.named_properties {
             if !special_message_property_is_ics_identity(*tag)
+                && *tag != PID_TAG_MESSAGE_FLAGS
                 && content_property_in_scope(sync_type, sync_flags, sync_property_tags, *tag)
             {
                 write_special_message_property(&mut buffer, object, *tag, value);

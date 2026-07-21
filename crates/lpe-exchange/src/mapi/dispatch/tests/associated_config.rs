@@ -477,7 +477,7 @@ fn calendar_configuration_debug_contract_uses_roaming_properties() {
         canonical_id: Uuid::nil(),
         associated: true,
         subject: "Calendar".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Configuration.Calendar".to_string(),
         last_modified_filetime: 0,
         message_size: 0,

@@ -679,7 +679,7 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
         canonical_id,
         associated: false,
         subject: "Protocol review".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Appointment".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc("2026-07-18T10:00:00Z"),
         message_size: 128,

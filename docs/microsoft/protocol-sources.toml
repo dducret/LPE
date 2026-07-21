@@ -771,7 +771,7 @@ used_for = [
   "Embedded message open response shape and attachment method semantics",
   "Opening the Calendar default-view descriptor by FID and MID",
   "PidTagMessageFlags mfUnsent projection from canonical Draft mailbox state",
-  "PidTagMessageFlags mfFAI projection for folder-associated messages",
+  "PidTagMessageFlags server-owned mfFAI projection plus preservation of client-writable bits accepted before the first successful FAI Save",
   "New Message object identity returned by the first RopSaveChangesMessage",
   "Containing Folder response-handle restoration only after a successful non-embedded RopSaveChangesMessage, while failed and embedded saves retain their Message object handle",
   "Initial property state of newly created folder-associated messages before the client sets configuration properties",
@@ -1013,7 +1013,7 @@ used_for = [
   "Complete retained hierarchy tombstone download without storage-page truncation",
   "Exact MetaTagIdsetDeleted property tag and hierarchy deletion-section wire encoding",
   "Message CopyTo and CopyProperties subobject filters, empty collection directives, and provider-internal property exclusion",
-  "Direct Message CopyTo replay of the persisted client-owned configuration FAI property set without synthetic stream or content metadata",
+  "Direct Message CopyTo replay of persisted configuration FAI MessageFlags and body presence without synthetic properties",
 ]
 sections = [
   "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",
@@ -1417,6 +1417,7 @@ sha256 = "7dc48bc2b675d9f78a9ef236c77b3e57afa9dded613ac74c249021a44cf33c2c"
 used_for = [
   "Message body format selection across MAPI, ActiveSync, and IMAP projections",
   "PidTagHtml NotEnoughMemory fallback before stream retrieval",
+  "BestBody distinction between an absent body and an explicitly present empty PidTagBody during direct Message CopyTo",
 ]
 sections = [
   "2.1 Best Body Determination Algorithm Details",

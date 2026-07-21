@@ -107,7 +107,12 @@ pub(in crate::mapi::dispatch) fn log_calendar_special_sync_objects(
         .join(",");
     let body_lengths = objects
         .iter()
-        .map(|object| object.body_text.chars().count().to_string())
+        .map(|object| {
+            object.body_text.as_deref().map_or_else(
+                || "absent".to_string(),
+                |body_text| body_text.chars().count().to_string(),
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
     let message_sizes = objects
@@ -342,7 +347,12 @@ pub(in crate::mapi::dispatch) fn log_special_sync_objects(
         .join(",");
     let body_lengths = objects
         .iter()
-        .map(|object| object.body_text.chars().count().to_string())
+        .map(|object| {
+            object.body_text.as_deref().map_or_else(
+                || "absent".to_string(),
+                |body_text| body_text.chars().count().to_string(),
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
     let property_tag_count = objects

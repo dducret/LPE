@@ -138,10 +138,16 @@ before it is advertised.
   collection is preceded by `MetaTagFXDelProp` even when it is empty, while an
   excluded collection has no directive. Direct `messageContent` downloads omit
   the provider-internal `PidTagAssociated` and `PidTagMid`; FAI status remains
-  represented by `PidTagMessageFlags.mfFAI`. This follows `[MS-OXCFXICS]`
-  sections 2.2.1.7, 2.2.4.1.5.1, 2.2.4.3.12, 2.2.4.3.16, 3.2.5.10, and
-  3.2.5.12, with `[MS-OXPROPS]` section 1.3.3. Complete filtering of the
-  ordinary property list remains an explicit gap.
+  represented by the server-owned `PidTagMessageFlags.mfFAI` bit. An FAI
+  without a persisted flag value falls back to `mfFAI` alone, while an effective
+  value accepted at the first successful Save is replayed unchanged (for
+  example, `0x00000049`, not `0x00000040`). A missing `PidTagBody` remains
+  absent; only an explicitly persisted empty body is emitted as a present
+  zero-length property. This follows `[MS-OXCMSG]` section 2.2.1.6,
+  `[MS-OXCFXICS]` sections 2.2.1.7, 2.2.3.1.1.1.1, 2.2.4.1.5.1,
+  2.2.4.3.12, 2.2.4.3.16, 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12,
+  `[MS-OXBBODY]` section 2.1.3.1, and `[MS-OXPROPS]` section 1.3.3. Complete
+  filtering of the ordinary property list remains an explicit gap.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
@@ -149,6 +155,16 @@ before it is advertised.
   `RopSynchronizationConfigure` always carries `RestrictionDataSize`,
   `SynchronizationExtraFlags`, `PropertyTagCount`, and `PropertyTags`; the
   parser must consume those fields before reading the next ROP in a batch.
+
+`mapi_mailstore.rs`, `mapi_mailstore/manifest.rs`, and `mapi/sync.rs` have
+reached the thousand-line split threshold. Before adding further special-message
+behavior, extract the shared `SpecialMessageSyncFact` property selection and
+FastTransfer serialization into a focused `mapi_mailstore/special_message.rs`,
+then extract associated-configuration projection from `mapi/sync.rs` into
+`mapi/sync/associated_config.rs`. Keep the existing public entry points as thin
+wiring and verify the split with the special-message unit tests, the realistic
+`MessageListSettings` import/reconnect regression, and
+`cargo test -p lpe-exchange`.
 
 ### Table Projection Contract
 
@@ -337,18 +353,23 @@ non-canonical LPE state.
   undocumented `0x0E0B0102`, and named content metadata remain absent from the
   saved row, FastTransfer, and direct-property projections. Reconnect and
   `RopOpenMessage` retain the same identity; Save and direct Message CopyTo
-  retain the persisted configuration-property set. A direct
+  retain the persisted configuration-property set. The server owns and sets
+  `PidTagMessageFlags.mfFAI`, but retains the other flag bits accepted before
+  the first successful Save: persisted `0x00000049` is therefore exported as
+  `0x00000049`, not reduced to `mfFAI` alone. An absent `PidTagBody` remains
+  absent from `BestBody` CopyTo output; an explicitly empty body remains a
+  present zero-length value. A direct
   `RopGetPropertiesSpecific` returns a requested property determined to be
   absent as an `ecNotFound` cell in a `FlaggedPropertyRow`, with
   `ReturnValue=Success` following the
   response-specific `[MS-OXCROPS]` section 2.2.8.3.2. The property-row
   encoding follows `[MS-OXCPRPT]` sections 2.2.2, 2.2.2.2, 3.2.5.1, and
   3.2.5.4, `[MS-OXCDATA]` sections 2.4.2, 2.8.1, 2.8.1.2, and 2.11.5,
-  `[MS-OXCMSG]` section 3.2.5.3, `[MS-OXOCFG]` sections 2.2.2.1 through
+  `[MS-OXCMSG]` sections 2.2.1.6 and 3.2.5.3, `[MS-OXOCFG]` sections 2.2.2.1 through
   2.2.2.3, 2.2.5.1, and 2.2.5.2, `[MS-OXPROPS]` sections 2.938 through 2.940,
   and `[MS-OXCFXICS]` sections
   2.2.3.1.1.1.1, 2.2.3.2.4.2.1, 2.2.4.3.16, 2.2.4.4, 3.1.5.3,
-  3.2.5.8.1.1, 3.2.5.10, and 3.3.5.8.7.
+  3.2.5.8.1.1, 3.2.5.10, and 3.3.5.8.7, and `[MS-OXBBODY]` section 2.1.3.1.
   `[MS-OXCDATA]` section 2.4.3 instead illustrates this partial-property case
   with `ErrorsReturned` (`0x00040380`). No product note resolves the conflict,
   so LPE does not generalize that warning without an Exchange reference trace.

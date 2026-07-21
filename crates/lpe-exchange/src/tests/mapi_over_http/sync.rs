@@ -10375,13 +10375,33 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         &imported_pcl,
     );
     let mut save_values = Vec::new();
+    append_mapi_i32_property(&mut save_values, 0x0017_0003, 1); // PidTagImportance.
     append_mapi_utf16_property(
         &mut save_values,
         PID_TAG_MESSAGE_CLASS_W,
         "IPM.Configuration.MessageListSettings",
     );
+    append_mapi_i32_property(&mut save_values, 0x0036_0003, 0); // PidTagSensitivity.
+                                                                // Exact first-save value from Outlook trace 202607211302. Per
+                                                                // [MS-OXCMSG] section 2.2.1.6, mfRead and mfUnsent are writable before
+                                                                // the first successful Save, while mfFAI identifies the associated item.
+    append_mapi_i32_property(&mut save_values, PID_TAG_MESSAGE_FLAGS, 0x49);
+    append_mapi_i64_property(
+        &mut save_values,
+        0x3007_0040, // PidTagCreationTime.
+        test_filetime("2026-07-21", "17:23") as i64,
+    );
+    append_mapi_utf16_property(&mut save_values, 0x3FFA_001F, "test@l-p-e.ch");
     append_mapi_i32_property(&mut save_values, 0x7C06_0003, 0); // PidTagRoamingDatatypes.
-    append_mapi_i32_property(&mut save_values, PID_TAG_MESSAGE_FLAGS, 0x40);
+    append_mapi_bool_property(&mut save_values, 0x0E1F_000B, true); // PidTagRtfInSync.
+
+    let mut subject_values = Vec::new();
+    append_mapi_utf16_property(&mut subject_values, 0x003D_001F, "");
+    append_mapi_utf16_property(
+        &mut subject_values,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "IPM.Configuration.MessageListSettings",
+    );
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
@@ -10392,7 +10412,11 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     ]);
     rops.extend_from_slice(&4u16.to_le_bytes());
     rops.extend_from_slice(&import_values);
-    append_rop_set_properties(&mut rops, 3, 3, &save_values);
+    let mut repeated_rtf_sync = Vec::new();
+    append_mapi_bool_property(&mut repeated_rtf_sync, 0x0E1F_000B, true);
+    append_rop_set_properties(&mut rops, 3, 8, &save_values);
+    append_rop_set_properties(&mut rops, 3, 1, &repeated_rtf_sync);
+    append_rop_set_properties(&mut rops, 3, 2, &subject_values);
     append_rop_save_changes_message_with_flags(&mut rops, 3, 3, 0x08);
 
     let mut execute_headers = mapi_headers("Execute");
@@ -10468,6 +10492,11 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         config.properties_json["0x7c060003"],
         serde_json::json!({"type": "i32", "value": 0})
     );
+    assert_eq!(
+        config.properties_json["0x0e070003"],
+        serde_json::json!({"type": "i32", "value": 0x49})
+    );
+    assert!(config.properties_json.get("0x1000001f").is_none());
     assert!(config.properties_json.get("0x7c070102").is_none());
     assert!(config.properties_json.get("0x7c080102").is_none());
     assert!(config.properties_json.get("0x0e0b0102").is_none());
@@ -10577,6 +10606,22 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         .collect::<Vec<_>>();
     assert_eq!(roaming_datatypes.len(), 1, "{transfer:02x?}");
     assert_eq!(strict_decode_i32_property(roaming_datatypes[0]).unwrap(), 0);
+    let message_flags = properties
+        .iter()
+        .filter(|property| property.tag == PID_TAG_MESSAGE_FLAGS)
+        .collect::<Vec<_>>();
+    assert_eq!(message_flags.len(), 1, "{transfer:02x?}");
+    assert_eq!(
+        strict_decode_i32_property(message_flags[0]).unwrap(),
+        0x49,
+        "direct CopyTo must retain the accepted first-save mfRead | mfUnsent | mfFAI value"
+    );
+    assert!(
+        !properties
+            .iter()
+            .any(|property| property.tag == PID_TAG_BODY_W),
+        "direct CopyTo must not synthesize an empty PidTagBody_W absent from the canonical FAI"
+    );
     assert!(!properties
         .iter()
         .any(|property| property.tag == 0x7C07_0102));

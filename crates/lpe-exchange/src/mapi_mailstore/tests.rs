@@ -584,7 +584,7 @@ fn microsoft_oxcfxics_order_by_delivery_time_interleaves_normal_and_fai_changes(
         canonical_id: Uuid::parse_str("33333333-3333-4333-8333-333333333263").unwrap(),
         associated: true,
         subject: "FAI newest".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Configuration.Test".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-20T12:00:00Z"),
         message_size: 64,
@@ -598,7 +598,7 @@ fn microsoft_oxcfxics_order_by_delivery_time_interleaves_normal_and_fai_changes(
         canonical_id: Uuid::parse_str("33333333-3333-4333-8333-333333333262").unwrap(),
         associated: true,
         subject: "FAI oldest".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Configuration.Test".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-20T10:00:00Z"),
         message_size: 64,
@@ -656,7 +656,7 @@ fn microsoft_oxcfxics_order_by_delivery_time_uses_calendar_delivery_property() {
                 canonical_id: Uuid::parse_str(canonical_id).unwrap(),
                 associated: false,
                 subject: subject.to_string(),
-                body_text: String::new(),
+                body_text: Some(String::new()),
                 message_class: "IPM.Appointment".to_string(),
                 last_modified_filetime: filetime_from_rfc3339_utc(modified),
                 message_size: 128,
@@ -946,7 +946,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         canonical_id,
         associated: true,
         subject: "Outlook Inbox view state".to_string(),
-        body_text: "Client view payload".to_string(),
+        body_text: Some("Client view payload".to_string()),
         message_class: "IPM.Configuration.MessageListSettings".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
@@ -2337,7 +2337,7 @@ fn content_sync_manifest_includes_special_folder_message_objects() {
         canonical_id,
         associated: false,
         subject: "Sticky".to_string(),
-        body_text: "Remember this".to_string(),
+        body_text: Some("Remember this".to_string()),
         message_class: "IPM.StickyNote".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
@@ -2462,12 +2462,15 @@ fn content_sync_manifest_starts_fai_message_before_item_properties() {
         canonical_id,
         associated: true,
         subject: "Calendar".to_string(),
-        body_text: String::new(),
+        body_text: None,
         message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 0,
         read_state: None,
-        named_properties: Vec::new(),
+        named_properties: vec![(
+            PID_TAG_MESSAGE_FLAGS,
+            SpecialMessagePropertyValue::I32(0x09),
+        )],
         named_property_definitions: Default::default(),
     };
     let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
@@ -2498,7 +2501,17 @@ fn content_sync_manifest_starts_fai_message_before_item_properties() {
     );
     let summary = decode_content_transfer_fai_debug_summary(&buffer).unwrap();
     assert_eq!(summary.fai_items.len(), 1);
-    assert_eq!(summary.fai_items[0].message_flags, Some(MSGFLAG_FAI));
+    assert_eq!(summary.fai_items[0].message_flags, Some(0x49));
+    assert_eq!(
+        buffer
+            .windows(4)
+            .filter(|window| *window == PID_TAG_MESSAGE_FLAGS.to_le_bytes())
+            .count(),
+        1
+    );
+    assert!(!buffer
+        .windows(4)
+        .any(|window| window == PID_TAG_BODY_W.to_le_bytes()));
     let item = &summary.fai_items[0];
     let message_start = item.message_start_marker_offset.unwrap();
     let property_start = item.property_list_start_offset.unwrap();
@@ -2533,7 +2546,7 @@ fn fai_foreign_source_key_identity_is_used_by_selected_and_full_idset_given() {
         canonical_id,
         associated: true,
         subject: "Foreign persisted FAI view".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-20T21:36:00Z"),
         message_size: 256,
@@ -2616,7 +2629,7 @@ fn microsoft_oxcfxics_fai_content_sync_does_not_insert_null_property_before_next
             canonical_id: first_canonical_id,
             associated: true,
             subject: "Compact".to_string(),
-            body_text: String::new(),
+            body_text: Some(String::new()),
             message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
             last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
             message_size: 2_048,
@@ -2633,7 +2646,7 @@ fn microsoft_oxcfxics_fai_content_sync_does_not_insert_null_property_before_next
             canonical_id: second_canonical_id,
             associated: true,
             subject: "Sent To".to_string(),
-            body_text: String::new(),
+            body_text: Some(String::new()),
             message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
             last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:01:00Z"),
             message_size: 1_984,
@@ -2703,7 +2716,7 @@ fn content_sync_manifest_unicode_fai_uses_unicode_subject_and_fai_message_flag()
         canonical_id,
         associated: true,
         subject: "Calendar".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 128,
@@ -2754,7 +2767,7 @@ fn content_sync_manifest_applies_property_excludes_to_special_objects() {
         canonical_id,
         associated: false,
         subject: "Kept subject".to_string(),
-        body_text: "Filtered body".to_string(),
+        body_text: Some("Filtered body".to_string()),
         message_class: "IPM.Appointment".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
@@ -2811,7 +2824,7 @@ fn content_sync_manifest_applies_string8_property_excludes_to_special_objects() 
         canonical_id,
         associated: false,
         subject: "Kept subject".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Appointment".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
@@ -2856,7 +2869,7 @@ fn content_sync_manifest_applies_string8_property_includes_to_special_objects() 
         canonical_id,
         associated: false,
         subject: "Filtered subject".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Appointment".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
@@ -2904,7 +2917,7 @@ fn content_sync_manifest_respects_normal_and_fai_scope_flags() {
         canonical_id: normal_canonical_id,
         associated: false,
         subject: "Normal appointment".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Appointment".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
@@ -2918,7 +2931,7 @@ fn content_sync_manifest_respects_normal_and_fai_scope_flags() {
         canonical_id: associated_canonical_id,
         associated: true,
         subject: "Associated view".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
@@ -3280,7 +3293,7 @@ fn special_message_headers_and_final_cnsets_share_durable_change_numbers() {
         canonical_id: normal_canonical_id,
         associated: false,
         subject: "Durable normal Event".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Appointment".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-15T10:11:00Z"),
         message_size: 64,
@@ -3309,7 +3322,7 @@ fn special_message_headers_and_final_cnsets_share_durable_change_numbers() {
         canonical_id: fai_canonical_id,
         associated: true,
         subject: "Durable FAI".to_string(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-15T10:12:00Z"),
         message_size: 64,

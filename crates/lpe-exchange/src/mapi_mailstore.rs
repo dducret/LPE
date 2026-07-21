@@ -928,11 +928,7 @@ fn write_fast_transfer_special_message_content(
     // provider-internal PidTagAssociated (0x67AA) and PidTagMid (0x674A).
     // [MS-OXCMSG] section 2.2.1.6: mfFAI remains the transmittable FAI
     // discriminator for CopyTo/CopyProperties.
-    let message_flags = if object.associated {
-        MSGFLAG_FAI
-    } else {
-        MSGFLAG_READ
-    };
+    let message_flags = manifest::special_message_flags(object);
     write_i32_property(buffer, PID_TAG_MESSAGE_FLAGS, message_flags as i32);
     write_utf16_property(buffer, PID_TAG_SUBJECT_W, &object.subject);
     // [MS-OXCFXICS] sections 2.2.3.1.1.1.1 and 3.2.5.8.1.1:
@@ -946,10 +942,13 @@ fn write_fast_transfer_special_message_content(
         write_string8_property(buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
     }
     write_utf16_property(buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
-    write_utf16_property(buffer, PID_TAG_BODY_W, &object.body_text);
+    if let Some(body_text) = &object.body_text {
+        write_utf16_property(buffer, PID_TAG_BODY_W, body_text);
+    }
     write_i32_property(buffer, PID_TAG_MESSAGE_SIZE, object.message_size as i32);
     for (tag, value) in &object.named_properties {
         if !manifest::special_message_property_is_copy_identity(*tag)
+            && *tag != PID_TAG_MESSAGE_FLAGS
             && !provider_defined_internal_property(*tag)
         {
             write_special_message_property(buffer, object, *tag, value);

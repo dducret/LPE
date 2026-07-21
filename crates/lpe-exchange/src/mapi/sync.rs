@@ -233,7 +233,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
                     canonical_id: note.canonical_id,
                     associated: false,
                     subject: note.note.title.clone(),
-                    body_text: note.note.body_text.clone(),
+                    body_text: Some(note.note.body_text.clone()),
                     message_class: "IPM.StickyNote".to_string(),
                     last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(
                         &note.note.updated_at,
@@ -379,7 +379,7 @@ fn public_folder_item_sync_object(
         canonical_id: item.item.id,
         associated: false,
         subject: item.item.subject.clone(),
-        body_text: item.item.body_text.clone(),
+        body_text: Some(item.item.body_text.clone()),
         message_class,
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&item.item.updated_at),
         message_size,
@@ -449,7 +449,7 @@ fn contact_sync_object(
         canonical_id: contact.canonical_id,
         associated: false,
         subject: contact.contact.name.clone(),
-        body_text: contact.contact.notes.clone(),
+        body_text: Some(contact.contact.notes.clone()),
         message_class: "IPM.Contact".to_string(),
         last_modified_filetime: contact
             .durable_identity
@@ -501,7 +501,7 @@ fn task_sync_object(
         canonical_id: task.canonical_id,
         associated: false,
         subject: task.task.title.clone(),
-        body_text: task.task.description.clone(),
+        body_text: Some(task.task.description.clone()),
         message_class: "IPM.Task".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&task.task.updated_at),
         message_size: task_size(&task.task),
@@ -607,7 +607,7 @@ fn journal_sync_object(
         canonical_id: entry.canonical_id,
         associated: false,
         subject: entry.entry.subject.clone(),
-        body_text: entry.entry.body_text.clone(),
+        body_text: Some(entry.entry.body_text.clone()),
         message_class: entry.entry.message_class.clone(),
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&entry.entry.updated_at),
         message_size: journal_entry_size(&entry.entry),
@@ -667,7 +667,7 @@ fn navigation_shortcut_sync_object(
         canonical_id: message.canonical_id,
         associated: true,
         subject: message.subject.clone(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
         last_modified_filetime: message
             .durable_identity
@@ -749,7 +749,7 @@ fn search_folder_definition_sync_object(
         canonical_id: message.id,
         associated: true,
         subject: message.display_name.clone(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Microsoft.WunderBar.SFInfo".to_string(),
         last_modified_filetime,
         message_size: 128,
@@ -793,7 +793,7 @@ fn common_view_named_view_sync_object(
         canonical_id: message.canonical_id,
         associated: true,
         subject: message.name.clone(),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size: 128,
@@ -837,7 +837,7 @@ fn conversation_action_sync_object(
         canonical_id: message.canonical_id,
         associated: true,
         subject: conversation_action_subject(&message.action),
-        body_text: String::new(),
+        body_text: Some(String::new()),
         message_class: "IPM.ConversationAction".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size,
@@ -865,7 +865,7 @@ fn delegate_freebusy_sync_object(
         canonical_id: message.canonical_id,
         associated: true,
         subject: message.message.subject.clone(),
-        body_text: message.message.body_text.clone(),
+        body_text: Some(message.message.body_text.clone()),
         message_class: if message.message.message_kind == "delegate" {
             "IPM.Microsoft.Delegate".to_string()
         } else {
@@ -991,7 +991,6 @@ fn associated_config_standard_sync_tag(tag: u32) -> bool {
             | PID_TAG_INSTANCE_KEY
             | PID_TAG_ASSOCIATED
             | PID_TAG_MESSAGE_SIZE
-            | PID_TAG_MESSAGE_FLAGS
             | PID_TAG_SUBJECT_W
             | PID_TAG_NORMALIZED_SUBJECT_W
             | PID_TAG_MESSAGE_CLASS_W
@@ -1006,11 +1005,10 @@ fn associated_config_standard_sync_tag(tag: u32) -> bool {
 fn associated_config_text_property(
     message: &crate::mapi_store::MapiAssociatedConfigMessage,
     tag: u32,
-) -> String {
+) -> Option<String> {
     mapi_properties_from_json(&message.properties_json)
         .remove(&tag)
         .and_then(MapiValue::into_text)
-        .unwrap_or_default()
 }
 
 fn special_message_property_value(
@@ -1103,7 +1101,7 @@ fn calendar_sync_object(
         canonical_id: event.canonical_id,
         associated: false,
         subject: event.event.title.clone(),
-        body_text: event.event.notes.clone(),
+        body_text: Some(event.event.notes.clone()),
         message_class: "IPM.Appointment".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(
             &event.version.updated_at,
