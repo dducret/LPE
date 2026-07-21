@@ -1116,6 +1116,43 @@ fn ipm_hierarchy_state_matches_emitted_folder_projection() {
 }
 
 #[test]
+fn ipm_hierarchy_scope_includes_durable_hidden_special_folder_alias_targets() {
+    for folder_id in [
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        QUICK_STEP_SETTINGS_FOLDER_ID,
+        JUNK_FOLDER_ID,
+    ] {
+        assert!(folder_is_in_hierarchy_sync_scope(
+            folder_id,
+            IPM_SUBTREE_FOLDER_ID,
+            &[]
+        ));
+    }
+    assert!(
+        !IPM_SUBTREE_VIRTUAL_FOLDER_IDS.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID),
+        "resident aliases must not create duplicate hierarchy changes"
+    );
+    assert!(
+        !IPM_SUBTREE_VIRTUAL_FOLDER_IDS.contains(&QUICK_STEP_SETTINGS_FOLDER_ID),
+        "resident aliases must not create duplicate hierarchy changes"
+    );
+    assert!(!folder_is_in_hierarchy_sync_scope(
+        COMMON_VIEWS_FOLDER_ID,
+        IPM_SUBTREE_FOLDER_ID,
+        &[]
+    ));
+    assert!(
+        !folder_is_in_hierarchy_sync_scope(IPM_SUBTREE_FOLDER_ID, IPM_SUBTREE_FOLDER_ID, &[]),
+        "the hierarchy root itself is not part of its descendant IdsetGiven"
+    );
+    assert!(folder_is_in_hierarchy_sync_scope(
+        IPM_SUBTREE_FOLDER_ID,
+        ROOT_FOLDER_ID,
+        &[]
+    ));
+}
+
+#[test]
 fn common_views_shortcut_sync_uses_account_bound_entry_ids() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000002);

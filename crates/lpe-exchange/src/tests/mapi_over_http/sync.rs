@@ -5358,7 +5358,7 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
     deleted_idset.extend_from_slice(&globcnt_bytes(deleted_counter));
     deleted_idset.extend_from_slice(&globcnt_bytes(deleted_counter));
     deleted_idset.push(0);
-    let mut deleted_property = 0x4018_0102u32.to_le_bytes().to_vec();
+    let mut deleted_property = 0x67E5_0102u32.to_le_bytes().to_vec();
     deleted_property.extend_from_slice(&(deleted_idset.len() as u32).to_le_bytes());
     deleted_property.extend_from_slice(&deleted_idset);
     assert!(contains_bytes(&response_rops, &deleted_property));
@@ -12236,12 +12236,12 @@ async fn mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_even
     append_mapi_i64_property(
         &mut update_values,
         0x0060_0040,
-        test_filetime("2026-07-17", "08:35"),
+        test_filetime("2026-07-17", "06:35"),
     );
     append_mapi_i64_property(
         &mut update_values,
         0x0061_0040,
-        test_filetime("2026-07-17", "09:05"),
+        test_filetime("2026-07-17", "07:05"),
     );
     let mut update_rops = vec![
         0x72, 0x00, 0x01, 0x02, // RopSynchronizationImportMessageChange.
@@ -15376,6 +15376,48 @@ async fn mapi_over_http_sync_imported_special_folder_alias_survives_a_new_sessio
     );
     assert!(contains_bytes(&open_response_rops, &utf16z("Junk E-mail")));
     assert!(created_mailboxes.lock().unwrap().is_empty());
+
+    renew_mapi_request_id(&mut second_headers);
+    let alias_counter =
+        crate::mapi::identity::global_counter_from_store_id(alias_id).expect("alias GLOBCNT");
+    let alias_idset_given = strict_test_replguid_globset(&[alias_counter]);
+    let mut hierarchy_rops = Vec::new();
+    append_rop_open_folder(
+        &mut hierarchy_rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
+        &mut hierarchy_rops,
+        1,
+        2,
+        20_000,
+        &alias_idset_given,
+        &[],
+    );
+    let hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &second_headers,
+            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let hierarchy_response_rops = response_rops_from_execute_response(hierarchy_response).await;
+    let hierarchy_chunks = mapi_fast_transfer_chunks(&hierarchy_response_rops);
+    assert_eq!(hierarchy_chunks.len(), 1);
+    let hierarchy_stream = &hierarchy_chunks[0].1;
+    assert!(
+        !contains_bytes(hierarchy_stream, &META_TAG_IDSET_DELETED.to_le_bytes()),
+        "a successful durable special-folder alias must not be reported deleted"
+    );
+    let final_idset_given = mapi_binary_property_value(hierarchy_stream, META_TAG_IDSET_GIVEN);
+    assert!(
+        strict_replguid_globset_contains_counter(final_idset_given, &globcnt_bytes(alias_counter))
+            .unwrap(),
+        "the active alias must remain in hierarchy MetaTagIdsetGiven"
+    );
 }
 
 #[tokio::test]

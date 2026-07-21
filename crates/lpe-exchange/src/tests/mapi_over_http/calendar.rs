@@ -3229,6 +3229,7 @@ async fn mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_
     assert_eq!(stored.len(), 1);
     assert_eq!(stored[0].title, "Test calendrier IDs nommés");
     assert_eq!(stored[0].location, "Salle Zürich");
+    assert_eq!(stored[0].time, "11:00");
     assert_eq!(stored[0].time_zone, "Europe/Berlin");
     assert_eq!(stored[0].recurrence_rule, "FREQ=DAILY;COUNT=3");
     let event_id = stored[0].id;
@@ -7383,12 +7384,12 @@ async fn mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collecti
     append_mapi_i64_property(
         &mut property_values,
         0x0060_0040,
-        test_filetime("2026-06-06", "14:00"),
+        test_filetime("2026-06-06", "12:00"),
     );
     append_mapi_i64_property(
         &mut property_values,
         0x0061_0040,
-        test_filetime("2026-06-06", "15:30"),
+        test_filetime("2026-06-06", "13:30"),
     );
     append_mapi_utf16_property(&mut property_values, 0x8208_001F, "Room 700");
     append_mapi_binary_property(

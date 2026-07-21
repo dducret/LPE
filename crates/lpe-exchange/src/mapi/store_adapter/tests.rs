@@ -282,6 +282,7 @@ fn access_plan_cached_mode_transfer_state_get_buffer_uses_session_state() {
             client_state_selection_invalidated: false,
             client_state_selection_applied: false,
             download_change_facts: Vec::new(),
+            resident_hierarchy_alias_counters: Vec::new(),
             incremental_transfer_buffer: None,
             transfer_buffer: vec![0xaa],
             transfer_position: 1,

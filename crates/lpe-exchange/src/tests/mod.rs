@@ -11945,7 +11945,7 @@ const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 15;
 const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 13;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0003;
 const META_TAG_IDSET_GIVEN_BINARY: u32 = 0x4017_0102;
-const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
+const META_TAG_IDSET_DELETED: u32 = 0x67E5_0102;
 const META_TAG_IDSET_READ: u32 = 0x402D_0102;
 const META_TAG_IDSET_UNREAD: u32 = 0x402E_0102;
 const META_TAG_CNSET_SEEN: u32 = 0x6796_0102;
@@ -11955,6 +11955,7 @@ const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
 #[derive(Debug)]
 struct StrictHierarchySyncStream {
     folder_changes: Vec<StrictHierarchyFolderChange>,
+    deleted_idset: Option<Vec<u8>>,
     idset_given: Vec<u8>,
     cnset_seen: Vec<u8>,
 }
@@ -12029,6 +12030,8 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
     ];
     let mut in_state = false;
     let mut state_closed = false;
+    let mut in_deletions = false;
+    let mut deleted_idset = None;
     let mut idset_given = None;
     let mut cnset_seen = None;
 
@@ -12037,7 +12040,7 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
         if strict_hierarchy_marker(tag) {
             match tag {
                 FX_INCR_SYNC_CHG => {
-                    if in_state || state_closed {
+                    if in_state || state_closed || in_deletions {
                         return Err(
                             "folderChange marker appears after final ICS state starts".into()
                         );
@@ -12051,6 +12054,19 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
                     }
                     current_folder = Some(StrictHierarchyFolderBuilder::default());
                 }
+                FX_INCR_SYNC_DEL => {
+                    if in_state || state_closed || in_deletions {
+                        return Err("duplicate or misplaced hierarchy deletions boundary".into());
+                    }
+                    if let Some(folder) = current_folder.take() {
+                        strict_finish_folder_change(
+                            folder,
+                            &mut seen_source_keys,
+                            &mut folder_changes,
+                        )?;
+                    }
+                    in_deletions = true;
+                }
                 FX_INCR_SYNC_STATE_BEGIN => {
                     if let Some(folder) = current_folder.take() {
                         strict_finish_folder_change(
@@ -12062,6 +12078,12 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
                     if in_state || state_closed {
                         return Err("duplicate final ICS state boundary".into());
                     }
+                    if in_deletions && deleted_idset.is_none() {
+                        return Err(
+                            "hierarchy deletions section contains no MetaTagIdsetDeleted".into(),
+                        );
+                    }
+                    in_deletions = false;
                     in_state = true;
                 }
                 FX_INCR_SYNC_STATE_END => {
@@ -12097,6 +12119,19 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
         offset = property.next_offset;
         if let Some(folder) = current_folder.as_mut() {
             strict_record_folder_property(folder, property)?;
+        } else if in_deletions {
+            match property.tag {
+                META_TAG_IDSET_DELETED => {
+                    if deleted_idset.replace(property.value).is_some() {
+                        return Err("duplicate MetaTagIdsetDeleted in hierarchy deletions".into());
+                    }
+                }
+                tag => {
+                    return Err(format!(
+                        "unexpected property 0x{tag:08x} in hierarchy deletions"
+                    ));
+                }
+            }
         } else if in_state {
             match property.tag {
                 META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => {
@@ -12126,13 +12161,16 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
     if offset != bytes.len() {
         return Err("FastTransfer stream ended on a partial atom".into());
     }
-    if folder_changes.is_empty() {
-        return Err("hierarchy sync stream contained no folderChange rows".into());
+    if folder_changes.is_empty() && deleted_idset.is_none() {
+        return Err("hierarchy sync stream contained no folderChange or deletion rows".into());
     }
     let idset_given = idset_given.ok_or("missing MetaTagIdsetGiven")?;
     let cnset_seen = cnset_seen.ok_or("missing MetaTagCnsetSeen")?;
     strict_validate_replguid_globset(&idset_given)?;
     strict_validate_replguid_globset(&cnset_seen)?;
+    if let Some(value) = deleted_idset.as_deref() {
+        strict_validate_replid_globset(value)?;
+    }
     for folder in &folder_changes {
         strict_validate_store_xid(&folder.source_key)?;
         strict_validate_store_xid(&folder.change_key)?;
@@ -12152,6 +12190,7 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
 
     Ok(StrictHierarchySyncStream {
         folder_changes,
+        deleted_idset,
         idset_given,
         cnset_seen,
     })
@@ -12160,7 +12199,11 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
 fn strict_hierarchy_marker(tag: u32) -> bool {
     matches!(
         tag,
-        FX_INCR_SYNC_CHG | FX_INCR_SYNC_STATE_BEGIN | FX_INCR_SYNC_STATE_END | FX_INCR_SYNC_END
+        FX_INCR_SYNC_CHG
+            | FX_INCR_SYNC_DEL
+            | FX_INCR_SYNC_STATE_BEGIN
+            | FX_INCR_SYNC_STATE_END
+            | FX_INCR_SYNC_END
     )
 }
 
@@ -13635,6 +13678,30 @@ fn strict_hierarchy_decoder_rejects_child_before_parent() {
 
     let error = strict_decode_hierarchy_sync_stream(&bytes).unwrap_err();
     assert!(error.contains("before its parent"));
+}
+
+#[test]
+fn strict_hierarchy_decoder_accepts_deletion_only_delta() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&FX_INCR_SYNC_DEL.to_le_bytes());
+    let deleted_idset = strict_test_replid_globset(&[9]);
+    strict_push_binary_property(&mut bytes, META_TAG_IDSET_DELETED, &deleted_idset);
+    strict_push_final_hierarchy_state(&mut bytes, &[], &[]);
+
+    let stream = strict_decode_hierarchy_sync_stream(&bytes).unwrap();
+    assert!(stream.folder_changes.is_empty());
+    assert_eq!(stream.deleted_idset, Some(deleted_idset));
+}
+
+#[test]
+fn strict_hierarchy_decoder_rejects_empty_deletions_section() {
+    let mut bytes = Vec::new();
+    strict_push_folder_change(&mut bytes, &[], 5, 100, "Projects", 2);
+    bytes.extend_from_slice(&FX_INCR_SYNC_DEL.to_le_bytes());
+    strict_push_final_hierarchy_state(&mut bytes, &[5], &[100]);
+
+    let error = strict_decode_hierarchy_sync_stream(&bytes).unwrap_err();
+    assert!(error.contains("no MetaTagIdsetDeleted"));
 }
 
 #[test]

@@ -252,6 +252,7 @@ pub(super) fn append_fast_transfer_source_copy_messages_response(
             client_state_selection_invalidated: false,
             client_state_selection_applied: false,
             download_change_facts: Vec::new(),
+            resident_hierarchy_alias_counters: Vec::new(),
             incremental_transfer_buffer: None,
             transfer_buffer,
             transfer_position: 0,
@@ -325,6 +326,7 @@ pub(super) fn append_fast_transfer_source_copy_response(
             client_state_selection_invalidated: false,
             client_state_selection_applied: false,
             download_change_facts: Vec::new(),
+            resident_hierarchy_alias_counters: Vec::new(),
             incremental_transfer_buffer: None,
             transfer_buffer,
             transfer_position: 0,
@@ -438,6 +440,7 @@ pub(super) fn append_synchronization_get_transfer_state_response(
             client_state_selection_invalidated,
             client_state_selection_applied: false,
             download_change_facts: Vec::new(),
+            resident_hierarchy_alias_counters: Vec::new(),
             incremental_transfer_buffer: None,
             transfer_buffer,
             transfer_position: 0,
@@ -897,7 +900,7 @@ pub(super) fn sync_property_filter_mode(
 pub(super) fn upload_state_property_name(tag: u32) -> &'static str {
     match tag {
         0x4017_0003 | 0x4017_0102 => "MetaTagIdsetGiven",
-        0x4018_0102 => "MetaTagIdsetDeleted",
+        0x67E5_0102 => "MetaTagIdsetDeleted",
         0x402D_0102 => "MetaTagIdsetRead",
         0x402E_0102 => "MetaTagIdsetUnread",
         0x6796_0102 => "MetaTagCnsetSeen",

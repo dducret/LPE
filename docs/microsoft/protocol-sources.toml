@@ -646,6 +646,7 @@ used_for = [
   "Outlook Calendar descending SortOrder encoding",
   "Common ROP InvalidParameter and GeneralFailure return values",
   "PtypBoolean wire values used by RopSynchronizationOpenCollector",
+  "PtypTime UTC FILETIME values used by Outlook Calendar start and end properties",
 ]
   sections = [
     "2.2.1.1 Folder ID Structure",
@@ -663,7 +664,7 @@ used_for = [
   "2.8.1.2 FlaggedPropertyRow Structure",
   "2.11.5 FlaggedPropertyValue Structure",
   "2.11.6 FlaggedPropertyValueWithType Structure",
-  "2.11.1 Property Data Types (PtypBoolean)",
+  "2.11.1 Property Data Types (PtypBoolean and PtypTime)",
   "2.11.4 TaggedPropertyValue Structure",
   "2.13.1 SortOrder Structure",
   "3.1 Restriction",
@@ -987,6 +988,7 @@ used_for = [
   "Hierarchy collector Boolean semantics and upload GetTransferState checkpoint composition",
   "Preservation of durable ICS checkpoints for virtual special-folder projections during identity repair",
   "Durable special-folder alias reconciliation with a server CN distinct from the client-reserved FID",
+  "Durable imported special-folder aliases remain resident during hierarchy IdsetGiven deletion selection",
   "Durable special-folder identity with distinct folder IDs and server change numbers across properties, hierarchy tables, and ICS state",
   "Existing canonical-folder hierarchy uploads, duplicate detection, and conflict responses without advancing CnsetSeen",
   "Upload state ignores MetaTagIdsetGiven and returns only applicable CN sets",
@@ -997,6 +999,7 @@ used_for = [
   "Validation and decoding of REPLGUID-based IDSET/GLOBSET state streams, with RpcFormat and configured-context invalidation for malformed uploads",
   "OrderByDeliveryTime content synchronization ordering by delivery time with last-modification fallback, newest first",
   "Complete retained hierarchy tombstone download without storage-page truncation",
+  "Exact MetaTagIdsetDeleted property tag and hierarchy deletion-section wire encoding",
   "Message CopyTo and CopyProperties subobject filters, empty collection directives, and provider-internal property exclusion",
 ]
 sections = [
@@ -1008,11 +1011,13 @@ sections = [
   "2.2.1.2.5 PidTagSourceKey Property",
   "2.2.1.2.7 PidTagChangeKey Property",
   "2.2.1.2.8 PidTagPredecessorChangeList Property",
+  "2.2.1.3.1 MetaTagIdsetDeleted Meta-Property",
   "2.2.1.7 Properties That Denote Subobjects",
   "2.2.2.1 CN Structure",
   "2.2.2.2 XID Structure",
   "2.2.2.3 PredecessorChangeList Structure",
   "2.2.2.3.1 SizedXid Structure",
+  "2.2.2.4.1 Serialized IDSET Structure Containing a REPLID Structure",
   "2.2.2.4.2 Serialized IDSET Structure Containing a REPLGUID Structure",
   "2.2.2.5 GLOBCNT Structure",
   "2.2.2.6 GLOBSET Structure",
@@ -1039,6 +1044,7 @@ sections = [
   "2.2.4.1.5.4 MetaTagIncrSyncGroupId Meta-Property",
   "2.2.4.1.5.5 MetaTagIncrementalSyncMessagePartial Meta-Property",
   "2.2.4.2 Syntactical Structure",
+  "2.2.4.3.3 deletions Element",
   "2.2.4.3.5 folderChange Element",
   "2.2.4.3.6 folderContent Element",
   "2.2.4.3.8 groupInfo Element",
@@ -1712,13 +1718,17 @@ used_for = [
   "Existing appointment update property set including start, end, ClipStart, ClipEnd, and common start/end values",
   "Validation of the exact empty Outlook LocalFreebusy appointment-tombstone stream and rejection of nonempty records without a canonical calendar mapping",
   "AppointmentStateFlags distinction between a standalone appointment and a Meeting object with recipients",
+  "Separation of BusyStatus availability from AppointmentStateFlags cancellation state during Outlook appointment import",
+  "UTC PtypTime conversion to and from canonical civil time for the bounded UTC and W. Europe calendar time zones",
 ]
 sections = [
   "2.2.1 Common Properties",
+  "2.2.1.2 PidLidBusyStatus Property",
   "2.2.1.4 PidLidLocation Property",
   "2.2.1.5 PidLidAppointmentStartWhole Property",
   "2.2.1.6 PidLidAppointmentEndWhole Property",
   "2.2.1.7 PidLidAppointmentDuration Property",
+  "2.2.1.9 PidLidAppointmentSubType Property",
   "2.2.1.10 PidLidAppointmentStateFlags Property",
   "2.2.1.14 PidLidClipStart Property",
   "2.2.1.15 PidLidClipEnd Property",
@@ -1742,6 +1752,8 @@ sections = [
   "2.2.12.5 PidTagScheduleInfoAppointmentTombstone Property",
   "2.2.12.5.1 Record Structure",
   "3.1.4.2 Converting an Appointment Object to a Meeting Object",
+  "3.1.5.5 Time Display Adjustments",
+  "3.1.5.5.1 Data Interpretation for Floating Appointments",
   "4.2.2.1 Creating the Meeting",
 ]
 

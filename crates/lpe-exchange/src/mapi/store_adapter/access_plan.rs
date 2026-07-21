@@ -601,6 +601,7 @@ pub(in crate::mapi) fn simulate_table_access(
                     client_state_selection_invalidated,
                     client_state_selection_applied: false,
                     download_change_facts: Vec::new(),
+                    resident_hierarchy_alias_counters: Vec::new(),
                     incremental_transfer_buffer: None,
                     transfer_buffer: state,
                     transfer_position: 0,

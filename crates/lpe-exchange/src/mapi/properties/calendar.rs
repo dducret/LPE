@@ -249,14 +249,7 @@ fn appointment_duration(event: &AccessibleEvent) -> i32 {
 }
 
 fn recognized_calendar_time_zone_key(time_zone: &str) -> Option<&'static str> {
-    if time_zone.eq_ignore_ascii_case("W. Europe Standard Time")
-        || time_zone.eq_ignore_ascii_case("Europe/Zurich")
-        || time_zone.eq_ignore_ascii_case("Europe/Berlin")
-        || time_zone.eq_ignore_ascii_case("Europe/Rome")
-        || time_zone.eq_ignore_ascii_case("Europe/Vienna")
-        || time_zone
-            .eq_ignore_ascii_case("(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna")
-    {
+    if is_western_europe_calendar_time_zone(time_zone) {
         Some("W. Europe Standard Time")
     } else if time_zone.eq_ignore_ascii_case("UTC") {
         Some("UTC")
@@ -553,10 +546,13 @@ pub(in crate::mapi) fn event_input_from_mapi(
                 .and_then(MapiValue::as_i64)?;
             Some(start.saturating_add(duration.max(0).saturating_mul(600_000_000)))
         });
+    let time_zone =
+        calendar_time_zone_from_mapi(properties).unwrap_or_else(|| existing.time_zone.clone());
     let start = start_filetime
-        .and_then(filetime_to_date_time)
+        .and_then(|filetime| filetime_to_date_time_in_time_zone(filetime, &time_zone))
         .unwrap_or_else(|| (existing.date.clone(), existing.time.clone()));
-    let end = end_filetime.and_then(filetime_to_date_time);
+    let end =
+        end_filetime.and_then(|filetime| filetime_to_date_time_in_time_zone(filetime, &time_zone));
     let duration_minutes = match (start_filetime, end_filetime) {
         (Some(start), Some(end)) if end >= start => {
             ((end - start) / 10_000_000 / 60).clamp(0, i64::from(i32::MAX)) as i32
@@ -580,8 +576,7 @@ pub(in crate::mapi) fn event_input_from_mapi(
             .unwrap_or_else(|| existing.uid.clone()),
         date,
         time,
-        time_zone: calendar_time_zone_from_mapi(properties)
-            .unwrap_or_else(|| existing.time_zone.clone()),
+        time_zone,
         duration_minutes: end
             .map(|_| duration_minutes)
             .unwrap_or(existing.duration_minutes),
@@ -892,8 +887,9 @@ fn calendar_participants_from_display_string(
 }
 
 fn calendar_status_from_mapi_busy_status(value: i64) -> String {
+    // [MS-OXOCAL] section 2.2.1.2 defines zero as olFree, not cancellation.
+    // Cancellation is the asfCanceled bit from section 2.2.1.10.
     match value {
-        0 => "cancelled",
         1 => "tentative",
         _ => "confirmed",
     }

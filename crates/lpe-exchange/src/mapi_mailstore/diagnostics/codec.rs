@@ -80,6 +80,7 @@ pub(crate) fn decode_hierarchy_transfer_debug_summary(
     let mut emitted_property_tags = BTreeSet::new();
     let mut summary = HierarchyTransferDebugSummary::default();
     let mut in_final_state = false;
+    let mut in_deletions = false;
 
     while offset < bytes.len() {
         let tag = read_debug_u32(bytes, offset)?;
@@ -91,6 +92,14 @@ pub(crate) fn decode_hierarchy_transfer_debug_summary(
                         finish_hierarchy_debug_folder(folder, &mut seen_source_keys, &mut summary);
                     }
                     current_folder = Some(HierarchyTransferFolderDebug::default());
+                    in_deletions = false;
+                }
+                INCR_SYNC_DEL => {
+                    if let Some(folder) = current_folder.take() {
+                        finish_hierarchy_debug_folder(folder, &mut seen_source_keys, &mut summary);
+                    }
+                    in_deletions = true;
+                    in_final_state = false;
                 }
                 INCR_SYNC_STATE_BEGIN => {
                     if let Some(folder) = current_folder.take() {
@@ -98,6 +107,7 @@ pub(crate) fn decode_hierarchy_transfer_debug_summary(
                     }
                     summary.final_state_present = true;
                     in_final_state = true;
+                    in_deletions = false;
                 }
                 INCR_SYNC_STATE_END => {
                     in_final_state = false;
@@ -169,7 +179,7 @@ pub(crate) fn decode_hierarchy_transfer_debug_summary(
                 PID_TAG_SUBFOLDERS => folder.subfolders = decode_debug_bool(&property.value),
                 _ => {}
             }
-        } else if !in_final_state {
+        } else if !in_final_state && !in_deletions {
             return Err(format!(
                 "property 0x{:08x} appears outside folderChange or final state",
                 property.tag
@@ -914,7 +924,7 @@ pub(super) fn hierarchy_debug_known_parent_source_key(source_key: &[u8]) -> bool
 pub(super) fn hierarchy_debug_marker(tag: u32) -> bool {
     matches!(
         tag,
-        INCR_SYNC_CHG | INCR_SYNC_STATE_BEGIN | INCR_SYNC_STATE_END | INCR_SYNC_END
+        INCR_SYNC_CHG | INCR_SYNC_DEL | INCR_SYNC_STATE_BEGIN | INCR_SYNC_STATE_END | INCR_SYNC_END
     )
 }
 

@@ -3945,7 +3945,7 @@ fn mapi_over_http_calendar_writes_map_supported_mapi_fields_to_canonical_event_f
     );
     properties.insert(
         PID_TAG_START_DATE,
-        MapiValue::I64(date_time_to_filetime("2026-05-22", "10:00") as i64),
+        MapiValue::I64(date_time_to_filetime("2026-05-22", "08:00") as i64),
     );
     properties.insert(PID_LID_APPOINTMENT_DURATION_TAG, MapiValue::I32(45));
 
@@ -3972,6 +3972,115 @@ fn mapi_over_http_calendar_writes_map_supported_mapi_fields_to_canonical_event_f
     assert!(input.organizer_json.contains("alice@example.test"));
     assert!(input.attendees_json.contains("Bob One"));
     assert!(input.attendees_json.contains("OPT-PARTICIPANT"));
+}
+
+#[test]
+fn mapi_over_http_outlook_free_appointment_is_not_imported_as_cancelled() {
+    let existing = default_event_for_mapping(Uuid::nil(), "default");
+    let mut properties = HashMap::new();
+    properties.insert(
+        PID_TAG_MESSAGE_CLASS_W,
+        MapiValue::String("IPM.Appointment".to_string()),
+    );
+    properties.insert(
+        PID_TAG_SUBJECT_W,
+        MapiValue::String("Outlook free appointment".to_string()),
+    );
+    properties.insert(
+        PID_LID_APPOINTMENT_START_WHOLE_TAG,
+        MapiValue::I64(date_time_to_filetime("2026-07-21", "12:54") as i64),
+    );
+    properties.insert(
+        PID_LID_APPOINTMENT_END_WHOLE_TAG,
+        MapiValue::I64(date_time_to_filetime("2026-07-21", "13:24") as i64),
+    );
+    properties.insert(PID_LID_BUSY_STATUS_TAG, MapiValue::I32(0));
+    properties.insert(PID_LID_APPOINTMENT_STATE_FLAGS_TAG, MapiValue::I32(0));
+
+    let input = event_input_from_mapi(
+        Uuid::nil(),
+        Some(Uuid::from_u128(0x8888)),
+        &existing,
+        &properties,
+    )
+    .unwrap();
+
+    assert_eq!(input.status, "confirmed");
+}
+
+#[test]
+fn mapi_over_http_w_europe_all_day_import_preserves_canonical_local_midnight() {
+    let existing = default_event_for_mapping(Uuid::nil(), "default");
+    let mut properties = HashMap::new();
+    properties.insert(
+        PID_TAG_MESSAGE_CLASS_W,
+        MapiValue::String("IPM.Appointment".to_string()),
+    );
+    properties.insert(
+        PID_LID_APPOINTMENT_START_WHOLE_TAG,
+        MapiValue::I64(date_time_to_filetime("2026-07-21", "22:00") as i64),
+    );
+    properties.insert(
+        PID_LID_APPOINTMENT_END_WHOLE_TAG,
+        MapiValue::I64(date_time_to_filetime("2026-07-22", "22:00") as i64),
+    );
+    properties.insert(PID_LID_APPOINTMENT_SUB_TYPE_TAG, MapiValue::Bool(true));
+    properties.insert(PID_LID_APPOINTMENT_STATE_FLAGS_TAG, MapiValue::I32(0));
+    properties.insert(
+        PID_LID_TIME_ZONE_DESCRIPTION_W_TAG,
+        MapiValue::String("W. Europe Standard Time".to_string()),
+    );
+
+    let input = event_input_from_mapi(
+        Uuid::nil(),
+        Some(Uuid::from_u128(0x8890)),
+        &existing,
+        &properties,
+    )
+    .unwrap();
+
+    assert_eq!(input.date, "2026-07-22");
+    assert_eq!(input.time, "00:00");
+    assert_eq!(input.time_zone, "Europe/Berlin");
+    assert_eq!(input.duration_minutes, 24 * 60);
+    assert!(input.all_day);
+}
+
+#[test]
+fn mapi_over_http_w_europe_all_day_projection_emits_utc_filetimes() {
+    let mut event = default_event_for_mapping(Uuid::nil(), "default");
+    event.date = "2026-07-22".to_string();
+    event.time = "00:00".to_string();
+    event.time_zone = "Europe/Berlin".to_string();
+    event.duration_minutes = 24 * 60;
+    event.all_day = true;
+
+    assert_eq!(
+        event_start_filetime(&event),
+        date_time_to_filetime("2026-07-21", "22:00")
+    );
+    assert_eq!(
+        event_end_filetime(&event),
+        date_time_to_filetime("2026-07-22", "22:00")
+    );
+}
+
+#[test]
+fn mapi_over_http_w_europe_time_conversion_observes_standard_and_daylight_biases() {
+    for (date, utc_time, local_time) in [
+        ("2026-01-15", "08:00", "09:00"),
+        ("2026-07-15", "07:00", "09:00"),
+    ] {
+        let utc_filetime = date_time_to_filetime(date, utc_time);
+        assert_eq!(
+            filetime_to_date_time_in_time_zone(utc_filetime as i64, "W. Europe Standard Time"),
+            Some((date.to_string(), local_time.to_string()))
+        );
+        assert_eq!(
+            date_time_to_filetime_in_time_zone(date, local_time, "Europe/Berlin"),
+            utc_filetime
+        );
+    }
 }
 
 #[test]

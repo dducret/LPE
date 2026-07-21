@@ -260,6 +260,7 @@ fn hierarchy_download_keeps_imported_change_key_and_predecessor_lineage() {
             associated: false,
             source_key: source_key_for_store_id(version.folder_id),
         }],
+        &[],
     )
     .expect("imported ChangeKey must not replace the server CN used for selection");
     let selected_summary = decode_hierarchy_transfer_debug_summary(&selected).unwrap();
@@ -1439,6 +1440,7 @@ fn hierarchy_download_selection_uses_uploaded_empty_client_state() {
             associated: false,
             source_key: source_key_for_store_id(crate::mapi::identity::INBOX_FOLDER_ID),
         }],
+        &[],
     )
     .expect("select hierarchy baseline from empty client state");
 
@@ -1522,6 +1524,7 @@ fn hierarchy_download_selection_preserves_foreign_replica_and_uses_local_cnset()
         &manifest,
         &client_state,
         &facts,
+        &[],
     )
     .expect("select change unseen by the local replica set");
     assert_eq!(
@@ -1539,6 +1542,7 @@ fn hierarchy_download_selection_preserves_foreign_replica_and_uses_local_cnset()
         &manifest,
         &final_state,
         &facts,
+        &[],
     )
     .expect("select change already seen by the local replica set");
     assert_eq!(
@@ -1586,6 +1590,7 @@ fn hierarchy_download_no_deletions_keeps_missing_id_without_tombstone() {
         &manifest,
         &client_state,
         &[],
+        &[],
     )
     .expect("select hierarchy with NoDeletions");
     assert_absent_property(&selected, META_TAG_IDSET_DELETED);
@@ -1621,10 +1626,27 @@ fn hierarchy_download_emits_explicit_tombstone_absent_from_client_idset() {
         &manifest,
         &initial_sync_state_stream(SYNC_TYPE_HIERARCHY),
         &[],
+        &[],
     )
     .expect("select explicit hierarchy tombstone");
+    let deletion_offset = selected
+        .windows(4)
+        .position(|bytes| bytes == INCR_SYNC_DEL.to_le_bytes())
+        .expect("IncrSyncDel marker");
+    assert_eq!(
+        u32::from_le_bytes(
+            selected[deletion_offset + 4..deletion_offset + 8]
+                .try_into()
+                .unwrap()
+        ),
+        0x67E5_0102,
+        "[MS-OXCFXICS] section 2.2.1.3.1 MetaTagIdsetDeleted"
+    );
     assert_variable_property_present(&selected, META_TAG_IDSET_DELETED, &expected_tombstone);
     assert_variable_property(&final_state, META_TAG_IDSET_GIVEN, &[]);
+    let summary = decode_hierarchy_transfer_debug_summary(&selected)
+        .expect("decode hierarchy stream containing IncrSyncDel");
+    assert!(summary.stream_end_marker_seen);
 }
 
 #[test]
@@ -1657,6 +1679,7 @@ fn hierarchy_download_rejects_malformed_client_globset() {
         0x0100,
         &manifest,
         &client_state,
+        &[],
         &[],
     )
     .expect_err("reject truncated client GLOBSET");
@@ -2558,6 +2581,7 @@ fn fai_foreign_source_key_identity_is_used_by_selected_and_full_idset_given() {
         &manifest,
         &initial_sync_state_stream(SYNC_TYPE_CONTENTS),
         &facts,
+        &[],
     )
     .expect("select FAI with its persisted foreign SourceKey");
     let mut expected_idset_given = foreign_guid.to_vec();

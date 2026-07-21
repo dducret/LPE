@@ -859,6 +859,11 @@ canonical `from` identity.
 - Transient deleted/read/unread sets use REPLID-scoped IDSET/GLOBSET encoding.
   These transient sets must not be confused with durable REPLGUID checkpoint
   state.
+- A hierarchy or contents deletion section serializes `IncrSyncDel (0x40130003)`
+  followed by `MetaTagIdsetDeleted (0x67E50102)` and its
+  REPLID-scoped IDSET. Property ID `0x4018` belongs to the `FXErrorInfo`
+  marker and is never used for `MetaTagIdsetDeleted`. This follows
+  `[MS-OXCFXICS]` sections 2.2.1.3.1, 2.2.4.1.4, 2.2.4.2, and 2.2.4.3.3.
 - Canonical mail currently has one per-folder modification sequence rather than
   a distinct durable read-state CN. A read/unread transition therefore advances
   the normal message CN and is downloaded as a full `messageChange` carrying
@@ -912,6 +917,13 @@ canonical `from` identity.
   carried by its emitted `PidTagSourceKey`, including its foreign REPLGUID when
   `NoForeignIdentifiers` is absent, rather than LPE's internal MID. This follows
   `[MS-OXCFXICS]` sections 2.2.1.1.1, 2.2.1.2.5, 2.2.2.4.2, and 3.2.5.3.
+  A durable special-folder alias successfully imported by an OST remains a
+  resident hierarchy identity in that synchronization root. When that alias is
+  present in the client's `MetaTagIdsetGiven`, LPE must not return it through
+  `MetaTagIdsetDeleted`; it is used only in the temporary resident-set
+  comparison and is not emitted as a duplicate folder change or advertised to
+  another OST. This follows `[MS-OXCFXICS]` sections 2.2.3.2.4.3.1, 3.2.5.3,
+  and 3.3.5.8.8.
   `MetaTagCnsetRead` remains client-derived unless the transfer contains a
   real separate read-state stream; the current canonical read transition is
   delivered as a full message change with `PidTagMessageFlags`.
@@ -1264,12 +1276,19 @@ subject prefix, body, HTML body,
 start/end through `PidTagStartDate`/`PidTagEndDate` and
 `PidLidAppointmentStartWhole`/`PidLidAppointmentEndWhole` plus
 `PidLidCommonStart`/`PidLidCommonEnd`, location, all-day,
-busy-status-derived canonical status, organizer,
+busy-status-derived canonical status, where `olTentative` maps to `tentative`
+and the availability values `olFree`, `olBusy`, `olOutOfOffice`, and
+`olWorkingElsewhere` map to `confirmed`, organizer,
 required attendees from display/To attendee properties, and optional attendees
 from `PidTagDisplayCc` and `PidLidCcAttendeesString`, plus the bounded
 `PidLidTimeZoneDescription` string into canonical `time_zone`. Bounded
-`PidLidAppointmentStateFlags` writes map only the meeting/cancel bits; the
-cancel bit updates canonical event status to `cancelled`, while unsupported
+start/end `PtypTime` values are UTC instants on the wire and are converted to
+and from canonical civil time using the supported `UTC` or recurring
+`W. Europe Standard Time` rule, including its standard/daylight bias. This
+follows `[MS-OXCDATA]` section 2.11.1 and `[MS-OXOCAL]` sections 2.2.1.5,
+2.2.1.6, 2.2.1.9, 3.1.5.5, and 3.1.5.5.1. Bounded
+`PidLidAppointmentStateFlags` writes map only the meeting/cancel bits; only the
+`asfCanceled` bit updates canonical event status to `cancelled`, while unsupported
 state bits are rejected without side effects. Calendar reads project those
 canonical body, organizer, attendee, and timezone fields through
 direct properties, requested contents columns, and FastTransfer/ICS message
@@ -1319,6 +1338,14 @@ response/cancel properties, and other unsupported meeting-response or
 cancellation payloads remain
 unsupported and are rejected with deterministic parseable errors instead of
 being stored as opaque MAPI blobs.
+
+`mapi/properties/calendar.rs` has reached the thousand-line split threshold.
+Before adding further Calendar property behavior, move read projection and
+write/import mapping into focused `calendar/projection.rs` and
+`calendar/import.rs` helpers, leaving `calendar.rs` as the shared property
+dispatch and wiring layer. Preserve the current canonical Event boundaries and
+verify the split with the focused Calendar property/integration tests followed
+by `cargo test -p lpe-exchange`.
 
 The real Outlook 15:25 capture on 2026-07-14 isolated appointment creation
 before ICS: `RopCreateMessage` returned a pending Calendar Message object, but

@@ -31,6 +31,7 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
             client_state_selection_invalidated,
             client_state_selection_applied,
             download_change_facts,
+            resident_hierarchy_alias_counters,
             incremental_transfer_buffer,
             transfer_buffer,
             transfer_position,
@@ -64,6 +65,7 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
                     transfer_buffer,
                     initial_state,
                     download_change_facts,
+                    resident_hierarchy_alias_counters,
                 ) {
                     Ok((selected, selected_final_state)) => {
                         *transfer_buffer = selected;

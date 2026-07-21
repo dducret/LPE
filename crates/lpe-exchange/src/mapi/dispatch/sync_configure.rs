@@ -171,6 +171,29 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
     let all_special_sync_objects =
         special_sync_objects_for(folder_id, sync_type, snapshot, principal);
+    let mut resident_hierarchy_alias_counters = if sync_type == 0x02 {
+        session
+            .special_folder_aliases
+            .iter()
+            .filter(|(_, canonical_folder_id)| {
+                !session
+                    .deleted_advertised_special_folders
+                    .contains(canonical_folder_id)
+                    && folder_is_in_hierarchy_sync_scope(
+                        **canonical_folder_id,
+                        folder_id,
+                        mailboxes,
+                    )
+            })
+            .filter_map(|(alias_folder_id, _)| {
+                crate::mapi::identity::global_counter_from_store_id(*alias_folder_id)
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    resident_hierarchy_alias_counters.sort_unstable();
+    resident_hierarchy_alias_counters.dedup();
     log_calendar_special_sync_objects(principal, folder_id, sync_type, &all_special_sync_objects);
     log_special_sync_objects(principal, folder_id, sync_type, &all_special_sync_objects);
     let available_sync_mailbox_count = all_sync_mailboxes.len();
@@ -446,6 +469,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         sync_state_mailbox_count = state_sync_mailboxes.len(),
         sync_email_count = all_sync_emails.len(),
         sync_special_object_count = all_special_sync_objects.len(),
+        resident_hierarchy_alias_count = resident_hierarchy_alias_counters.len(),
         normal_scope_requested,
         fai_scope_requested,
         wire_sync_email_count,
@@ -506,6 +530,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
             client_state_selection_invalidated: false,
             client_state_selection_applied: false,
             download_change_facts,
+            resident_hierarchy_alias_counters,
             incremental_transfer_buffer,
             transfer_buffer,
             transfer_position: 0,

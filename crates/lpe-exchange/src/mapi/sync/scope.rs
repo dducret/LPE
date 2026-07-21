@@ -242,6 +242,26 @@ fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> 
     }
 }
 
+pub(in crate::mapi) fn folder_is_in_hierarchy_sync_scope(
+    folder_id: u64,
+    sync_root_folder_id: u64,
+    mailboxes: &[JmapMailbox],
+) -> bool {
+    let mut current_folder_id = folder_id;
+    let mut visited = HashSet::new();
+    while visited.insert(current_folder_id) {
+        let Some(parent_folder_id) = parent_folder_id_for_folder_id(current_folder_id, mailboxes)
+        else {
+            return false;
+        };
+        if parent_folder_id == sync_root_folder_id {
+            return true;
+        }
+        current_folder_id = parent_folder_id;
+    }
+    false
+}
+
 fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: u64) -> bool {
     match sync_root_folder_id {
         ROOT_FOLDER_ID => true,

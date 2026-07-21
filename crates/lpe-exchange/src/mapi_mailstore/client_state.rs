@@ -328,6 +328,7 @@ pub(crate) fn select_download_manifest_for_client_state(
     full_manifest: &[u8],
     client_state: &[u8],
     change_facts: &[DownloadChangeFact],
+    resident_hierarchy_alias_counters: &[u64],
 ) -> Result<(Vec<u8>, Vec<u8>), String> {
     if !matches!(sync_type, SYNC_TYPE_CONTENTS | SYNC_TYPE_HIERARCHY) {
         return Err(format!(
@@ -423,14 +424,27 @@ pub(crate) fn select_download_manifest_for_client_state(
     }
 
     if sync_flags & SYNC_FLAG_NO_DELETIONS == 0 {
-        let missing = match (
-            client_state.idset_given.local(),
-            manifest.final_state.idset_given.local(),
-        ) {
-            (Some(client), Some(server)) => client.difference(server),
-            (Some(client), None) => client.clone(),
-            (None, _) => CounterSet::default(),
-        };
+        let mut resident_server_ids = manifest
+            .final_state
+            .idset_given
+            .local()
+            .cloned()
+            .unwrap_or_default();
+        if sync_type == SYNC_TYPE_HIERARCHY {
+            // [MS-OXCFXICS] sections 2.2.3.2.4.3.1, 3.2.5.3, and
+            // 3.3.5.8.8: a successfully imported folder SourceKey remains a
+            // server object and the client adds its FID to IdsetGiven.
+            // Count durable aliases only when comparing this client's
+            // IdsetGiven; they are not new changes to advertise to other OSTs.
+            for counter in resident_hierarchy_alias_counters {
+                resident_server_ids.insert(*counter);
+            }
+        }
+        let missing = client_state
+            .idset_given
+            .local()
+            .map(|client| client.difference(&resident_server_ids))
+            .unwrap_or_default();
         let mut no_longer_in_scope = missing.intersection(&manifest.no_longer_in_scope_ids);
         let expired = missing.intersection(&manifest.expired_ids);
         let explicitly_deleted = if sync_type == SYNC_TYPE_HIERARCHY {

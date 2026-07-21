@@ -522,6 +522,7 @@ pub(in crate::mapi) enum MapiObject {
         client_state_selection_invalidated: bool,
         client_state_selection_applied: bool,
         download_change_facts: Vec<mapi_mailstore::DownloadChangeFact>,
+        resident_hierarchy_alias_counters: Vec<u64>,
         incremental_transfer_buffer: Option<Vec<u8>>,
         transfer_buffer: Vec<u8>,
         transfer_position: usize,
