@@ -897,7 +897,9 @@ compatible. They do not replace canonical mail or collaboration tables.
   index with a non-unique lookup index.
   After the updater validates the complete target shape, the version-bounded,
   transactional, idempotent `0.5.0-sql-v1-to-0.5.1-sql.sql` update changes the
-  label. Databases from before 0.5 and every other source label remain
+  label. That label-only file requires the private validation marker set by
+  `update-lpe.sh` and is not an operator-facing standalone migration command.
+  Databases from before 0.5 and every other source label remain
   unsupported, and `schema.sql`
   remains the canonical complete source for every new database.
 - `update-lpe.sh` accepts only `0.5.1-sql` or the exact supported

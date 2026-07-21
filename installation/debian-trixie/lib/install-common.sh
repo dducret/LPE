@@ -182,6 +182,40 @@ WHERE n.nspname = 'public'
 SQL
 }
 
+mapi_active_source_key_index_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT CASE WHEN EXISTS (
+  SELECT 1
+  FROM pg_index index_row
+  JOIN pg_class index_class ON index_class.oid = index_row.indexrelid
+  JOIN pg_namespace namespace_row ON namespace_row.oid = index_class.relnamespace
+  JOIN pg_am access_method ON access_method.oid = index_class.relam
+  WHERE index_row.indrelid = to_regclass('public.mapi_object_identities')
+    AND namespace_row.nspname = 'public'
+    AND index_class.relname = 'mapi_object_identities_active_source_key_uidx'
+    AND access_method.amname = 'btree'
+    AND index_row.indisunique
+    AND index_row.indisvalid
+    AND index_row.indisready
+    AND index_row.indislive
+    AND index_row.indexprs IS NULL
+    AND index_row.indnkeyatts = 3
+    AND index_row.indnatts = 3
+    AND pg_get_indexdef(index_row.indexrelid, 1, FALSE) = 'tenant_id'
+    AND pg_get_indexdef(index_row.indexrelid, 2, FALSE) = 'account_id'
+    AND pg_get_indexdef(index_row.indexrelid, 3, FALSE) = 'source_key'
+    AND lower(regexp_replace(
+          pg_get_expr(index_row.indpred, index_row.indrelid, FALSE),
+          '[()[:space:]]',
+          '',
+          'g'
+        )) = 'deleted_atisnull'
+) THEN 1 ELSE 0 END;
+SQL
+}
+
 mapi_calendar_event_move_change_key_constraint_count() {
   local database_url="$1"
 

@@ -367,7 +367,7 @@ impl Storage {
         })?;
         if !mapi_outlook_cache_fidelity_shape_is_current {
             bail!(
-                "required MAPI WLink/configuration FAI fidelity shape is missing or incompatible in {schema_name}; run the reviewed 0.5.1 update or initialize an empty database from crates/lpe-storage/sql/schema.sql"
+                "required MAPI WLink/configuration FAI fidelity shape is missing or incompatible in {schema_name}; initialize an empty LPE 0.5.1 database from crates/lpe-storage/sql/schema.sql"
             );
         }
 

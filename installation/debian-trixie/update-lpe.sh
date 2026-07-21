@@ -264,15 +264,34 @@ if [[ "${MIGRATE_SCHEMA_FROM_050}" == "true" ]]; then
     echo "The ${SOURCE_SCHEMA_VERSION} database does not have the supported late canonical physical shape. Initialize a fresh LPE 0.5.1 database with init-schema.sh." >&2
     exit 1
   }
-fi
+  SOURCE_LOCAL_REPLICA_TABLE_COUNT="$(
+    psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name IN ('mapi_local_replica_id_ranges', 'mapi_local_replica_deleted_ranges')"
+  )" || {
+    echo "Unable to inspect preexisting MAPI local-replica tables." >&2
+    exit 1
+  }
+  if [[ "${SOURCE_LOCAL_REPLICA_TABLE_COUNT}" == "2" ]]; then
+    SOURCE_LOCAL_REPLICA_RANGE_SHAPE_OK="$(
+      mapi_local_replica_range_shape_ok "${DATABASE_URL}"
+    )" || {
+      echo "Unable to inspect the preexisting MAPI local-replica table shape." >&2
+      exit 1
+    }
+    if [[ "${SOURCE_LOCAL_REPLICA_RANGE_SHAPE_OK}" != "1" ]]; then
+      echo "The existing MAPI local-replica tables are incomplete. Initialize a fresh LPE 0.5.1 database with init-schema.sh." >&2
+      exit 1
+    fi
+  elif [[ "${SOURCE_LOCAL_REPLICA_TABLE_COUNT}" != "0" ]]; then
+    echo "The MAPI local-replica tables are only partially present. Initialize a fresh LPE 0.5.1 database with init-schema.sh." >&2
+    exit 1
+  fi
 
-if systemctl is-active --quiet "${SERVICE_NAME}"; then
-  systemctl stop "${SERVICE_NAME}"
-else
-  echo "Service ${SERVICE_NAME} is already inactive."
-fi
+  if systemctl is-active --quiet "${SERVICE_NAME}"; then
+    systemctl stop "${SERVICE_NAME}"
+  else
+    echo "Service ${SERVICE_NAME} is already inactive."
+  fi
 
-if [[ "${MIGRATE_SCHEMA_FROM_050}" == "true" ]]; then
   psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -f "${OUTLOOK_CACHE_FIDELITY_UPDATE_FILE}" || {
     echo "Unable to prepare ${SOURCE_SCHEMA_VERSION} with ${OUTLOOK_CACHE_FIDELITY_UPDATE_FILE}." >&2
     exit 1
@@ -357,6 +376,17 @@ if [[ "${MAPI_IDENTITY_KEY_CONSTRAINT_COUNT}" != "3" \
   echo "Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
   exit 1
 fi
+MAPI_ACTIVE_SOURCE_KEY_INDEX_SHAPE_OK="$(
+  mapi_active_source_key_index_shape_ok "${DATABASE_URL}"
+)" || {
+  echo "Unable to inspect the active MAPI SourceKey uniqueness index." >&2
+  exit 1
+}
+if [[ "${MAPI_ACTIVE_SOURCE_KEY_INDEX_SHAPE_OK}" != "1" ]]; then
+  echo "MAPI active SourceKey uniqueness index is incomplete for ${EXPECTED_SCHEMA_VERSION}." >&2
+  echo "Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
+  exit 1
+fi
 MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK="$(
   mapi_special_folder_alias_shape_ok "${DATABASE_URL}"
 )" || {
@@ -370,7 +400,9 @@ if [[ "${MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK}" != "1" ]]; then
 fi
 
 if [[ "${MIGRATE_SCHEMA_FROM_050}" == "true" ]]; then
-  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -f "${SCHEMA_051_UPDATE_FILE}" || {
+  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 \
+    -c "SET lpe.schema_target_shape_validated = '0.5.1-sql'" \
+    -f "${SCHEMA_051_UPDATE_FILE}" || {
     echo "Unable to migrate ${SOURCE_SCHEMA_VERSION} to ${EXPECTED_SCHEMA_VERSION} with ${SCHEMA_051_UPDATE_FILE}." >&2
     exit 1
   }
@@ -385,6 +417,14 @@ INSTALLED_SCHEMA_VERSION="$(
 if [[ "${INSTALLED_SCHEMA_VERSION}" != "${EXPECTED_SCHEMA_VERSION}" ]]; then
   echo "Schema transition finished with ${INSTALLED_SCHEMA_VERSION}; expected ${EXPECTED_SCHEMA_VERSION}." >&2
   exit 1
+fi
+
+if [[ "${MIGRATE_SCHEMA_FROM_050}" == "false" ]]; then
+  if systemctl is-active --quiet "${SERVICE_NAME}"; then
+    systemctl stop "${SERVICE_NAME}"
+  else
+    echo "Service ${SERVICE_NAME} is already inactive."
+  fi
 fi
 
 echo "Database schema ${EXPECTED_SCHEMA_VERSION} is current."

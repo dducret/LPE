@@ -26,7 +26,9 @@ nullable canonical columns for client-written Calendar shortcut properties,
 and makes the associated-configuration class/subject index non-unique so two
 distinct FAI identities are not collapsed. It leaves the source label
 unchanged. The second update changes only the validated source label to
-`0.5.1-sql`; rerunning it against the target label is safe. Earlier same-label
+`0.5.1-sql` and requires the private validation marker set by `update-lpe.sh`;
+it is not a standalone operator command. Rerunning `update-lpe.sh` against the
+target label is safe. Earlier same-label
 physical forms and every other source label, including pre-0.5 versions, are
 rejected before the service is stopped or SQL is applied. Use
 `LPE_RESET_SCHEMA=true`

@@ -1,8 +1,10 @@
 const SCHEMA: &str = include_str!("../sql/schema.sql");
-const PREFLIGHT: &str =
-    include_str!("../sql/updates/0.5.0-sql-v1-to-0.5.1-sql-preflight.sql");
+const PREFLIGHT: &str = include_str!("../sql/updates/0.5.0-sql-v1-to-0.5.1-sql-preflight.sql");
 const TRANSITION: &str = include_str!("../sql/updates/0.5.0-sql-v1-to-0.5.1-sql.sql");
 const UPDATE_LPE: &str = include_str!("../../../installation/debian-trixie/update-lpe.sh");
+const CHECK_LPE: &str = include_str!("../../../installation/debian-trixie/check-lpe.sh");
+const INSTALL_COMMON: &str =
+    include_str!("../../../installation/debian-trixie/lib/install-common.sh");
 
 #[test]
 fn canonical_schema_uses_051_release_label() {
@@ -31,6 +33,8 @@ fn update_script_preflights_050_then_validates_before_relabeling_051() {
             "0.5.0-sql-v1-outlook-cache-fidelity.sql",
             "SCHEMA_051_UPDATE_FILE",
             "0.5.0-sql-v1-to-0.5.1-sql.sql",
+            "SET lpe.schema_target_shape_validated = '0.5.1-sql'",
+            "mapi_active_source_key_index_shape_ok",
             "Database schema ${EXPECTED_SCHEMA_VERSION} is current",
         ],
     );
@@ -54,8 +58,14 @@ fn update_script_preflights_050_then_validates_before_relabeling_051() {
     assert_before(
         UPDATE_LPE,
         "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${SCHEMA_051_PREFLIGHT_FILE}\"",
+        "SOURCE_LOCAL_REPLICA_TABLE_COUNT",
+        "the source preflight must precede local-replica applicability checks",
+    );
+    assert_before(
+        UPDATE_LPE,
+        "SOURCE_LOCAL_REPLICA_RANGE_SHAPE_OK",
         "systemctl stop \"${SERVICE_NAME}\"",
-        "the updater must reject unsupported 0.5.0 shapes before stopping LPE",
+        "the updater must reject unrecoverable local-replica shapes before stopping LPE",
     );
     assert_before(
         UPDATE_LPE,
@@ -72,8 +82,37 @@ fn update_script_preflights_050_then_validates_before_relabeling_051() {
     assert_before(
         UPDATE_LPE,
         "MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK",
-        "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${SCHEMA_051_UPDATE_FILE}\"",
+        "-f \"${SCHEMA_051_UPDATE_FILE}\"",
         "the updater must validate the target shape before committing the 0.5.1 label",
+    );
+    assert_before(
+        UPDATE_LPE,
+        "Schema transition finished with ${INSTALLED_SCHEMA_VERSION}",
+        "if [[ \"${MIGRATE_SCHEMA_FROM_050}\" == \"false\" ]]",
+        "a current 0.5.1 database must pass read-only guards before LPE is stopped",
+    );
+}
+
+#[test]
+fn active_source_key_index_guard_checks_semantics_in_update_and_validation_scripts() {
+    assert_contains_all(
+        "active SourceKey index helper",
+        INSTALL_COMMON,
+        &[
+            "mapi_active_source_key_index_shape_ok()",
+            "mapi_object_identities_active_source_key_uidx",
+            "index_row.indisunique",
+            "index_row.indisvalid",
+            "index_row.indisready",
+            "index_row.indislive",
+            "pg_get_indexdef(index_row.indexrelid, 1, FALSE) = 'tenant_id'",
+            "pg_get_expr(index_row.indpred, index_row.indrelid, FALSE)",
+        ],
+    );
+    assert!(
+        UPDATE_LPE.contains("mapi_active_source_key_index_shape_ok \"${DATABASE_URL}\"")
+            && CHECK_LPE.contains("mapi_active_source_key_index_shape_ok \"${DATABASE_URL}\""),
+        "update-lpe.sh and check-lpe.sh must both use the semantic active SourceKey index guard"
     );
 }
 
@@ -89,12 +128,21 @@ fn source_preflight_is_read_only_and_checks_known_050_shape_deltas() {
             "installed_schema_version IS DISTINCT FROM '0.5.0-sql-v1'",
             "mapi_change_number",
             "predecessor_change_list",
+            "mapi_object_identities_source_key_check",
+            "mapi_object_identities_instance_key_check",
+            "mapi_object_identities_active_source_key_uidx",
             "deleted_calendar_event",
             "calendar_events_owner_deleted_idx",
             "mapi_calendar_event_identity_moves",
             "octet_length(%change_key) >= 17",
             "next_global_counter",
             "mapi_special_folder_aliases",
+            "PRIMARY KEY (tenant_id, account_id, alias_folder_id)",
+            "FOREIGN KEY (tenant_id, account_id)",
+            "mapi_navigation_shortcuts",
+            "mapi_associated_config_messages",
+            "ordinal_data_type NOT IN ('bigint', 'bytea')",
+            "local_replica_table_count NOT IN (0, 2)",
             "unsupported 0.5.0-sql-v1 physical shape",
             "COMMIT;",
         ],
@@ -126,18 +174,34 @@ fn schema_transition_is_transactional_idempotent_and_version_bounded() {
             "to_regclass('public.schema_metadata')",
             "installed_schema_version IS DISTINCT FROM '0.5.0-sql-v1'",
             "installed_schema_version IS DISTINCT FROM '0.5.1-sql'",
+            "current_setting('lpe.schema_target_shape_validated', TRUE)",
+            "validated update-lpe.sh session",
+            "target_shape_ok",
+            "mapi_local_replica_id_ranges",
+            "mapi_local_replica_deleted_ranges",
+            "mapi_navigation_shortcuts",
+            "mapi_associated_config_messages_logical_idx",
+            "mapi_object_identities_active_source_key_uidx",
+            "LPE 0.5.1 target physical shape is incomplete",
             "DROP CONSTRAINT IF EXISTS schema_metadata_schema_version_check",
             "SET schema_version = '0.5.1-sql'",
             "ADD CONSTRAINT schema_metadata_schema_version_check",
             "CHECK (schema_version = '0.5.1-sql')",
+            "RESET lpe.schema_target_shape_validated;",
             "COMMIT;",
         ],
     );
     assert_before(
         TRANSITION,
         "installed_schema_version IS DISTINCT FROM '0.5.0-sql-v1'",
+        "INTO target_shape_ok",
+        "the transition must validate the target shape after validating the source label",
+    );
+    assert_before(
+        TRANSITION,
+        "INTO target_shape_ok",
         "DROP CONSTRAINT IF EXISTS schema_metadata_schema_version_check",
-        "the transition must reject unsupported versions before changing metadata",
+        "the transition must validate physical state before changing metadata",
     );
     for forbidden in ["DROP TABLE", "DROP SCHEMA", "TRUNCATE"] {
         assert!(

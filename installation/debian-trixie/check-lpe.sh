@@ -291,9 +291,11 @@ mapi_calendar_event_move_change_key_constraint_count="$(mapi_calendar_event_move
   || fail "Calendar Event move ChangeKey constraints do not accept 17-24-byte XIDs. Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Calendar Event move ChangeKey constraints match the current XID schema"
 
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_object_identities_active_source_key_uidx');" | grep -qx 'mapi_object_identities_active_source_key_uidx' \
-  || fail "MAPI active source-key uniqueness index is missing. Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
-pass "MAPI active source-key uniqueness index is present"
+mapi_active_source_key_index_shape_status="$(mapi_active_source_key_index_shape_ok "${DATABASE_URL}")" \
+  || fail "Unable to inspect the MAPI active SourceKey uniqueness index"
+[[ "${mapi_active_source_key_index_shape_status}" == "1" ]] \
+  || fail "MAPI active SourceKey uniqueness index is missing or invalid. Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "MAPI active SourceKey uniqueness index is current"
 
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/live" '"status":"ok"'
