@@ -29,4 +29,32 @@ impl RopRequest {
             _ => None,
         }
     }
+
+    pub(in crate::mapi) fn fast_transfer_source_level(&self) -> Option<u8> {
+        match RopId::from_u8(self.rop_id) {
+            Some(RopId::FastTransferSourceCopyTo | RopId::FastTransferSourceCopyProperties) => {
+                self.payload.first().copied()
+            }
+            _ => None,
+        }
+    }
+
+    pub(in crate::mapi) fn fast_transfer_source_property_tags(&self) -> Vec<u32> {
+        let (count_offset, tags_offset) = match RopId::from_u8(self.rop_id) {
+            Some(RopId::FastTransferSourceCopyTo) => (6, 8),
+            Some(RopId::FastTransferSourceCopyProperties) => (3, 5),
+            _ => return Vec::new(),
+        };
+        let Some(count_bytes) = self.payload.get(count_offset..count_offset + 2) else {
+            return Vec::new();
+        };
+        let count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]) as usize;
+        self.payload
+            .get(tags_offset..)
+            .unwrap_or_default()
+            .chunks_exact(4)
+            .take(count)
+            .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+            .collect()
+    }
 }

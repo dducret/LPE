@@ -133,9 +133,15 @@ before it is advertised.
   This follows `[MS-OXCFXICS]` sections 2.2.3.1.1.1, 2.2.3.1.1.2, 2.2.4.2,
   2.2.4.3.16, and 2.2.4.4. The separate Folder-object `folderContent` root
   remains outside the currently validated CopyTo/CopyProperties surface.
-  Full `Level`, CopyTo exclusion-list, CopyProperties inclusion-list, and
-  complete transmittable-property projection remain explicit gaps; the captured
-  Contacts request uses `Level=0`, `BestBody`, and an empty exclusion list.
+  For Message-object recipient and attachment subobjects, LPE applies `Level`,
+  the CopyTo exclusion list, and the CopyProperties inclusion list. An included
+  collection is preceded by `MetaTagFXDelProp` even when it is empty, while an
+  excluded collection has no directive. Direct `messageContent` downloads omit
+  the provider-internal `PidTagAssociated` and `PidTagMid`; FAI status remains
+  represented by `PidTagMessageFlags.mfFAI`. This follows `[MS-OXCFXICS]`
+  sections 2.2.1.7, 2.2.4.1.5.1, 2.2.4.3.12, 2.2.4.3.16, 3.2.5.10, and
+  3.2.5.12, with `[MS-OXPROPS]` section 1.3.3. Complete filtering of the
+  ordinary property list remains an explicit gap.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.

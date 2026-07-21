@@ -960,6 +960,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         crate::mapi::identity::INBOX_FOLDER_ID,
         &special,
         0x00,
+        FastTransferMessageChildren::all(),
     );
 
     assert_tag_sequence(
@@ -967,8 +968,6 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         &[
             PID_TAG_PARENT_SOURCE_KEY,
             PID_TAG_SOURCE_KEY,
-            PID_TAG_ASSOCIATED,
-            PID_TAG_MID,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_BODY_W,
             0x7C08_0102,
@@ -982,7 +981,12 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         .windows(4)
         .any(|window| window == END_MESSAGE.to_le_bytes()));
     assert!(!buffer.starts_with(b"LPE-MAPI-FASTTRANSFER\0"));
-    assert_bool_property(&buffer, PID_TAG_ASSOCIATED, true);
+    assert!(!buffer
+        .windows(4)
+        .any(|window| window == PID_TAG_ASSOCIATED.to_le_bytes()));
+    assert!(!buffer
+        .windows(4)
+        .any(|window| window == PID_TAG_MID.to_le_bytes()));
     assert_i32_property(&buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_FAI as i32);
     assert_variable_property_present(
         &buffer,
@@ -1004,8 +1008,15 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         crate::mapi::identity::INBOX_FOLDER_ID,
         &special,
         0x09,
+        FastTransferMessageChildren::all(),
     );
-    assert_bool_property(&outlook_buffer, PID_TAG_ASSOCIATED, true);
+    let empty_message_children = [
+        0x03, 0x00, 0x16, 0x40, // MetaTagFXDelProp.
+        0x0D, 0x00, 0x12, 0x0E, // PidTagMessageRecipients.
+        0x03, 0x00, 0x16, 0x40, // MetaTagFXDelProp.
+        0x0D, 0x00, 0x13, 0x0E, // PidTagMessageAttachments.
+    ];
+    assert!(outlook_buffer.ends_with(&empty_message_children));
     assert_i32_property(&outlook_buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_FAI as i32);
     assert_variable_property_present(
         &outlook_buffer,
@@ -1016,14 +1027,27 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         .windows(4)
         .any(|window| window == PID_TAG_NORMALIZED_SUBJECT_A.to_le_bytes()));
 
+    let no_children_buffer = fast_transfer_message_content_buffer_with_special_object(
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &special,
+        0x09,
+        FastTransferMessageChildren::new(false, false),
+    );
+    assert!(!no_children_buffer
+        .windows(4)
+        .any(|window| window == 0x4016_0003u32.to_le_bytes()));
+
     let mut normal = special;
     normal.associated = false;
     let normal_buffer = fast_transfer_message_content_buffer_with_special_object(
         crate::mapi::identity::INBOX_FOLDER_ID,
         &normal,
         0x09,
+        FastTransferMessageChildren::all(),
     );
-    assert_bool_property(&normal_buffer, PID_TAG_ASSOCIATED, false);
+    assert!(!normal_buffer
+        .windows(4)
+        .any(|window| window == PID_TAG_ASSOCIATED.to_le_bytes()));
     assert_i32_property(&normal_buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_READ as i32);
 }
 

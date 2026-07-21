@@ -4782,6 +4782,8 @@ fn fast_transfer_source_copy_requests_preserve_send_options() {
     let mut cursor = Cursor::new(&copy_to);
     let request = read_rop_request(&mut cursor).unwrap();
     assert_eq!(request.fast_transfer_source_send_options(), Some(0x09));
+    assert_eq!(request.fast_transfer_source_level(), Some(0));
+    assert!(request.fast_transfer_source_property_tags().is_empty());
     assert_eq!(cursor.remaining(), 0);
 
     let copy_properties = [
@@ -4795,6 +4797,11 @@ fn fast_transfer_source_copy_requests_preserve_send_options() {
     let mut cursor = Cursor::new(&copy_properties);
     let request = read_rop_request(&mut cursor).unwrap();
     assert_eq!(request.fast_transfer_source_send_options(), Some(0x00));
+    assert_eq!(request.fast_transfer_source_level(), Some(0));
+    assert_eq!(
+        request.fast_transfer_source_property_tags(),
+        vec![0x0037_001F]
+    );
     assert_eq!(cursor.remaining(), 0);
 }
 

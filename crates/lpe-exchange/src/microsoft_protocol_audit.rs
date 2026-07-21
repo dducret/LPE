@@ -219,6 +219,7 @@ pub(crate) const FAST_TRANSFER_MARKER_GAP_MANIFEST: &[(u32, GapStatus)] = &[
     (0x4013_0003, GapStatus::Implemented),
     (0x4014_0003, GapStatus::Implemented),
     (0x4015_0003, GapStatus::Implemented),
+    (0x4016_0003, GapStatus::Implemented),
     (0x4018_0003, GapStatus::KnownUnsupported),
     (0x402F_0003, GapStatus::Implemented),
     (0x403A_0003, GapStatus::Implemented),

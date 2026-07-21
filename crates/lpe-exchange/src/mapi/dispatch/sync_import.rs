@@ -281,11 +281,14 @@ pub(super) fn append_fast_transfer_source_copy_response(
         ));
         return;
     };
+    let property_tags = request.fast_transfer_source_property_tags();
     let Some((folder_id, transfer_buffer)) = fast_transfer_manifest_for_object(
         request.rop_id,
         request
             .fast_transfer_source_send_options()
             .unwrap_or_default(),
+        request.fast_transfer_source_level().unwrap_or_default(),
+        &property_tags,
         &object,
         principal,
         mailboxes,

@@ -95,6 +95,8 @@ const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_DELIVERY_TIME: u32 = 0x0E06_0040;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
+const PID_TAG_MESSAGE_RECIPIENTS: u32 = 0x0E12_000D;
+const PID_TAG_MESSAGE_ATTACHMENTS: u32 = 0x0E13_000D;
 const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
 const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
@@ -147,6 +149,7 @@ const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0003;
+const META_TAG_FX_DEL_PROP: u32 = 0x4016_0003;
 const META_TAG_IDSET_GIVEN_BINARY: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
 const META_TAG_IDSET_READ: u32 = 0x402D_0102;
@@ -175,8 +178,31 @@ const FILETIME_2026_01_01: u64 =
     (WINDOWS_UNIX_EPOCH_OFFSET_SECONDS + 1_767_225_600) * WINDOWS_FILETIME_TICKS_PER_SECOND;
 const VIRTUAL_SPECIAL_MAILBOX_UUID_PREFIX: u128 = 0x4c50455f_4d415049_0000_0000_0000_0000;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FastTransferMessageChildren {
+    recipients: bool,
+    attachments: bool,
+}
+
+impl FastTransferMessageChildren {
+    pub(crate) const fn new(recipients: bool, attachments: bool) -> Self {
+        Self {
+            recipients,
+            attachments,
+        }
+    }
+
+    pub(crate) const fn all() -> Self {
+        Self::new(true, true)
+    }
+}
+
 fn property_tag_excluded(excluded_property_tags: &[u32], property_tag: u32) -> bool {
     property_tag_requested(excluded_property_tags, property_tag)
+}
+
+fn provider_defined_internal_property(property_tag: u32) -> bool {
+    (0x6600..=0x67FF).contains(&(property_tag >> 16))
 }
 
 fn property_tag_requested(requested_property_tags: &[u32], property_tag: u32) -> bool {
@@ -627,7 +653,12 @@ pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
     for email in messages {
         let attachments = attachments_for_message(email.id, attachment_facts);
         write_u32(&mut buffer, START_MESSAGE);
-        write_fast_transfer_message_content(&mut buffer, email, attachments);
+        write_fast_transfer_message_content(
+            &mut buffer,
+            email,
+            attachments,
+            FastTransferMessageChildren::all(),
+        );
         write_u32(&mut buffer, END_MESSAGE);
     }
     buffer
@@ -636,12 +667,14 @@ pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
 pub(crate) fn fast_transfer_message_content_buffer_with_attachments(
     email: &JmapEmail,
     attachment_facts: &[MessageAttachmentSyncFacts],
+    message_children: FastTransferMessageChildren,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
     write_fast_transfer_message_content(
         &mut buffer,
         email,
         attachments_for_message(email.id, attachment_facts),
+        message_children,
     );
     buffer
 }
@@ -650,11 +683,26 @@ fn write_fast_transfer_message_content(
     buffer: &mut Vec<u8>,
     email: &JmapEmail,
     attachments: &[AttachmentSyncFact],
+    message_children: FastTransferMessageChildren,
 ) {
     write_utf16_property(buffer, PID_TAG_SUBJECT_W, &email.subject);
     write_utf16_property(buffer, PID_TAG_BODY_W, &email.body_text);
-    write_fast_transfer_visible_recipients(buffer, email);
-    write_fast_transfer_attachments(buffer, attachments);
+    if message_children.recipients {
+        write_i32_property(
+            buffer,
+            META_TAG_FX_DEL_PROP,
+            PID_TAG_MESSAGE_RECIPIENTS as i32,
+        );
+        write_fast_transfer_visible_recipients(buffer, email);
+    }
+    if message_children.attachments {
+        write_i32_property(
+            buffer,
+            META_TAG_FX_DEL_PROP,
+            PID_TAG_MESSAGE_ATTACHMENTS as i32,
+        );
+        write_fast_transfer_attachments(buffer, attachments);
+    }
 }
 
 pub(crate) fn fast_transfer_top_folder_buffer_with_attachments(
@@ -837,9 +885,16 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
     folder_id: u64,
     object: &SpecialMessageSyncFact,
     send_options: u8,
+    message_children: FastTransferMessageChildren,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
-    write_fast_transfer_special_message_content(&mut buffer, folder_id, object, send_options);
+    write_fast_transfer_special_message_content(
+        &mut buffer,
+        folder_id,
+        object,
+        send_options,
+        message_children,
+    );
     buffer
 }
 
@@ -848,6 +903,7 @@ fn write_fast_transfer_special_message_content(
     folder_id: u64,
     object: &SpecialMessageSyncFact,
     send_options: u8,
+    message_children: FastTransferMessageChildren,
 ) {
     let source_key = manifest::special_message_source_key(object);
     let change_key = manifest::special_message_change_key(object);
@@ -866,11 +922,11 @@ fn write_fast_transfer_special_message_content(
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         &predecessor_change_list,
     );
-    write_bool_property(buffer, PID_TAG_ASSOCIATED, object.associated);
-    write_u32(buffer, PID_TAG_MID);
-    write_object_id(buffer, object.item_id);
-    // [MS-OXCMSG] section 2.2.1.6 and [MS-OXCFXICS] section 2.2.1.5:
-    // keep CopyTo/CopyProperties consistent with the ICS and GetProps views.
+    // [MS-OXCFXICS] sections 2.2.4.3.16 and 3.2.5.12, with
+    // [MS-OXPROPS] section 1.3.3: direct messageContent downloads exclude
+    // provider-internal PidTagAssociated (0x67AA) and PidTagMid (0x674A).
+    // [MS-OXCMSG] section 2.2.1.6: mfFAI remains the transmittable FAI
+    // discriminator for CopyTo/CopyProperties.
     let message_flags = if object.associated {
         MSGFLAG_FAI
     } else {
@@ -892,9 +948,28 @@ fn write_fast_transfer_special_message_content(
     write_utf16_property(buffer, PID_TAG_BODY_W, &object.body_text);
     write_i32_property(buffer, PID_TAG_MESSAGE_SIZE, object.message_size as i32);
     for (tag, value) in &object.named_properties {
-        if !manifest::special_message_property_is_copy_identity(*tag) {
+        if !manifest::special_message_property_is_copy_identity(*tag)
+            && !provider_defined_internal_property(*tag)
+        {
             write_special_message_property(buffer, object, *tag, value);
         }
+    }
+    // [MS-OXCFXICS] sections 2.2.4.1.5.1, 2.2.4.3.12, and 3.2.5.10:
+    // included recipient and attachment collections are each preceded by
+    // MetaTagFXDelProp, including when the collection is empty.
+    if message_children.recipients {
+        write_i32_property(
+            buffer,
+            META_TAG_FX_DEL_PROP,
+            PID_TAG_MESSAGE_RECIPIENTS as i32,
+        );
+    }
+    if message_children.attachments {
+        write_i32_property(
+            buffer,
+            META_TAG_FX_DEL_PROP,
+            PID_TAG_MESSAGE_ATTACHMENTS as i32,
+        );
     }
 }
 

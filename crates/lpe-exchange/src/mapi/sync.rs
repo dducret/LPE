@@ -1168,15 +1168,46 @@ pub(in crate::mapi) fn sync_attachment_facts_for(
     facts
 }
 
+fn fast_transfer_message_children(
+    rop_id: u8,
+    level: u8,
+    property_tags: &[u32],
+) -> mapi_mailstore::FastTransferMessageChildren {
+    // [MS-OXCFXICS] sections 3.2.5.8.1.1, 3.2.5.8.1.2, and 3.2.5.10:
+    // CopyTo lists exclusions, CopyProperties lists inclusions, and a nonzero
+    // Level excludes all descendant subobjects.
+    if level != 0 {
+        return mapi_mailstore::FastTransferMessageChildren::new(false, false);
+    }
+
+    let includes = |property_tag| property_tags.contains(&property_tag);
+    match RopId::from_u8(rop_id) {
+        Some(RopId::FastTransferSourceCopyTo) => mapi_mailstore::FastTransferMessageChildren::new(
+            !includes(PID_TAG_MESSAGE_RECIPIENTS),
+            !includes(PID_TAG_MESSAGE_ATTACHMENTS),
+        ),
+        Some(RopId::FastTransferSourceCopyProperties) => {
+            mapi_mailstore::FastTransferMessageChildren::new(
+                includes(PID_TAG_MESSAGE_RECIPIENTS),
+                includes(PID_TAG_MESSAGE_ATTACHMENTS),
+            )
+        }
+        _ => mapi_mailstore::FastTransferMessageChildren::all(),
+    }
+}
+
 pub(in crate::mapi) fn fast_transfer_manifest_for_object(
     rop_id: u8,
     send_options: u8,
+    level: u8,
+    property_tags: &[u32],
     object: &MapiObject,
     principal: &AccountPrincipal,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Option<(u64, Vec<u8>)> {
+    let message_children = fast_transfer_message_children(rop_id, level, property_tags);
     match object {
         MapiObject::Folder { folder_id, .. } => {
             if RopId::from_u8(rop_id) == Some(RopId::FastTransferSourceCopyFolder) {
@@ -1245,6 +1276,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 mapi_mailstore::fast_transfer_message_content_buffer_with_attachments(
                     &message,
                     &attachment_facts,
+                    message_children,
                 ),
             ))
         }
@@ -1266,6 +1298,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    message_children,
                 ),
             ))
         }
@@ -1287,6 +1320,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    message_children,
                 ),
             ))
         }
@@ -1308,6 +1342,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    message_children,
                 ),
             ))
         }
@@ -1322,6 +1357,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    message_children,
                 ),
             ))
         }
@@ -1343,6 +1379,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    message_children,
                 ),
             ))
         }
@@ -1359,6 +1396,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    message_children,
                 ),
             ))
         }

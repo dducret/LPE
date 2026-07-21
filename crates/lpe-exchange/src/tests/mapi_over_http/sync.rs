@@ -11485,8 +11485,8 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
         associated_object_id,
     );
     rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]);
-    rops.push(0);
-    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.push(0); // Level: include subobjects.
+    rops.extend_from_slice(&0x0000_2000u32.to_le_bytes()); // BestBody.
     rops.push(0x09); // Unicode | ForceUnicode, as sent by Outlook.
     rops.extend_from_slice(&0u16.to_le_bytes());
     rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
@@ -11513,6 +11513,8 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
     assert!(!contains_bytes(transfer, &0x4010_0003u32.to_le_bytes()));
     assert!(!contains_bytes(transfer, &0x400D_0003u32.to_le_bytes()));
     assert!(!contains_bytes(transfer, b"LPE-MAPI-FASTTRANSFER\0"));
+    assert!(!contains_bytes(transfer, &0x67AA_000Bu32.to_le_bytes()));
+    assert!(!contains_bytes(transfer, &0x674A_0014u32.to_le_bytes()));
     assert!(contains_bytes(
         transfer,
         &utf16z("Outlook Inbox view state")
@@ -11534,6 +11536,12 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
     let mut message_flags = PID_TAG_MESSAGE_FLAGS.to_le_bytes().to_vec();
     message_flags.extend_from_slice(&0x0000_0040u32.to_le_bytes());
     assert!(contains_bytes(transfer, &message_flags));
+    assert!(transfer.ends_with(&[
+        0x03, 0x00, 0x16, 0x40, // MetaTagFXDelProp.
+        0x0D, 0x00, 0x12, 0x0E, // PidTagMessageRecipients.
+        0x03, 0x00, 0x16, 0x40, // MetaTagFXDelProp.
+        0x0D, 0x00, 0x13, 0x0E, // PidTagMessageAttachments.
+    ]));
 }
 
 #[tokio::test]
