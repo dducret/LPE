@@ -117,6 +117,15 @@ fn active_source_key_index_guard_checks_semantics_in_update_and_validation_scrip
 }
 
 #[test]
+fn installation_check_accepts_the_canonical_unconfigured_local_ai_state() {
+    assert!(
+        CHECK_LPE.contains("check_http_json_field \"$HTTP_BASE/health/local-ai\" '\"offline_only\":true'")
+            && !CHECK_LPE.contains("'\"provider\":\"stub-local\"'"),
+        "check-lpe.sh must validate the stable offline-only invariant instead of a configurable provider"
+    );
+}
+
+#[test]
 fn source_preflight_is_read_only_and_checks_known_050_shape_deltas() {
     assert_contains_all(
         "0.5.1 source preflight",

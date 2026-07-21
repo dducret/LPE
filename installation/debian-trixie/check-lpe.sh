@@ -300,7 +300,7 @@ pass "MAPI active SourceKey uniqueness index is current"
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/live" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/ready" '"status":"ready"'
-check_http_json_field "$HTTP_BASE/health/local-ai" '"provider":"stub-local"'
+check_http_json_field "$HTTP_BASE/health/local-ai" '"offline_only":true'
 check_http_json_field "http://127.0.0.1/api/health" '"status":"ok"'
 check_http_json_field "http://127.0.0.1/api/health/live" '"status":"ok"'
 check_http_json_field "http://127.0.0.1/api/health/ready" '"status":"ready"'
