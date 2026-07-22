@@ -971,7 +971,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         crate::mapi::identity::INBOX_FOLDER_ID,
         &special,
         0x00,
-        true,
+        SpecialMessageFastTransferSelection::all(),
         FastTransferMessageChildren::all(),
     );
 
@@ -1031,7 +1031,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         crate::mapi::identity::INBOX_FOLDER_ID,
         &special,
         0x09,
-        true,
+        SpecialMessageFastTransferSelection::all(),
         FastTransferMessageChildren::all(),
     );
     let empty_message_children = [
@@ -1055,7 +1055,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         crate::mapi::identity::INBOX_FOLDER_ID,
         &special,
         0x09,
-        true,
+        SpecialMessageFastTransferSelection::all(),
         FastTransferMessageChildren::new(false, false),
     );
     assert!(!no_children_buffer
@@ -1068,7 +1068,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         crate::mapi::identity::INBOX_FOLDER_ID,
         &normal,
         0x09,
-        true,
+        SpecialMessageFastTransferSelection::all(),
         FastTransferMessageChildren::all(),
     );
     assert!(!normal_buffer

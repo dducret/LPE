@@ -143,10 +143,22 @@ before it is advertised.
   value accepted at the first successful Save is replayed unchanged (for
   example, `0x00000049`, not `0x00000040`). A missing `PidTagBody` remains
   absent; only an explicitly persisted empty body is emitted as a present
-  zero-length property. This follows `[MS-OXCMSG]` section 2.2.1.6,
-  `[MS-OXCFXICS]` sections 2.2.1.7, 2.2.3.1.1.1.1, 2.2.4.1.5.1,
-  2.2.4.3.12, 2.2.4.3.16, 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12,
-  `[MS-OXBBODY]` section 2.1.3.1, and `[MS-OXPROPS]` section 1.3.3. Complete
+  zero-length property. The server also projects exactly one read-only
+  `PidTagAccess` and `PidTagAccessLevel` in direct and ICS special-message
+  downloads when their property filters include them. The current owner-only
+  model emits message rights `0x00000007` and access level `0`; writable handles
+  and shared-folder rights will require handle-effective values rather than a
+  broader constant. The direct CopyTo value `0` is an interoperability inference
+  from the captured read-only `RopOpenMessage`, corroborated by the ICS example,
+  rather than an explicit FastTransfer handle-to-value rule; the ICS projection
+  is protocol alignment, not the proven cause of the Outlook report. This
+  follows `[MS-OXCMSG]` sections 2.2.1.1, 2.2.1.6, and 2.2.3.1.1,
+  `[MS-OXCPRPT]` sections 2.2.1.1 and 2.2.1.2,
+  `[MS-OXCFXICS]` sections 2.2.1.7, 2.2.3.1.1.1.1, 2.2.3.1.1.2.1,
+  2.2.3.2.1.1.1, 2.2.4.1.5.1, 2.2.4.3.12, 2.2.4.3.13, 2.2.4.3.16,
+  3.2.5.8.1.1, 3.2.5.8.1.2, 3.2.5.9.1.1, 3.2.5.10, 3.2.5.12, and 4.5,
+  `[MS-OXBBODY]` section 2.1.3.1, and `[MS-OXPROPS]` sections 1.3.3, 2.505,
+  and 2.507. Complete
   filtering of the ordinary property list remains an explicit gap.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
@@ -156,15 +168,14 @@ before it is advertised.
   `SynchronizationExtraFlags`, `PropertyTagCount`, and `PropertyTags`; the
   parser must consume those fields before reading the next ROP in a batch.
 
-`mapi_mailstore.rs`, `mapi_mailstore/manifest.rs`, and `mapi/sync.rs` have
-reached the thousand-line split threshold. Before adding further special-message
-behavior, extract the shared `SpecialMessageSyncFact` property selection and
-FastTransfer serialization into a focused `mapi_mailstore/special_message.rs`,
-then extract associated-configuration projection from `mapi/sync.rs` into
-`mapi/sync/associated_config.rs`. Keep the existing public entry points as thin
-wiring and verify the split with the special-message unit tests, the realistic
-`MessageListSettings` import/reconnect regression, and
-`cargo test -p lpe-exchange`.
+`mapi_mailstore.rs`, `mapi_mailstore/manifest.rs`, and `mapi/sync.rs` reached the
+thousand-line split threshold. Shared `SpecialMessageSyncFact` property
+selection and FastTransfer serialization now live in
+`mapi_mailstore/special_message.rs`; associated-configuration projection lives
+in `mapi/sync/associated_config.rs`. Keep further behavior in those focused
+helpers and the public entry points as thin wiring. Verify changes with the
+special-message unit tests, the realistic `MessageListSettings`
+import/reconnect regression, and `cargo test -p lpe-exchange`.
 
 ### Table Projection Contract
 

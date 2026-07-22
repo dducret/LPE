@@ -433,7 +433,7 @@ fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
         CALENDAR_FOLDER_ID,
         &objects[0],
         0x09,
-        true,
+        mapi_mailstore::SpecialMessageFastTransferSelection::all(),
         mapi_mailstore::FastTransferMessageChildren::all(),
     );
 
@@ -516,7 +516,7 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             folder_id,
             object,
             0x09,
-            true,
+            mapi_mailstore::SpecialMessageFastTransferSelection::all(),
             mapi_mailstore::FastTransferMessageChildren::all(),
         );
         let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
@@ -688,7 +688,7 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
         CALENDAR_FOLDER_ID,
         &object,
         0x09,
-        true,
+        mapi_mailstore::SpecialMessageFastTransferSelection::all(),
         mapi_mailstore::FastTransferMessageChildren::all(),
     );
     let mut expected = PID_LID_BUSY_STATUS_TAG.to_le_bytes().to_vec();
@@ -1684,7 +1684,7 @@ fn fast_transfer_message_children_follow_level_and_property_tag_semantics() {
 }
 
 #[test]
-fn special_message_search_key_follows_fast_transfer_property_filters() {
+fn special_message_general_properties_follow_fast_transfer_property_filters() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let canonical_id = Uuid::from_u128(0x6d617069_6d6c_7350_8000_000000000201);
     let item_id = crate::mapi::identity::mapi_store_id(0x7a03);
@@ -1719,40 +1719,52 @@ fn special_message_search_key_follows_fast_transfer_property_filters() {
         .expect("associated configuration manifest")
         .1
     };
-    let search_key_count = |buffer: &[u8]| {
+    let property_count = |buffer: &[u8], property_tag: u32| {
         buffer
             .windows(4)
-            .filter(|window| *window == PID_TAG_SEARCH_KEY.to_le_bytes())
+            .filter(|window| *window == property_tag.to_le_bytes())
             .count()
     };
 
-    assert_eq!(
-        search_key_count(&transfer(RopId::FastTransferSourceCopyTo.as_u8(), &[])),
-        1
-    );
-    assert_eq!(
-        search_key_count(&transfer(
-            RopId::FastTransferSourceCopyTo.as_u8(),
-            &[PID_TAG_SEARCH_KEY],
-        )),
-        0,
-        "CopyTo must honor its SearchKey exclusion"
-    );
-    assert_eq!(
-        search_key_count(&transfer(
-            RopId::FastTransferSourceCopyProperties.as_u8(),
-            &[],
-        )),
-        0,
-        "CopyProperties must not add an unrequested SearchKey"
-    );
-    assert_eq!(
-        search_key_count(&transfer(
-            RopId::FastTransferSourceCopyProperties.as_u8(),
-            &[PID_TAG_SEARCH_KEY],
-        )),
-        1
-    );
+    for (property_tag, property_name) in [
+        (PID_TAG_ACCESS, "PidTagAccess"),
+        (PID_TAG_ACCESS_LEVEL, "PidTagAccessLevel"),
+        (PID_TAG_SEARCH_KEY, "PidTagSearchKey"),
+    ] {
+        assert_eq!(
+            property_count(
+                &transfer(RopId::FastTransferSourceCopyTo.as_u8(), &[]),
+                property_tag,
+            ),
+            1
+        );
+        assert_eq!(
+            property_count(
+                &transfer(RopId::FastTransferSourceCopyTo.as_u8(), &[property_tag],),
+                property_tag,
+            ),
+            0,
+            "CopyTo must honor its {property_name} exclusion"
+        );
+        assert_eq!(
+            property_count(
+                &transfer(RopId::FastTransferSourceCopyProperties.as_u8(), &[]),
+                property_tag,
+            ),
+            0,
+            "CopyProperties must not add an unrequested {property_name}"
+        );
+        assert_eq!(
+            property_count(
+                &transfer(
+                    RopId::FastTransferSourceCopyProperties.as_u8(),
+                    &[property_tag],
+                ),
+                property_tag,
+            ),
+            1
+        );
+    }
 }
 
 #[test]

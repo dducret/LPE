@@ -97,9 +97,9 @@ pub(crate) fn download_change_facts(
         )
         .then(|| DownloadChangeFact {
             object_id: object.item_id,
-            change_number: manifest::special_message_change_number(object),
+            change_number: special_message::special_message_change_number(object),
             associated: object.associated,
-            source_key: manifest::special_message_sync_source_key(object, sync_flags),
+            source_key: special_message::special_message_sync_source_key(object, sync_flags),
         })
     }));
     facts

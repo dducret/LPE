@@ -21,9 +21,11 @@ pub(in crate::mapi) use super::identity::{
     TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
 };
 
+mod associated_config;
 mod responses;
 mod scope;
 
+use associated_config::associated_config_sync_object;
 pub(in crate::mapi) use responses::*;
 pub(in crate::mapi) use scope::*;
 
@@ -879,138 +881,6 @@ fn delegate_freebusy_sync_object(
     }
 }
 
-fn associated_config_sync_object(
-    message: &crate::mapi_store::MapiAssociatedConfigMessage,
-) -> mapi_mailstore::SpecialMessageSyncFact {
-    let mut named_properties = Vec::new();
-    let stored_properties = mapi_properties_from_json(&message.properties_json);
-    for (tag, value) in stored_properties.clone() {
-        if associated_config_standard_sync_tag(tag) {
-            continue;
-        }
-        if let Some(value) = special_message_property_value(value) {
-            named_properties.push((tag, value));
-        }
-    }
-    for &tag in associated_config_default_sync_tags(message, &stored_properties) {
-        let canonical_tag = canonical_property_storage_tag(tag);
-        if associated_config_standard_sync_tag(canonical_tag)
-            || stored_properties.contains_key(&canonical_tag)
-        {
-            continue;
-        }
-        if let Some(value) =
-            associated_config_property_value(message, tag).and_then(special_message_property_value)
-        {
-            named_properties.push((tag, value));
-        }
-    }
-    let change_number = stored_properties
-        .get(&PID_TAG_CHANGE_NUMBER)
-        .and_then(MapiValue::as_i64)
-        .and_then(|value| u64::try_from(value).ok())
-        .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(message.id));
-    let last_modified_filetime = stored_properties
-        .get(&PID_TAG_LAST_MODIFICATION_TIME)
-        .and_then(MapiValue::as_i64)
-        .and_then(|value| u64::try_from(value).ok())
-        .unwrap_or_else(|| mapi_mailstore::filetime_from_change_number(change_number));
-    let message_size = message
-        .subject
-        .len()
-        .saturating_add(message.message_class.len())
-        .saturating_add(message.properties_json.to_string().len())
-        .min(i64::MAX as usize) as i64;
-
-    mapi_mailstore::SpecialMessageSyncFact {
-        folder_id: message.folder_id,
-        item_id: message.id,
-        canonical_id: message.canonical_id,
-        associated: true,
-        subject: message.subject.clone(),
-        body_text: associated_config_text_property(message, PID_TAG_BODY_W),
-        message_class: message.message_class.clone(),
-        last_modified_filetime,
-        message_size,
-        read_state: None,
-        named_properties,
-        named_property_definitions: HashMap::new(),
-    }
-}
-
-fn associated_config_default_sync_tags(
-    message: &crate::mapi_store::MapiAssociatedConfigMessage,
-    stored_properties: &HashMap<u32, MapiValue>,
-) -> &'static [u32] {
-    if crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
-        // [MS-OXOCFG] sections 2.2.2.1 and 2.2.5.1: a persisted
-        // PidTagRoamingDatatypes value is the client's complete declaration of
-        // the streams that exist. LPE therefore preserves the client-owned bag
-        // in CopyTo/ICS instead of adding absent compatibility properties.
-        if stored_properties.contains_key(&PID_TAG_ROAMING_DATATYPES) {
-            return &[];
-        }
-        &[
-            PID_TAG_ROAMING_DATATYPES,
-            PID_TAG_ROAMING_DICTIONARY,
-            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
-            PID_NAME_CONTENT_CLASS_W_TAG,
-            PID_NAME_CONTENT_TYPE_W_TAG,
-        ]
-    } else if message
-        .message_class
-        .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
-    {
-        &[
-            PID_TAG_VIEW_DESCRIPTOR_CLSID,
-            PID_TAG_VIEW_DESCRIPTOR_FLAGS,
-            PID_TAG_VIEW_DESCRIPTOR_VERSION,
-            PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL,
-            PID_TAG_VIEW_DESCRIPTOR_NAME_W,
-            PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
-            PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE,
-            PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
-            PID_TAG_VIEW_DESCRIPTOR_BINARY,
-            OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
-            OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
-            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
-        ]
-    } else {
-        &[]
-    }
-}
-
-fn associated_config_standard_sync_tag(tag: u32) -> bool {
-    matches!(
-        canonical_property_storage_tag(tag),
-        PID_TAG_FOLDER_ID
-            | PID_TAG_MID
-            | PID_TAG_INST_ID
-            | PID_TAG_INSTANCE_NUM
-            | PID_TAG_ENTRY_ID
-            | PID_TAG_INSTANCE_KEY
-            | PID_TAG_ASSOCIATED
-            | PID_TAG_MESSAGE_SIZE
-            | PID_TAG_SUBJECT_W
-            | PID_TAG_NORMALIZED_SUBJECT_W
-            | PID_TAG_MESSAGE_CLASS_W
-            | PID_TAG_BODY_W
-            | PID_TAG_LAST_MODIFICATION_TIME
-            | PID_TAG_LOCAL_COMMIT_TIME
-            | PID_TAG_MESSAGE_DELIVERY_TIME
-            | PID_TAG_ACCESS
-    )
-}
-
-fn associated_config_text_property(
-    message: &crate::mapi_store::MapiAssociatedConfigMessage,
-    tag: u32,
-) -> Option<String> {
-    mapi_properties_from_json(&message.properties_json)
-        .remove(&tag)
-        .and_then(MapiValue::into_text)
-}
-
 fn special_message_property_value(
     value: MapiValue,
 ) -> Option<mapi_mailstore::SpecialMessagePropertyValue> {
@@ -1187,17 +1057,17 @@ fn fast_transfer_message_children(
     }
 
     mapi_mailstore::FastTransferMessageChildren::new(
-        fast_transfer_property_included(rop_id, property_tags, PID_TAG_MESSAGE_RECIPIENTS),
-        fast_transfer_property_included(rop_id, property_tags, PID_TAG_MESSAGE_ATTACHMENTS),
+        mapi_mailstore::fast_transfer_property_included(
+            rop_id,
+            property_tags,
+            PID_TAG_MESSAGE_RECIPIENTS,
+        ),
+        mapi_mailstore::fast_transfer_property_included(
+            rop_id,
+            property_tags,
+            PID_TAG_MESSAGE_ATTACHMENTS,
+        ),
     )
-}
-
-fn fast_transfer_property_included(rop_id: u8, property_tags: &[u32], property_tag: u32) -> bool {
-    match RopId::from_u8(rop_id) {
-        Some(RopId::FastTransferSourceCopyTo) => !property_tags.contains(&property_tag),
-        Some(RopId::FastTransferSourceCopyProperties) => property_tags.contains(&property_tag),
-        _ => true,
-    }
 }
 
 pub(in crate::mapi) fn fast_transfer_manifest_for_object(
@@ -1212,8 +1082,8 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
     snapshot: &MapiMailStoreSnapshot,
 ) -> Option<(u64, Vec<u8>)> {
     let message_children = fast_transfer_message_children(rop_id, level, property_tags);
-    let include_search_key =
-        fast_transfer_property_included(rop_id, property_tags, PID_TAG_SEARCH_KEY);
+    let special_message_selection =
+        mapi_mailstore::SpecialMessageFastTransferSelection::for_copy_rop(rop_id, property_tags);
     match object {
         MapiObject::Folder { folder_id, .. } => {
             if RopId::from_u8(rop_id) == Some(RopId::FastTransferSourceCopyFolder) {
@@ -1304,7 +1174,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    include_search_key,
+                    special_message_selection,
                     message_children,
                 ),
             ))
@@ -1327,7 +1197,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    include_search_key,
+                    special_message_selection,
                     message_children,
                 ),
             ))
@@ -1350,7 +1220,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    include_search_key,
+                    special_message_selection,
                     message_children,
                 ),
             ))
@@ -1366,7 +1236,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    include_search_key,
+                    special_message_selection,
                     message_children,
                 ),
             ))
@@ -1389,7 +1259,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    include_search_key,
+                    special_message_selection,
                     message_children,
                 ),
             ))
@@ -1407,7 +1277,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    include_search_key,
+                    special_message_selection,
                     message_children,
                 ),
             ))

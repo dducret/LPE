@@ -11,6 +11,7 @@ mod client_state;
 mod diagnostics;
 mod folders;
 mod manifest;
+mod special_message;
 #[cfg(test)]
 mod tests;
 
@@ -31,11 +32,16 @@ pub(crate) use manifest::{
     canonical_message_change_number_with_attachments, change_key_for_change_number,
     change_number_for_store_id, filetime_from_change_number, filetime_from_rfc3339_utc,
     predecessor_change_list, source_key_for_mailbox_folder, source_key_for_mailbox_role,
-    source_key_for_store_id, source_key_for_uuid, special_message_source_key,
+    source_key_for_store_id, source_key_for_uuid,
     sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions,
     sync_state_token_with_attachments, sync_state_token_with_special_objects,
     virtual_special_mailbox, AttachmentSyncFact, FaiContentSyncDebugContext,
-    MessageAttachmentSyncFacts, SpecialMessagePropertyValue, SpecialMessageSyncFact,
+    MessageAttachmentSyncFacts,
+};
+pub(crate) use special_message::{
+    fast_transfer_message_content_buffer_with_special_object, fast_transfer_property_included,
+    special_message_source_key, SpecialMessageFastTransferSelection, SpecialMessagePropertyValue,
+    SpecialMessageSyncFact,
 };
 
 #[cfg(test)]
@@ -53,10 +59,7 @@ pub(crate) use diagnostics::{
 };
 
 pub(crate) use crate::mapi::identity::STORE_REPLICA_GUID;
-use crate::mapi::properties::{
-    canonical_property_storage_tag, fast_transfer_named_property_for_message_tag,
-    MapiNamedPropertyKind,
-};
+use crate::mapi::properties::canonical_property_storage_tag;
 use crate::mapi::wire::{FastTransferMarker, MapiSyncType};
 
 const INCR_SYNC_CHG: u32 = FastTransferMarker::IncrSyncChg.as_u32();
@@ -114,6 +117,7 @@ const PID_TAG_ATTACH_FLAGS: u32 = 0x3714_0003;
 const PID_TAG_ATTACHMENT_HIDDEN: u32 = 0x7FFE_000B;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
+const PID_TAG_ACCESS_LEVEL: u32 = 0x0FF7_0003;
 const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
 const MAPI_ACCESS_MODIFY: u32 = 0x0000_0001;
@@ -122,6 +126,7 @@ const MAPI_ACCESS_DELETE: u32 = 0x0000_0004;
 const MAPI_ACCESS_CREATE_HIERARCHY: u32 = 0x0000_0008;
 const MAPI_ACCESS_CREATE_CONTENTS: u32 = 0x0000_0010;
 const MAPI_ACCESS_CREATE_ASSOCIATED: u32 = 0x0000_0020;
+const MAPI_MESSAGE_ACCESS: u32 = MAPI_ACCESS_MODIFY | MAPI_ACCESS_READ | MAPI_ACCESS_DELETE;
 const MAPI_FOLDER_ACCESS: u32 = MAPI_ACCESS_MODIFY
     | MAPI_ACCESS_READ
     | MAPI_ACCESS_DELETE
@@ -882,111 +887,6 @@ fn fast_transfer_email_matches_folder(
         })
 }
 
-pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
-    folder_id: u64,
-    object: &SpecialMessageSyncFact,
-    send_options: u8,
-    include_search_key: bool,
-    message_children: FastTransferMessageChildren,
-) -> Vec<u8> {
-    let mut buffer = Vec::new();
-    write_fast_transfer_special_message_content(
-        &mut buffer,
-        folder_id,
-        object,
-        send_options,
-        include_search_key,
-        message_children,
-    );
-    buffer
-}
-
-fn write_fast_transfer_special_message_content(
-    buffer: &mut Vec<u8>,
-    folder_id: u64,
-    object: &SpecialMessageSyncFact,
-    send_options: u8,
-    include_search_key: bool,
-    message_children: FastTransferMessageChildren,
-) {
-    let source_key = manifest::special_message_source_key(object);
-    let change_key = manifest::special_message_change_key(object);
-    let predecessor_change_list = manifest::special_message_predecessor_change_list(object);
-    write_binary_property(
-        buffer,
-        PID_TAG_PARENT_SOURCE_KEY,
-        &source_key_for_store_id(folder_id),
-    );
-    write_binary_property(buffer, PID_TAG_SOURCE_KEY, &source_key);
-    // [MS-OXCMSG] sections 2.2.1.1 and 3.2.5.2 and [MS-OXCPRPT]
-    // section 2.2.1.9: every Message has a server-generated, read-only
-    // SearchKey. It remains transmittable in the direct messageContent root
-    // under [MS-OXCFXICS] sections 3.2.5.8.1.1 and 3.2.5.12.
-    if include_search_key {
-        write_binary_property(
-            buffer,
-            PID_TAG_SEARCH_KEY,
-            &manifest::special_message_search_key(object),
-        );
-    }
-    write_u32(buffer, PID_TAG_LAST_MODIFICATION_TIME);
-    write_i64(buffer, object.last_modified_filetime as i64);
-    write_binary_property(buffer, PID_TAG_CHANGE_KEY, &change_key);
-    write_binary_property(
-        buffer,
-        PID_TAG_PREDECESSOR_CHANGE_LIST,
-        &predecessor_change_list,
-    );
-    // [MS-OXCFXICS] sections 2.2.4.3.16 and 3.2.5.12, with
-    // [MS-OXPROPS] section 1.3.3: direct messageContent downloads exclude
-    // provider-internal PidTagAssociated (0x67AA) and PidTagMid (0x674A).
-    // [MS-OXCMSG] section 2.2.1.6: mfFAI remains the transmittable FAI
-    // discriminator for CopyTo/CopyProperties.
-    let message_flags = manifest::special_message_flags(object);
-    write_i32_property(buffer, PID_TAG_MESSAGE_FLAGS, message_flags as i32);
-    write_utf16_property(buffer, PID_TAG_SUBJECT_W, &object.subject);
-    // [MS-OXCFXICS] sections 2.2.3.1.1.1.1 and 3.2.5.8.1.1:
-    // canonical subjects are stored as Unicode, so Unicode/ForceUnicode
-    // select PtypUnicode; without either flag use PtypString8.
-    if send_options & (FAST_TRANSFER_SEND_OPTION_UNICODE | FAST_TRANSFER_SEND_OPTION_FORCE_UNICODE)
-        != 0
-    {
-        write_utf16_property(buffer, PID_TAG_NORMALIZED_SUBJECT_W, &object.subject);
-    } else {
-        write_string8_property(buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
-    }
-    write_utf16_property(buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
-    if let Some(body_text) = &object.body_text {
-        write_utf16_property(buffer, PID_TAG_BODY_W, body_text);
-    }
-    write_i32_property(buffer, PID_TAG_MESSAGE_SIZE, object.message_size as i32);
-    for (tag, value) in &object.named_properties {
-        if !manifest::special_message_property_is_copy_identity(*tag)
-            && *tag != PID_TAG_MESSAGE_FLAGS
-            && !provider_defined_internal_property(*tag)
-        {
-            write_special_message_property(buffer, object, *tag, value);
-        }
-    }
-    // [MS-OXCFXICS] sections 2.2.4.1.5.1, 2.2.4.3.12, and 3.2.5.10:
-    // included recipient and attachment collections are each preceded by
-    // MetaTagFXDelProp, including when the collection is empty.
-    if message_children.recipients {
-        write_i32_property(
-            buffer,
-            META_TAG_FX_DEL_PROP,
-            PID_TAG_MESSAGE_RECIPIENTS as i32,
-        );
-    }
-    if message_children.attachments {
-        write_i32_property(
-            buffer,
-            META_TAG_FX_DEL_PROP,
-            PID_TAG_MESSAGE_ATTACHMENTS as i32,
-        );
-    }
-}
-
 pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {
     let mut flags = MSGFLAG_UNMODIFIED;
     if !email.unread {
@@ -1321,101 +1221,6 @@ fn write_string8_property(buffer: &mut Vec<u8>, property_tag: u32, value: &str) 
     bytes.push(0);
     write_u32(buffer, bytes.len().min(u32::MAX as usize) as u32);
     buffer.extend_from_slice(&bytes);
-}
-
-fn write_special_message_property(
-    buffer: &mut Vec<u8>,
-    object: &SpecialMessageSyncFact,
-    property_tag: u32,
-    value: &SpecialMessagePropertyValue,
-) {
-    if !write_fast_transfer_property_info(buffer, object, property_tag) {
-        return;
-    }
-    match value {
-        SpecialMessagePropertyValue::Binary(value) => {
-            write_u32(buffer, value.len().min(u32::MAX as usize) as u32);
-            buffer.extend_from_slice(value);
-        }
-        SpecialMessagePropertyValue::Bool(value) => {
-            buffer.extend_from_slice(&(*value as u16).to_le_bytes());
-        }
-        SpecialMessagePropertyValue::Guid(value) => buffer.extend_from_slice(value),
-        SpecialMessagePropertyValue::I32(value) => write_i32(buffer, *value),
-        SpecialMessagePropertyValue::I64(value) => write_i64(buffer, *value),
-        SpecialMessagePropertyValue::U32(value) => write_u32(buffer, *value),
-        SpecialMessagePropertyValue::U64(value) => write_i64(buffer, *value as i64),
-        SpecialMessagePropertyValue::String(value) => {
-            let mut bytes = value
-                .encode_utf16()
-                .flat_map(u16::to_le_bytes)
-                .collect::<Vec<_>>();
-            bytes.extend_from_slice(&0u16.to_le_bytes());
-            write_u32(buffer, bytes.len().min(u32::MAX as usize) as u32);
-            buffer.extend_from_slice(&bytes);
-        }
-        SpecialMessagePropertyValue::MultiString(values) => {
-            write_u32(buffer, values.len().min(u32::MAX as usize) as u32);
-            for value in values.iter().take(u32::MAX as usize) {
-                let mut bytes = value
-                    .encode_utf16()
-                    .flat_map(u16::to_le_bytes)
-                    .collect::<Vec<_>>();
-                bytes.extend_from_slice(&0u16.to_le_bytes());
-                write_u32(buffer, bytes.len().min(u32::MAX as usize) as u32);
-                buffer.extend_from_slice(&bytes);
-            }
-        }
-        SpecialMessagePropertyValue::Time(value) => {
-            write_i64(buffer, filetime_from_rfc3339_utc(value) as i64)
-        }
-    }
-}
-
-fn write_fast_transfer_property_info(
-    buffer: &mut Vec<u8>,
-    object: &SpecialMessageSyncFact,
-    property_tag: u32,
-) -> bool {
-    let property_id = (property_tag >> 16) as u16;
-    if property_id < 0x8000 {
-        write_u32(buffer, property_tag);
-        return true;
-    }
-
-    let property = object
-        .named_property_definitions
-        .get(&property_id)
-        .cloned()
-        .or_else(|| {
-            fast_transfer_named_property_for_message_tag(&object.message_class, property_tag)
-        });
-    let Some(property) = property else {
-        tracing::error!(
-            adapter = "mapi",
-            message_class = %object.message_class,
-            property_tag = format_args!("0x{property_tag:08x}"),
-            "cannot encode FastTransfer named property without its mailbox mapping"
-        );
-        return false;
-    };
-
-    // [MS-OXCFXICS] section 2.2.4.1: a named property is serialized as
-    // the property tag, property-set GUID and its LID/name definition.
-    write_u32(buffer, property_tag);
-    buffer.extend_from_slice(&property.guid);
-    match property.kind {
-        MapiNamedPropertyKind::Lid(lid) => {
-            buffer.push(0x00);
-            write_u32(buffer, lid);
-        }
-        MapiNamedPropertyKind::Name(name) => {
-            buffer.push(0x01);
-            buffer.extend(name.encode_utf16().flat_map(u16::to_le_bytes));
-            buffer.extend_from_slice(&0u16.to_le_bytes());
-        }
-    }
-    true
 }
 
 pub(crate) fn fast_transfer_property_value_start(

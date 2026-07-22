@@ -12846,6 +12846,9 @@ struct StrictContentSyncStream {
     cnset_read: Vec<u8>,
 }
 
+const STRICT_PID_TAG_ACCESS: u32 = 0x0FF4_0003;
+const STRICT_PID_TAG_ACCESS_LEVEL: u32 = 0x0FF7_0003;
+
 #[derive(Debug)]
 struct StrictContentMessageChange {
     source_key: Vec<u8>,
@@ -12853,6 +12856,8 @@ struct StrictContentMessageChange {
     change_key: Vec<u8>,
     predecessor_change_list: Vec<u8>,
     body_tags: Vec<u32>,
+    access: Option<u32>,
+    access_level: Option<u32>,
     mid: Option<u64>,
     change_number: Option<u64>,
     last_modification_time: Option<u64>,
@@ -12864,6 +12869,8 @@ struct StrictContentMessageChange {
 struct StrictContentMessageBuilder {
     header_tags: Vec<u32>,
     body_tags: Vec<u32>,
+    access: Option<u32>,
+    access_level: Option<u32>,
     source_key: Option<Vec<u8>>,
     parent_source_key: Option<Vec<u8>>,
     change_key: Option<Vec<u8>>,
@@ -13311,6 +13318,10 @@ fn strict_record_content_body_property(
         PID_TAG_MESSAGE_FLAGS | PID_TAG_FLAG_STATUS => {
             let _ = strict_decode_u32_property(&property)?;
         }
+        STRICT_PID_TAG_ACCESS => message.access = Some(strict_decode_u32_property(&property)?),
+        STRICT_PID_TAG_ACCESS_LEVEL => {
+            message.access_level = Some(strict_decode_u32_property(&property)?)
+        }
         PID_TAG_MESSAGE_SIZE => {
             let _ = strict_decode_i32_property(&property)?;
         }
@@ -13360,6 +13371,8 @@ fn strict_finish_content_message(
         change_key,
         predecessor_change_list,
         body_tags: message.body_tags,
+        access: message.access,
+        access_level: message.access_level,
         mid: message.mid,
         change_number: message.change_number,
         last_modification_time: message.last_modification_time,

@@ -10648,6 +10648,30 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         crate::mapi_mailstore::source_key_for_store_id(imported_message_id),
         "direct CopyTo must generate the stable server SearchKey after the submitted read-only value was discarded"
     );
+    // [MS-OXCMSG] section 2.2.1.1 requires these server-owned general
+    // properties on every Message object. [MS-OXCPRPT] sections 2.2.1.1
+    // and 2.2.1.2 define the owner's available operations and the read-only
+    // level. AccessLevel=0 is inferred here from the trace's RopOpenMessage
+    // OpenModeFlags=0x00; FastTransfer does not state that relation explicitly.
+    for (tag, expected, name) in [
+        (0x0FF4_0003, 0x0000_0007, "PidTagAccess"),
+        (0x0FF7_0003, 0x0000_0000, "PidTagAccessLevel"),
+    ] {
+        let matches = properties
+            .iter()
+            .filter(|property| property.tag == tag)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matches.len(),
+            1,
+            "direct CopyTo must project exactly one {name}: {transfer:02x?}"
+        );
+        assert_eq!(
+            strict_decode_i32_property(matches[0]).unwrap(),
+            expected,
+            "direct CopyTo must project the effective {name} value"
+        );
+    }
     assert!(
         !properties
             .iter()
@@ -10773,6 +10797,10 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         downloaded.last_modification_time,
         Some(imported_last_modification_time as u64)
     );
+    assert!(downloaded.body_tags.contains(&0x0FF4_0003));
+    assert!(downloaded.body_tags.contains(&0x0FF7_0003));
+    assert_eq!(downloaded.access, Some(0x0000_0007));
+    assert_eq!(downloaded.access_level, Some(0x0000_0000));
     assert!(downloaded.body_tags.contains(&0x7C06_0003));
     for absent_tag in [
         0x7C07_0102,

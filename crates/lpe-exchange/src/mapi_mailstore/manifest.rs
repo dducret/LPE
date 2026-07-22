@@ -1,3 +1,10 @@
+use super::special_message::{
+    special_message_access, special_message_access_level, special_message_change_key,
+    special_message_change_number, special_message_flags, special_message_parent_source_key,
+    special_message_predecessor_change_list, special_message_property_is_ics_identity,
+    special_message_property_is_server_access, special_message_search_key,
+    special_message_sync_source_key, write_special_message_property,
+};
 use super::*;
 
 const OWNER_INBOX_SPECIAL_FOLDER_ENTRY_IDS: [(u32, u64); 7] = [
@@ -24,22 +31,6 @@ pub(crate) struct AttachmentSyncFact {
 pub(crate) struct MessageAttachmentSyncFacts {
     pub(crate) message_id: Uuid,
     pub(crate) attachments: Vec<AttachmentSyncFact>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SpecialMessageSyncFact {
-    pub(crate) folder_id: u64,
-    pub(crate) item_id: u64,
-    pub(crate) canonical_id: Uuid,
-    pub(crate) associated: bool,
-    pub(crate) subject: String,
-    pub(crate) body_text: Option<String>,
-    pub(crate) message_class: String,
-    pub(crate) last_modified_filetime: u64,
-    pub(crate) message_size: i64,
-    pub(crate) read_state: Option<bool>,
-    pub(crate) named_properties: Vec<(u32, SpecialMessagePropertyValue)>,
-    pub(crate) named_property_definitions: HashMap<u16, crate::mapi::properties::MapiNamedProperty>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -109,20 +100,6 @@ fn write_normalized_subject_property(buffer: &mut Vec<u8>, property_tag: u32, su
     } else {
         write_string8_property(buffer, property_tag, subject);
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SpecialMessagePropertyValue {
-    Binary(Vec<u8>),
-    Bool(bool),
-    Guid([u8; 16]),
-    I32(i32),
-    I64(i64),
-    U32(u32),
-    U64(u64),
-    String(String),
-    MultiString(Vec<String>),
-    Time(String),
 }
 
 pub(crate) fn canonical_folder_change_number(mailbox: &JmapMailbox) -> u64 {
@@ -218,124 +195,6 @@ pub(crate) fn predecessor_change_list(change_number: u64) -> Vec<u8> {
     list.push(change_key.len() as u8);
     list.extend_from_slice(&change_key);
     list
-}
-
-fn special_message_binary_property(
-    object: &SpecialMessageSyncFact,
-    property_tag: u32,
-) -> Option<&[u8]> {
-    object
-        .named_properties
-        .iter()
-        .find_map(|(tag, value)| match (*tag == property_tag, value) {
-            (true, SpecialMessagePropertyValue::Binary(value)) => Some(value.as_slice()),
-            _ => None,
-        })
-}
-
-pub(crate) fn special_message_source_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
-    // [MS-OXCFXICS] 3.2.5.5: output a persisted PidTagSourceKey and
-    // generate one from the internal identifier only when it is missing.
-    special_message_binary_property(object, PID_TAG_SOURCE_KEY)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| source_key_for_store_id(object.item_id))
-}
-
-pub(super) fn special_message_sync_source_key(
-    object: &SpecialMessageSyncFact,
-    sync_flags: u16,
-) -> Vec<u8> {
-    if sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0 {
-        source_key_for_store_id(object.item_id)
-    } else {
-        special_message_source_key(object)
-    }
-}
-
-fn special_message_parent_source_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
-    special_message_binary_property(object, PID_TAG_PARENT_SOURCE_KEY)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| source_key_for_store_id(object.folder_id))
-}
-
-pub(super) fn special_message_search_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
-    // [MS-OXCPRPT] section 2.2.1.9: SearchKey is a read-only search identity.
-    special_message_binary_property(object, PID_TAG_SEARCH_KEY)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| source_key_for_store_id(object.item_id))
-}
-
-pub(super) fn special_message_change_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
-    special_message_binary_property(object, PID_TAG_CHANGE_KEY)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| change_key_for_change_number(change_number_for_store_id(object.item_id)))
-}
-
-pub(super) fn special_message_predecessor_change_list(object: &SpecialMessageSyncFact) -> Vec<u8> {
-    special_message_binary_property(object, PID_TAG_PREDECESSOR_CHANGE_LIST)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| predecessor_change_list(change_number_for_store_id(object.item_id)))
-}
-
-pub(super) fn special_message_change_number(object: &SpecialMessageSyncFact) -> u64 {
-    object
-        .named_properties
-        .iter()
-        .find_map(|(tag, value)| match (*tag, value) {
-            (PID_TAG_CHANGE_NUMBER, SpecialMessagePropertyValue::U64(value)) => Some(*value),
-            _ => None,
-        })
-        .unwrap_or_else(|| change_number_for_store_id(object.item_id))
-}
-
-pub(super) fn special_message_flags(object: &SpecialMessageSyncFact) -> u32 {
-    let flags = object
-        .named_properties
-        .iter()
-        .find_map(|(tag, value)| match (*tag, value) {
-            (PID_TAG_MESSAGE_FLAGS, SpecialMessagePropertyValue::I32(value)) => Some(*value as u32),
-            (PID_TAG_MESSAGE_FLAGS, SpecialMessagePropertyValue::U32(value)) => Some(*value),
-            _ => None,
-        });
-    match flags {
-        Some(flags) if object.associated => flags | MSGFLAG_FAI,
-        Some(flags) => flags,
-        None => {
-            if object.associated {
-                MSGFLAG_FAI
-            } else if object.read_state == Some(false) {
-                0
-            } else {
-                MSGFLAG_READ
-            }
-        }
-    }
-}
-
-pub(super) fn special_message_property_is_ics_identity(property_tag: u32) -> bool {
-    matches!(
-        property_tag,
-        PID_TAG_SOURCE_KEY
-            | PID_TAG_PARENT_SOURCE_KEY
-            | PID_TAG_RECORD_KEY
-            | PID_TAG_SEARCH_KEY
-            | PID_TAG_CHANGE_KEY
-            | PID_TAG_PREDECESSOR_CHANGE_LIST
-            | PID_TAG_CHANGE_NUMBER
-    )
-}
-
-pub(super) fn special_message_property_is_copy_identity(property_tag: u32) -> bool {
-    matches!(
-        property_tag,
-        PID_TAG_SOURCE_KEY
-            | PID_TAG_PARENT_SOURCE_KEY
-            | PID_TAG_RECORD_KEY
-            | PID_TAG_SEARCH_KEY
-            | PID_TAG_CHANGE_KEY
-            | PID_TAG_PREDECESSOR_CHANGE_LIST
-            | PID_TAG_CHANGE_NUMBER
-    )
 }
 
 pub(crate) fn filetime_from_rfc3339_utc(value: &str) -> u64 {
@@ -1098,6 +957,28 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 &special_message_search_key(object),
             );
         }
+        // [MS-OXCMSG] section 2.2.1.1 requires these server-owned
+        // properties on every Message object. [MS-OXCFXICS] section 4.5
+        // includes PidTagAccessLevel in a content synchronization download.
+        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_ACCESS) {
+            write_i32_property(
+                &mut buffer,
+                PID_TAG_ACCESS,
+                special_message_access(object) as i32,
+            );
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_ACCESS_LEVEL,
+        ) {
+            write_i32_property(
+                &mut buffer,
+                PID_TAG_ACCESS_LEVEL,
+                special_message_access_level(object) as i32,
+            );
+        }
         if content_property_in_scope(
             sync_type,
             sync_flags,
@@ -1149,6 +1030,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         }
         for (tag, value) in &object.named_properties {
             if !special_message_property_is_ics_identity(*tag)
+                && !special_message_property_is_server_access(*tag)
                 && *tag != PID_TAG_MESSAGE_FLAGS
                 && content_property_in_scope(sync_type, sync_flags, sync_property_tags, *tag)
             {
