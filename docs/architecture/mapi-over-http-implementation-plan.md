@@ -160,6 +160,23 @@ before it is advertised.
   `[MS-OXBBODY]` section 2.1.3.1, and `[MS-OXPROPS]` sections 1.3.3, 2.505,
   and 2.507. Complete
   filtering of the ordinary property list remains an explicit gap.
+- The `202607221041` real-Outlook rerun emitted the corrected 547-byte FAI
+  `CopyTo` stream but still increased the synchronization-report count from 9
+  to 10 and then 11, so `PidTagAccess`/`PidTagAccessLevel` was not the sole
+  cause. The next bounded hypothesis projects effective
+  `PidTagHasAttachments` and `PidTagMessageStatus` through the same
+  `CopyTo`/`CopyProperties` and ICS filters, including `PtypUnspecified`
+  property-ID matching. `PidTagHasAttachments` stays
+  coherent with `PidTagMessageFlags.mfHasAttach`; a status present in the
+  canonical special-message fact is retained and this bounded projection
+  otherwise defaults to zero. The zero fallback is an
+  interoperability inference corroborated by `[MS-OXCFXICS]` section 4.5, not
+  a requirement that every Message persist `PidTagMessageStatus`, and remains
+  unproven pending a real-Outlook retest. This follows `[MS-OXCMSG]` sections
+  2.2.1.2, 2.2.1.6, and 2.2.1.8, `[MS-OXCFXICS]` sections
+  2.2.3.1.1.1.1, 2.2.3.1.1.2.1, 2.2.4.3.16, 3.2.5.8.1.1,
+  3.2.5.8.1.2, 3.2.5.10, 3.2.5.12, and 4.5, `[MS-OXPROPS]`
+  sections 2.717, 2.793, and 2.800, and `[MS-OXCDATA]` section 2.11.1.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.

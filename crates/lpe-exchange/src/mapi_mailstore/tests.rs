@@ -1,6 +1,26 @@
 use super::*;
 use lpe_storage::{JmapEmailAddress, JmapEmailMailboxState};
 
+#[test]
+fn property_filters_match_ptyp_unspecified_by_property_id() {
+    let unspecified_body = PID_TAG_BODY_W & 0xFFFF_0000;
+
+    assert!(property_tag_matches(unspecified_body, PID_TAG_BODY_W));
+    assert!(!property_tag_matches(unspecified_body, PID_TAG_SUBJECT_W));
+    assert!(content_property_in_scope(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL | 0x0080,
+        &[unspecified_body],
+        PID_TAG_BODY_W,
+    ));
+    assert!(!content_property_in_scope(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        &[unspecified_body],
+        PID_TAG_BODY_W,
+    ));
+}
+
 fn wire_id_bytes(object_id: u64) -> [u8; 8] {
     crate::mapi::identity::wire_id_bytes_from_object_id(object_id).unwrap()
 }

@@ -6,6 +6,8 @@ use crate::mapi::properties::{
 // [MS-OXCROPS] sections 2.2.12.7.1 and 2.2.12.8.1.
 const ROP_FAST_TRANSFER_SOURCE_COPY_TO: u8 = 0x4D;
 const ROP_FAST_TRANSFER_SOURCE_COPY_PROPERTIES: u8 = 0x69;
+pub(super) const PID_TAG_MESSAGE_STATUS: u32 = 0x0E17_0003;
+pub(super) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SpecialMessageSyncFact {
@@ -41,6 +43,8 @@ pub(crate) enum SpecialMessagePropertyValue {
 pub(crate) struct SpecialMessageFastTransferSelection {
     access: bool,
     access_level: bool,
+    has_attachments: bool,
+    message_status: bool,
     search_key: bool,
 }
 
@@ -50,6 +54,8 @@ impl SpecialMessageFastTransferSelection {
         Self {
             access: true,
             access_level: true,
+            has_attachments: true,
+            message_status: true,
             search_key: true,
         }
     }
@@ -62,6 +68,16 @@ impl SpecialMessageFastTransferSelection {
                 property_tags,
                 PID_TAG_ACCESS_LEVEL,
             ),
+            has_attachments: fast_transfer_property_included(
+                rop_id,
+                property_tags,
+                PID_TAG_HAS_ATTACHMENTS,
+            ),
+            message_status: fast_transfer_property_included(
+                rop_id,
+                property_tags,
+                PID_TAG_MESSAGE_STATUS,
+            ),
             search_key: fast_transfer_property_included(rop_id, property_tags, PID_TAG_SEARCH_KEY),
         }
     }
@@ -73,8 +89,12 @@ pub(crate) fn fast_transfer_property_included(
     property_tag: u32,
 ) -> bool {
     match rop_id {
-        ROP_FAST_TRANSFER_SOURCE_COPY_TO => !property_tags.contains(&property_tag),
-        ROP_FAST_TRANSFER_SOURCE_COPY_PROPERTIES => property_tags.contains(&property_tag),
+        ROP_FAST_TRANSFER_SOURCE_COPY_TO => !property_tags
+            .iter()
+            .any(|tag| property_tag_matches(*tag, property_tag)),
+        ROP_FAST_TRANSFER_SOURCE_COPY_PROPERTIES => property_tags
+            .iter()
+            .any(|tag| property_tag_matches(*tag, property_tag)),
         _ => true,
     }
 }
@@ -99,6 +119,19 @@ fn special_message_u32_property(object: &SpecialMessageSyncFact, property_tag: u
         .find_map(|(tag, value)| match (*tag == property_tag, value) {
             (true, SpecialMessagePropertyValue::I32(value)) => u32::try_from(*value).ok(),
             (true, SpecialMessagePropertyValue::U32(value)) => Some(*value),
+            _ => None,
+        })
+}
+
+fn special_message_bool_property(
+    object: &SpecialMessageSyncFact,
+    property_tag: u32,
+) -> Option<bool> {
+    object
+        .named_properties
+        .iter()
+        .find_map(|(tag, value)| match (*tag == property_tag, value) {
+            (true, SpecialMessagePropertyValue::Bool(value)) => Some(*value),
             _ => None,
         })
 }
@@ -167,7 +200,7 @@ pub(super) fn special_message_flags(object: &SpecialMessageSyncFact) -> u32 {
             (PID_TAG_MESSAGE_FLAGS, SpecialMessagePropertyValue::U32(value)) => Some(*value),
             _ => None,
         });
-    match flags {
+    let mut flags = match flags {
         Some(flags) if object.associated => flags | MSGFLAG_FAI,
         Some(flags) => flags,
         None => {
@@ -179,7 +212,19 @@ pub(super) fn special_message_flags(object: &SpecialMessageSyncFact) -> u32 {
                 MSGFLAG_READ
             }
         }
+    };
+    // Calendar and the other item builders calculate canonical attachment
+    // presence in SpecialMessageSyncFact. Use it to adjust mfHasAttach, then
+    // derive PidTagHasAttachments from those flags as [MS-OXCMSG] sections
+    // 2.2.1.2 and 2.2.1.6 require.
+    if let Some(has_attachments) = special_message_bool_property(object, PID_TAG_HAS_ATTACHMENTS) {
+        if has_attachments {
+            flags |= MSGFLAG_HASATTACH;
+        } else {
+            flags &= !MSGFLAG_HASATTACH;
+        }
     }
+    flags
 }
 
 pub(super) fn special_message_access(object: &SpecialMessageSyncFact) -> u32 {
@@ -195,10 +240,18 @@ pub(super) fn special_message_access_level(object: &SpecialMessageSyncFact) -> u
     special_message_u32_property(object, PID_TAG_ACCESS_LEVEL).unwrap_or(0)
 }
 
-pub(super) fn special_message_property_is_server_access(property_tag: u32) -> bool {
+pub(super) fn special_message_has_attachments(object: &SpecialMessageSyncFact) -> bool {
+    special_message_flags(object) & MSGFLAG_HASATTACH != 0
+}
+
+pub(super) fn special_message_status(object: &SpecialMessageSyncFact) -> u32 {
+    special_message_u32_property(object, PID_TAG_MESSAGE_STATUS).unwrap_or(0)
+}
+
+pub(super) fn special_message_property_is_server_projected(property_tag: u32) -> bool {
     matches!(
         canonical_property_storage_tag(property_tag),
-        PID_TAG_ACCESS | PID_TAG_ACCESS_LEVEL
+        PID_TAG_ACCESS | PID_TAG_ACCESS_LEVEL | PID_TAG_HAS_ATTACHMENTS | PID_TAG_MESSAGE_STATUS
     )
 }
 
@@ -282,6 +335,25 @@ fn write_fast_transfer_special_message_content(
             special_message_access_level(object) as i32,
         );
     }
+    // [MS-OXCMSG] sections 2.2.1.2 and 2.2.1.6 define the coherent
+    // HasAttachments/mfHasAttach projection. Section 2.2.1.8 defines
+    // MessageStatus; its zero fallback matches LPE's effective default and
+    // the content-synchronization example in [MS-OXCFXICS] section 4.5.
+    // CopyTo/CopyProperties apply their exclusion/inclusion lists to both.
+    if selection.has_attachments {
+        write_bool_property(
+            buffer,
+            PID_TAG_HAS_ATTACHMENTS,
+            special_message_has_attachments(object),
+        );
+    }
+    if selection.message_status {
+        write_i32_property(
+            buffer,
+            PID_TAG_MESSAGE_STATUS,
+            special_message_status(object) as i32,
+        );
+    }
     // [MS-OXCMSG] sections 2.2.1.1 and 3.2.5.2 and [MS-OXCPRPT]
     // section 2.2.1.9: every Message has a server-generated, read-only
     // SearchKey. It remains transmittable in the direct messageContent root
@@ -326,7 +398,7 @@ fn write_fast_transfer_special_message_content(
     write_i32_property(buffer, PID_TAG_MESSAGE_SIZE, object.message_size as i32);
     for (tag, value) in &object.named_properties {
         if !special_message_property_is_copy_identity(*tag)
-            && !special_message_property_is_server_access(*tag)
+            && !special_message_property_is_server_projected(*tag)
             && *tag != PID_TAG_MESSAGE_FLAGS
             && !provider_defined_internal_property(*tag)
         {

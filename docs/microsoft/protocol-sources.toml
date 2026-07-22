@@ -657,6 +657,7 @@ used_for = [
   "Common ROP InvalidParameter and GeneralFailure return values",
   "PtypBoolean wire values used by RopSynchronizationOpenCollector",
   "PtypTime UTC FILETIME values used by Outlook Calendar start and end properties",
+  "PtypUnspecified property-ID matching in FastTransfer and ICS property filters",
 ]
   sections = [
     "2.2.1.1 Folder ID Structure",
@@ -675,7 +676,7 @@ used_for = [
   "2.8.1.2 FlaggedPropertyRow Structure",
   "2.11.5 FlaggedPropertyValue Structure",
   "2.11.6 FlaggedPropertyValueWithType Structure",
-  "2.11.1 Property Data Types (PtypBoolean and PtypTime)",
+  "2.11.1 Property Data Types (PtypBoolean, PtypTime, and PtypUnspecified)",
   "2.11.4 TaggedPropertyValue Structure",
   "2.13.1 SortOrder Structure",
   "3.1 Restriction",
@@ -704,6 +705,7 @@ used_for = [
   "PidTagRoamingDatatypes, PidTagRoamingDictionary, and PidTagRoamingXmlStream identities and types",
   "PidTagSearchKey canonical tag and PtypBinary type in direct Message FastTransfer projections",
   "PidTagAccess and PidTagAccessLevel canonical tags and PtypInteger32 types",
+  "PidTagHasAttachments, PidTagMessageFlags, and PidTagMessageStatus identities and types for special-message FastTransfer projection",
 ]
 sections = [
   "1.3.2 Commonly Used Property Sets",
@@ -734,6 +736,7 @@ sections = [
   "2.791 PidTagMessageDeliveryTime",
   "2.793 PidTagMessageFlags",
   "2.798 PidTagMessageSize",
+  "2.800 PidTagMessageStatus",
   "2.803 PidTagMid",
   "2.921 PidTagReplyTime",
   "2.938 PidTagRoamingDatatypes",
@@ -793,6 +796,7 @@ used_for = [
   "Commit of accepted client-written associated-configuration properties through RopSaveChangesMessage",
   "Server-generated PidTagSearchKey projection for every Message object after client creation",
   "Required general PidTagAccess and PidTagAccessLevel properties on folder-associated Message objects opened read-only by Outlook",
+  "Computed PidTagHasAttachments and effective PidTagMessageStatus projection for configuration FAI FastTransfer",
 ]
 sections = [
   "1.3.2 Folder Associated Information Messages",
@@ -801,6 +805,7 @@ sections = [
   "2.2.1.2 PidTagHasAttachments Property",
   "2.2.1.6 PidTagMessageFlags Property",
   "2.2.1.7 PidTagMessageSize Property",
+  "2.2.1.8 PidTagMessageStatus Property",
   "2.2.1.9 PidTagSubjectPrefix Property",
   "2.2.1.10 PidTagNormalizedSubject Property",
   "2.2.1.11 PidTagImportance Property",
@@ -1030,7 +1035,7 @@ used_for = [
   "Message CopyTo and CopyProperties subobject filters, empty collection directives, and provider-internal property exclusion",
   "Direct Message CopyTo replay of persisted configuration FAI MessageFlags and body presence without synthetic properties",
   "Filtered direct Message CopyTo and CopyProperties projection of one server-generated PidTagSearchKey after read-only client input is discarded",
-  "Filtered direct and ICS special-message projection of server-owned PidTagAccess and PidTagAccessLevel",
+  "Filtered direct and ICS special-message projection of effective PidTagAccess, PidTagAccessLevel, PidTagHasAttachments, and PidTagMessageStatus",
 ]
 sections = [
   "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",

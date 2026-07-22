@@ -1696,7 +1696,9 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
             folder_id: INBOX_FOLDER_ID,
             message_class: "IPM.Configuration.MessageListSettings".to_string(),
             subject: "IPM.Configuration.MessageListSettings".to_string(),
-            properties_json: serde_json::json!({}),
+            properties_json: serde_json::json!({
+                "0x0e170003": {"type": "i32", "value": 3},
+            }),
         },
     ]);
     let object = MapiObject::AssociatedConfig {
@@ -1729,6 +1731,8 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
     for (property_tag, property_name) in [
         (PID_TAG_ACCESS, "PidTagAccess"),
         (PID_TAG_ACCESS_LEVEL, "PidTagAccessLevel"),
+        (PID_TAG_HAS_ATTACHMENTS, "PidTagHasAttachments"),
+        (PID_TAG_MESSAGE_STATUS, "PidTagMessageStatus"),
         (PID_TAG_SEARCH_KEY, "PidTagSearchKey"),
     ] {
         assert_eq!(
@@ -1748,6 +1752,17 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
         );
         assert_eq!(
             property_count(
+                &transfer(
+                    RopId::FastTransferSourceCopyTo.as_u8(),
+                    &[property_tag & 0xFFFF_0000],
+                ),
+                property_tag,
+            ),
+            0,
+            "CopyTo must honor its PtypUnspecified {property_name} exclusion"
+        );
+        assert_eq!(
+            property_count(
                 &transfer(RopId::FastTransferSourceCopyProperties.as_u8(), &[]),
                 property_tag,
             ),
@@ -1764,7 +1779,28 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
             ),
             1
         );
+        assert_eq!(
+            property_count(
+                &transfer(
+                    RopId::FastTransferSourceCopyProperties.as_u8(),
+                    &[property_tag & 0xFFFF_0000],
+                ),
+                property_tag,
+            ),
+            1,
+            "CopyProperties must honor its PtypUnspecified {property_name} inclusion"
+        );
     }
+
+    let direct_copy = transfer(RopId::FastTransferSourceCopyTo.as_u8(), &[]);
+    let mut expected_status = PID_TAG_MESSAGE_STATUS.to_le_bytes().to_vec();
+    expected_status.extend_from_slice(&3i32.to_le_bytes());
+    assert!(
+        direct_copy
+            .windows(expected_status.len())
+            .any(|property| property == expected_status),
+        "direct CopyTo must retain the canonical PidTagMessageStatus value"
+    );
 }
 
 #[test]

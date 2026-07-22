@@ -1,9 +1,10 @@
 use super::special_message::{
     special_message_access, special_message_access_level, special_message_change_key,
-    special_message_change_number, special_message_flags, special_message_parent_source_key,
-    special_message_predecessor_change_list, special_message_property_is_ics_identity,
-    special_message_property_is_server_access, special_message_search_key,
-    special_message_sync_source_key, write_special_message_property,
+    special_message_change_number, special_message_flags, special_message_has_attachments,
+    special_message_parent_source_key, special_message_predecessor_change_list,
+    special_message_property_is_ics_identity, special_message_property_is_server_projected,
+    special_message_search_key, special_message_status, special_message_sync_source_key,
+    write_special_message_property, PID_TAG_HAS_ATTACHMENTS, PID_TAG_MESSAGE_STATUS,
 };
 use super::*;
 
@@ -983,6 +984,30 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             sync_type,
             sync_flags,
             sync_property_tags,
+            PID_TAG_HAS_ATTACHMENTS,
+        ) {
+            write_bool_property(
+                &mut buffer,
+                PID_TAG_HAS_ATTACHMENTS,
+                special_message_has_attachments(object),
+            );
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_MESSAGE_STATUS,
+        ) {
+            write_i32_property(
+                &mut buffer,
+                PID_TAG_MESSAGE_STATUS,
+                special_message_status(object) as i32,
+            );
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
             PID_TAG_MESSAGE_FLAGS,
         ) {
             // [MS-OXCMSG] section 2.2.1.6: mfFAI identifies an FAI message.
@@ -1030,7 +1055,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         }
         for (tag, value) in &object.named_properties {
             if !special_message_property_is_ics_identity(*tag)
-                && !special_message_property_is_server_access(*tag)
+                && !special_message_property_is_server_projected(*tag)
                 && *tag != PID_TAG_MESSAGE_FLAGS
                 && content_property_in_scope(sync_type, sync_flags, sync_property_tags, *tag)
             {

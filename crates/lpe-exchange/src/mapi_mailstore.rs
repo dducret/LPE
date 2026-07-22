@@ -211,11 +211,20 @@ fn provider_defined_internal_property(property_tag: u32) -> bool {
     (0x6600..=0x67FF).contains(&(property_tag >> 16))
 }
 
-fn property_tag_requested(requested_property_tags: &[u32], property_tag: u32) -> bool {
+pub(super) fn property_tag_matches(requested_property_tag: u32, property_tag: u32) -> bool {
+    let requested_property_tag = canonical_property_storage_tag(requested_property_tag);
     let property_tag = canonical_property_storage_tag(property_tag);
+    // [MS-OXCDATA] section 2.11.1: PtypUnspecified matches any type, so
+    // property-filter comparisons use the same property ID in that case.
+    requested_property_tag == property_tag
+        || (requested_property_tag & 0xFFFF == 0
+            && requested_property_tag & 0xFFFF_0000 == property_tag & 0xFFFF_0000)
+}
+
+fn property_tag_requested(requested_property_tags: &[u32], property_tag: u32) -> bool {
     requested_property_tags
         .iter()
-        .any(|tag| canonical_property_storage_tag(*tag) == property_tag)
+        .any(|tag| property_tag_matches(*tag, property_tag))
 }
 
 fn content_property_in_scope(

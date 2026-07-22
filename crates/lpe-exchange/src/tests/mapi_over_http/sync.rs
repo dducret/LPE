@@ -10672,6 +10672,32 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
             "direct CopyTo must project the effective {name} value"
         );
     }
+    // Outlook trace 202607221041 repeats a view/form synchronization error
+    // after this exact CopyTo. [MS-OXCMSG] sections 2.2.1.2 and 2.2.1.6
+    // define the coherent HasAttachments/mfHasAttach projection; section
+    // 2.2.1.8 defines MessageStatus, whose zero fallback is corroborated by
+    // [MS-OXCFXICS] section 4.5. Sections 2.2.3.1.1.1.1 and 3.2.5.8.1.1
+    // define this CopyTo request's empty exclusion list.
+    let has_attachments = properties
+        .iter()
+        .filter(|property| property.tag == 0x0E1B_000B) // PidTagHasAttachments.
+        .collect::<Vec<_>>();
+    assert_eq!(
+        has_attachments.len(),
+        1,
+        "direct CopyTo must project exactly one PidTagHasAttachments: {transfer:02x?}"
+    );
+    assert_eq!(has_attachments[0].value, 0u16.to_le_bytes());
+    let message_status = properties
+        .iter()
+        .filter(|property| property.tag == 0x0E17_0003) // PidTagMessageStatus.
+        .collect::<Vec<_>>();
+    assert_eq!(
+        message_status.len(),
+        1,
+        "direct CopyTo must project exactly one PidTagMessageStatus: {transfer:02x?}"
+    );
+    assert_eq!(strict_decode_i32_property(message_status[0]).unwrap(), 0);
     assert!(
         !properties
             .iter()
@@ -10799,6 +10825,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     );
     assert!(downloaded.body_tags.contains(&0x0FF4_0003));
     assert!(downloaded.body_tags.contains(&0x0FF7_0003));
+    assert!(downloaded.body_tags.contains(&0x0E1B_000B));
+    assert!(downloaded.body_tags.contains(&0x0E17_0003));
     assert_eq!(downloaded.access, Some(0x0000_0007));
     assert_eq!(downloaded.access_level, Some(0x0000_0000));
     assert!(downloaded.body_tags.contains(&0x7C06_0003));
