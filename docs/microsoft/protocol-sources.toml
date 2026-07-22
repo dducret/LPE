@@ -1034,6 +1034,7 @@ used_for = [
   "Exact MetaTagIdsetDeleted property tag and hierarchy deletion-section wire encoding",
   "Message CopyTo and CopyProperties subobject filters, empty collection directives, and provider-internal property exclusion",
   "Direct Message CopyTo replay of persisted configuration FAI MessageFlags and body presence without synthetic properties",
+  "Stable FastTransfer projection of unchanged persisted associated-configuration properties after JSON rehydration",
   "Filtered direct Message CopyTo and CopyProperties projection of one server-generated PidTagSearchKey after read-only client input is discarded",
   "Filtered direct and ICS special-message projection of effective PidTagAccess, PidTagAccessLevel, PidTagHasAttachments, and PidTagMessageStatus",
 ]
@@ -1091,6 +1092,7 @@ sections = [
   "2.2.4.3.13 messageChangeFull Element",
   "2.2.4.3.14 messageChangeHeader Element",
   "2.2.4.3.16 messageContent Element",
+  "2.2.4.3.20 propList Element",
   "2.2.4.4 FastTransfer Streams in ROPs",
   "2.2.3.2.4.2.1 RopSynchronizationImportMessageChange ROP Request Buffer",
   "2.2.3.2.4.2.2 RopSynchronizationImportMessageChange ROP Response Buffer",

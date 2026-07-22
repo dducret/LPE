@@ -13,6 +13,10 @@ pub(super) fn associated_config_sync_object(
             named_properties.push((tag, value));
         }
     }
+    // Keep the LPE projection stable: [MS-OXCFXICS] section 2.2.4.2
+    // serializes propList in the supplied sequence, while the persisted bag
+    // is rehydrated as a HashMap before the same FAI version is projected.
+    named_properties.sort_unstable_by_key(|(tag, _)| *tag);
     for &tag in associated_config_default_sync_tags(message, &stored_properties) {
         let canonical_tag = canonical_property_storage_tag(tag);
         if associated_config_standard_sync_tag(canonical_tag)

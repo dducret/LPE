@@ -175,6 +175,18 @@ list determines whether each collection is included. See MS-OXCMSG section
 2.2.1.6, MS-OXCFXICS sections 2.2.1.7, 2.2.4.1.5.1, 2.2.4.3.12, 2.2.4.3.16,
 3.2.5.10, and 3.2.5.12, and MS-OXPROPS section 1.3.3.
 
+For an unchanged persisted associated-configuration Message, LPE serializes
+the rehydrated configuration-property bag in ascending PropertyTag order. This
+is an LPE cache-consistency invariant, not an additional FastTransfer ordering
+constraint: a fixed SourceKey, ChangeKey, predecessor list, and CN must not
+produce multiple byte representations solely because JSON storage is reloaded
+into an unordered map. It applies to both the FAI ICS projection and direct
+Message `RopFastTransferSourceCopyTo` / `RopFastTransferSourceCopyProperties`
+projection. The FastTransfer `propList` sequence and its fixed-position rules
+are in MS-OXCFXICS sections 2.2, 2.2.4.2, and 2.2.4.3.20; direct Message
+content and ROP stream selection are in sections 2.2.4.3.16, 2.2.4.4, and
+3.2.5.8.1.1 through 3.2.5.8.1.2.
+
 ## Delete, Move, Tombstone, And Recovery Matrix
 
 | Surface | LPE behavior | Cross-protocol outcome |

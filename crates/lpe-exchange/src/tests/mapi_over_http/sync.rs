@@ -10610,6 +10610,68 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert_eq!(chunks.len(), 1, "{copy_response_rops:02x?}");
     assert_eq!(chunks[0].0, 0x0003);
     let transfer = &chunks[0].1;
+    let expected_transfer = transfer.clone();
+    // [MS-OXCFXICS] sections 2.2.4.2, 2.2.4.3.16, 2.2.4.3.20, 2.2.4.4, and
+    // 3.2.5.8.1.1 define this direct messageContent CopyTo flow. The persisted
+    // FAI is not changed between requests; this regression locks LPE's stable
+    // byte projection for that fixed SourceKey/ChangeKey/PCL version. It
+    // repeats the Outlook OpenMessage/CopyTo/GetBuffer pattern from trace
+    // 202607221217.
+    for attempt in 1..8 {
+        let reconnect = service
+            .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+            .await
+            .unwrap();
+        let mut repeated_headers = mapi_headers("Execute");
+        repeated_headers.insert(
+            "cookie",
+            HeaderValue::from_str(&mapi_cookie_header(&reconnect)).unwrap(),
+        );
+        let mut repeated_rops = Vec::new();
+        append_rop_open_folder(
+            &mut repeated_rops,
+            0,
+            1,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        );
+        append_rop_open_message(
+            &mut repeated_rops,
+            1,
+            2,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            imported_message_id,
+        );
+        repeated_rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]);
+        repeated_rops.push(0);
+        repeated_rops.extend_from_slice(&0x0000_2000u32.to_le_bytes());
+        repeated_rops.push(0x09);
+        repeated_rops.extend_from_slice(&0u16.to_le_bytes());
+        repeated_rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
+        repeated_rops.extend_from_slice(&0xBABEu16.to_le_bytes());
+        repeated_rops.extend_from_slice(&0x7BC0u16.to_le_bytes());
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &repeated_headers,
+                &execute_body(&rop_buffer(
+                    &repeated_rops,
+                    &[1, u32::MAX, u32::MAX, u32::MAX],
+                )),
+            )
+            .await
+            .unwrap();
+        let response_rops = response_rops_from_execute_response(response).await;
+        let chunks = mapi_fast_transfer_chunks(&response_rops);
+        assert_eq!(chunks.len(), 1, "attempt {attempt}: {response_rops:02x?}");
+        assert_eq!(
+            chunks[0].0, 0x0003,
+            "attempt {attempt}: {response_rops:02x?}"
+        );
+        assert_eq!(
+            chunks[0].1, expected_transfer,
+            "attempt {attempt} changed the direct CopyTo representation without a FAI mutation"
+        );
+    }
     let mut offset = 0;
     let mut properties = Vec::new();
     while offset < transfer.len() {
