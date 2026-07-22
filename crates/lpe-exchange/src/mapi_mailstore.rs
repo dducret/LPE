@@ -886,6 +886,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
     folder_id: u64,
     object: &SpecialMessageSyncFact,
     send_options: u8,
+    include_search_key: bool,
     message_children: FastTransferMessageChildren,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
@@ -894,6 +895,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
         folder_id,
         object,
         send_options,
+        include_search_key,
         message_children,
     );
     buffer
@@ -904,6 +906,7 @@ fn write_fast_transfer_special_message_content(
     folder_id: u64,
     object: &SpecialMessageSyncFact,
     send_options: u8,
+    include_search_key: bool,
     message_children: FastTransferMessageChildren,
 ) {
     let source_key = manifest::special_message_source_key(object);
@@ -915,6 +918,17 @@ fn write_fast_transfer_special_message_content(
         &source_key_for_store_id(folder_id),
     );
     write_binary_property(buffer, PID_TAG_SOURCE_KEY, &source_key);
+    // [MS-OXCMSG] sections 2.2.1.1 and 3.2.5.2 and [MS-OXCPRPT]
+    // section 2.2.1.9: every Message has a server-generated, read-only
+    // SearchKey. It remains transmittable in the direct messageContent root
+    // under [MS-OXCFXICS] sections 3.2.5.8.1.1 and 3.2.5.12.
+    if include_search_key {
+        write_binary_property(
+            buffer,
+            PID_TAG_SEARCH_KEY,
+            &manifest::special_message_search_key(object),
+        );
+    }
     write_u32(buffer, PID_TAG_LAST_MODIFICATION_TIME);
     write_i64(buffer, object.last_modified_filetime as i64);
     write_binary_property(buffer, PID_TAG_CHANGE_KEY, &change_key);

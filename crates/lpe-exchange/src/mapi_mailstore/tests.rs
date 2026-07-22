@@ -939,6 +939,10 @@ fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
 fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999990").unwrap();
     let item_id = crate::mapi::identity::mapi_store_id(90);
+    let persisted_search_key = vec![
+        0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
+        0x00,
+    ];
     crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
     let special = SpecialMessageSyncFact {
         folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
@@ -951,16 +955,23 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
         read_state: None,
-        named_properties: vec![(
-            0x7C08_0102,
-            SpecialMessagePropertyValue::Binary(b"view-extra".to_vec()),
-        )],
+        named_properties: vec![
+            (
+                PID_TAG_SEARCH_KEY,
+                SpecialMessagePropertyValue::Binary(persisted_search_key.clone()),
+            ),
+            (
+                0x7C08_0102,
+                SpecialMessagePropertyValue::Binary(b"view-extra".to_vec()),
+            ),
+        ],
         named_property_definitions: Default::default(),
     };
     let buffer = fast_transfer_message_content_buffer_with_special_object(
         crate::mapi::identity::INBOX_FOLDER_ID,
         &special,
         0x00,
+        true,
         FastTransferMessageChildren::all(),
     );
 
@@ -1004,11 +1015,23 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         .any(|window| window == PID_TAG_NORMALIZED_SUBJECT_W.to_le_bytes()));
     assert_variable_property_present(&buffer, PID_TAG_BODY_W, &utf16z("Client view payload"));
     assert_variable_property_present(&buffer, 0x7C08_0102, b"view-extra");
+    let mut encoded_search_key = PID_TAG_SEARCH_KEY.to_le_bytes().to_vec();
+    encoded_search_key.extend_from_slice(&(persisted_search_key.len() as u32).to_le_bytes());
+    encoded_search_key.extend_from_slice(&persisted_search_key);
+    assert_eq!(
+        buffer
+            .windows(encoded_search_key.len())
+            .filter(|window| *window == encoded_search_key)
+            .count(),
+        1,
+        "CopyTo must preserve exactly one existing SearchKey"
+    );
 
     let outlook_buffer = fast_transfer_message_content_buffer_with_special_object(
         crate::mapi::identity::INBOX_FOLDER_ID,
         &special,
         0x09,
+        true,
         FastTransferMessageChildren::all(),
     );
     let empty_message_children = [
@@ -1032,6 +1055,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         crate::mapi::identity::INBOX_FOLDER_ID,
         &special,
         0x09,
+        true,
         FastTransferMessageChildren::new(false, false),
     );
     assert!(!no_children_buffer
@@ -1044,6 +1068,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         crate::mapi::identity::INBOX_FOLDER_ID,
         &normal,
         0x09,
+        true,
         FastTransferMessageChildren::all(),
     );
     assert!(!normal_buffer

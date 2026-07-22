@@ -10391,6 +10391,18 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         0x3007_0040, // PidTagCreationTime.
         test_filetime("2026-07-21", "17:23") as i64,
     );
+    // Outlook trace 202607211931 also submits this read-only SearchKey on the
+    // first save. [MS-OXCMSG] section 2.2.1.1 and [MS-OXCPRPT] section
+    // 2.2.1.9 make the server responsible for the durable projected value.
+    let submitted_search_key = [
+        0xf0, 0xeb, 0x1b, 0xbd, 0x5b, 0x8f, 0x37, 0x4c, 0x9d, 0x9a, 0x4e, 0x2f, 0x91, 0xeb, 0x05,
+        0xa6,
+    ];
+    append_mapi_binary_property(
+        &mut save_values,
+        0x300B_0102, // PidTagSearchKey.
+        &submitted_search_key,
+    );
     append_mapi_utf16_property(&mut save_values, 0x3FFA_001F, "test@l-p-e.ch");
     append_mapi_i32_property(&mut save_values, 0x7C06_0003, 0); // PidTagRoamingDatatypes.
     append_mapi_bool_property(&mut save_values, 0x0E1F_000B, true); // PidTagRtfInSync.
@@ -10482,10 +10494,16 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
             .copied(),
         Some(imported_last_modification_time as u64)
     );
-    for identity_tag in ["0x65e00102", "0x65e20102", "0x65e30102", "0x30080040"] {
+    for identity_tag in [
+        "0x300b0102",
+        "0x65e00102",
+        "0x65e20102",
+        "0x65e30102",
+        "0x30080040",
+    ] {
         assert!(
             config.properties_json.get(identity_tag).is_none(),
-            "{identity_tag} must exist only in the durable identity record"
+            "{identity_tag} must not be persisted in associated-configuration content JSON"
         );
     }
     assert_eq!(
@@ -10615,6 +10633,20 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         strict_decode_i32_property(message_flags[0]).unwrap(),
         0x49,
         "direct CopyTo must retain the accepted first-save mfRead | mfUnsent | mfFAI value"
+    );
+    let search_keys = properties
+        .iter()
+        .filter(|property| property.tag == 0x300B_0102)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        search_keys.len(),
+        1,
+        "direct CopyTo must project exactly one server SearchKey: {transfer:02x?}"
+    );
+    assert_eq!(
+        search_keys[0].value,
+        crate::mapi_mailstore::source_key_for_store_id(imported_message_id),
+        "direct CopyTo must generate the stable server SearchKey after the submitted read-only value was discarded"
     );
     assert!(
         !properties

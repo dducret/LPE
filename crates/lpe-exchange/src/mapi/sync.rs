@@ -1186,19 +1186,17 @@ fn fast_transfer_message_children(
         return mapi_mailstore::FastTransferMessageChildren::new(false, false);
     }
 
-    let includes = |property_tag| property_tags.contains(&property_tag);
+    mapi_mailstore::FastTransferMessageChildren::new(
+        fast_transfer_property_included(rop_id, property_tags, PID_TAG_MESSAGE_RECIPIENTS),
+        fast_transfer_property_included(rop_id, property_tags, PID_TAG_MESSAGE_ATTACHMENTS),
+    )
+}
+
+fn fast_transfer_property_included(rop_id: u8, property_tags: &[u32], property_tag: u32) -> bool {
     match RopId::from_u8(rop_id) {
-        Some(RopId::FastTransferSourceCopyTo) => mapi_mailstore::FastTransferMessageChildren::new(
-            !includes(PID_TAG_MESSAGE_RECIPIENTS),
-            !includes(PID_TAG_MESSAGE_ATTACHMENTS),
-        ),
-        Some(RopId::FastTransferSourceCopyProperties) => {
-            mapi_mailstore::FastTransferMessageChildren::new(
-                includes(PID_TAG_MESSAGE_RECIPIENTS),
-                includes(PID_TAG_MESSAGE_ATTACHMENTS),
-            )
-        }
-        _ => mapi_mailstore::FastTransferMessageChildren::all(),
+        Some(RopId::FastTransferSourceCopyTo) => !property_tags.contains(&property_tag),
+        Some(RopId::FastTransferSourceCopyProperties) => property_tags.contains(&property_tag),
+        _ => true,
     }
 }
 
@@ -1214,6 +1212,8 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
     snapshot: &MapiMailStoreSnapshot,
 ) -> Option<(u64, Vec<u8>)> {
     let message_children = fast_transfer_message_children(rop_id, level, property_tags);
+    let include_search_key =
+        fast_transfer_property_included(rop_id, property_tags, PID_TAG_SEARCH_KEY);
     match object {
         MapiObject::Folder { folder_id, .. } => {
             if RopId::from_u8(rop_id) == Some(RopId::FastTransferSourceCopyFolder) {
@@ -1304,6 +1304,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    include_search_key,
                     message_children,
                 ),
             ))
@@ -1326,6 +1327,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    include_search_key,
                     message_children,
                 ),
             ))
@@ -1348,6 +1350,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    include_search_key,
                     message_children,
                 ),
             ))
@@ -1363,6 +1366,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    include_search_key,
                     message_children,
                 ),
             ))
@@ -1385,6 +1389,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    include_search_key,
                     message_children,
                 ),
             ))
@@ -1402,6 +1407,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
+                    include_search_key,
                     message_children,
                 ),
             ))

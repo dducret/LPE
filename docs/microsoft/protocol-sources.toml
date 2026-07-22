@@ -696,6 +696,7 @@ used_for = [
   "PidTagLastModificationTime fallback key for OrderByDeliveryTime content synchronization",
   "Provider-defined internal FastTransfer download exclusions for PidTagAssociated and PidTagMid",
   "PidTagRoamingDatatypes, PidTagRoamingDictionary, and PidTagRoamingXmlStream identities and types",
+  "PidTagSearchKey canonical tag and PtypBinary type in direct Message FastTransfer projections",
 ]
 sections = [
   "1.3.2 Commonly Used Property Sets",
@@ -729,6 +730,7 @@ sections = [
   "2.938 PidTagRoamingDatatypes",
   "2.939 PidTagRoamingDictionary",
   "2.940 PidTagRoamingXmlStream",
+  "2.999 PidTagSearchKey",
   "2.917 PidTagReplyRecipientEntries",
   "2.1006 PidTagSenderName",
   "2.1007 PidTagSenderSearchKey",
@@ -780,10 +782,12 @@ used_for = [
   "Message-object acceptance of additional MS-OXPROPS properties during Outlook appointment creation",
   "RopSaveChangesMessage ignores invalid or unknown SaveFlags values while still committing the message",
   "Commit of accepted client-written associated-configuration properties through RopSaveChangesMessage",
+  "Server-generated PidTagSearchKey projection for every Message object after client creation",
 ]
 sections = [
   "1.3.2 Folder Associated Information Messages",
   "2.2 Message Syntax",
+  "2.2.1.1 General Properties",
   "2.2.1.2 PidTagHasAttachments Property",
   "2.2.1.6 PidTagMessageFlags Property",
   "2.2.1.7 PidTagMessageSize Property",
@@ -1014,6 +1018,7 @@ used_for = [
   "Exact MetaTagIdsetDeleted property tag and hierarchy deletion-section wire encoding",
   "Message CopyTo and CopyProperties subobject filters, empty collection directives, and provider-internal property exclusion",
   "Direct Message CopyTo replay of persisted configuration FAI MessageFlags and body presence without synthetic properties",
+  "Filtered direct Message CopyTo and CopyProperties projection of one server-generated PidTagSearchKey after read-only client input is discarded",
 ]
 sections = [
   "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",
@@ -1039,6 +1044,7 @@ sections = [
   "2.2.3.1.1.1.1 RopFastTransferSourceCopyTo ROP Request Buffer",
   "2.2.3.1.1.1 RopFastTransferSourceCopyTo ROP",
   "2.2.3.1.1.2 RopFastTransferSourceCopyProperties ROP",
+  "2.2.3.1.1.2.1 RopFastTransferSourceCopyProperties ROP Request Buffer",
   "2.2.3.2.1.1.1 RopSynchronizationConfigure ROP Request Buffer",
   "2.2.3.2.3.1 RopSynchronizationGetTransferState ROP",
   "2.2.3.2.4.1.1 RopSynchronizationOpenCollector ROP Request Buffer",

@@ -433,6 +433,7 @@ fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
         CALENDAR_FOLDER_ID,
         &objects[0],
         0x09,
+        true,
         mapi_mailstore::FastTransferMessageChildren::all(),
     );
 
@@ -461,10 +462,6 @@ fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
 #[test]
 fn associated_config_fai_content_sync_emits_valid_property_definitions() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
-    let persisted_search_key = [
-        0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
-        0x00,
-    ];
     let cases = [
         (
             INBOX_FOLDER_ID,
@@ -503,10 +500,6 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
                 message_class: message_class.to_string(),
                 subject: message_class.to_string(),
                 properties_json: serde_json::json!({
-                    "0x300b0102": {
-                        "type": "binary",
-                        "value": "ffeeddccbbaa99887766554433221100"
-                    },
                     "0x7c060003": {"type": "i32", "value": 4},
                     "0x7c070102": {"type": "binary", "value": "3c2f3e"},
                     "0x9001001f": {"type": "string", "value": "enabled"}
@@ -523,6 +516,7 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             folder_id,
             object,
             0x09,
+            true,
             mapi_mailstore::FastTransferMessageChildren::all(),
         );
         let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
@@ -536,7 +530,7 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
         let server_record_key = mapi_mailstore::source_key_for_store_id(item_id);
         for (tag, expected_value) in [
             (PID_TAG_RECORD_KEY, server_record_key.as_slice()),
-            (PID_TAG_SEARCH_KEY, persisted_search_key.as_slice()),
+            (PID_TAG_SEARCH_KEY, server_record_key.as_slice()),
         ] {
             assert_eq!(
                 item.property_tags
@@ -557,8 +551,8 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             );
         }
         let mut copy_search_key = PID_TAG_SEARCH_KEY.to_le_bytes().to_vec();
-        copy_search_key.extend_from_slice(&(persisted_search_key.len() as u32).to_le_bytes());
-        copy_search_key.extend_from_slice(&persisted_search_key);
+        copy_search_key.extend_from_slice(&(server_record_key.len() as u32).to_le_bytes());
+        copy_search_key.extend_from_slice(&server_record_key);
         assert_eq!(
             copy_buffer
                 .windows(copy_search_key.len())
@@ -694,6 +688,7 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
         CALENDAR_FOLDER_ID,
         &object,
         0x09,
+        true,
         mapi_mailstore::FastTransferMessageChildren::all(),
     );
     let mut expected = PID_LID_BUSY_STATUS_TAG.to_le_bytes().to_vec();
@@ -1685,6 +1680,78 @@ fn fast_transfer_message_children_follow_level_and_property_tag_semantics() {
             &[PID_TAG_SUBJECT_W],
         ),
         none
+    );
+}
+
+#[test]
+fn special_message_search_key_follows_fast_transfer_property_filters() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let canonical_id = Uuid::from_u128(0x6d617069_6d6c_7350_8000_000000000201);
+    let item_id = crate::mapi::identity::mapi_store_id(0x7a03);
+    crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: canonical_id,
+            account_id,
+            folder_id: INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "IPM.Configuration.MessageListSettings".to_string(),
+            properties_json: serde_json::json!({}),
+        },
+    ]);
+    let object = MapiObject::AssociatedConfig {
+        folder_id: INBOX_FOLDER_ID,
+        config_id: item_id,
+        saved_message: None,
+    };
+    let transfer = |rop_id, property_tags: &[u32]| {
+        fast_transfer_manifest_for_object(
+            rop_id,
+            0x09,
+            0,
+            property_tags,
+            &object,
+            &sync_principal(account_id),
+            &[],
+            &[],
+            &snapshot,
+        )
+        .expect("associated configuration manifest")
+        .1
+    };
+    let search_key_count = |buffer: &[u8]| {
+        buffer
+            .windows(4)
+            .filter(|window| *window == PID_TAG_SEARCH_KEY.to_le_bytes())
+            .count()
+    };
+
+    assert_eq!(
+        search_key_count(&transfer(RopId::FastTransferSourceCopyTo.as_u8(), &[])),
+        1
+    );
+    assert_eq!(
+        search_key_count(&transfer(
+            RopId::FastTransferSourceCopyTo.as_u8(),
+            &[PID_TAG_SEARCH_KEY],
+        )),
+        0,
+        "CopyTo must honor its SearchKey exclusion"
+    );
+    assert_eq!(
+        search_key_count(&transfer(
+            RopId::FastTransferSourceCopyProperties.as_u8(),
+            &[],
+        )),
+        0,
+        "CopyProperties must not add an unrequested SearchKey"
+    );
+    assert_eq!(
+        search_key_count(&transfer(
+            RopId::FastTransferSourceCopyProperties.as_u8(),
+            &[PID_TAG_SEARCH_KEY],
+        )),
+        1
     );
 }
 

@@ -258,7 +258,7 @@ fn special_message_parent_source_key(object: &SpecialMessageSyncFact) -> Vec<u8>
         .unwrap_or_else(|| source_key_for_store_id(object.folder_id))
 }
 
-fn special_message_search_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
+pub(super) fn special_message_search_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
     // [MS-OXCPRPT] section 2.2.1.9: SearchKey is a read-only search identity.
     special_message_binary_property(object, PID_TAG_SEARCH_KEY)
         .map(ToOwned::to_owned)
@@ -331,6 +331,7 @@ pub(super) fn special_message_property_is_copy_identity(property_tag: u32) -> bo
         PID_TAG_SOURCE_KEY
             | PID_TAG_PARENT_SOURCE_KEY
             | PID_TAG_RECORD_KEY
+            | PID_TAG_SEARCH_KEY
             | PID_TAG_CHANGE_KEY
             | PID_TAG_PREDECESSOR_CHANGE_LIST
             | PID_TAG_CHANGE_NUMBER
