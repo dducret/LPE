@@ -46,6 +46,33 @@ check_http_json_field() {
   pass "Endpoint responded as expected: $url"
 }
 
+check_mapi_streaming_proxy_configuration() {
+  local mapi_proxy_location
+  local directive
+  mapi_proxy_location="$(
+    awk '
+      $1 == "location" && $2 == "/mapi/" { inside = 1 }
+      inside { print }
+      inside && $1 == "}" { exit }
+    ' "$NGINX_SITE_PATH"
+  )"
+  [[ -n "$mapi_proxy_location" ]] || fail "nginx MAPI proxy location is missing"
+
+  for directive in \
+    "client_max_body_size 0;" \
+    "proxy_http_version 1.1;" \
+    "proxy_read_timeout 1800s;" \
+    "proxy_send_timeout 1800s;" \
+    "proxy_connect_timeout 60s;" \
+    "proxy_buffering off;" \
+    "proxy_request_buffering off;"
+  do
+    grep -Fq "$directive" <<<"$mapi_proxy_location" \
+      || fail "nginx MAPI proxy location is missing: $directive"
+  done
+  pass "nginx MAPI proxy streams NotificationWait responses"
+}
+
 check_command curl
 check_command nginx
 check_command psql
@@ -59,6 +86,7 @@ check_file "/etc/systemd/system/${SERVICE_NAME}"
 check_file "${NGINX_SITE_PATH}"
 check_file "${ADMIN_WEB_ROOT}/index.html"
 check_file "${CLIENT_WEB_ROOT}/index.html"
+check_mapi_streaming_proxy_configuration
 
 check_file "$SRC_DIR"
 check_file "$BIN_PATH"

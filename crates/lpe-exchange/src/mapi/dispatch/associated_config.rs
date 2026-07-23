@@ -32,6 +32,11 @@ pub(super) fn delete_associated_config_properties(
         }
     }
     let (message_class, subject) = associated_config_class_and_subject(&properties);
+    let mut properties_json = mapi_properties_to_json(&properties);
+    crate::mapi_store::copy_associated_config_server_metadata(
+        &existing.properties_json,
+        &mut properties_json,
+    );
     Ok((
         deleted,
         crate::mapi_store::MapiAssociatedConfigMessage {
@@ -40,7 +45,7 @@ pub(super) fn delete_associated_config_properties(
             canonical_id: existing.canonical_id,
             message_class,
             subject,
-            properties_json: mapi_properties_to_json(&properties),
+            properties_json,
         },
     ))
 }
@@ -64,15 +69,27 @@ pub(super) fn set_associated_config_properties(
     values: Vec<(u32, MapiValue)>,
 ) -> Result<crate::mapi_store::MapiAssociatedConfigMessage> {
     let mut properties = associated_config_mutation_base_properties(existing);
+    // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: Outlook can
+    // submit these properties during an ICS FAI upload, but the server must
+    // not retain client-selected CreationTime or LastModifierName values.
+    let values = values
+        .into_iter()
+        .filter(|(tag, _)| !crate::mapi_store::is_associated_config_read_only_property_tag(*tag))
+        .collect();
     apply_mapi_property_values_to_map(&mut properties, values);
     let (message_class, subject) = associated_config_class_and_subject(&properties);
+    let mut properties_json = mapi_properties_to_json(&properties);
+    crate::mapi_store::copy_associated_config_server_metadata(
+        &existing.properties_json,
+        &mut properties_json,
+    );
     Ok(crate::mapi_store::MapiAssociatedConfigMessage {
         id: existing.id,
         folder_id: existing.folder_id,
         canonical_id: existing.canonical_id,
         message_class,
         subject,
-        properties_json: mapi_properties_to_json(&properties),
+        properties_json,
     })
 }
 
@@ -207,7 +224,7 @@ where
     // contains only user/configuration properties and receives the identity
     // tuple as an ephemeral snapshot projection on reload.
     let mut content_properties = mapi_properties_from_json(&input.properties_json);
-    remove_associated_config_identity_properties(&mut content_properties);
+    remove_associated_config_server_owned_properties(&mut content_properties);
     input.properties_json = mapi_properties_to_json(&content_properties);
 
     if let Some(imported_identity) = imported_identity {
@@ -239,9 +256,9 @@ where
     Ok((committed.config, committed.identity, None))
 }
 
-fn remove_associated_config_identity_properties(properties: &mut HashMap<u32, MapiValue>) {
+fn remove_associated_config_server_owned_properties(properties: &mut HashMap<u32, MapiValue>) {
     properties
-        .retain(|tag, _| !crate::mapi_store::is_associated_config_identity_property_tag(*tag));
+        .retain(|tag, _| !crate::mapi_store::is_associated_config_server_owned_property_tag(*tag));
 }
 
 fn associated_config_message_with_identity(
@@ -270,13 +287,18 @@ fn associated_config_message_with_identity(
         PID_TAG_LAST_MODIFICATION_TIME,
         MapiValue::I64(identity.last_modification_time as i64),
     );
+    let mut properties_json = mapi_properties_to_json(&properties);
+    crate::mapi_store::copy_associated_config_server_metadata(
+        &saved.properties_json,
+        &mut properties_json,
+    );
     crate::mapi_store::MapiAssociatedConfigMessage {
         id: identity.object_id,
         folder_id: saved.folder_id,
         canonical_id: saved.id,
         message_class: saved.message_class.clone(),
         subject: saved.subject.clone(),
-        properties_json: mapi_properties_to_json(&properties),
+        properties_json,
     }
 }
 
@@ -545,9 +567,10 @@ pub(super) fn normalized_associated_config_content_properties(
 ) -> HashMap<u32, MapiValue> {
     let mut normalized =
         normalized_associated_config_persisted_properties(message_class, properties);
-    // Identity/version properties are projected from mapi_object_identities.
-    // Never re-persist that projection when an existing FAI is mutated.
-    remove_associated_config_identity_properties(&mut normalized);
+    // Server-owned identity, version, and history properties are projected
+    // from canonical metadata. Never re-persist that projection when an
+    // existing FAI is mutated.
+    remove_associated_config_server_owned_properties(&mut normalized);
     normalized
 }
 

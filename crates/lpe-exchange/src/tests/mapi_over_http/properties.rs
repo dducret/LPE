@@ -5200,6 +5200,247 @@ async fn mapi_over_http_existing_associated_config_save_is_atomic_in_postgresql(
 }
 
 #[tokio::test]
+async fn mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: CreationTime
+    // and LastModifierName are server-owned. Outlook may include them during
+    // an ICS FAI upload, but they must not become client-controlled content.
+    // [MS-OXCFXICS] section 2.2.4.3.16 then requires the reloaded Message
+    // CopyTo projection to expose the server values, not the submitted ones.
+    const PID_TAG_CREATION_TIME: u32 = 0x3007_0040;
+    const PID_TAG_LAST_MODIFIER_NAME_W: u32 = 0x3FFA_001F;
+    const SUBMITTED_CREATION_TIME: u64 = 0x01D9_8A51_7A20_0000;
+    const SUBMITTED_LAST_MODIFIER: &str = "spoofed@example.test";
+    const STREAM_SUBMITTED_LAST_MODIFIER: &str = "stream-spoofed@example.test";
+
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await?;
+    let config_id = Uuid::parse_str("ca69499e-ce4d-4a45-9d99-a0e0b9aa5a31")?;
+    storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: Some(config_id),
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "Read-only Outlook FAI".to_string(),
+            properties_json: serde_json::json!({
+                "0x001a001f": {
+                    "type": "string",
+                    "value": "IPM.Configuration.MessageListSettings"
+                },
+                "0x0037001f": {
+                    "type": "string",
+                    "value": "Read-only Outlook FAI"
+                },
+                "0x7c060003": {"type": "u32", "value": 0}
+            }),
+        })
+        .await?;
+    let identity = storage
+        .fetch_or_allocate_mapi_identities(
+            fixture.account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                canonical_id: config_id,
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await?
+        .remove(0);
+    let expected_creation_time = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT to_char(
+            created_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+        )
+        FROM mapi_associated_config_messages
+        WHERE account_id = $1 AND id = $2
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(config_id)
+    .fetch_one(storage.pool())
+    .await?;
+
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut headers = mapi_headers("Execute");
+    headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let mut values = Vec::new();
+    append_mapi_i64_property(
+        &mut values,
+        PID_TAG_CREATION_TIME,
+        SUBMITTED_CREATION_TIME as i64,
+    );
+    append_mapi_utf16_property(
+        &mut values,
+        PID_TAG_LAST_MODIFIER_NAME_W,
+        SUBMITTED_LAST_MODIFIER,
+    );
+    append_mapi_binary_property(
+        &mut values,
+        0x7C08_0102,
+        b"real message-list-settings payload",
+    );
+    let mut save_rops = Vec::new();
+    append_rop_open_folder(&mut save_rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_open_message(
+        &mut save_rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        identity.object_id,
+    );
+    let stream_submitted_last_modifier = utf16z(STREAM_SUBMITTED_LAST_MODIFIER);
+    save_rops.extend_from_slice(&[0x2B, 0x00, 0x02, 0x03]); // RopOpenStream.
+    save_rops.extend_from_slice(&PID_TAG_LAST_MODIFIER_NAME_W.to_le_bytes());
+    save_rops.push(2);
+    save_rops.extend_from_slice(&[0x2F, 0x00, 0x03]); // RopSetStreamSize.
+    save_rops.extend_from_slice(&(stream_submitted_last_modifier.len() as u64).to_le_bytes());
+    save_rops.extend_from_slice(&[0x2D, 0x00, 0x03]); // RopWriteStream.
+    save_rops.extend_from_slice(&(stream_submitted_last_modifier.len() as u16).to_le_bytes());
+    save_rops.extend_from_slice(&stream_submitted_last_modifier);
+    save_rops.extend_from_slice(&[0x01, 0x00, 0x03]); // RopRelease stream.
+    append_rop_set_properties(&mut save_rops, 2, 3, &values);
+    append_rop_get_properties_specific(
+        &mut save_rops,
+        2,
+        &[PID_TAG_CREATION_TIME, PID_TAG_LAST_MODIFIER_NAME_W],
+    );
+    append_rop_save_changes_message(&mut save_rops, 2, 2);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &headers,
+            &execute_body(&rop_buffer(&save_rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0A, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
+    let row_offset = mapi_get_properties_specific_standard_row_offset(&response_rops, 2)
+        .expect("updated FAI GetPropertiesSpecific should return a standard row");
+    assert_eq!(response_rops[row_offset], 0);
+    let mut row_offset = row_offset + 1;
+    let current_creation_time = u64::from_le_bytes(
+        response_rops[row_offset..row_offset + 8]
+            .try_into()
+            .unwrap(),
+    );
+    row_offset += 8;
+    let current_last_modifier = read_rop_utf16z(&response_rops, &mut row_offset).unwrap();
+    assert_eq!(
+        current_creation_time,
+        crate::mapi_mailstore::filetime_from_rfc3339_utc(&expected_creation_time)
+    );
+    assert_ne!(current_creation_time, SUBMITTED_CREATION_TIME);
+    assert_eq!(current_last_modifier, "Alice Calendar");
+    assert_ne!(current_last_modifier, SUBMITTED_LAST_MODIFIER);
+    assert_ne!(current_last_modifier, STREAM_SUBMITTED_LAST_MODIFIER);
+
+    let saved = storage
+        .fetch_mapi_associated_configs(fixture.account_id)
+        .await?
+        .into_iter()
+        .find(|config| config.id == config_id)
+        .expect("saved associated config");
+    assert_eq!(
+        saved.properties_json["0x7c080102"]["value"],
+        "7265616c206d6573736167652d6c6973742d73657474696e6773207061796c6f6164"
+    );
+    assert!(saved.properties_json.get("0x30070040").is_none());
+    assert!(saved.properties_json.get("0x3ffa001f").is_none());
+
+    let reconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    renew_mapi_request_id(&mut headers);
+    headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&reconnect))?,
+    );
+    let mut copy_rops = Vec::new();
+    append_rop_open_folder(&mut copy_rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_open_message(
+        &mut copy_rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        identity.object_id,
+    );
+    copy_rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]); // CopyTo.
+    copy_rops.push(0);
+    copy_rops.extend_from_slice(&0x0000_2000u32.to_le_bytes());
+    copy_rops.push(0x09);
+    copy_rops.extend_from_slice(&0u16.to_le_bytes());
+    copy_rops.extend_from_slice(&[0x4E, 0x00, 0x03]); // GetBuffer.
+    copy_rops.extend_from_slice(&4096u16.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &headers,
+            &execute_body(&rop_buffer(&copy_rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    let chunks = mapi_fast_transfer_chunks(&response_rops);
+    assert_eq!(chunks.len(), 1, "{response_rops:02x?}");
+    assert_eq!(chunks[0].0, 0x0003, "{response_rops:02x?}");
+    let mut offset = 0;
+    let mut properties = Vec::new();
+    while offset < chunks[0].1.len() {
+        let property = strict_parse_fast_transfer_property(&chunks[0].1, offset)
+            .unwrap_or_else(|error| panic!("{error}: {:02x?}", chunks[0].1));
+        offset = property.next_offset;
+        properties.push(property);
+    }
+    let creation_times = properties
+        .iter()
+        .filter(|property| property.tag == PID_TAG_CREATION_TIME)
+        .collect::<Vec<_>>();
+    assert_eq!(creation_times.len(), 1, "{:02x?}", chunks[0].1);
+    assert_eq!(
+        strict_decode_u64_property(creation_times[0]).unwrap(),
+        crate::mapi_mailstore::filetime_from_rfc3339_utc(&expected_creation_time)
+    );
+    assert_ne!(
+        strict_decode_u64_property(creation_times[0]).unwrap(),
+        SUBMITTED_CREATION_TIME
+    );
+    let last_modifiers = properties
+        .iter()
+        .filter(|property| property.tag == PID_TAG_LAST_MODIFIER_NAME_W)
+        .collect::<Vec<_>>();
+    assert_eq!(last_modifiers.len(), 1, "{:02x?}", chunks[0].1);
+    assert_eq!(
+        strict_decode_utf16z(&last_modifiers[0].value).unwrap(),
+        "Alice Calendar"
+    );
+    assert_ne!(
+        strict_decode_utf16z(&last_modifiers[0].value).unwrap(),
+        SUBMITTED_LAST_MODIFIER
+    );
+    assert_ne!(
+        strict_decode_utf16z(&last_modifiers[0].value).unwrap(),
+        STREAM_SUBMITTED_LAST_MODIFIER
+    );
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn mapi_associated_config_delete_tombstones_identity_in_postgresql() -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());

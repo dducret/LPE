@@ -593,20 +593,23 @@ pub(super) fn apply_fast_transfer_destination_properties(
     target_handle: u32,
     property_values: Vec<(u32, MapiValue)>,
 ) -> Option<()> {
-    let properties = match session.handles.get_mut(&target_handle)? {
+    match session.handles.get_mut(&target_handle)? {
+        MapiObject::PendingAssociatedMessage { properties, .. } => {
+            apply_pending_associated_message_property_values(properties, property_values);
+        }
         MapiObject::PendingMessage { properties, .. }
-        | MapiObject::PendingAssociatedMessage { properties, .. }
         | MapiObject::PendingContact { properties, .. }
         | MapiObject::PendingEvent { properties, .. }
         | MapiObject::PendingTask { properties, .. }
         | MapiObject::PendingNote { properties, .. }
         | MapiObject::PendingJournalEntry { properties, .. }
         | MapiObject::PendingConversationAction { properties, .. }
-        | MapiObject::PendingNavigationShortcut { properties, .. } => properties,
+        | MapiObject::PendingNavigationShortcut { properties, .. } => {
+            for (property_tag, value) in property_values {
+                properties.insert(canonical_property_storage_tag(property_tag), value);
+            }
+        }
         _ => return None,
-    };
-    for (property_tag, value) in property_values {
-        properties.insert(canonical_property_storage_tag(property_tag), value);
     }
     Some(())
 }

@@ -244,9 +244,11 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
         return;
     }
     if import_flag & 0x10 != 0 {
+        let mut properties = HashMap::new();
+        apply_pending_associated_message_property_values(&mut properties, property_values);
         let pending_object = MapiObject::PendingAssociatedMessage {
             folder_id,
-            properties: property_values.into_iter().collect(),
+            properties,
             imported_message_id: Some(message_id),
             fail_on_conflict: import_flag & 0x40 != 0,
         };

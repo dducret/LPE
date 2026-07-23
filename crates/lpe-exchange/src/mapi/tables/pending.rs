@@ -431,10 +431,16 @@ pub(in crate::mapi) fn pending_associated_message_property_value(
     let lookup_tag = canonical_property_storage_tag(property_tag);
     // [MS-OXCMSG] 3.2.5.2 gives a newly created message the normal
     // IPM.Note defaults. Configuration properties begin when the client sets them.
-    properties
-        .get(&lookup_tag)
-        .cloned()
-        .or_else(|| pending_message_property_value(principal, properties, property_tag))
+    match lookup_tag {
+        // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: never
+        // replay a client-supplied FAI CreationTime or LastModifierName.
+        PID_TAG_CREATION_TIME => properties.get(&PID_TAG_CREATION_TIME).cloned(),
+        PID_TAG_LAST_MODIFIER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
+        _ => properties
+            .get(&lookup_tag)
+            .cloned()
+            .or_else(|| pending_message_property_value(principal, properties, property_tag)),
+    }
 }
 
 fn pending_message_search_key(properties: &HashMap<u32, MapiValue>) -> Vec<u8> {

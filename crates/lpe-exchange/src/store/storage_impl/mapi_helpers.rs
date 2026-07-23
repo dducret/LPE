@@ -565,6 +565,22 @@ fn mapi_associated_config_from_row(
             );
         }
     }
+    if let Ok(created_at) = row.try_get::<String, _>("created_at") {
+        if let Some(properties) = properties_json.as_object_mut() {
+            properties.insert(
+                "__lpe_created_at".to_string(),
+                serde_json::json!(created_at),
+            );
+        }
+    }
+    if let Ok(last_modifier_name) = row.try_get::<String, _>("last_modifier_name") {
+        if let Some(properties) = properties_json.as_object_mut() {
+            properties.insert(
+                "__lpe_last_modifier_name".to_string(),
+                serde_json::json!(last_modifier_name),
+            );
+        }
+    }
     Ok(MapiAssociatedConfigRecord {
         id: row.try_get("id")?,
         account_id: row.try_get("account_id")?,

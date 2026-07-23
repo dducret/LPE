@@ -729,7 +729,11 @@ pub(in crate::mapi) fn sync_stream_target(
             match session.handles.get_mut(&handle) {
                 Some(MapiObject::PendingAssociatedMessage { properties, .. })
                 | Some(MapiObject::PendingNavigationShortcut { properties, .. }) => {
-                    properties.insert(canonical_property_storage_tag(property_tag), value);
+                    let property_tag = canonical_property_storage_tag(property_tag);
+                    if !crate::mapi_store::is_associated_config_read_only_property_tag(property_tag)
+                    {
+                        properties.insert(property_tag, value);
+                    }
                     Some(())
                 }
                 _ => None,
@@ -739,6 +743,10 @@ pub(in crate::mapi) fn sync_stream_target(
             handle,
             property_tag,
         } => {
+            let property_tag = canonical_property_storage_tag(property_tag);
+            if crate::mapi_store::is_associated_config_read_only_property_tag(property_tag) {
+                return Some(());
+            }
             let value = stream_property_value(property_tag, data)?;
             if let Some(MapiObject::AssociatedConfig {
                 saved_message: Some(message),
@@ -746,8 +754,13 @@ pub(in crate::mapi) fn sync_stream_target(
             }) = session.handles.get_mut(&handle)
             {
                 let mut properties = mapi_properties_from_json(&message.properties_json);
-                properties.insert(canonical_property_storage_tag(property_tag), value);
-                message.properties_json = mapi_properties_to_json(&properties);
+                properties.insert(property_tag, value);
+                let mut properties_json = mapi_properties_to_json(&properties);
+                crate::mapi_store::copy_associated_config_server_metadata(
+                    &message.properties_json,
+                    &mut properties_json,
+                );
+                message.properties_json = properties_json;
                 Some(())
             } else {
                 None

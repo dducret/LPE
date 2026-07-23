@@ -450,6 +450,7 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
     properties
         .get(&lookup_tag)
         .cloned()
+        .filter(|_| !crate::mapi_store::is_associated_config_read_only_property_tag(lookup_tag))
         .map(|value| {
             sanitize_configuration_property_value(&message.message_class, lookup_tag, value)
         })
@@ -532,11 +533,21 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 | PID_TAG_REPLY_RECIPIENT_NAMES_W
                 | PID_TAG_REPORT_DISPOSITION_W
                 | PID_TAG_SUBJECT_PREFIX_W => Some(MapiValue::String(String::new())),
-                PID_TAG_CLIENT_SUBMIT_TIME | PID_TAG_CREATION_TIME => Some(MapiValue::I64(
+                PID_TAG_CLIENT_SUBMIT_TIME => Some(MapiValue::I64(
                     associated_config_last_modified_filetime(message).unwrap_or_else(|| {
                         mapi_mailstore::filetime_from_change_number(change_number)
                     }) as i64,
                 )),
+                PID_TAG_CREATION_TIME => Some(MapiValue::I64(
+                    associated_config_creation_filetime(message).unwrap_or_else(|| {
+                        associated_config_last_modified_filetime(message).unwrap_or_else(|| {
+                            mapi_mailstore::filetime_from_change_number(change_number)
+                        })
+                    }) as i64,
+                )),
+                PID_TAG_LAST_MODIFIER_NAME_W => {
+                    associated_config_last_modifier_name(message).map(MapiValue::String)
+                }
                 PID_TAG_DEFERRED_DELIVERY_TIME
                 | PID_TAG_DEFERRED_SEND_TIME
                 | PID_TAG_END_DATE
@@ -844,6 +855,7 @@ fn is_umolk_computed_property(property_tag: u32) -> bool {
             | PID_TAG_ACCESS
             | PID_TAG_CLIENT_SUBMIT_TIME
             | PID_TAG_CREATION_TIME
+            | PID_TAG_LAST_MODIFIER_NAME_W
             | PID_TAG_ASSOCIATED
             | PID_TAG_MESSAGE_SIZE
             | PID_TAG_MESSAGE_SIZE_EXTENDED
@@ -875,6 +887,24 @@ fn associated_config_last_modified_filetime(message: &MapiAssociatedConfigMessag
         .and_then(serde_json::Value::as_str)
         .map(mapi_mailstore::filetime_from_rfc3339_utc)
         .filter(|filetime| *filetime != 0)
+}
+
+fn associated_config_creation_filetime(message: &MapiAssociatedConfigMessage) -> Option<u64> {
+    message
+        .properties_json
+        .get("__lpe_created_at")
+        .and_then(serde_json::Value::as_str)
+        .map(mapi_mailstore::filetime_from_rfc3339_utc)
+        .filter(|filetime| *filetime != 0)
+}
+
+fn associated_config_last_modifier_name(message: &MapiAssociatedConfigMessage) -> Option<String> {
+    message
+        .properties_json
+        .get("__lpe_last_modifier_name")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn is_outlook_virtual_sharing_state_config(message: &MapiAssociatedConfigMessage) -> bool {

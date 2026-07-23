@@ -1314,8 +1314,11 @@ pub(in crate::mapi) fn apply_mapi_property_values(
             properties.extend(values);
             Ok(())
         }
-        Some(MapiObject::PendingAssociatedMessage { properties, .. })
-        | Some(MapiObject::PendingContact { properties, .. })
+        Some(MapiObject::PendingAssociatedMessage { properties, .. }) => {
+            apply_pending_associated_message_property_values(properties, values);
+            Ok(())
+        }
+        Some(MapiObject::PendingContact { properties, .. })
         | Some(MapiObject::PendingEvent { properties, .. })
         | Some(MapiObject::PendingTask { properties, .. })
         | Some(MapiObject::PendingNote { properties, .. })
@@ -1351,6 +1354,20 @@ pub(in crate::mapi) fn apply_mapi_property_values(
         }
         Some(MapiObject::Logon | MapiObject::PublicFolderLogon) => Ok(()),
         _ => Err(anyhow!("MAPI object does not support property mutation")),
+    }
+}
+
+pub(in crate::mapi) fn apply_pending_associated_message_property_values(
+    properties: &mut HashMap<u32, MapiValue>,
+    values: impl IntoIterator<Item = (u32, MapiValue)>,
+) {
+    // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: a client can
+    // submit these fields while importing an FAI, but it cannot set them.
+    for (tag, value) in values {
+        let tag = canonical_property_storage_tag(tag);
+        if !crate::mapi_store::is_associated_config_read_only_property_tag(tag) {
+            properties.insert(tag, value);
+        }
     }
 }
 

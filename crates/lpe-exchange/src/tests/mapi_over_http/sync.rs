@@ -10092,6 +10092,23 @@ async fn mapi_over_http_associated_message_uploads_do_not_create_visible_items()
 
 #[tokio::test]
 async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai() {
+    const PID_TAG_CREATION_TIME: u32 = 0x3007_0040;
+    const PID_TAG_LAST_MODIFIER_NAME_W: u32 = 0x3FFA_001F;
+    const SUBMITTED_CREATION_TIME: i64 = 0x01D9_8A51_7A20_0000;
+    const SUBMITTED_LAST_MODIFIER: &str = "spoofed@example.test";
+
+    fn append_fast_transfer_i64_property(values: &mut Vec<u8>, property_tag: u32, value: i64) {
+        values.extend_from_slice(&property_tag.to_le_bytes());
+        values.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn append_fast_transfer_utf16_property(values: &mut Vec<u8>, property_tag: u32, value: &str) {
+        let value = utf16z(value);
+        values.extend_from_slice(&property_tag.to_le_bytes());
+        values.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        values.extend_from_slice(&value);
+    }
+
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -10135,6 +10152,16 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         PID_TAG_LAST_MODIFICATION_TIME,
         imported_last_modification_time,
     );
+    append_mapi_i64_property(
+        &mut property_values,
+        PID_TAG_CREATION_TIME,
+        SUBMITTED_CREATION_TIME,
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_LAST_MODIFIER_NAME_W,
+        SUBMITTED_LAST_MODIFIER,
+    );
     append_mapi_utf16_property(&mut property_values, 0x001A_001F, "IPM.Configuration");
     append_mapi_utf16_property(
         &mut property_values,
@@ -10161,12 +10188,42 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange
     ]);
     rops.push(0x10);
-    rops.extend_from_slice(&7u16.to_le_bytes());
+    rops.extend_from_slice(&9u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
+    let mut fast_transfer_values = Vec::new();
+    append_fast_transfer_i64_property(
+        &mut fast_transfer_values,
+        PID_TAG_CREATION_TIME,
+        SUBMITTED_CREATION_TIME,
+    );
+    append_fast_transfer_utf16_property(
+        &mut fast_transfer_values,
+        PID_TAG_LAST_MODIFIER_NAME_W,
+        SUBMITTED_LAST_MODIFIER,
+    );
+    rops.extend_from_slice(&[0x53, 0x00, 0x03, 0x04, 0x01, 0x00]);
+    rops.extend_from_slice(&[0x54, 0x00, 0x04]);
+    rops.extend_from_slice(&(fast_transfer_values.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&fast_transfer_values);
     let mut update_values = Vec::new();
+    append_mapi_i64_property(
+        &mut update_values,
+        PID_TAG_CREATION_TIME,
+        SUBMITTED_CREATION_TIME,
+    );
+    append_mapi_utf16_property(
+        &mut update_values,
+        PID_TAG_LAST_MODIFIER_NAME_W,
+        SUBMITTED_LAST_MODIFIER,
+    );
     append_mapi_utf16_property(&mut update_values, PID_TAG_BODY_W, "Client view payload");
     append_mapi_binary_property(&mut update_values, 0x7C08_0102, b"view-extra");
-    append_rop_set_properties(&mut rops, 3, 2, &update_values);
+    append_rop_set_properties(&mut rops, 3, 4, &update_values);
+    append_rop_get_properties_specific(
+        &mut rops,
+        3,
+        &[PID_TAG_CREATION_TIME, PID_TAG_LAST_MODIFIER_NAME_W],
+    );
     append_rop_save_changes_message(&mut rops, 3, 3);
     append_rop_get_properties_specific(&mut rops, 3, &[PID_TAG_SUBJECT_W, 0x7C08_0102]);
 
@@ -10178,7 +10235,7 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
             &execute_headers,
             &execute_body(&rop_buffer(
                 &rops,
-                &[1, u32::MAX, u32::MAX, u32::MAX, 1, u32::MAX],
+                &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
             )),
         )
         .await
@@ -10187,9 +10244,26 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x53, 0x04, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x54, 0x04, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x0A, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x0C, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x07, 0x03, 0, 0, 0, 0]));
+    let row_offset = mapi_get_properties_specific_standard_row_offset(&response_rops, 3)
+        .expect("pending FAI GetPropertiesSpecific should return a standard row");
+    assert_eq!(response_rops[row_offset], 0);
+    let mut row_offset = row_offset + 1;
+    let creation_time = u64::from_le_bytes(
+        response_rops[row_offset..row_offset + 8]
+            .try_into()
+            .unwrap(),
+    );
+    row_offset += 8;
+    let last_modifier = read_rop_utf16z(&response_rops, &mut row_offset).unwrap();
+    assert_eq!(creation_time, 0);
+    assert_ne!(creation_time, SUBMITTED_CREATION_TIME as u64);
+    assert_eq!(last_modifier, account.display_name);
+    assert_ne!(last_modifier, SUBMITTED_LAST_MODIFIER);
     assert!(imported_emails.lock().unwrap().is_empty());
     {
         let configs = associated_configs.lock().unwrap();
@@ -10206,7 +10280,9 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
         assert!(config.properties_json.get("0x65e00102").is_none());
         assert!(config.properties_json.get("0x65e20102").is_none());
         assert!(config.properties_json.get("0x65e30102").is_none());
+        assert!(config.properties_json.get("0x30070040").is_none());
         assert!(config.properties_json.get("0x30080040").is_none());
+        assert!(config.properties_json.get("0x3ffa001f").is_none());
         assert_eq!(
             config.properties_json["0x7c070102"]["value"],
             serde_json::Value::String(

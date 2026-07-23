@@ -6,11 +6,22 @@ async fn fetch_mapi_associated_config_in_tx(
 ) -> Result<MapiAssociatedConfigRecord> {
     let row = sqlx::query(
         r#"
-        SELECT id, account_id, folder_id, message_class, subject, properties_json,
-               to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
-                   AS updated_at
-        FROM mapi_associated_config_messages
-        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+        SELECT config.id, config.account_id, config.folder_id,
+               config.message_class, config.subject, config.properties_json,
+               to_char(
+                   config.created_at AT TIME ZONE 'UTC',
+                   'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+               ) AS created_at,
+               to_char(
+                   config.updated_at AT TIME ZONE 'UTC',
+                   'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+               ) AS updated_at,
+               account.display_name AS last_modifier_name
+        FROM mapi_associated_config_messages config
+        JOIN accounts account
+          ON account.tenant_id = config.tenant_id
+         AND account.id = config.account_id
+        WHERE config.tenant_id = $1 AND config.account_id = $2 AND config.id = $3
         "#,
     )
     .bind(tenant_id)
@@ -59,8 +70,14 @@ async fn upsert_mapi_associated_config_in_tx(
             updated_at = NOW()
         WHERE mapi_associated_config_messages.account_id = EXCLUDED.account_id
         RETURNING id, account_id, folder_id, message_class, subject, properties_json,
-                  to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
-                      AS updated_at
+                  to_char(
+                      created_at AT TIME ZONE 'UTC',
+                      'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                  ) AS created_at,
+                  to_char(
+                      updated_at AT TIME ZONE 'UTC',
+                      'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                  ) AS updated_at
         "#,
     )
     .bind(tenant_id)
@@ -73,7 +90,24 @@ async fn upsert_mapi_associated_config_in_tx(
     .fetch_optional(&mut **tx)
     .await?
     .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?;
-    let saved = mapi_associated_config_from_row(row)?;
+    let mut saved = mapi_associated_config_from_row(row)?;
+    let last_modifier_name = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT display_name
+        FROM accounts
+        WHERE tenant_id = $1 AND id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(saved.account_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if let Some(properties) = saved.properties_json.as_object_mut() {
+        properties.insert(
+            "__lpe_last_modifier_name".to_string(),
+            serde_json::json!(last_modifier_name),
+        );
+    }
     insert_mapi_associated_config_change(
         tx,
         tenant_id,

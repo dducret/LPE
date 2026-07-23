@@ -239,11 +239,24 @@ macro_rules! store_impl_mailbox_config {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
             let rows = sqlx::query(
                 r#"
-                SELECT id, account_id, folder_id, message_class, subject, properties_json,
-                       to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
-                FROM mapi_associated_config_messages
-                WHERE tenant_id = $1 AND account_id = $2
-                ORDER BY folder_id, message_class, subject, updated_at DESC, id
+                SELECT config.id, config.account_id, config.folder_id,
+                       config.message_class, config.subject, config.properties_json,
+                       to_char(
+                           config.created_at AT TIME ZONE 'UTC',
+                           'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                       ) AS created_at,
+                       to_char(
+                           config.updated_at AT TIME ZONE 'UTC',
+                           'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                       ) AS updated_at,
+                       account.display_name AS last_modifier_name
+                FROM mapi_associated_config_messages config
+                JOIN accounts account
+                  ON account.tenant_id = config.tenant_id
+                 AND account.id = config.account_id
+                WHERE config.tenant_id = $1 AND config.account_id = $2
+                ORDER BY config.folder_id, config.message_class, config.subject,
+                         config.updated_at DESC, config.id
                 "#,
             )
             .bind(tenant_id)

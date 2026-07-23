@@ -339,14 +339,15 @@ impl MapiMailStoreSnapshot {
                 .properties_json
                 .as_object_mut()
                 .expect("associated config properties must be a JSON object");
-            // The identity table is canonical. This projection deliberately
-            // removes every property-type variant of a legacy/stale identity
-            // tuple before inserting the canonical values, so tables and ICS
-            // cannot expose parallel FAI state.
+            // The identity table and canonical FAI metadata are authoritative.
+            // This projection deliberately removes every property-type variant
+            // of a legacy/stale server-owned property before inserting the
+            // canonical identity values, so tables and ICS cannot expose
+            // parallel FAI state.
             properties.retain(|tag, _| {
                 tag.strip_prefix("0x")
                     .and_then(|tag| u32::from_str_radix(tag, 16).ok())
-                    .is_none_or(|tag| !is_associated_config_identity_property_tag(tag))
+                    .is_none_or(|tag| !is_associated_config_server_owned_property_tag(tag))
             });
             properties.insert(
                 "0x674a0014".to_string(),

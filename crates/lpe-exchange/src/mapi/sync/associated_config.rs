@@ -6,10 +6,19 @@ pub(super) fn associated_config_sync_object(
     let mut named_properties = Vec::new();
     let stored_properties = mapi_properties_from_json(&message.properties_json);
     for (tag, value) in stored_properties.clone() {
-        if associated_config_standard_sync_tag(tag) {
+        if associated_config_standard_sync_tag(tag)
+            || crate::mapi_store::is_associated_config_read_only_property_tag(tag)
+        {
             continue;
         }
         if let Some(value) = special_message_property_value(value) {
+            named_properties.push((tag, value));
+        }
+    }
+    for tag in [PID_TAG_CREATION_TIME, PID_TAG_LAST_MODIFIER_NAME_W] {
+        if let Some(value) =
+            associated_config_property_value(message, tag).and_then(special_message_property_value)
+        {
             named_properties.push((tag, value));
         }
     }

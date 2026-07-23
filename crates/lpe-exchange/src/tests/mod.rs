@@ -11693,13 +11693,22 @@ fn parse_attachment_reference(value: &str) -> Option<(Uuid, Uuid)> {
 }
 
 fn strip_mapi_http_envelope(bytes: Vec<u8>) -> Vec<u8> {
-    if !bytes.starts_with(b"PROCESSING\r\nDONE\r\n") {
+    if !bytes.starts_with(b"PROCESSING\r\n") {
         return bytes;
     }
-    let Some(offset) = bytes.windows(4).position(|window| window == b"\r\n\r\n") else {
+    let Some(done_offset) = bytes
+        .windows(b"DONE\r\n".len())
+        .position(|window| window == b"DONE\r\n")
+    else {
         return bytes;
     };
-    bytes[offset + 4..].to_vec()
+    let Some(offset) = bytes[done_offset..]
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+    else {
+        return bytes;
+    };
+    bytes[done_offset + offset + 4..].to_vec()
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {

@@ -4,21 +4,56 @@ use uuid::Uuid;
 use super::{MapiAssociatedConfigMessage, MapiDelegateFreeBusyMessage};
 use crate::store::{MapiAssociatedConfigRecord, UpsertMapiAssociatedConfigInput};
 
-pub(crate) fn is_associated_config_identity_property_tag(property_tag: u32) -> bool {
+const ASSOCIATED_CONFIG_SERVER_METADATA_KEYS: [&str; 3] = [
+    "__lpe_created_at",
+    "__lpe_updated_at",
+    "__lpe_last_modifier_name",
+];
+
+// These fields exist only on in-memory snapshot/message projections. Property
+// JSON writes reconstruct their bags from tagged MAPI values and never retain
+// the non-MAPI `__lpe_*` keys as durable configuration state.
+pub(crate) fn copy_associated_config_server_metadata(
+    source: &serde_json::Value,
+    target: &mut serde_json::Value,
+) {
+    let metadata = ASSOCIATED_CONFIG_SERVER_METADATA_KEYS
+        .iter()
+        .filter_map(|key| {
+            source
+                .get(*key)
+                .map(|value| ((*key).to_string(), value.clone()))
+        })
+        .collect::<Vec<_>>();
+    if let Some(properties) = target.as_object_mut() {
+        properties.extend(metadata);
+    }
+}
+
+pub(crate) fn is_associated_config_read_only_property_tag(property_tag: u32) -> bool {
     matches!(
         property_tag >> 16,
-        0x0FF6 // PidTagInstanceKey
-            | 0x0FF9 // PidTagRecordKey
-            | 0x3008 // PidTagLastModificationTime
-            | 0x300B // PidTagSearchKey
-            | 0x65E0 // PidTagSourceKey
-            | 0x65E2 // PidTagChangeKey
-            | 0x65E3 // PidTagPredecessorChangeList
-            | 0x6709 // PidTagLocalCommitTime
-            | 0x6748 // PidTagInstId
-            | 0x674A // PidTagMid
-            | 0x67A4 // PidTagChangeNumber
+        0x3007 // PidTagCreationTime
+            | 0x3FFA // PidTagLastModifierName
     )
+}
+
+pub(crate) fn is_associated_config_server_owned_property_tag(property_tag: u32) -> bool {
+    is_associated_config_read_only_property_tag(property_tag)
+        || matches!(
+            property_tag >> 16,
+            0x0FF6 // PidTagInstanceKey
+                | 0x0FF9 // PidTagRecordKey
+                | 0x3008 // PidTagLastModificationTime
+                | 0x300B // PidTagSearchKey
+                | 0x65E0 // PidTagSourceKey
+                | 0x65E2 // PidTagChangeKey
+                | 0x65E3 // PidTagPredecessorChangeList
+                | 0x6709 // PidTagLocalCommitTime
+                | 0x6748 // PidTagInstId
+                | 0x674A // PidTagMid
+                | 0x67A4 // PidTagChangeNumber
+        )
 }
 
 pub(super) const OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS: &str = "IPM.Configuration.AccountPrefs";

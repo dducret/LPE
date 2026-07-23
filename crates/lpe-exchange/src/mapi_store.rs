@@ -224,7 +224,8 @@ mod snapshot;
 pub(crate) use associated_config::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID;
 use associated_config::*;
 pub(crate) use associated_config::{
-    is_associated_config_identity_property_tag,
+    copy_associated_config_server_metadata, is_associated_config_read_only_property_tag,
+    is_associated_config_server_owned_property_tag,
     is_outlook_common_views_default_navigation_shortcut_id, is_outlook_configuration_message_class,
     is_outlook_configuration_message_class_name, is_outlook_default_conversation_action_id,
     is_outlook_inbox_default_associated_config_id,
