@@ -1349,6 +1349,7 @@ pub(in crate::mapi) fn apply_mapi_property_values(
                 *folder_id != ROOT_FOLDER_ID
                     || !is_default_folder_identification_property_tag(*tag)
                     || is_scalar_default_folder_entry_id_property_tag(*tag)
+                    || canonical_property_storage_tag(*tag) == PID_TAG_ADDITIONAL_REN_ENTRY_IDS
             }));
             Ok(())
         }

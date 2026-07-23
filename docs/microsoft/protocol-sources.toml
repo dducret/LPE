@@ -594,6 +594,7 @@ used_for = [
   "Same-handle staging and reread of PidTagScheduleInfoAppointmentTombstone through direct properties and writable streams",
   "RopGetPropertiesSpecific response-buffer budgeting, per-property NotEnoughMemory, and stream fallback for oversized Outlook Calendar HTML",
   "Server-owned PidTagAccess and PidTagAccessLevel projection in special-message FastTransfer downloads",
+  "RopSetProperties durable round-trip of Inbox PidTagAdditionalRenEntryIds client state",
 ]
 sections = [
   "2.2.1 Common Object Properties",
@@ -1429,6 +1430,7 @@ used_for = [
   "Outlook special folder hierarchy projection, identifiers, container classes, and search-folder placement",
   "Root, Finder/Search, Common Views, Personal Views, Deferred Action, FreeBusy Data, Reminders, To-Do, tracked mail, and Conversation Action Settings compatibility",
   "Deleted Items as the default destination for deleted objects and Calendar move projection",
+  "Durable preservation of Outlook PidTagAdditionalRenEntryIds client indexes",
 ]
 sections = [
   "2.2.1 List of Special Folders",
@@ -3238,12 +3240,17 @@ local_cache = "docs/microsoft/cache/MS-OXCSPAM.pdf"
 sha256 = "20ff7692fdb89b6e58d6c1d4043fb33a55d65e9dd07f5c9e7379c4dbe69a345a"
 used_for = [
   "Classifying Exchange SCL/junk rule properties against LPE-CT spam scoring and canonical Junk behavior",
+  "Outlook Junk Email Move Stamp storage in PidTagAdditionalRenEntryIds index 5",
 ]
 sections = [
   "2.2.1 Message Object Properties",
   "2.2.1.1 PidLidSpamOriginalFolder Property",
   "2.2.1.3 PidTagContentFilterSpamConfidenceLevel Property",
   "2.2.2 Junk Email Rule Properties",
+  "2.2.3.1 PidTagAdditionalRenEntryIds Property",
+  "3.2.4.1 Obtaining or Creating the Junk Email Move Stamp",
+  "3.2.4.1.1 Obtaining the Junk Email Move Stamp",
+  "3.2.4.1.2 Generating the Junk Email Move Stamp",
 ]
 
 [[protocol]]

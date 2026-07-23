@@ -1892,7 +1892,7 @@ fn default_folder_entry_id_values_debug_decodes_freebusy_data_index() {
 }
 
 #[test]
-fn default_folder_identification_values_do_not_shadow_canonical_inbox_projection() {
+fn default_folder_identification_values_preserve_additional_ren_client_state() {
     let inbox = MapiObject::Folder {
         folder_id: INBOX_FOLDER_ID,
         properties: std::collections::HashMap::new(),
@@ -1928,7 +1928,7 @@ fn default_folder_identification_values_do_not_shadow_canonical_inbox_projection
         panic!("expected AdditionalRenEntryIds");
     };
     assert_eq!(values.len(), 6);
-    assert_ne!(values[0], vec![0xAA]);
+    assert_eq!(values[0], vec![0xAA]);
     assert_eq!(values[5], vec![0xFA, 0xCE]);
     assert_eq!(
         retained
@@ -1942,7 +1942,7 @@ fn default_folder_identification_values_do_not_shadow_canonical_inbox_projection
 }
 
 #[test]
-fn root_scalar_default_folder_entry_ids_do_not_shadow_canonical_projection() {
+fn root_default_folder_properties_retain_additional_ren_client_state() {
     let root = MapiObject::Folder {
         folder_id: ROOT_FOLDER_ID,
         properties: std::collections::HashMap::new(),
@@ -1970,10 +1970,16 @@ fn root_scalar_default_folder_entry_ids_do_not_shadow_canonical_projection() {
 
     assert_eq!(
         retained,
-        vec![(
-            PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
-            MapiValue::Binary(calendar_entry_id)
-        )]
+        vec![
+            (
+                PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+                MapiValue::Binary(calendar_entry_id)
+            ),
+            (
+                PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+                MapiValue::MultiBinary(vec![Vec::new()])
+            ),
+        ]
     );
 }
 

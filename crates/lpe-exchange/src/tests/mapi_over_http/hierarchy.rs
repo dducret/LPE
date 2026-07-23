@@ -2188,6 +2188,123 @@ async fn mapi_over_http_folder_extended_flags_survive_reconnect() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_additional_ren_entry_ids_round_trip_client_state_across_reconnect() {
+    // Outlook trace 202607211111 creates this sixth value after reading the
+    // documented five folder EntryIDs. Keep the dynamic Junk alias and move
+    // stamp fixture-independent: [MS-OXOSFLD] section 2.2.4 requires opaque
+    // indexes to survive, [MS-OXCSPAM] sections 2.2.3.1 and 3.2.4.1.2 require
+    // Outlook's index 5 move stamp to persist on Inbox, and [MS-OXCPRPT]
+    // section 3.2.5.4 defines the successful RopSetProperties transition.
+    let account = FakeStore::account();
+    let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    let stored_folder_profile_values = store.mapi_folder_profile_property_values.clone();
+    let first_reserved_counter = store
+        .reserve_mapi_local_replica_ids(account.account_id, 0x1_0000)
+        .await
+        .unwrap();
+    let service = ExchangeService::new(store);
+    let first_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut first_headers = mapi_headers("Execute");
+    first_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&first_connect)).unwrap(),
+    );
+
+    let mut entries = [
+        crate::mapi::identity::CONFLICTS_FOLDER_ID,
+        crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+        crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
+        crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
+        crate::mapi::identity::JUNK_FOLDER_ID,
+    ]
+    .map(|folder_id| {
+        crate::mapi::identity::folder_entry_id_from_object_id(account.account_id, folder_id)
+            .unwrap()
+    });
+    let client_junk_alias_id = crate::mapi::identity::mapi_store_id(first_reserved_counter + 0x5e);
+    entries[4] = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        client_junk_alias_id,
+    )
+    .unwrap();
+    let junk_move_stamp = [0x4d, 0x3c, 0x2b, 0x1a];
+    let mut property_values = Vec::new();
+    append_mapi_multi_binary_property(
+        &mut property_values,
+        0x36D8_1102, // PidTagAdditionalRenEntryIds
+        &[
+            &entries[0],
+            &entries[1],
+            &entries[2],
+            &entries[3],
+            &entries[4],
+            &junk_move_stamp,
+        ],
+    );
+    let mut expected_profile_value = 6u32.to_le_bytes().to_vec();
+    for entry in &entries {
+        expected_profile_value.extend_from_slice(&(entry.len() as u16).to_le_bytes());
+        expected_profile_value.extend_from_slice(entry);
+    }
+    expected_profile_value.extend_from_slice(&(junk_move_stamp.len() as u16).to_le_bytes());
+    expected_profile_value.extend_from_slice(&junk_move_stamp);
+
+    let mut set_rops = Vec::new();
+    append_rop_open_folder(&mut set_rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_set_properties(&mut set_rops, 1, 1, &property_values);
+    let set_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &first_headers,
+            &execute_body(&rop_buffer(&set_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    let set_response_rops = response_rops_from_execute_response(set_response).await;
+    assert!(contains_bytes(
+        &set_response_rops,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(stored_folder_profile_values
+        .lock()
+        .unwrap()
+        .values()
+        .any(|value| value == &expected_profile_value));
+
+    let reconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut reconnect_headers = mapi_headers("Execute");
+    reconnect_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&reconnect)).unwrap(),
+    );
+    let mut get_rops = Vec::new();
+    append_rop_open_folder(&mut get_rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_get_properties_specific(&mut get_rops, 1, &[0x36D8_1102]);
+    let get_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &reconnect_headers,
+            &execute_body(&rop_buffer(&get_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    let get_response_rops = response_rops_from_execute_response(get_response).await;
+    assert!(contains_bytes(&get_response_rops, &expected_profile_value));
+}
+
+#[tokio::test]
 async fn mapi_over_http_delete_folder_local_default_named_view_is_noop_success() {
     let account = FakeStore::account();
     let store = FakeStore {

@@ -1139,6 +1139,26 @@ where
             }
         }
     }
+    if matches!(folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID) {
+        if let Ok(values) = store
+            .fetch_mapi_folder_profile_property_values(
+                principal.account_id,
+                INBOX_FOLDER_ID,
+                &[PID_TAG_ADDITIONAL_REN_ENTRY_IDS],
+            )
+            .await
+        {
+            for value in values {
+                if value.property_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS {
+                    if let Some(value) =
+                        additional_ren_entry_ids_from_profile_bytes(&value.property_value)
+                    {
+                        properties.insert(PID_TAG_ADDITIONAL_REN_ENTRY_IDS, value);
+                    }
+                }
+            }
+        }
+    }
     properties
 }
 
@@ -1155,18 +1175,28 @@ where
         .iter()
         .filter_map(|(tag, value)| {
             let storage_tag = canonical_property_storage_tag(*tag);
-            if storage_tag != PID_TAG_EXTENDED_FOLDER_FLAGS {
-                return None;
+            match (storage_tag, value) {
+                (PID_TAG_EXTENDED_FOLDER_FLAGS, MapiValue::Binary(bytes)) => {
+                    Some(crate::store::MapiFolderProfilePropertyValue {
+                        folder_id,
+                        property_tag: storage_tag,
+                        property_type: (PID_TAG_EXTENDED_FOLDER_FLAGS & 0xffff) as u16,
+                        property_value: bytes.clone(),
+                    })
+                }
+                (PID_TAG_ADDITIONAL_REN_ENTRY_IDS, _)
+                    if matches!(folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID) =>
+                {
+                    let property_value = additional_ren_entry_ids_profile_bytes(value)?;
+                    Some(crate::store::MapiFolderProfilePropertyValue {
+                        folder_id: INBOX_FOLDER_ID,
+                        property_tag: storage_tag,
+                        property_type: (PID_TAG_ADDITIONAL_REN_ENTRY_IDS & 0xffff) as u16,
+                        property_value,
+                    })
+                }
+                _ => None,
             }
-            let MapiValue::Binary(bytes) = value else {
-                return None;
-            };
-            Some(crate::store::MapiFolderProfilePropertyValue {
-                folder_id,
-                property_tag: storage_tag,
-                property_type: (PID_TAG_EXTENDED_FOLDER_FLAGS & 0xffff) as u16,
-                property_value: bytes.clone(),
-            })
         })
         .collect::<Vec<_>>();
     if !folder_profile_values.is_empty() {

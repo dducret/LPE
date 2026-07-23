@@ -47,7 +47,12 @@ pub(super) fn folder_set_property_problems(
                     return Some((index, *tag, 0x8004_0102));
                 }
                 return match value {
-                    MapiValue::MultiBinary(values) if !values.is_empty() => None,
+                    MapiValue::MultiBinary(values)
+                        if !values.is_empty()
+                            && additional_ren_entry_ids_profile_bytes(value).is_some() =>
+                    {
+                        None
+                    }
                     _ => Some((index, *tag, 0x8004_0102)),
                 };
             }
@@ -175,19 +180,7 @@ fn default_folder_identification_safe_property_value(
             special_folder_identification_property_value(principal.account_id, storage_tag)
                 .map(|value| (storage_tag, value))
         }
-        PID_TAG_ADDITIONAL_REN_ENTRY_IDS => {
-            if !matches!(
-                object,
-                Some(MapiObject::Folder {
-                    folder_id: INBOX_FOLDER_ID,
-                    ..
-                })
-            ) {
-                return None;
-            }
-            merge_indexed_special_folder_entry_ids(principal, tag, value)
-                .map(|value| (canonical_property_storage_tag(tag), value))
-        }
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS => Some((canonical_property_storage_tag(tag), value)),
         PID_TAG_FREE_BUSY_ENTRY_IDS => {
             merge_indexed_special_folder_entry_ids(principal, tag, value)
                 .map(|value| (canonical_property_storage_tag(tag), value))
@@ -214,6 +207,30 @@ fn merge_indexed_special_folder_entry_ids(
         canonical_values.extend(client_values.into_iter().skip(canonical_len));
     }
     Some(MapiValue::MultiBinary(canonical_values))
+}
+
+// [MS-OXOSFLD] section 2.2.4 requires preserving values at unassigned
+// AdditionalRenEntryIds indexes. [MS-OXCSPAM] section 3.2.4.1.2 assigns
+// Outlook's Junk Email Move Stamp to index 5, so retain the complete wire
+// value rather than synthesizing only the five documented folder entries.
+pub(super) fn additional_ren_entry_ids_profile_bytes(value: &MapiValue) -> Option<Vec<u8>> {
+    let MapiValue::MultiBinary(values) = value else {
+        return None;
+    };
+    if values.is_empty() || values.iter().any(|value| value.len() > u16::MAX as usize) {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    write_mapi_value(&mut bytes, PID_TAG_ADDITIONAL_REN_ENTRY_IDS, value);
+    (bytes.len() <= 4096).then_some(bytes)
+}
+
+pub(super) fn additional_ren_entry_ids_from_profile_bytes(bytes: &[u8]) -> Option<MapiValue> {
+    let mut cursor = Cursor::new(bytes);
+    let value = parse_mapi_property_value(&mut cursor, PID_TAG_ADDITIONAL_REN_ENTRY_IDS).ok()?;
+    matches!(&value, MapiValue::MultiBinary(values) if !values.is_empty())
+        .then_some(value)
+        .filter(|_| cursor.remaining() == 0)
 }
 
 pub(super) fn default_folder_entry_id_aliases(
