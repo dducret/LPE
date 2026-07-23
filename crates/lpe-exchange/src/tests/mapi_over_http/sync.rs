@@ -10858,12 +10858,13 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         .iter()
         .any(|property| property.tag == 0x836B_001F));
 
-    // Exact third Execute from trace 202607211931: Outlook releases the
-    // FastTransfer handle, then directly reads the persisted Message handle.
-    // The client did not write 0x0E0B0102, so the requested property is absent
-    // and must be returned as ecNotFound in a FlaggedPropertyRow, following
-    // [MS-OXCPRPT] section 3.2.5.1 and [MS-OXCDATA] sections 2.4.2,
-    // 2.8.1.2, and 2.11.5.
+    // Trace 202607231148 repeats this OpenMessage/CopyTo/GetPropertiesSpecific
+    // sequence after the FAI was saved with PidTagRoamingDatatypes=0 and no
+    // roaming stream. [MS-OXOCFG] section 2.2.2.1 scopes that zero value to
+    // the roaming XML and dictionary streams only; it does not establish that
+    // the independently requested 0x0E0B0102 compatibility property is absent.
+    // It is not persisted or included in FastTransfer, but it must be exposed
+    // as an empty PtypBinary value, never as generated XML.
     let direct_tags = [
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
@@ -10895,44 +10896,55 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert_eq!(
         direct_get_response_rops.get(..6),
         Some(&[0x07, 0x01, 0, 0, 0, 0][..]),
-        "GetPropertiesSpecific must use the success response from [MS-OXCROPS] section 2.2.8.3.2: {direct_get_response_rops:02x?}"
+        "GetPropertiesSpecific must use the success response from [MS-OXCPRPT] section 2.2.2.2: {direct_get_response_rops:02x?}"
     );
     assert_eq!(
         direct_get_response_rops.get(6),
-        Some(&1),
-        "GetPropertiesSpecific must return a FlaggedPropertyRow: {direct_get_response_rops:02x?}"
+        Some(&0),
+        "all requested properties must produce a StandardPropertyRow: {direct_get_response_rops:02x?}"
     );
-    let mut cell_offset = 7;
-    for tag in [PID_TAG_CHANGE_KEY, PID_TAG_PREDECESSOR_CHANGE_LIST] {
-        assert_eq!(
-            direct_get_response_rops[cell_offset], 0,
-            "{tag:#010x} must have a value: {direct_get_response_rops:02x?}"
-        );
-        cell_offset += 1;
+    let mut value_offset = 7;
+    for (tag, expected) in [
+        (PID_TAG_CHANGE_KEY, imported_change_key.as_slice()),
+        (PID_TAG_PREDECESSOR_CHANGE_LIST, imported_pcl.as_slice()),
+    ] {
         let value_len = u16::from_le_bytes(
-            direct_get_response_rops[cell_offset..cell_offset + 2]
+            direct_get_response_rops[value_offset..value_offset + 2]
                 .try_into()
                 .unwrap(),
         ) as usize;
-        cell_offset += 2 + value_len;
+        value_offset += 2;
+        assert_eq!(
+            &direct_get_response_rops[value_offset..value_offset + value_len],
+            expected,
+            "{tag:#010x} must retain its canonical value: {direct_get_response_rops:02x?}"
+        );
+        value_offset += value_len;
     }
     assert_eq!(
-        direct_get_response_rops[cell_offset], 0,
-        "PidTagLastModificationTime must have a value: {direct_get_response_rops:02x?}"
+        &direct_get_response_rops[value_offset..value_offset + 8],
+        imported_last_modification_time.to_le_bytes(),
+        "PidTagLastModificationTime must retain its canonical value: {direct_get_response_rops:02x?}"
     );
-    cell_offset += 1 + 8;
+    value_offset += 8;
     assert_eq!(
-        direct_get_response_rops[cell_offset], 0x0A,
-        "absent 0x0E0B0102 must be a flagged error: {direct_get_response_rops:02x?}"
-    );
-    assert_eq!(
-        u32::from_le_bytes(
-            direct_get_response_rops[cell_offset + 1..cell_offset + 5]
+        u16::from_le_bytes(
+            direct_get_response_rops[value_offset..value_offset + 2]
                 .try_into()
                 .unwrap(),
         ),
-        0x8004_010F,
-        "absent 0x0E0B0102 must be ecNotFound: {direct_get_response_rops:02x?}"
+        0,
+        "0x0E0B0102 must be an empty binary value, not synthesized configuration content: {direct_get_response_rops:02x?}"
+    );
+    value_offset += 2;
+    assert_eq!(
+        &direct_get_response_rops[value_offset..],
+        utf16z("IPM.Configuration.MessageListSettings"),
+        "PidTagMessageClass must complete the StandardPropertyRow: {direct_get_response_rops:02x?}"
+    );
+    assert!(
+        !contains_bytes(&direct_get_response_rops, &[0x0A, 0x0F, 0x01, 0x04, 0x80]),
+        "0x0E0B0102 must not encode ecNotFound: {direct_get_response_rops:02x?}"
     );
     assert!(!contains_bytes(
         &direct_get_response_rops,

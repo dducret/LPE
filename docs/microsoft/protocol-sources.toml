@@ -590,7 +590,7 @@ used_for = [
   "Per-handle staging of writable Calendar properties and deletions until RopSaveChangesMessage",
   "Per-handle Contact property staging after ICS ImportMessageChange until atomic RopSaveChangesMessage persistence",
   "Application of an accepted client-written PidTagRoamingDatatypes value by RopSetProperties",
-  "Direct RopGetPropertiesSpecific projection of absent client-owned configuration properties after reconnect",
+  "Direct RopGetPropertiesSpecific StandardPropertyRow projection of a zero-length Outlook configuration compatibility property without canonical persistence",
   "Same-handle staging and reread of PidTagScheduleInfoAppointmentTombstone through direct properties and writable streams",
   "RopGetPropertiesSpecific response-buffer budgeting, per-property NotEnoughMemory, and stream fallback for oversized Outlook Calendar HTML",
   "Server-owned PidTagAccess and PidTagAccessLevel projection in special-message FastTransfer downloads",
@@ -606,6 +606,7 @@ sections = [
   "2.2.2 RopGetPropertiesSpecific ROP",
   "2.2.2.1 RopGetPropertiesSpecific ROP Request Buffer",
   "2.2.2.2 RopGetPropertiesSpecific ROP Response Buffer",
+  "4.3.2",
   "2.2.5 RopSetProperties ROP",
   "2.2.5.1 RopSetProperties ROP Request Buffer",
   "2.2.5.2 RopSetProperties ROP Response Buffer",
@@ -654,6 +655,7 @@ used_for = [
   "Property tags, typed values, EntryIDs, GUIDs, and FILETIME values",
   "FlatEntryList and PropertyProblem structures used by Outlook reply-recipient deletion and property mutation responses",
   "RopGetPropertiesSpecific PropertyRow and per-property error encoding checks",
+  "StandardPropertyRow encoding of Outlook's zero-length 0x0E0B0102 compatibility projection",
   "FlaggedPropertyRow ecNotFound encoding for an absent client-owned configuration property",
   "Unresolved RopGetPropertiesSpecific partial-property ReturnValue conflict between MS-OXCDATA section 2.4.3 and MS-OXCROPS section 2.2.8.3.2",
   "Calendar default-view Message EntryID folder and message identity",
@@ -908,7 +910,7 @@ used_for = [
   "FolderDesign.NamedView selection contract contrasted with Outlook's additional registered view CLSID requirement",
   "Persisted-only Contacts helper and NamedView parity between the live FAI table and cached-mode synchronization",
   "Conversation Action Settings FAI projection only from canonical conversation action rows",
-  "Zero PidTagRoamingDatatypes as a complete declaration that no roaming dictionary or XML stream exists on a client-owned configuration FAI",
+  "Zero PidTagRoamingDatatypes as a declaration that no roaming dictionary or XML stream exists on a client-owned configuration FAI, without inferring unrelated property absence",
 ]
 sections = [
   "2.2.2.1 PidTagRoamingDatatypes Property",

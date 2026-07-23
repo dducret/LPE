@@ -412,6 +412,16 @@ pub(in crate::mapi) fn associated_config_property_is_client_absent(
     })
 }
 
+fn associated_config_has_explicit_zero_roaming_datatypes(
+    message: &MapiAssociatedConfigMessage,
+) -> bool {
+    crate::mapi_store::is_outlook_configuration_message_class(&message.message_class)
+        && matches!(
+            mapi_properties_from_json(&message.properties_json).get(&PID_TAG_ROAMING_DATATYPES),
+            Some(MapiValue::I32(0) | MapiValue::U32(0))
+        )
+}
+
 pub(in crate::mapi) fn associated_config_modeled_empty_property(
     message: Option<&MapiAssociatedConfigMessage>,
     property_tag: u32,
@@ -455,6 +465,18 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             sanitize_configuration_property_value(&message.message_class, lookup_tag, value)
         })
         .or_else(|| {
+            if lookup_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+                && associated_config_has_explicit_zero_roaming_datatypes(message)
+            {
+                // 0x0E0B0102 is an undocumented Outlook compatibility property.
+                // Trace 202607231148 requests it after a client-owned
+                // IPM.Configuration FAI declares no roaming streams. Per
+                // [MS-OXOCFG] section 2.2.2.1, that zero declaration applies
+                // only to PidTagRoamingDictionary and PidTagRoamingXmlStream;
+                // project an empty PtypBinary for direct GetProps rather than
+                // converting it to ecNotFound or generating configuration data.
+                return Some(MapiValue::Binary(Vec::new()));
+            }
             if associated_config_property_is_client_absent(Some(message), lookup_tag) {
                 // The persisted client configuration establishes that this
                 // compatibility property was not supplied; do not invent it.

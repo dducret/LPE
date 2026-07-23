@@ -7925,6 +7925,33 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
             &explicit_no_streams,
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
         ),
+        Some(MapiValue::Binary(Vec::new()))
+    );
+    let explicit_compatibility_binary = MapiAssociatedConfigMessage {
+        properties_json: serde_json::json!({
+            "0x7c060003": {"type": "i32", "value": 0},
+            "0x0e0b0102": {"type": "binary", "value": "0102"}
+        }),
+        ..message.clone()
+    };
+    assert_eq!(
+        associated_config_property_value(
+            &explicit_compatibility_binary,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        ),
+        Some(MapiValue::Binary(vec![1, 2]))
+    );
+    let explicit_roaming_xml = MapiAssociatedConfigMessage {
+        properties_json: serde_json::json!({
+            "0x7c060003": {"type": "i32", "value": 2}
+        }),
+        ..message.clone()
+    };
+    assert_eq!(
+        associated_config_property_value(
+            &explicit_roaming_xml,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        ),
         None
     );
     assert_eq!(
