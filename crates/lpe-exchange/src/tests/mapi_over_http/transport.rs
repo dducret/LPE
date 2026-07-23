@@ -1105,12 +1105,65 @@ async fn mapi_over_http_notification_wait_refreshes_emsmdb_session_cookie() {
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiSequence=") && cookie.contains("Max-Age=1800")));
-    let body = response_bytes(response).await;
-    assert_eq!(body.len(), 16);
-    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 0);
+    // [MS-OXCMAPIHTTP] section 3.2.5.5 keeps an idle NotificationWait open
+    // for up to five minutes, so this test deliberately does not await its
+    // final response body.
+    drop(response);
+}
+
+#[tokio::test]
+async fn mapi_over_http_notification_wait_streams_processing_and_pending_frames() {
+    use tokio_stream::StreamExt;
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = tokio::time::timeout(
+        Duration::from_secs(1),
+        service.handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b""),
+    )
+    .await
+    .expect("NotificationWait must return its immediate chunked response")
+    .unwrap();
+
+    // [MS-OXCMAPIHTTP] sections 2.2.7, 3.2.2, and 3.2.5.2 require a server
+    // to flush PROCESSING immediately, then PENDING every X-PendingPeriod.
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-requesttype").unwrap(),
+        "NotificationWait"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(response.headers().get("x-pendingperiod").unwrap(), "15000");
+    assert_eq!(
+        response.headers().get("transfer-encoding").unwrap(),
+        "chunked"
+    );
+    assert!(response.headers().get("content-length").is_none());
+
+    let mut frames = response.into_body().into_data_stream();
+    assert_eq!(
+        frames.next().await.unwrap().unwrap().as_ref(),
+        b"PROCESSING\r\n"
+    );
+
+    tokio::time::sleep(Duration::from_secs(15)).await;
+    let pending = tokio::time::timeout(Duration::from_secs(1), frames.next())
+        .await
+        .expect("NotificationWait must emit PENDING after X-PendingPeriod")
+        .unwrap()
+        .unwrap();
+    assert_eq!(pending.as_ref(), b"PENDING\r\n");
 }
 
 #[tokio::test]

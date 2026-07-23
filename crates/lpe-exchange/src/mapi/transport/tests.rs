@@ -1,3 +1,7 @@
+use super::notification_wait::{
+    acquire_notification_wait_active_session_request, notification_wait_empty_response,
+    MAPI_NOTIFICATION_WAIT_MAXIMUM_WAIT,
+};
 use super::*;
 use crate::mapi::transport::diagnostics::{
     advertised_default_view_pending_open_is_primary, post_hierarchy_close_kind,
@@ -305,37 +309,12 @@ async fn notification_wait_empty_response_reports_success_with_empty_body() {
 }
 
 #[test]
-fn notification_wait_empty_delay_uses_long_poll_when_subscription_exists() {
-    let short_session = test_session(HashMap::new());
-
+fn notification_wait_uses_the_microsoft_five_minute_maximum() {
+    // [MS-OXCMAPIHTTP] sections 3.2.2 and 3.2.5.5 specify a five-minute
+    // maximum NotificationWait duration, independently of subscription type.
     assert_eq!(
-        notification_wait_empty_delay_millis(&short_session),
-        MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
-    );
-
-    let mut logged_on_session = test_session(HashMap::new());
-    logged_on_session.logon_identity = Some(MapiLogonIdentityDebug::default());
-
-    assert_eq!(
-        notification_wait_empty_delay_millis(&logged_on_session),
-        MAPI_NOTIFICATION_WAIT_SUBSCRIPTION_EMPTY_DELAY_MILLIS
-    );
-
-    let mut handles = HashMap::new();
-    handles.insert(
-        7,
-        MapiObject::NotificationSubscription {
-            registration: MapiNotificationRegistration {
-                notification_types: 0x0078,
-                folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
-            },
-        },
-    );
-    let subscription_session = test_session(handles);
-
-    assert_eq!(
-        notification_wait_empty_delay_millis(&subscription_session),
-        MAPI_NOTIFICATION_WAIT_SUBSCRIPTION_EMPTY_DELAY_MILLIS
+        MAPI_NOTIFICATION_WAIT_MAXIMUM_WAIT,
+        Duration::from_secs(300)
     );
 }
 
