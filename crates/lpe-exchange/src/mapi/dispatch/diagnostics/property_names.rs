@@ -194,7 +194,6 @@ pub(in crate::mapi::dispatch) fn set_property_debug_name(tag: u32) -> &'static s
         PID_TAG_FOLDER_WEBVIEWINFO => "PidTagFolderWebViewInfo",
         PID_TAG_FOLDER_XVIEWINFO_E => "PidTagFolderXViewInfoE",
         PID_TAG_FOLDER_VIEWS_ONLY => "PidTagFolderViewsOnly",
-        PID_TAG_FOLDER_FORM_STORAGE => "PidTagFolderFormStorage",
         PID_TAG_EXTENDED_RULE_MESSAGE_ACTIONS => "PidTagExtendedRuleMessageActions",
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS => "PidTagAdditionalRenEntryIds",
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => "PidTagAdditionalRenEntryIdsEx",

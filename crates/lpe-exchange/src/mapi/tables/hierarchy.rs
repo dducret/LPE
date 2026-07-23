@@ -503,16 +503,11 @@ pub(in crate::mapi) fn special_folder_property_value_with_change_number(
         PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
             Some(MapiValue::U32(0))
         }
-        PID_TAG_FOLDER_FORM_FLAGS | PID_TAG_FOLDER_VIEWS_ONLY | PID_TAG_FOLDER_VIEWLIST_FLAGS => {
-            Some(MapiValue::U32(0))
-        }
-        PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
             if default_view_supported_folder(folder_id, message_class) =>
         {
             default_folder_view_entry_id(mailbox_guid, folder_id, message_class)
         }
-        PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(
             has_subfolders && folder_id != SYNC_ISSUES_FOLDER_ID,
         )),

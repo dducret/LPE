@@ -9109,7 +9109,7 @@ fn special_folder_property_does_not_project_unpersisted_default_views() {
     }
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_FORM_FLAGS, Uuid::nil()),
-        Some(MapiValue::U32(0))
+        None
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_WEBVIEWINFO, Uuid::nil()),
@@ -9121,15 +9121,15 @@ fn special_folder_property_does_not_project_unpersisted_default_views() {
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_VIEWS_ONLY, Uuid::nil()),
-        Some(MapiValue::U32(0))
+        None
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_DEFAULT_FORM_NAME_W, Uuid::nil()),
-        Some(MapiValue::String(String::new()))
+        None
     );
     assert_eq!(
-        special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_FORM_STORAGE, Uuid::nil()),
-        Some(MapiValue::Binary(Vec::new()))
+        special_folder_property_value(INBOX_FOLDER_ID, 0x36EB_0102, Uuid::nil()),
+        None
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_ACL_MEMBER_NAME_W, Uuid::nil()),
@@ -9137,7 +9137,7 @@ fn special_folder_property_does_not_project_unpersisted_default_views() {
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_VIEWLIST_FLAGS, Uuid::nil()),
-        Some(MapiValue::U32(0))
+        None
     );
     assert_eq!(
         special_folder_property_value(

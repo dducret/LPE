@@ -3455,6 +3455,109 @@ fn property_row_kind_reports_fallback_defaults_as_flagged() {
 }
 
 #[test]
+fn inbox_getprops_captured_unpersisted_folder_values_are_absent() {
+    // Outlook 16 request captured at 202607232116,
+    // {2CBC2463-546A-46DE-92ED-E4BE70830DA8}:14.
+    const COLUMNS: [u32; 32] = [
+        0x6749_0014,
+        0x0FF4_0003,
+        0x6672_0102,
+        0x36E5_001F,
+        0x36E6_001F,
+        0x3001_001F,
+        0x3602_0003,
+        0x3603_0003,
+        0x360A_000B,
+        0x3613_001F,
+        0x3616_0102,
+        0x36D0_0102,
+        0x36D1_0102,
+        0x36D2_0102,
+        0x36D3_0102,
+        0x36D4_0102,
+        0x36D5_0102,
+        0x36D6_0102,
+        0x36D7_0102,
+        0x36D8_1102,
+        0x36D9_0102,
+        0x36DE_0003,
+        0x36DF_0102,
+        0x36E0_0102,
+        0x36E1_0003,
+        0x36E4_1102,
+        0x36EB_0102,
+        0x6639_0003,
+        0x36DA_0102,
+        0x3018_0102,
+        0x301E_0003,
+        0x36DA_0102,
+    ];
+    const UNPERSISTED_COLUMNS: [u32; 4] = [0x36E6_001F, 0x36DE_0003, 0x36E1_0003, 0x36EB_0102];
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let object = MapiObject::Folder {
+        folder_id: INBOX_FOLDER_ID,
+        properties: HashMap::new(),
+    };
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&0u16.to_le_bytes());
+    payload.extend_from_slice(&(COLUMNS.len() as u16).to_le_bytes());
+    for property_tag in COLUMNS {
+        payload.extend_from_slice(&property_tag.to_le_bytes());
+    }
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific as u8,
+        input_handle_index: Some(1),
+        output_handle_index: None,
+        payload,
+    };
+
+    for property_tag in UNPERSISTED_COLUMNS {
+        assert!(!modeled_zero_or_default_property(
+            Some(&object),
+            property_tag
+        ));
+    }
+
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
+    let mut cursor = Cursor::new(&response[7..]);
+    let mut property_errors = HashMap::new();
+    for property_tag in COLUMNS {
+        match cursor.read_u8().unwrap() {
+            0 => {
+                parse_mapi_property_value(&mut cursor, property_tag).unwrap();
+            }
+            0x0A => {
+                property_errors.insert(property_tag, cursor.read_u32().unwrap());
+            }
+            flag => panic!("unexpected FlaggedPropertyValue flag {flag:#04x}"),
+        }
+    }
+    assert_eq!(cursor.remaining(), 0);
+    for property_tag in UNPERSISTED_COLUMNS {
+        assert_eq!(
+            property_errors.get(&property_tag),
+            Some(&ROP_ERROR_NOT_FOUND)
+        );
+    }
+}
+
+#[test]
 fn newly_created_associated_message_getprops_uses_new_message_contract() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
@@ -3806,16 +3909,11 @@ fn folder_view_defaults_distinguish_absent_structured_streams() {
         PID_TAG_FOLDER_FORM_FLAGS,
         PID_TAG_FOLDER_VIEWS_ONLY,
         PID_TAG_DEFAULT_FORM_NAME_W,
-        PID_TAG_FOLDER_FORM_STORAGE,
         PID_TAG_FOLDER_VIEWLIST_FLAGS,
+        PID_TAG_FOLDER_WEBVIEWINFO,
+        PID_TAG_FOLDER_XVIEWINFO_E,
+        0x36EB_0102,
     ] {
-        assert!(modeled_zero_or_default_property(
-            Some(&folder),
-            property_tag
-        ));
-    }
-
-    for property_tag in [PID_TAG_FOLDER_WEBVIEWINFO, PID_TAG_FOLDER_XVIEWINFO_E] {
         assert!(!modeled_zero_or_default_property(
             Some(&folder),
             property_tag

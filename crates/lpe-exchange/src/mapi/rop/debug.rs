@@ -263,7 +263,6 @@ pub(in crate::mapi) fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_FOLDER_WEBVIEWINFO => "PidTagFolderWebViewInfo",
         PID_TAG_FOLDER_XVIEWINFO_E => "PidTagFolderXViewInfoE",
         PID_TAG_FOLDER_VIEWS_ONLY => "PidTagFolderViewsOnly",
-        PID_TAG_FOLDER_FORM_STORAGE => "PidTagFolderFormStorage",
         PID_TAG_EXTENDED_FOLDER_FLAGS => "PidTagExtendedFolderFlags",
         PID_TAG_SEARCH_FOLDER_STORAGE_TYPE => "PidTagSearchFolderStorageType",
         PID_TAG_SEARCH_FOLDER_EFP_FLAGS => "PidTagSearchFolderEfpFlags",

@@ -644,7 +644,7 @@ fn folder_properties_report_deleted_count_total() {
     );
     assert_eq!(
         collaboration_folder_property_value(&collection, PID_TAG_DEFAULT_FORM_NAME_W),
-        Some(MapiValue::String(String::new()))
+        None
     );
     assert_eq!(
         collaboration_folder_property_value(&collection, PID_TAG_ARCHIVE_TAG),
@@ -1788,7 +1788,7 @@ fn public_folder_projects_default_post_message_class_from_folder_class() {
     );
     assert_eq!(
         public_folder_property_value(&folder, PID_TAG_DEFAULT_FORM_NAME_W),
-        Some(MapiValue::String(String::new()))
+        None
     );
     assert_eq!(
         public_folder_property_value(&folder, PID_TAG_ARCHIVE_TAG),

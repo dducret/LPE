@@ -272,29 +272,14 @@ fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
         Some(&MapiValue::Binary(vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]))
     );
     assert!(!properties.contains_key(&PID_TAG_DEFAULT_VIEW_ENTRY_ID));
-    assert_eq!(
-        properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
-        Some(&MapiValue::U32(0))
-    );
+    assert!(!properties.contains_key(&PID_TAG_FOLDER_FORM_FLAGS));
     assert!(!properties.contains_key(&PID_TAG_FOLDER_WEBVIEWINFO));
     assert!(!properties.contains_key(&PID_TAG_FOLDER_XVIEWINFO_E));
-    assert_eq!(
-        properties.get(&PID_TAG_FOLDER_VIEWS_ONLY),
-        Some(&MapiValue::U32(0))
-    );
-    assert_eq!(
-        properties.get(&PID_TAG_DEFAULT_FORM_NAME_W),
-        Some(&MapiValue::String(String::new()))
-    );
-    assert_eq!(
-        properties.get(&PID_TAG_FOLDER_FORM_STORAGE),
-        Some(&MapiValue::Binary(Vec::new()))
-    );
+    assert!(!properties.contains_key(&PID_TAG_FOLDER_VIEWS_ONLY));
+    assert!(!properties.contains_key(&PID_TAG_DEFAULT_FORM_NAME_W));
+    assert!(!properties.contains_key(&0x36EB_0102));
     assert!(!properties.contains_key(&PID_TAG_ACL_MEMBER_NAME_W));
-    assert_eq!(
-        properties.get(&PID_TAG_FOLDER_VIEWLIST_FLAGS),
-        Some(&MapiValue::U32(0))
-    );
+    assert!(!properties.contains_key(&PID_TAG_FOLDER_VIEWLIST_FLAGS));
     assert!(!properties.contains_key(&PID_TAG_ARCHIVE_TAG));
     assert!(!properties.contains_key(&PID_TAG_POLICY_TAG));
     assert_eq!(
@@ -470,15 +455,9 @@ fn folder_properties_for_open_projects_collaboration_folder_contract() {
             &snapshot
         )))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_FOLDER_FORM_FLAGS),
-        Some(&MapiValue::U32(0))
-    );
+    assert!(!properties.contains_key(&PID_TAG_FOLDER_FORM_FLAGS));
     assert!(!properties.contains_key(&PID_TAG_FOLDER_WEBVIEWINFO));
-    assert_eq!(
-        properties.get(&PID_TAG_DEFAULT_FORM_NAME_W),
-        Some(&MapiValue::String(String::new()))
-    );
+    assert!(!properties.contains_key(&PID_TAG_DEFAULT_FORM_NAME_W));
     assert!(!properties.contains_key(&PID_TAG_ARCHIVE_TAG));
     assert_eq!(
         properties.get(&PID_TAG_RETENTION_PERIOD),
@@ -1426,10 +1405,7 @@ fn set_property_debug_names_cover_folder_special_properties() {
         set_property_debug_name(PID_TAG_FOLDER_VIEWS_ONLY),
         "PidTagFolderViewsOnly"
     );
-    assert_eq!(
-        set_property_debug_name(PID_TAG_FOLDER_FORM_STORAGE),
-        "PidTagFolderFormStorage"
-    );
+    assert_eq!(set_property_debug_name(0x36EB_0102), "unknown");
     assert_eq!(
         set_property_debug_name(PID_TAG_EXTENDED_FOLDER_FLAGS),
         "PidTagExtendedFolderFlags"

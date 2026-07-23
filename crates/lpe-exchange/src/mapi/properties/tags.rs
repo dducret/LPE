@@ -101,7 +101,6 @@ pub(in crate::mapi) const PID_TAG_FOLDER_FORM_FLAGS: u32 = 0x36DE_0003;
 pub(in crate::mapi) const PID_TAG_FOLDER_WEBVIEWINFO: u32 = 0x36DF_0102;
 pub(in crate::mapi) const PID_TAG_FOLDER_XVIEWINFO_E: u32 = 0x36E0_0102;
 pub(in crate::mapi) const PID_TAG_FOLDER_VIEWS_ONLY: u32 = 0x36E1_0003;
-pub(in crate::mapi) const PID_TAG_FOLDER_FORM_STORAGE: u32 = 0x36EB_0102;
 pub(in crate::mapi) const OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C: u32 = 0x120C_0102;
 pub(in crate::mapi) const PID_TAG_ARCHIVE_TAG: u32 = 0x3018_0102;
 pub(in crate::mapi) const PID_TAG_POLICY_TAG: u32 = 0x3019_0102;
