@@ -91,24 +91,6 @@ fn associated_config_default_sync_tags(
             PID_NAME_CONTENT_CLASS_W_TAG,
             PID_NAME_CONTENT_TYPE_W_TAG,
         ]
-    } else if message
-        .message_class
-        .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
-    {
-        &[
-            PID_TAG_VIEW_DESCRIPTOR_CLSID,
-            PID_TAG_VIEW_DESCRIPTOR_FLAGS,
-            PID_TAG_VIEW_DESCRIPTOR_VERSION,
-            PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL,
-            PID_TAG_VIEW_DESCRIPTOR_NAME_W,
-            PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
-            PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE,
-            PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
-            PID_TAG_VIEW_DESCRIPTOR_BINARY,
-            OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
-            OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
-            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
-        ]
     } else {
         &[]
     }

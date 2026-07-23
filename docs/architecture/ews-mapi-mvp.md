@@ -187,6 +187,19 @@ are in MS-OXCFXICS sections 2.2, 2.2.4.2, and 2.2.4.3.20; direct Message
 content and ROP stream selection are in sections 2.2.4.3.16, 2.2.4.4, and
 3.2.5.8.1.1 through 3.2.5.8.1.2.
 
+For a persisted `IPM.Microsoft.FolderDesign.NamedView` FAI, associated
+contents tables, `GetProps`, direct FastTransfer, and ICS relay the canonical
+descriptor properties of that FAI. They do not complete it or add a second
+descriptor by generating absent `PidTagViewDescriptorBinary` (`0x70010102`),
+`PidTagViewDescriptorName` (`0x7006001F`), `PidTagViewDescriptorStrings`
+(`0x7002001F`), or `PidTagViewDescriptorVersion` (`0x70070003`) values, nor
+does it model an absent trace-observed private `0x0E0B0102` value as empty.
+This no-completion rule keeps one canonical FAI property bag. [MS-OXOCFG]
+sections 2.2.6 and 3.1.4.3 define the FAI selection and descriptor-read path;
+[MS-OXPROPS] sections 2.1057 through 2.1060 define the standard descriptor
+tags and types; [MS-OXCFXICS] section 2.2.3.1.1.5.2 defines the
+`RopFastTransferSourceGetBuffer` `TransferBuffer` carrying the wire portion.
+
 For durable associated-configuration FAI messages, a client-supplied
 `PidTagCreationTime` (`0x30070040`) or `PidTagLastModifierName`
 (`0x3FFA001F`) is ignored in direct property writes, writable streams,

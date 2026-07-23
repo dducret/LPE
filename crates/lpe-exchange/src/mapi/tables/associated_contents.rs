@@ -428,7 +428,15 @@ pub(in crate::mapi) fn associated_config_modeled_empty_property(
 ) -> bool {
     let storage_tag = canonical_property_storage_tag(property_tag);
     if storage_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B {
-        return !associated_config_property_is_client_absent(message, storage_tag);
+        return !message.is_some_and(|message| {
+            // [MS-OXOCFG] sections 2.2.6 and 3.1.4.3: a named view is a
+            // persisted FAI. Its absent companion properties remain absent,
+            // rather than being projected as empty compatibility properties.
+            message
+                .message_class
+                .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
+                || associated_config_property_is_client_absent(Some(message), storage_tag)
+        });
     }
     let Some(message) = message else {
         return false;
@@ -583,13 +591,6 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 PID_TAG_NATIVE_BODY => Some(MapiValue::U32(1)),
                 PID_TAG_INTERNET_CODEPAGE => Some(MapiValue::U32(65001)),
                 PID_TAG_MESSAGE_LOCALE_ID => Some(MapiValue::U32(0x0409)),
-                OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG
-                    if message.message_class.eq_ignore_ascii_case(
-                        crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS,
-                    ) =>
-                {
-                    Some(MapiValue::U32(0))
-                }
                 PID_TAG_SENT_MAIL_SVR_EID => Some(MapiValue::Binary(Vec::new())),
                 PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
                 PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(
@@ -717,103 +718,6 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                     ) =>
                 {
                     Some(MapiValue::String("text/xml".to_string()))
-                }
-                PID_TAG_VIEW_DESCRIPTOR_FLAGS
-                    if message.message_class
-                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-                {
-                    Some(MapiValue::U32(14_745_605))
-                }
-                PID_TAG_VIEW_DESCRIPTOR_VERSION | PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL
-                    if message.message_class
-                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-                {
-                    Some(MapiValue::U32(8))
-                }
-                PID_TAG_VIEW_DESCRIPTOR_NAME_W
-                    if message.message_class
-                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-                {
-                    Some(MapiValue::String(message.subject.clone()))
-                }
-                PID_TAG_VIEW_DESCRIPTOR_STRINGS_W
-                    if message.message_class
-                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-                {
-                    let definition =
-                        outlook_folder_view_definition(message.folder_id, &message.subject);
-                    log_view_definition_diagnostics(
-                        message.folder_id,
-                        message.id,
-                        &message.subject,
-                        &definition,
-                    );
-                    Some(MapiValue::String(view_descriptor_strings(&definition)))
-                }
-                PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE
-                    if message.message_class
-                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-                {
-                    Some(MapiValue::U32(0))
-                }
-                PID_TAG_VIEW_DESCRIPTOR_BINARY
-                | OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835
-                | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                    if message.message_class
-                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-                {
-                    let definition =
-                        outlook_folder_view_definition(message.folder_id, &message.subject);
-                    log_view_definition_diagnostics(
-                        message.folder_id,
-                        message.id,
-                        &message.subject,
-                        &definition,
-                    );
-                    Some(MapiValue::Binary(view_descriptor_binary(&definition)))
-                }
-                OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C
-                    if message.message_class
-                        == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS =>
-                {
-                    let definition =
-                        outlook_folder_view_definition(message.folder_id, &message.subject);
-                    log_view_definition_diagnostics(
-                        message.folder_id,
-                        message.id,
-                        &message.subject,
-                        &definition,
-                    );
-                    Some(MapiValue::Binary(view_descriptor_strings_binary(
-                        &definition,
-                    )))
-                }
-                tag if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-                    && property_tag_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_CLSID) =>
-                {
-                    Some(guid_property_value(
-                        property_tag,
-                        outlook_view_descriptor_clsid(message.folder_id),
-                    ))
-                }
-                tag if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-                    && property_tag_id_matches(tag, PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE) =>
-                {
-                    Some(guid_property_value(
-                        property_tag,
-                        common_view_named_view_folder_type_guid(),
-                    ))
-                }
-                tag if message.message_class
-                    == crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS
-                    && property_tag_id_matches(tag, PID_TAG_WLINK_GROUP_HEADER_ID) =>
-                {
-                    Some(guid_property_value(
-                        property_tag,
-                        default_wlink_group_guid(),
-                    ))
                 }
                 PID_LID_OUTLOOK_SHARING_PROVIDER_GUID_TAG
                     if is_outlook_virtual_sharing_state_config(message) =>
@@ -1013,14 +917,6 @@ fn minimal_category_list_roaming_xml_stream() -> Vec<u8> {
 
 fn minimal_mrm_roaming_xml_stream() -> Vec<u8> {
     br#"<?xml version="1.0"?><UserConfiguration><Info version="LPE.1"><Data><RetentionHold Enabled="False" RetentionComment="" RetentionUrl=""/></Data></Info></UserConfiguration>"#.to_vec()
-}
-
-fn guid_property_value(property_tag: u32, guid: [u8; 16]) -> MapiValue {
-    if (property_tag & 0x0000_FFFF) == 0x0102 {
-        MapiValue::Binary(guid.to_vec())
-    } else {
-        MapiValue::Guid(guid)
-    }
 }
 
 fn outlook_configuration_stamp(message: &MapiAssociatedConfigMessage) -> u32 {

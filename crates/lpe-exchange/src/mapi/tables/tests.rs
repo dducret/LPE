@@ -7757,7 +7757,7 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
     };
     assert_eq!(
         associated_config_property_value(&compact_view, OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG),
-        Some(MapiValue::U32(0))
+        None
     );
     assert_eq!(
         associated_config_property_value(&message, PID_TAG_REPLY_TIME),
@@ -8178,7 +8178,7 @@ fn persisted_contacts_helper_configs_project_only_stored_helper_properties() {
 }
 
 #[test]
-fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
+fn persisted_inbox_named_view_associated_row_preserves_only_stored_view_properties() {
     let message = MapiAssociatedConfigMessage {
         id: crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 91,
@@ -8187,7 +8187,22 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
         canonical_id: Uuid::from_u128(0x6d617069_696e_5669_8000_000000000001),
         message_class: crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS.to_string(),
         subject: "Compact".to_string(),
-        properties_json: serde_json::json!({}),
+        // [MS-OXOCFG] sections 2.2.6 and 3.1.4.3 describe a view as a
+        // persisted FAI. [MS-OXCFXICS] section 2.2.3.1.1.5.2 transfers the
+        // FAI's serialized properties; table and direct property projection
+        // must not add a second, generated descriptor.
+        properties_json: serde_json::json!({
+            "0x68330048": {
+                "type": "guid",
+                "value": "0020060000000000c000000000000046"
+            },
+            "0x68340003": {"type": "u32", "value": 14746188},
+            "0x68350102": {"type": "binary", "value": "dada000000000000"},
+            "0x683a0003": {"type": "i32", "value": 8},
+            "0x683c0102": {"type": "binary", "value": "0a0043006f006d0070006100630074000a00"},
+            "0x683f0102": {"type": "binary", "value": "0020060000000000c000000000000046"},
+            "0x70030003": {"type": "u32", "value": 0}
+        }),
     };
 
     assert_eq!(
@@ -8201,76 +8216,19 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
         Some(MapiValue::String("Compact".to_string()))
     );
     assert_eq!(
-        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_VERSION),
-        Some(MapiValue::U32(8))
-    );
-    assert_eq!(
-        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL),
-        Some(MapiValue::U32(8))
-    );
-    assert_eq!(
-        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_NAME_W),
-        Some(MapiValue::String("Compact".to_string()))
-    );
-    assert_eq!(
-        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_STRINGS_W),
-        Some(MapiValue::String(
-            "\nImportance\nReminder\nIcon\nFlag Status\nAttachment\nFrom\nSubject\nReceived\nSize\nCategories\n"
-                .to_string()
-        ))
-    );
-    assert_eq!(
-        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE),
-        Some(MapiValue::U32(0))
-    );
-    assert!(matches!(
         associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_FLAGS),
-        Some(MapiValue::U32(value)) if value != 0
-    ));
-    assert!(matches!(
-        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_BINARY),
-        Some(MapiValue::Binary(value)) if !value.is_empty()
-    ));
-    let Some(MapiValue::Binary(descriptor_binary)) =
-        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_BINARY)
-    else {
-        panic!("expected descriptor binary");
-    };
-    assert_eq!(
-        view_descriptor_all_property_tags(&descriptor_binary).len(),
-        11
-    );
-    assert!(!view_descriptor_all_property_tags(&descriptor_binary).contains(&PID_TAG_FOLDER_ID));
-    assert!(!view_descriptor_all_property_tags(&descriptor_binary).contains(&PID_TAG_MID));
-    assert!(!view_descriptor_all_property_tags(&descriptor_binary).contains(&PID_TAG_INST_ID));
-    assert!(!view_descriptor_all_property_tags(&descriptor_binary).contains(&PID_TAG_INSTANCE_NUM));
-    assert_eq!(
-        associated_config_property_value(&message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
-        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_BINARY)
+        Some(MapiValue::U32(14_746_188))
     );
     assert_eq!(
-        associated_config_property_value(&message, OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835),
-        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_BINARY)
+        associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_VERSION),
+        Some(MapiValue::I32(8))
     );
     assert_eq!(
         associated_config_property_value(&message, OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C),
-        Some(MapiValue::Binary(view_descriptor_strings_binary(
-            &outlook_folder_view_definition(INBOX_FOLDER_ID, "Compact")
-        )))
-    );
-    let Some(MapiValue::Binary(descriptor_strings)) =
-        associated_config_property_value(&message, OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C)
-    else {
-        panic!("expected descriptor strings");
-    };
-    assert_eq!(&descriptor_strings[..4], &[0x0A, 0x00, b'I', 0x00]);
-    assert!(descriptor_strings.ends_with(&[0x0A, 0x00]));
-    assert_eq!(
-        descriptor_strings
-            .windows(2)
-            .filter(|bytes| *bytes == [0x0A, 0x00])
-            .count(),
-        11
+        Some(MapiValue::Binary(vec![
+            0x0A, 0x00, b'C', 0x00, b'o', 0x00, b'm', 0x00, b'p', 0x00, b'a', 0x00, b'c', 0x00,
+            b't', 0x00, 0x0A, 0x00,
+        ]))
     );
     assert_eq!(
         associated_config_property_value(&message, PID_TAG_VIEW_DESCRIPTOR_CLSID),
@@ -8280,16 +8238,39 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
         ]))
     );
     assert_eq!(
-        associated_config_property_value(&message, 0x6833_0102),
+        associated_config_property_value(&message, OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835),
+        Some(MapiValue::Binary(vec![
+            0xDA, 0xDA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        ]))
+    );
+    assert_eq!(
+        associated_config_property_value(&message, 0x683F_0102),
         Some(MapiValue::Binary(vec![
             0x00, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x46,
         ]))
     );
     assert_eq!(
-        associated_config_property_value(&message, 0x6842_0102),
-        Some(MapiValue::Binary(default_wlink_group_guid().to_vec()))
+        associated_config_property_value(&message, 0x7003_0003),
+        Some(MapiValue::U32(0))
     );
+    for tag in [
+        PID_TAG_VIEW_DESCRIPTOR_BINARY,
+        PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
+        PID_TAG_VIEW_DESCRIPTOR_NAME_W,
+        PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL,
+        PID_TAG_VIEW_DESCRIPTOR_FOLDER_TYPE,
+        PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
+        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
+        OUTLOOK_COMPACT_VIEW_AUXILIARY_FLAGS_TAG,
+        PID_TAG_WLINK_GROUP_HEADER_ID,
+    ] {
+        assert_eq!(
+            associated_config_property_value(&message, tag),
+            None,
+            "persisted NamedView FAI must not gain synthetic 0x{tag:08x}"
+        );
+    }
 
     let row = serialize_associated_config_row_with_mailbox_guid(
         &message,
@@ -8302,8 +8283,8 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
             PID_TAG_VIEW_DESCRIPTOR_CLSID,
             PID_TAG_VIEW_DESCRIPTOR_FLAGS,
             PID_TAG_VIEW_DESCRIPTOR_VERSION,
-            PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
-            0x6842_0102,
+            OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
+            OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
             PID_TAG_LAST_MODIFICATION_TIME,
             PID_TAG_MESSAGE_CLASS_W,
         ],
@@ -8317,8 +8298,8 @@ fn inbox_named_view_associated_row_projects_view_descriptor_properties() {
         PID_TAG_VIEW_DESCRIPTOR_CLSID,
         PID_TAG_VIEW_DESCRIPTOR_FLAGS,
         PID_TAG_VIEW_DESCRIPTOR_VERSION,
-        PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
-        0x6842_0102,
+        OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
+        OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
         PID_TAG_LAST_MODIFICATION_TIME,
         PID_TAG_MESSAGE_CLASS_W,
     ] {

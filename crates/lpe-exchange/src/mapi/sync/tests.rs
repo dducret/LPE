@@ -1395,16 +1395,41 @@ fn inbox_associated_content_sync_payload_emits_required_fai_properties() {
     .map(|(id, item_id, class, subject)| {
         let id = Uuid::from_u128(id);
         crate::mapi::identity::remember_mapi_identity(id, item_id);
+        let properties_json = if class == "IPM.Microsoft.FolderDesign.NamedView" {
+            // Outlook 16 persists these private descriptor properties on the
+            // FAI. The server must relay this property bag unchanged instead
+            // of adding a second, locally generated descriptor.
+            serde_json::json!({
+                "0x68330048": {
+                    "type": "guid",
+                    "value": "0020060000000000c000000000000046"
+                },
+                "0x68340003": {"type": "u32", "value": 14746188},
+                "0x68350102": {
+                    "type": "binary",
+                    "value": "000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+                },
+                "0x683a0003": {"type": "i32", "value": 8},
+                "0x683c0102": {
+                    "type": "binary",
+                    "value": "0a0043006f006d0070006100630074000a00"
+                },
+                "0x683f0102": {"type": "binary", "value": "00"},
+                "0x70030003": {"type": "u32", "value": 0}
+            })
+        } else {
+            serde_json::json!({
+                "0x7c060003": {"type": "u32", "value": 4},
+                "0x7c070102": {"type": "binary", "value": "392d30"}
+            })
+        };
         crate::store::MapiAssociatedConfigRecord {
             id,
             account_id,
             folder_id: INBOX_FOLDER_ID,
             message_class: class.to_string(),
             subject: subject.to_string(),
-            properties_json: serde_json::json!({
-                "0x7c060003": {"type": "u32", "value": 4},
-                "0x7c070102": {"type": "binary", "value": "392d30"}
-            }),
+            properties_json,
         }
     })
     .collect::<Vec<_>>();
@@ -1479,13 +1504,26 @@ fn inbox_associated_content_sync_payload_emits_required_fai_properties() {
     assert_has_tags(
         named_view,
         &[
-            PID_TAG_VIEW_DESCRIPTOR_NAME_W,
-            PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
-            PID_TAG_VIEW_DESCRIPTOR_BINARY,
+            PID_TAG_VIEW_DESCRIPTOR_CLSID,
+            PID_TAG_VIEW_DESCRIPTOR_FLAGS,
+            PID_TAG_VIEW_DESCRIPTOR_VERSION,
             OUTLOOK_COMMON_VIEW_DESCRIPTOR_BINARY_6835,
             OUTLOOK_COMMON_VIEW_DESCRIPTOR_STRINGS_683C,
         ],
     );
+    for tag in [
+        PID_TAG_VIEW_DESCRIPTOR_BINARY,
+        PID_TAG_VIEW_DESCRIPTOR_STRINGS_W,
+        PID_TAG_VIEW_DESCRIPTOR_NAME_W,
+        PID_TAG_VIEW_DESCRIPTOR_VERSION_CANONICAL,
+        PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE,
+        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
+    ] {
+        assert!(
+            !named_view.property_tags.contains(&tag),
+            "persisted named-view FAI must not gain synthetic 0x{tag:08x}"
+        );
+    }
     let umolk = summary
         .fai_items
         .iter()
