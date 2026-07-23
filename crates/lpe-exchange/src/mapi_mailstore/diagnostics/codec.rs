@@ -580,14 +580,22 @@ pub(super) fn finalize_hierarchy_debug_summary(summary: &mut HierarchyTransferDe
     let change_counters = summary
         .rows
         .iter()
-        .filter_map(|row| row.change_counter)
+        .filter_map(hierarchy_row_server_change_number)
         .collect::<Vec<_>>();
     summary.final_state_idset_given_includes_all_expected_folder_source_counters =
         source_counters.len() == summary.folder_change_count
             && counters_include_all(&summary.final_state_idset_given_counters, &source_counters);
     summary.final_state_cnset_seen_includes_all_expected_folder_change_counters =
-        change_counters.len() == summary.folder_change_count
-            && counters_include_all(&summary.final_state_cnset_seen_counters, &change_counters);
+        counters_include_all(&summary.final_state_cnset_seen_counters, &change_counters);
+}
+
+pub(super) fn hierarchy_row_server_change_number(row: &HierarchyTransferRowDebug) -> Option<u64> {
+    // [MS-OXCFXICS] sections 2.2.1.1.2, 2.2.1.2.7, and 3.1.5.3: a
+    // hierarchy ChangeKey can remain a foreign XID after import, whereas
+    // CnsetSeen contains the server-assigned CN. Only an explicit
+    // PidTagChangeNumber, or a local-replica ChangeKey, can be compared to
+    // the local CnsetSeen diagnostic.
+    row.change_number.or(row.change_counter)
 }
 
 pub(super) fn counters_include_all(haystack: &[u64], needles: &[u64]) -> bool {

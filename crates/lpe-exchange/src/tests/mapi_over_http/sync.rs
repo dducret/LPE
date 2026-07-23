@@ -10861,10 +10861,9 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     // Trace 202607231148 repeats this OpenMessage/CopyTo/GetPropertiesSpecific
     // sequence after the FAI was saved with PidTagRoamingDatatypes=0 and no
     // roaming stream. [MS-OXOCFG] section 2.2.2.1 scopes that zero value to
-    // the roaming XML and dictionary streams only; it does not establish that
-    // the independently requested 0x0E0B0102 compatibility property is absent.
-    // It is not persisted or included in FastTransfer, but it must be exposed
-    // as an empty PtypBinary value, never as generated XML.
+    // the roaming XML and dictionary streams only. Because 0x0E0B0102 is not
+    // persisted, [MS-OXCDATA] sections 2.4.2 and 2.11.5 require a flagged
+    // MAPI_E_NOT_FOUND cell rather than a fabricated PtypBinary value.
     let direct_tags = [
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
@@ -10900,14 +10899,20 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     );
     assert_eq!(
         direct_get_response_rops.get(6),
-        Some(&0),
-        "all requested properties must produce a StandardPropertyRow: {direct_get_response_rops:02x?}"
+        Some(&1),
+        "the absent 0x0E0B0102 property must select a FlaggedPropertyRow: {direct_get_response_rops:02x?}"
     );
     let mut value_offset = 7;
     for (tag, expected) in [
         (PID_TAG_CHANGE_KEY, imported_change_key.as_slice()),
         (PID_TAG_PREDECESSOR_CHANGE_LIST, imported_pcl.as_slice()),
     ] {
+        assert_eq!(
+            direct_get_response_rops[value_offset],
+            0,
+            "{tag:#010x} must be a successful FlaggedPropertyValue: {direct_get_response_rops:02x?}"
+        );
+        value_offset += 1;
         let value_len = u16::from_le_bytes(
             direct_get_response_rops[value_offset..value_offset + 2]
                 .try_into()
@@ -10922,29 +10927,41 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         value_offset += value_len;
     }
     assert_eq!(
+        direct_get_response_rops[value_offset],
+        0,
+        "PidTagLastModificationTime must be a successful FlaggedPropertyValue: {direct_get_response_rops:02x?}"
+    );
+    value_offset += 1;
+    assert_eq!(
         &direct_get_response_rops[value_offset..value_offset + 8],
         imported_last_modification_time.to_le_bytes(),
         "PidTagLastModificationTime must retain its canonical value: {direct_get_response_rops:02x?}"
     );
     value_offset += 8;
     assert_eq!(
-        u16::from_le_bytes(
-            direct_get_response_rops[value_offset..value_offset + 2]
+        direct_get_response_rops[value_offset], 0x0A,
+        "0x0E0B0102 must be absent rather than fabricated: {direct_get_response_rops:02x?}"
+    );
+    value_offset += 1;
+    assert_eq!(
+        u32::from_le_bytes(
+            direct_get_response_rops[value_offset..value_offset + 4]
                 .try_into()
                 .unwrap(),
         ),
-        0,
-        "0x0E0B0102 must be an empty binary value, not synthesized configuration content: {direct_get_response_rops:02x?}"
+        0x8004_010F,
+        "0x0E0B0102 must encode MAPI_E_NOT_FOUND: {direct_get_response_rops:02x?}"
     );
-    value_offset += 2;
+    value_offset += 4;
+    assert!(
+        direct_get_response_rops.get(value_offset) == Some(&0),
+        "PidTagMessageClass must be a successful FlaggedPropertyValue: {direct_get_response_rops:02x?}"
+    );
+    value_offset += 1;
     assert_eq!(
         &direct_get_response_rops[value_offset..],
         utf16z("IPM.Configuration.MessageListSettings"),
-        "PidTagMessageClass must complete the StandardPropertyRow: {direct_get_response_rops:02x?}"
-    );
-    assert!(
-        !contains_bytes(&direct_get_response_rops, &[0x0A, 0x0F, 0x01, 0x04, 0x80]),
-        "0x0E0B0102 must not encode ecNotFound: {direct_get_response_rops:02x?}"
+        "PidTagMessageClass must complete the FlaggedPropertyRow: {direct_get_response_rops:02x?}"
     );
     assert!(!contains_bytes(
         &direct_get_response_rops,

@@ -405,39 +405,15 @@ pub(in crate::mapi) fn associated_config_property_is_client_absent(
                 .contains_key(&PID_TAG_ROAMING_DATATYPES)
             && matches!(
                 property_tag,
-                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                    | PID_NAME_CONTENT_CLASS_W_TAG
-                    | PID_NAME_CONTENT_TYPE_W_TAG
+                PID_NAME_CONTENT_CLASS_W_TAG | PID_NAME_CONTENT_TYPE_W_TAG
             )
     })
-}
-
-fn associated_config_has_explicit_zero_roaming_datatypes(
-    message: &MapiAssociatedConfigMessage,
-) -> bool {
-    crate::mapi_store::is_outlook_configuration_message_class(&message.message_class)
-        && matches!(
-            mapi_properties_from_json(&message.properties_json).get(&PID_TAG_ROAMING_DATATYPES),
-            Some(MapiValue::I32(0) | MapiValue::U32(0))
-        )
 }
 
 pub(in crate::mapi) fn associated_config_modeled_empty_property(
     message: Option<&MapiAssociatedConfigMessage>,
     property_tag: u32,
 ) -> bool {
-    let storage_tag = canonical_property_storage_tag(property_tag);
-    if storage_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B {
-        return !message.is_some_and(|message| {
-            // [MS-OXOCFG] sections 2.2.6 and 3.1.4.3: a named view is a
-            // persisted FAI. Its absent companion properties remain absent,
-            // rather than being projected as empty compatibility properties.
-            message
-                .message_class
-                .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
-                || associated_config_property_is_client_absent(Some(message), storage_tag)
-        });
-    }
     let Some(message) = message else {
         return false;
     };
@@ -473,18 +449,6 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             sanitize_configuration_property_value(&message.message_class, lookup_tag, value)
         })
         .or_else(|| {
-            if lookup_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                && associated_config_has_explicit_zero_roaming_datatypes(message)
-            {
-                // 0x0E0B0102 is an undocumented Outlook compatibility property.
-                // Trace 202607231148 requests it after a client-owned
-                // IPM.Configuration FAI declares no roaming streams. Per
-                // [MS-OXOCFG] section 2.2.2.1, that zero declaration applies
-                // only to PidTagRoamingDictionary and PidTagRoamingXmlStream;
-                // project an empty PtypBinary for direct GetProps rather than
-                // converting it to ecNotFound or generating configuration data.
-                return Some(MapiValue::Binary(Vec::new()));
-            }
             if associated_config_property_is_client_absent(Some(message), lookup_tag) {
                 // The persisted client configuration establishes that this
                 // compatibility property was not supplied; do not invent it.
@@ -690,21 +654,6 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 {
                     Some(MapiValue::Binary(minimal_custom_action_roaming_xml_stream()))
                 }
-                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                    if message.message_class
-                        == crate::mapi_store::OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS =>
-                {
-                    Some(MapiValue::Binary(Vec::new()))
-                }
-                OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-                    if crate::mapi_store::is_outlook_configuration_message_class(
-                        &message.message_class,
-                    ) =>
-                {
-                    Some(MapiValue::Binary(configuration_fallback_binary_stream(
-                        &message.message_class,
-                    )))
-                }
                 PID_NAME_CONTENT_CLASS_W_TAG
                     if crate::mapi_store::is_outlook_configuration_message_class(
                         &message.message_class,
@@ -800,7 +749,6 @@ fn is_umolk_computed_property(property_tag: u32) -> bool {
             | PID_TAG_MESSAGE_DELIVERY_TIME
             | PID_TAG_ROAMING_DATATYPES
             | PID_TAG_ROAMING_DICTIONARY
-            | OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
             | PID_NAME_CONTENT_CLASS_W_TAG
             | PID_NAME_CONTENT_TYPE_W_TAG
     )
@@ -862,27 +810,6 @@ fn configuration_roaming_datatypes(
         }
     } else {
         datatypes
-    }
-}
-
-fn configuration_fallback_binary_stream(message_class: &str) -> Vec<u8> {
-    if crate::mapi_store::is_outlook_configuration_message_class_name(
-        message_class,
-        "IPM.Configuration.WorkHours",
-    ) {
-        minimal_working_hours_roaming_xml_stream()
-    } else if crate::mapi_store::is_outlook_configuration_message_class_name(
-        message_class,
-        "IPM.Configuration.CategoryList",
-    ) {
-        minimal_category_list_roaming_xml_stream()
-    } else if crate::mapi_store::is_outlook_configuration_message_class_name(
-        message_class,
-        "IPM.Configuration.MRM",
-    ) {
-        minimal_mrm_roaming_xml_stream()
-    } else {
-        minimal_roaming_dictionary_stream()
     }
 }
 

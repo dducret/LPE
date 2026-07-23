@@ -1883,7 +1883,7 @@ fn associated_config_zero_metadata_defaults_are_intentional() {
         Some(&object),
         PID_TAG_SENT_MAIL_SVR_EID
     ));
-    assert!(modeled_zero_or_default_property(
+    assert!(!modeled_zero_or_default_property(
         Some(&object),
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
     ));
@@ -2037,14 +2037,77 @@ fn persisted_named_view_getprops_does_not_project_missing_0e0b() {
 }
 
 #[test]
-fn quick_step_custom_action_defaults_undocumented_0e0b_to_empty_binary() {
+fn persisted_message_list_settings_getprops_does_not_project_missing_0e0b() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "test@example.test".to_string(),
+        display_name: "Test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let object = MapiObject::AssociatedConfig {
+        folder_id: INBOX_FOLDER_ID,
+        config_id: 0x7fff_ffff_fffb_0003,
+        saved_message: Some(crate::mapi_store::MapiAssociatedConfigMessage {
+            id: 0x7fff_ffff_fffb_0003,
+            folder_id: INBOX_FOLDER_ID,
+            canonical_id: Uuid::parse_str("11111111-2222-4333-8444-555555555557").unwrap(),
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "IPM.Configuration.MessageListSettings".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "i32", "value": 0}
+            }),
+        }),
+    };
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&4096u16.to_le_bytes());
+    payload.extend_from_slice(&1u16.to_le_bytes());
+    payload.extend_from_slice(&OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B.to_le_bytes());
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload,
+    };
+
+    assert!(fallback_default_specific_property(
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
+    ));
+
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
+    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+    assert_eq!(response[6], 1);
+    assert_eq!(response[7], 0x0A);
+    assert_eq!(
+        u32::from_le_bytes(response[8..12].try_into().unwrap()),
+        0x8004_010F
+    );
+}
+
+#[test]
+fn quick_step_custom_action_does_not_project_undocumented_0e0b() {
     let object = MapiObject::AssociatedConfig {
         folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
         config_id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF4),
         saved_message: None,
     };
 
-    assert!(modeled_zero_or_default_property(
+    assert!(!modeled_zero_or_default_property(
         Some(&object),
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
     ));
@@ -3012,7 +3075,7 @@ fn saved_associated_config_getprops_uses_same_batch_saved_message() {
 }
 
 #[test]
-fn saved_umolk_associated_config_getprops_projects_roaming_dictionary_stream() {
+fn saved_umolk_associated_config_getprops_reports_missing_0e0b_not_found() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -3062,26 +3125,25 @@ fn saved_umolk_associated_config_getprops_projects_roaming_dictionary_stream() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 0]);
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 1]);
     let mut cursor = Cursor::new(&response[7..]);
+    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
         parse_property_value_for_tag(&mut cursor, PID_TAG_MESSAGE_CLASS_W).unwrap(),
         MapiValue::String("IPM.Configuration.UMOLK.UserOptions".to_string())
     );
+    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
         parse_property_value_for_tag(&mut cursor, PID_TAG_MESSAGE_FLAGS).unwrap(),
         MapiValue::I32(64)
     );
+    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
         parse_property_value_for_tag(&mut cursor, PID_TAG_MESSAGE_STATUS).unwrap(),
         MapiValue::I32(0)
     );
-    assert!(matches!(
-        parse_property_value_for_tag(&mut cursor, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B).unwrap(),
-        MapiValue::Binary(value)
-            if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
-                && value.windows(b"18-OLPrefsVersion".len()).any(|window| window == b"18-OLPrefsVersion")
-    ));
+    assert_eq!(cursor.read_u8().unwrap(), 0x0A);
+    assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F);
 }
 
 #[test]
@@ -3294,20 +3356,21 @@ fn contacts_helper_associated_getprops_projects_empty_modeled_values() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 0]);
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 1]);
     let mut cursor = Cursor::new(&response[7..]);
+    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
         parse_property_value_for_tag(&mut cursor, PID_NAME_OSC_CONTACT_SOURCES_TAG).unwrap(),
         MapiValue::MultiString(Vec::new())
     );
+    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert!(matches!(
         parse_property_value_for_tag(&mut cursor, PID_TAG_ENTRY_ID).unwrap(),
         MapiValue::Binary(bytes) if !bytes.is_empty()
     ));
-    assert_eq!(
-        parse_property_value_for_tag(&mut cursor, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B).unwrap(),
-        MapiValue::Binary(Vec::new())
-    );
+    assert_eq!(cursor.read_u8().unwrap(), 0x0A);
+    assert_eq!(cursor.read_u32().unwrap(), 0x8004_010F);
+    assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
         parse_property_value_for_tag(&mut cursor, PID_TAG_MESSAGE_CLASS_W).unwrap(),
         MapiValue::String("IPM.Microsoft.OSC.ContactSync".to_string())

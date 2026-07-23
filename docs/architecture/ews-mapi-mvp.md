@@ -200,6 +200,16 @@ sections 2.2.6 and 3.1.4.3 define the FAI selection and descriptor-read path;
 tags and types; [MS-OXCFXICS] section 2.2.3.1.1.5.2 defines the
 `RopFastTransferSourceGetBuffer` `TransferBuffer` carrying the wire portion.
 
+The same single-bag rule applies to persisted `IPM.Configuration` FAI
+messages. In particular, an absent private `0x0E0B0102` property remains
+absent in `GetProps`, `OpenStream`, direct `CopyTo`, and ICS; it is not
+derived from a zero `PidTagRoamingDatatypes` value. `RopGetPropertiesSpecific`
+therefore keeps the requested position as a flagged `MAPI_E_NOT_FOUND`
+(`0x8004010F`) cell. `PidTagRoamingDatatypes` describes only the roaming
+dictionary and XML streams. This follows [MS-OXOCFG] section 2.2.2.1,
+[MS-OXCROPS] section 2.2.8.3.2, and [MS-OXCDATA] sections 2.4.2, 2.8.1.2,
+and 2.11.5.
+
 For durable associated-configuration FAI messages, a client-supplied
 `PidTagCreationTime` (`0x30070040`) or `PidTagLastModifierName`
 (`0x3FFA001F`) is ignored in direct property writes, writable streams,

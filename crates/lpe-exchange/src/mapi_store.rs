@@ -220,8 +220,6 @@ pub(crate) struct MapiAssociatedConfigIdentity {
 
 mod associated_config;
 mod snapshot;
-#[cfg(test)]
-pub(crate) use associated_config::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID;
 use associated_config::*;
 pub(crate) use associated_config::{
     copy_associated_config_server_metadata, is_associated_config_read_only_property_tag,
@@ -235,12 +233,16 @@ pub(crate) use associated_config::{
     outlook_default_folder_named_view_id, outlook_default_folder_named_view_name,
     outlook_inbox_broad_startup_associated_config_defaults,
     outlook_inbox_exact_virtual_associated_config_for_message_class,
-    OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID, OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS,
-    OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS, OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS,
+    OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID, OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
+    OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS,
 };
 #[cfg(test)]
 pub(crate) use associated_config::{
     OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
+};
+#[cfg(test)]
+pub(crate) use associated_config::{
+    OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS, OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,
 };
 
 pub(crate) enum MapiCommonViewsMessage {

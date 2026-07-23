@@ -657,8 +657,7 @@ fn ipm_configuration_contract_summary_reports_required_columns_and_streams() {
     assert!(summary.contains("row_issue_count=0"));
     assert!(summary.contains("datatypes=0x00000004"));
     assert!(summary.contains("has_dict=true"));
-    assert!(summary.contains("associated_config_0e0b=binary:bytes="));
-    assert!(!summary.contains("associated_config_0e0b=binary:bytes=0"));
+    assert!(summary.contains("associated_config_0e0b=missing"));
 }
 
 #[test]

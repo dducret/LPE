@@ -87,7 +87,6 @@ fn associated_config_default_sync_tags(
         &[
             PID_TAG_ROAMING_DATATYPES,
             PID_TAG_ROAMING_DICTIONARY,
-            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
             PID_NAME_CONTENT_CLASS_W_TAG,
             PID_NAME_CONTENT_TYPE_W_TAG,
         ]

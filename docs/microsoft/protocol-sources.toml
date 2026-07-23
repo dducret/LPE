@@ -413,6 +413,7 @@ used_for = [
   "Cumulative associated-configuration property mutations before RopSaveChangesMessage",
   "Sequential same-buffer RopSaveChangesMessage and post-save RopGetPropertiesSpecific visibility",
   "RopGetAttachmentTable success response shape without an embedded row count",
+  "RopGetPropertiesSpecific FlaggedPropertyRow projection for an absent private associated-configuration property",
   "RopSetReadFlags and RopSetMessageReadFlag read-state request and response encoding",
   "RopNotify response encoding and extra ROP placement at the end of the Execute RopsList",
   "RopSynchronizationImportDeletes TaggedPropertyValue request framing and response encoding",
@@ -656,8 +657,7 @@ used_for = [
   "Property tags, typed values, EntryIDs, GUIDs, and FILETIME values",
   "FlatEntryList and PropertyProblem structures used by Outlook reply-recipient deletion and property mutation responses",
   "RopGetPropertiesSpecific PropertyRow and per-property error encoding checks",
-  "StandardPropertyRow encoding of Outlook's zero-length 0x0E0B0102 compatibility projection",
-  "FlaggedPropertyRow ecNotFound encoding for an absent client-owned configuration property",
+  "FlaggedPropertyRow MAPI_E_NOT_FOUND encoding for an absent private associated-configuration property instead of a synthetic zero-length value",
   "Unresolved RopGetPropertiesSpecific partial-property ReturnValue conflict between MS-OXCDATA section 2.4.3 and MS-OXCROPS section 2.2.8.3.2",
   "Calendar default-view Message EntryID folder and message identity",
   "Calendar FAI QueryRows flagged-property encoding for selected properties absent from a FolderDesign.NamedView message",
@@ -917,7 +917,7 @@ used_for = [
   "Persisted-only Contacts helper and NamedView parity between the live FAI table and cached-mode synchronization",
   "Persisted FolderDesign.NamedView FAI descriptor projection without generated descriptor properties",
   "Conversation Action Settings FAI projection only from canonical conversation action rows",
-  "Zero PidTagRoamingDatatypes as a declaration that no roaming dictionary or XML stream exists on a client-owned configuration FAI, without inferring unrelated property absence",
+  "Zero PidTagRoamingDatatypes as a declaration that no roaming dictionary or XML stream exists on a client-owned configuration FAI; it does not authorize a synthetic unrelated private property",
 ]
 sections = [
   "2.2.2.1 PidTagRoamingDatatypes Property",

@@ -6256,7 +6256,7 @@ fn associated_config_unknown_binary_property_does_not_open_as_empty_stream() {
         &snapshot,
     )
     .is_none());
-    let (modeled_stream, writable_target) = property_stream_data(
+    assert!(property_stream_data(
         &mut session,
         1,
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
@@ -6265,9 +6265,7 @@ fn associated_config_unknown_binary_property_does_not_open_as_empty_stream() {
         account_id,
         &snapshot,
     )
-    .expect("modeled associated config stream");
-    assert!(!modeled_stream.is_empty());
-    assert!(writable_target.is_none());
+    .is_none());
 }
 
 #[test]

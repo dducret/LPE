@@ -268,6 +268,10 @@ fn hierarchy_download_keeps_imported_change_key_and_predecessor_lineage() {
     );
     assert_eq!(summary.final_state_idset_given_counters, vec![8]);
     assert_eq!(summary.final_state_cnset_seen_counters, vec![58]);
+    // [MS-OXCFXICS] sections 2.2.1.1.2, 2.2.1.2.7, and 3.1.5.3:
+    // imported foreign ChangeKeys remain foreign XIDs, while CnsetSeen
+    // records the server's locally assigned change number.
+    assert!(summary.final_state_cnset_seen_includes_all_expected_folder_change_counters);
 
     let (selected, _) = select_download_manifest_for_client_state(
         SYNC_TYPE_HIERARCHY,

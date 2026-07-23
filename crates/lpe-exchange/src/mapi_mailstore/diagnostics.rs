@@ -971,8 +971,9 @@ pub(crate) fn hierarchy_microsoft_payload_comparison(
     let expected_change_counters = summary
         .rows
         .iter()
-        .filter_map(|row| row.change_counter)
+        .filter_map(hierarchy_row_server_change_number)
         .collect::<Vec<_>>();
+    let complete_change_counter_set = expected_change_counters.len() == summary.folder_change_count;
 
     HierarchyMicrosoftPayloadComparison {
         required_missing_row_names,
@@ -1001,10 +1002,14 @@ pub(crate) fn hierarchy_microsoft_payload_comparison(
             &expected_change_counters,
             &summary.final_state_cnset_seen_counters,
         ),
-        final_state_cnset_extra_change_counters: counter_difference(
-            &summary.final_state_cnset_seen_counters,
-            &expected_change_counters,
-        ),
+        final_state_cnset_extra_change_counters: complete_change_counter_set
+            .then(|| {
+                counter_difference(
+                    &summary.final_state_cnset_seen_counters,
+                    &expected_change_counters,
+                )
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -1076,8 +1081,9 @@ pub(crate) fn hierarchy_semantic_validation(
     let expected_change_counters = summary
         .rows
         .iter()
-        .filter_map(|row| row.change_counter)
+        .filter_map(hierarchy_row_server_change_number)
         .collect::<Vec<_>>();
+    let complete_change_counter_set = expected_change_counters.len() == summary.folder_change_count;
     let rows_missing_core_properties = summary
         .rows
         .iter()
@@ -1114,10 +1120,14 @@ pub(crate) fn hierarchy_semantic_validation(
         &expected_change_counters,
         &summary.final_state_cnset_seen_counters,
     );
-    let cnset_extra_change_counters = counter_difference(
-        &summary.final_state_cnset_seen_counters,
-        &expected_change_counters,
-    );
+    let cnset_extra_change_counters = complete_change_counter_set
+        .then(|| {
+            counter_difference(
+                &summary.final_state_cnset_seen_counters,
+                &expected_change_counters,
+            )
+        })
+        .unwrap_or_default();
     let root_inclusive_idset_given = root_inclusive_idset(
         &summary.final_state_idset_given_counters,
         sync_root_source_counter,
