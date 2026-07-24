@@ -100,6 +100,7 @@ const PID_TAG_MESSAGE_DELIVERY_TIME: u32 = 0x0E06_0040;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_MESSAGE_RECIPIENTS: u32 = 0x0E12_000D;
 const PID_TAG_MESSAGE_ATTACHMENTS: u32 = 0x0E13_000D;
+const PID_TAG_ROWID: u32 = 0x3000_0003;
 const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
 const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
@@ -999,8 +1000,11 @@ fn write_fast_transfer_visible_recipients(buffer: &mut Vec<u8>, email: &JmapEmai
         .iter()
         .map(|recipient| (1i32, recipient))
         .chain(email.cc.iter().map(|recipient| (2i32, recipient)));
-    for (recipient_type, recipient) in visible_recipients {
+    for (row_id, (recipient_type, recipient)) in visible_recipients.enumerate() {
         write_u32(buffer, START_RECIP);
+        // [MS-OXCFXICS] section 2.2.4.3.23: PidTagRowid is required in
+        // fixed first position for every recipient element.
+        write_i32_property(buffer, PID_TAG_ROWID, row_id as i32);
         write_i32_property(buffer, PID_TAG_RECIPIENT_TYPE, recipient_type);
         write_utf16_property(
             buffer,

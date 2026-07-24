@@ -538,6 +538,22 @@ pub(super) fn normalized_associated_config_persisted_properties(
     properties: &HashMap<u32, MapiValue>,
 ) -> HashMap<u32, MapiValue> {
     let mut normalized = properties.clone();
+    // [MS-OXCMSG] section 2.2.1.6: the server sets or clears mfEverRead
+    // whenever mfRead is set or cleared.
+    if let Some(message_flags) = normalized.get_mut(&PID_TAG_MESSAGE_FLAGS) {
+        let normalize_read_state = |flags: u32| {
+            if flags & MSGFLAG_READ != 0 {
+                flags | MSGFLAG_EVERREAD
+            } else {
+                flags & !MSGFLAG_EVERREAD
+            }
+        };
+        match message_flags {
+            MapiValue::I32(flags) => *flags = normalize_read_state(*flags as u32) as i32,
+            MapiValue::U32(flags) => *flags = normalize_read_state(*flags),
+            _ => {}
+        }
+    }
     if !message_class
         .get(..18)
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case("IPM.Configuration."))

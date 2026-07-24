@@ -237,6 +237,7 @@ pub(in crate::mapi) const MAPI_MESSAGE_ACCESS: u32 =
 pub(in crate::mapi) const MSGFLAG_READ: u32 = 0x0000_0001;
 pub(in crate::mapi) const MSGFLAG_UNSENT: u32 = 0x0000_0008;
 pub(in crate::mapi) const MSGFLAG_FAI: u32 = 0x0000_0040;
+pub(in crate::mapi) const MSGFLAG_EVERREAD: u32 = 0x0000_0400;
 pub(in crate::mapi) const FOLLOWUP_COMPLETE: u32 = 0x0000_0001;
 pub(in crate::mapi) const FOLLOWUP_FLAGGED: u32 = 0x0000_0002;
 pub(in crate::mapi) const PID_TAG_HTML_BINARY: u32 = 0x1013_0102;

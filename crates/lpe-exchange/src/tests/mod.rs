@@ -11915,6 +11915,7 @@ const PID_TAG_DELETED_COUNT_TOTAL: u32 = 0x670B_0003;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
+const PID_TAG_ROWID: u32 = 0x3000_0003;
 const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
 const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
@@ -13072,6 +13073,9 @@ fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncSt
                 tag => return Err(format!("unexpected progress property 0x{tag:08x}")),
             },
             StrictContentSection::Recipient => match property.tag {
+                PID_TAG_ROWID => {
+                    let _ = strict_decode_i32_property(&property)?;
+                }
                 PID_TAG_RECIPIENT_TYPE => {
                     let recipient_type = strict_decode_i32_property(&property)?;
                     if recipient_type != 1 && recipient_type != 2 {

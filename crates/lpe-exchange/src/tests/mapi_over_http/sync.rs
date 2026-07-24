@@ -10463,7 +10463,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     append_mapi_i32_property(&mut save_values, 0x0036_0003, 0); // PidTagSensitivity.
                                                                 // Exact first-save value from Outlook trace 202607211302. Per
                                                                 // [MS-OXCMSG] section 2.2.1.6, mfRead and mfUnsent are writable before
-                                                                // the first successful Save, while mfFAI identifies the associated item.
+                                                                // the first successful Save, while mfFAI identifies the associated item
+                                                                // and the server adds mfEverRead with mfRead.
     append_mapi_i32_property(&mut save_values, PID_TAG_MESSAGE_FLAGS, 0x49);
     append_mapi_i64_property(
         &mut save_values,
@@ -10591,7 +10592,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     );
     assert_eq!(
         config.properties_json["0x0e070003"],
-        serde_json::json!({"type": "i32", "value": 0x49})
+        serde_json::json!({"type": "i32", "value": 0x449}),
+        "[MS-OXCMSG] section 2.2.1.6 requires the server to set mfEverRead when mfRead is set"
     );
     assert!(config.properties_json.get("0x1000001f").is_none());
     assert!(config.properties_json.get("0x7c070102").is_none());
@@ -10772,8 +10774,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert_eq!(message_flags.len(), 1, "{transfer:02x?}");
     assert_eq!(
         strict_decode_i32_property(message_flags[0]).unwrap(),
-        0x49,
-        "direct CopyTo must retain the accepted first-save mfRead | mfUnsent | mfFAI value"
+        0x449,
+        "direct CopyTo must retain mfUnsent | mfFAI and project the server-owned mfEverRead bit with mfRead"
     );
     let search_keys = properties
         .iter()

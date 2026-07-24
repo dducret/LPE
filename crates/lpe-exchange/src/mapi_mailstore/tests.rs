@@ -808,6 +808,7 @@ fn microsoft_oxcfxics_content_sync_uses_recipient_markers() {
         &[
             PID_TAG_SUBJECT_W,
             START_RECIP,
+            PID_TAG_ROWID,
             PID_TAG_RECIPIENT_TYPE,
             PID_TAG_DISPLAY_NAME_W,
             PID_TAG_EMAIL_ADDRESS_W,
@@ -821,6 +822,30 @@ fn microsoft_oxcfxics_content_sync_uses_recipient_markers() {
             .filter(|window| *window == START_RECIP.to_le_bytes())
             .count(),
         2
+    );
+    let first_recipient = [
+        START_RECIP.to_le_bytes(),
+        PID_TAG_ROWID.to_le_bytes(),
+        0_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TYPE.to_le_bytes(),
+        1_i32.to_le_bytes(),
+    ]
+    .concat();
+    let second_recipient = [
+        START_RECIP.to_le_bytes(),
+        PID_TAG_ROWID.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TYPE.to_le_bytes(),
+        2_i32.to_le_bytes(),
+    ]
+    .concat();
+    assert!(
+        contains_bytes(&buffer, &first_recipient),
+        "MS-OXCFXICS 2.2.4.3.23 requires Rowid first in the To recipient"
+    );
+    assert!(
+        contains_bytes(&buffer, &second_recipient),
+        "MS-OXCFXICS 2.2.4.3.23 requires a distinct Rowid first in the Cc recipient"
     );
     assert_i32_property(&buffer, PID_TAG_RECIPIENT_TYPE, 1);
     assert_variable_property_present(&buffer, PID_TAG_DISPLAY_NAME_W, &utf16z("Bob"));
