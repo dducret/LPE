@@ -8555,8 +8555,14 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
     let service = ExchangeService::new(store.clone());
 
     let nspi_headers = nspi_bound_headers(&service, "DNToMId").await;
+    let nspi_dn_to_mid_request =
+        super::nspi::nspi_dn_to_mid_request(&["alice@example.test"]);
     let nspi_dn_to_mid = service
-        .handle_mapi(MapiEndpoint::Nspi, &nspi_headers, b"alice@example.test\0")
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &nspi_headers,
+            &nspi_dn_to_mid_request,
+        )
         .await
         .unwrap();
     assert_eq!(nspi_dn_to_mid.headers().get("x-responsecode").unwrap(), "0");

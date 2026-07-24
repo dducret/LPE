@@ -297,14 +297,21 @@ used_for = [
   "PropertyRowSet_r and PropertyValue_r wire layout",
   "Outlook address book bootstrap and hierarchy debugging",
   "Address book hierarchy and QueryRows protocol example behavior",
+  "DN-to-Minimal-ID cardinality and missing-property GetProps error projection",
+  "StringsArray_r maximum cardinality and duplicate-preserving DNToMId projection",
 ]
 sections = [
+  "2.2.1.8 Positioning Minimal Entry IDs",
+  "2.2.7.1 StringsArray_r",
+  "2.2.9.1 MinimalEntryID",
   "2.2.1.12 NspiGetSpecialTable Flags",
   "2.2.3 PropertyRow_r Structure",
   "2.2.4 PropertyRowSet_r Structure",
   "3.1.4.1.1 NspiBind",
   "3.1.4.1.3 NspiGetSpecialTable",
+  "3.1.4.1.7 NspiGetProps",
   "3.1.4.1.8 NspiQueryRows",
+  "3.1.4.1.13 NspiDNToMId",
   "4 Protocol Examples",
 ]
 
@@ -322,6 +329,7 @@ used_for = [
   "PidTagContainerFlags, PidTagAddressBookContainerId, and PidTagAddressBookIsMaster semantics",
   "Bounded NSPI address-book object property projection audit row",
   "Calendar navigation shortcut owner EntryID validation",
+  "PidTagDisplayTypeEx and PidTagAddressBookRoomContainers NSPI projection",
 ]
 sections = [
   "2.2 Message Syntax",
@@ -333,6 +341,8 @@ sections = [
   "2.2.2.4 PidTagAddressBookIsMaster",
   "2.2.3 Properties that Apply to All Address Book Objects",
   "2.2.3.2 PidTagEntryId",
+  "2.2.3.12 PidTagDisplayTypeEx",
+  "2.2.7.1 PidTagAddressBookRoomContainers",
 ]
 
 [[protocol]]
@@ -376,7 +386,11 @@ sections = [
   "2.2.4.4.2 NotificationWait Request Type Success Response Body",
   "2.2.7 Response Meta-Tags",
   "2.2.5.1 Bind Request Type",
+  "2.2.5.4.1 DnToMinId Request Type Request Body",
+  "2.2.5.4.2 DnToMinId Request Type Success Response Body",
+  "2.2.5.7.1 GetProps Request Type Request Body",
   "2.2.5.7.2 GetProps Request Type Success Response Body",
+  "2.2.5.8.1 GetSpecialTable Request Type Request Body",
   "2.2.5.8.2 GetSpecialTable Request Type Success Response Body",
   "2.2.5.9.2 GetTemplateInfo Request Type Success Response Body",
   "2.2.6 PING Request Type",
@@ -669,6 +683,7 @@ used_for = [
   "PtypBoolean wire values used by RopSynchronizationOpenCollector",
   "PtypTime UTC FILETIME values used by Outlook Calendar start and end properties",
   "PtypUnspecified property-ID matching in FastTransfer and ICS property filters",
+  "PtypNull zero-byte value encoding in NSPI GetProps",
 ]
   sections = [
     "2.2.1.1 Folder ID Structure",
@@ -687,7 +702,7 @@ used_for = [
   "2.8.1.2 FlaggedPropertyRow Structure",
   "2.11.5 FlaggedPropertyValue Structure",
   "2.11.6 FlaggedPropertyValueWithType Structure",
-  "2.11.1 Property Data Types (PtypBoolean, PtypTime, and PtypUnspecified)",
+  "2.11.1 Property Data Types (PtypNull, PtypBoolean, PtypTime, and PtypUnspecified)",
   "2.11.4 TaggedPropertyValue Structure",
   "2.13.1 SortOrder Structure",
   "3.1 Restriction",

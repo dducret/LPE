@@ -674,6 +674,21 @@ not by itself authorize broad client publication.
   Outlook address-book bootstrap.
 - NSPI projects `PidTagAddressBookObjectGuid` as the Windows GUID byte layout
   expected by Outlook address book clients.
+- NSPI hierarchy rows use object Minimal Entry IDs outside the reserved
+  `0x00000000` through `0x0000000F` signal range. `DNToMId` parses its own
+  ASCII DN array up to the 100,000-value protocol bound and preserves order,
+  duplicates, and one-to-one cardinality; an organization DN that has no
+  canonical LPE object maps to `0`, never to the authenticated mailbox
+  (MS-OXNSPI sections 2.2.1.8, 2.2.7.1, 2.2.9.1, and 3.1.4.1.13;
+  MS-OXCMAPIHTTP sections 2.2.5.4.1 and 2.2.5.4.2).
+- NSPI `GetProps` preserves the requested property order, duplicates, null
+  placeholders, and response code page. An unavailable property is returned in
+  its original slot as `PtypErrorCode` with `ErrorsReturned`, including when
+  `CurrentRec` does not identify an address-book object, rather than being
+  dropped or replaced by bootstrap columns (MS-OXNSPI section 3.1.4.1.7;
+  MS-OXCMAPIHTTP sections 2.2.5.7.1 and 2.2.5.7.2; MS-OXCDATA section 2.11.1).
+- `PidTagDisplayTypeEx` uses the canonical address-book display type in its
+  local-display byte (MS-OXOABK section 2.2.3.12).
 - NSPI mutation and advanced link-table operations are intentionally deferred.
 
 ### ICS and FastTransfer Coverage
@@ -1102,8 +1117,10 @@ canonical `from` identity.
   sequence behavior.
 - EMSMDB tests cover supported bootstrap, hierarchy, contents, table, property,
   FastTransfer, submission, mutation, and unsupported/error paths.
-- NSPI tests cover authenticated mailbox and visible-contact resolution, plus
-  deterministic rejection of deferred mutation surfaces.
+- NSPI tests cover authenticated mailbox and visible-contact resolution,
+  reserved hierarchy identifiers, organization-DN non-aliasing, strict
+  `GetProps` cardinality/error slots, and deterministic rejection of deferred
+  mutation surfaces.
 - ICS invariant tests prove REPLGUID final/checkpoint state, REPLID transient
   sets, baseline selection for zero-length client state, delta selection for
   non-empty uploaded state, non-regressing download checkpoints, and no

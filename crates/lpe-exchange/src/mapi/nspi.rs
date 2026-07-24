@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 mod diagnostics;
+mod dn_to_mid;
 mod property_values;
 mod special_tables;
 
@@ -23,9 +24,12 @@ use diagnostics::{
     log_nspi_dn_to_mid_debug, log_nspi_get_props_debug, log_nspi_response_contract,
     log_nspi_rowset_debug, nspi_raw_property_tag_candidates,
 };
+use dn_to_mid::parse_dn_to_mid_names;
 use property_values::{
-    allocate_nspi_entry_identities, allocate_principal_nspi_identity, nspi_get_props_property_tags,
-    nspi_property_tags_response, nspi_resolved_entry_row, NSPI_BOOTSTRAP_PROPERTY_TAGS,
+    allocate_nspi_entry_identities, allocate_principal_nspi_identity,
+    nspi_get_props_missing_property_value_list, nspi_get_props_property_tags,
+    nspi_get_props_property_value_list, nspi_property_tags_response, nspi_resolved_entry_row,
+    parse_nspi_get_props_request, NSPI_BOOTSTRAP_PROPERTY_TAGS,
 };
 pub(in crate::mapi) use property_values::{
     nspi_entry_display_type, nspi_entry_id, nspi_entry_property_value_list,
@@ -42,6 +46,7 @@ use special_tables::NSPI_UNICODE_STRINGS_FLAG;
 use special_tables::{nspi_hierarchy_info_response, nspi_special_table_response};
 
 const NSPI_ROWSET_DEBUG_SCHEMA: &str = "nspi-rowset-explicit-table-v2";
+const NSPI_ERRORS_RETURNED: u32 = 0x0004_0380;
 
 static NSPI_OBJECT_IDS: OnceLock<Mutex<HashMap<(Uuid, u8, Uuid), u64>>> = OnceLock::new();
 
@@ -403,8 +408,22 @@ where
             &format!("failed to project authenticated address book identifier: {error}"),
         );
     }
-    let values = resolve_names_requested_values(request);
-    let matched = nspi_dn_to_mid_match(principal, &entries, &values);
+    let values = match parse_dn_to_mid_names(request) {
+        Some(values) => values,
+        None => {
+            return mapi_diagnostic_response(
+                request_type,
+                request_id,
+                5,
+                "invalid DNToMId string array",
+            );
+        }
+    };
+    let matches = values
+        .iter()
+        .map(|value| nspi_dn_to_mid_match(principal, &entries, std::slice::from_ref(value)))
+        .collect::<Vec<_>>();
+    let matched = matches.first().copied().unwrap_or_default();
     log_nspi_dn_to_mid_debug(
         principal,
         request_type,
@@ -417,8 +436,10 @@ where
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     body.push(1);
-    write_u32(&mut body, 1);
-    write_u32(&mut body, matched.mid.unwrap_or(0));
+    write_u32(&mut body, matches.len() as u32);
+    for matched in matches {
+        write_u32(&mut body, matched.mid.unwrap_or(0));
+    }
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
 }
@@ -429,6 +450,18 @@ struct NspiDnToMidMatch {
     source: &'static str,
 }
 
+fn nspi_match_dn_to_mid_entry<'a>(
+    entries: &'a [ExchangeAddressBookEntry],
+    value: &str,
+) -> Option<&'a ExchangeAddressBookEntry> {
+    let value = normalize_nspi_lookup_value(value);
+    entries.iter().find(|entry| {
+        value == entry.email.to_ascii_lowercase()
+            || value == nspi_entry_legacy_dn(entry).to_ascii_lowercase()
+            || value == nspi_entry_unprefixed_legacy_dn(entry).to_ascii_lowercase()
+    })
+}
+
 fn nspi_dn_to_mid_match(
     principal: &AccountPrincipal,
     entries: &[ExchangeAddressBookEntry],
@@ -436,7 +469,7 @@ fn nspi_dn_to_mid_match(
 ) -> NspiDnToMidMatch {
     if let Some(entry) = values
         .first()
-        .and_then(|value| nspi_match_entry(principal.account_id, entries, value))
+        .and_then(|value| nspi_match_dn_to_mid_entry(entries, value))
     {
         return NspiDnToMidMatch {
             mid: Some(nspi_entry_id(principal.account_id, entry)),
@@ -450,20 +483,6 @@ fn nspi_dn_to_mid_match(
         return NspiDnToMidMatch {
             mid: Some(principal_minimal_entry_id(principal)),
             source: "principal_alias",
-        };
-    }
-    if let Some(entry) = values
-        .is_empty()
-        .then(|| {
-            entries
-                .iter()
-                .find(|entry| nspi_entry_is_principal(entry, principal))
-        })
-        .flatten()
-    {
-        return NspiDnToMidMatch {
-            mid: Some(nspi_entry_id(principal.account_id, entry)),
-            source: "principal_default",
         };
     }
     NspiDnToMidMatch {
@@ -509,57 +528,87 @@ where
             &format!("failed to project authenticated address book identifier: {error}"),
         );
     }
+    let parsed_request = parse_nspi_get_props_request(request);
+    let response_code_page = parsed_request
+        .as_ref()
+        .map(|parsed| parsed.code_page)
+        .unwrap_or(NSPI_UNICODE_CODEPAGE);
     let tags = nspi_get_props_property_tags(request);
     let raw_tag_candidates = nspi_raw_property_tag_candidates(request);
-    let dropped_tags = raw_tag_candidates
+    let dropped_tags = tags
         .iter()
         .copied()
-        .filter(|tag| !tags.contains(tag))
+        .filter(|tag| !nspi_property_tag_is_supported(*tag) && *tag != 0x0000_0001)
         .collect::<Vec<_>>();
     let principal_entry = principal_address_book_entry(principal);
     let principal_id = nspi_entry_id(principal.account_id, &principal_entry);
     let lookup_values = resolve_names_requested_values(request);
-    let entry = nspi_stat_current_rec(request)
-        .and_then(|current_rec| {
-            entries
-                .iter()
-                .find(|entry| nspi_entry_id(principal.account_id, entry) == current_rec)
-                .cloned()
-                .or_else(|| (current_rec == principal_id).then_some(principal_entry.clone()))
-        })
-        .or_else(|| nspi_requested_entry(principal.account_id, request, &entries).cloned())
-        .or_else(|| {
-            nspi_requested_entry_ids(request)
-                .contains(&principal_id)
-                .then_some(principal_entry.clone())
-        })
-        .or_else(|| {
-            lookup_values
-                .iter()
-                .any(|value| nspi_lookup_matches_principal(value, principal))
-                .then_some(principal_entry.clone())
-        })
-        .or_else(|| {
-            (lookup_values.is_empty() && !nspi_request_has_entry_selector(request)).then(|| {
+    let requested_current_rec = parsed_request
+        .as_ref()
+        .and_then(|parsed| parsed.current_rec);
+    let entry = if let Some(current_rec) = requested_current_rec.filter(|mid| *mid != 0) {
+        entries
+            .iter()
+            .find(|entry| nspi_entry_id(principal.account_id, entry) == current_rec)
+            .cloned()
+            .or_else(|| (current_rec == principal_id).then_some(principal_entry.clone()))
+    } else {
+        nspi_stat_current_rec(request)
+            .and_then(|current_rec| {
                 entries
                     .iter()
-                    .find(|entry| nspi_entry_is_principal(entry, principal))
+                    .find(|entry| nspi_entry_id(principal.account_id, entry) == current_rec)
                     .cloned()
-                    .unwrap_or_else(|| principal_entry.clone())
+                    .or_else(|| (current_rec == principal_id).then_some(principal_entry.clone()))
             })
-        });
+            .or_else(|| nspi_requested_entry(principal.account_id, request, &entries).cloned())
+            .or_else(|| {
+                nspi_requested_entry_ids(request)
+                    .contains(&principal_id)
+                    .then_some(principal_entry.clone())
+            })
+            .or_else(|| {
+                lookup_values
+                    .iter()
+                    .any(|value| nspi_lookup_matches_principal(value, principal))
+                    .then_some(principal_entry.clone())
+            })
+            .or_else(|| {
+                (lookup_values.is_empty() && !nspi_request_has_entry_selector(request)).then(|| {
+                    entries
+                        .iter()
+                        .find(|entry| nspi_entry_is_principal(entry, principal))
+                        .cloned()
+                        .unwrap_or_else(|| principal_entry.clone())
+                })
+            })
+    };
+    let (property_values, errors_returned) = if let Some(entry) = entry.as_ref() {
+        let (values, errors_returned) =
+            nspi_get_props_property_value_list(principal.account_id, entry, &tags, &entries);
+        (Some(values), errors_returned)
+    } else if requested_current_rec.is_some_and(|mid| mid != 0) && !tags.is_empty() {
+        (
+            Some(nspi_get_props_missing_property_value_list(&tags)),
+            true,
+        )
+    } else {
+        (None, false)
+    };
     let mut body = Vec::new();
     write_u32(&mut body, 0);
-    write_u32(&mut body, 0);
-    write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
-    if let Some(entry) = entry.as_ref() {
+    write_u32(
+        &mut body,
+        if errors_returned {
+            NSPI_ERRORS_RETURNED
+        } else {
+            0
+        },
+    );
+    write_u32(&mut body, response_code_page);
+    if let Some(property_values) = property_values {
         body.push(1);
-        body.extend_from_slice(&nspi_entry_property_value_list(
-            principal.account_id,
-            entry,
-            &tags,
-            &entries,
-        ));
+        body.extend_from_slice(&property_values);
     } else {
         body.push(0);
     }

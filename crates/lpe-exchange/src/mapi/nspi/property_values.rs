@@ -78,6 +78,7 @@ pub(super) const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x8CE2_0003, // PidTagAddressBookDistributionListMemberCount
     0x8CE3_0003, // PidTagAddressBookDistributionListExternalMemberCount
     0x8C6D_0102, // PidTagAddressBookObjectGuid
+    0x3905_0003, // PidTagDisplayTypeEx
     0x3E04_0003, // Outlook account-row compatibility column
     0x8888_0003, // Outlook account-row compatibility column
     0xFFFD_0003, // PidTagAddressBookContainerId
@@ -172,30 +173,62 @@ pub(in crate::mapi) fn nspi_requested_property_tags(request: &[u8]) -> Vec<u32> 
     }
 }
 
-pub(super) fn nspi_get_props_property_tags(request: &[u8]) -> Vec<u32> {
-    let tags = nspi_requested_property_tags(request);
-    if tags != NSPI_BOOTSTRAP_PROPERTY_TAGS {
-        return tags;
-    }
-    let mut tags = Vec::new();
-    let mut offset = 0usize;
-    while offset + 4 <= request.len() {
-        let tag = u32::from_le_bytes([
-            request[offset],
-            request[offset + 1],
-            request[offset + 2],
-            request[offset + 3],
-        ]);
-        if nspi_property_tag_is_supported(tag) && !tags.contains(&tag) {
-            tags.push(tag);
-        }
-        offset += 1;
-    }
-    if tags.is_empty() {
-        NSPI_BOOTSTRAP_PROPERTY_TAGS.to_vec()
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct NspiGetPropsRequest {
+    pub(super) code_page: u32,
+    pub(super) current_rec: Option<u32>,
+    pub(super) property_tags: Option<Vec<u32>>,
+}
+
+// MS-OXCMAPIHTTP 2.2.5.7.1: Flags, optional 36-byte STAT, optional
+// LargePropertyTagArray, then the auxiliary buffer.
+pub(super) fn parse_nspi_get_props_request(request: &[u8]) -> Option<NspiGetPropsRequest> {
+    let mut cursor = Cursor::new(request);
+    let _flags = cursor.read_u32().ok()?;
+    let has_state = cursor.read_u8().ok()? != 0;
+    let (code_page, current_rec) = if has_state {
+        let _sort_type = cursor.read_u32().ok()?;
+        let _container_id = cursor.read_u32().ok()?;
+        let current_rec = cursor.read_u32().ok()?;
+        let _delta = cursor.read_u32().ok()?;
+        let _num_pos = cursor.read_u32().ok()?;
+        let _total_recs = cursor.read_u32().ok()?;
+        let code_page = cursor.read_u32().ok()?;
+        let _template_locale = cursor.read_u32().ok()?;
+        let _sort_locale = cursor.read_u32().ok()?;
+        (code_page, Some(current_rec))
     } else {
-        tags
+        (NSPI_UNICODE_CODEPAGE, None)
+    };
+    let property_tags = if cursor.read_u8().ok()? != 0 {
+        let count = cursor.read_u32().ok()? as usize;
+        if count > cursor.remaining().saturating_sub(4) / 4 {
+            return None;
+        }
+        let mut tags = Vec::with_capacity(count);
+        for _ in 0..count {
+            tags.push(cursor.read_u32().ok()?);
+        }
+        Some(tags)
+    } else {
+        None
+    };
+    let auxiliary_size = cursor.read_u32().ok()? as usize;
+    cursor.read_bytes(auxiliary_size).ok()?;
+    Some(NspiGetPropsRequest {
+        code_page,
+        current_rec,
+        property_tags,
+    })
+}
+
+pub(super) fn nspi_get_props_property_tags(request: &[u8]) -> Vec<u32> {
+    if let Some(parsed) = parse_nspi_get_props_request(request) {
+        return parsed
+            .property_tags
+            .unwrap_or_else(|| NSPI_BOOTSTRAP_PROPERTY_TAGS.to_vec());
     }
+    nspi_requested_property_tags(request)
 }
 
 pub(in crate::mapi) fn nspi_property_tag_is_supported(tag: u32) -> bool {
@@ -239,7 +272,50 @@ pub(in crate::mapi) fn nspi_entry_property_value_list(
     values
 }
 
+pub(super) fn nspi_get_props_property_value_list(
+    account_id: Uuid,
+    entry: &ExchangeAddressBookEntry,
+    tags: &[u32],
+    directory_entries: &[ExchangeAddressBookEntry],
+) -> (Vec<u8>, bool) {
+    // MS-OXNSPI 3.1.4.1.7 constraint 12 requires one order-preserving output
+    // slot per requested tag and PtypErrorCode for a property without a value.
+    let mut values = Vec::new();
+    let mut errors_returned = false;
+    write_u32(&mut values, tags.len() as u32);
+    for property_tag in tags {
+        if nspi_property_tag_is_supported(*property_tag) || *property_tag == 0x0000_0001 {
+            write_address_book_tagged_property_value(
+                &mut values,
+                *property_tag,
+                &nspi_entry_value_with_directory(
+                    account_id,
+                    entry,
+                    *property_tag,
+                    directory_entries,
+                ),
+            );
+        } else {
+            errors_returned = true;
+            write_u32(&mut values, (*property_tag & 0xFFFF_0000) | 0x000A);
+            write_u32(&mut values, 0x8004_010F);
+        }
+    }
+    (values, errors_returned)
+}
+
+pub(super) fn nspi_get_props_missing_property_value_list(tags: &[u32]) -> Vec<u8> {
+    let mut values = Vec::new();
+    write_u32(&mut values, tags.len() as u32);
+    for property_tag in tags {
+        write_u32(&mut values, (*property_tag & 0xFFFF_0000) | 0x000A);
+        write_u32(&mut values, 0x8004_010F);
+    }
+    values
+}
+
 pub(in crate::mapi) enum NspiValue<'a> {
+    Null,
     String(&'a str),
     OwnedString(String),
     MultiString(Vec<String>),
@@ -265,6 +341,7 @@ pub(in crate::mapi) fn nspi_entry_value_with_directory<'a>(
     directory_entries: &'a [ExchangeAddressBookEntry],
 ) -> NspiValue<'a> {
     match property_tag {
+        0x0000_0001 => NspiValue::Null,
         0x0FF8_0102 => NspiValue::OwnedBinary(mapi_mailstore::STORE_REPLICA_GUID.to_vec()),
         0x3902_0102 => NspiValue::OwnedBinary(nspi_entry_permanent_entry_id(entry)),
         0x39FF_001F | 0x39FF_001E => NspiValue::String(&entry.display_name),
@@ -274,6 +351,7 @@ pub(in crate::mapi) fn nspi_entry_value_with_directory<'a>(
         0x3A00_001F | 0x3A00_001E => NspiValue::OwnedString(nspi_entry_alias(entry)),
         0x0FFE_0003 => NspiValue::U32(MAPI_MAILUSER_OBJECT_TYPE),
         0x3900_0003 => NspiValue::U32(nspi_entry_display_type(entry)),
+        0x3905_0003 => NspiValue::U32(nspi_entry_display_type(entry)),
         0x3000_0003 => NspiValue::U32(nspi_entry_id(account_id, entry)),
         0x0FF6_0102 => NspiValue::OwnedBinary(nspi_entry_instance_key(account_id, entry)),
         0x0FF9_0102 => NspiValue::OwnedBinary(nspi_entry_record_key(entry)),
@@ -550,6 +628,7 @@ pub(in crate::mapi) fn write_address_book_property_value(
     value: &NspiValue<'_>,
 ) {
     match (property_tag & 0xFFFF, value) {
+        (0x0001, NspiValue::Null) => {}
         (0x001E, NspiValue::String(value)) => {
             body.push(0xFF);
             write_ascii_z(body, value);
@@ -601,6 +680,7 @@ pub(in crate::mapi) fn write_address_book_property_value(
             body.push(0xFF);
             write_utf16z(body, value);
         }
+        (_, NspiValue::Null) => {}
     }
 }
 

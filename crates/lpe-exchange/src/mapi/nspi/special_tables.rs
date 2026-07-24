@@ -23,6 +23,7 @@ struct NspiSpecialTableContainer {
 
 // MS-OXOABK 2.2.1.1 requires "/" for the GAL and "/guid=<32 HEXDIG>" for
 // every other address-list DN embedded in an MS-OXNSPI 3.1.4.1.3 hierarchy row.
+// MS-OXNSPI 2.2.9.1 reserves every non-GAL Minimal Entry ID below 0x10.
 const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     NspiSpecialTableContainer {
         display_name: "Global Address List",
@@ -35,7 +36,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     NspiSpecialTableContainer {
         display_name: "All Users",
         dn: "/guid=5f462d24409b4de39ac520f4bb7bf2a1",
-        container_id: 2,
+        container_id: 0x10,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
         is_master: false,
@@ -43,7 +44,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     NspiSpecialTableContainer {
         display_name: "All Groups",
         dn: "/guid=ca66e476bca14d44aa1012e422225805",
-        container_id: 3,
+        container_id: 0x11,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
         is_master: false,
@@ -51,7 +52,7 @@ const NSPI_SPECIAL_TABLE_CONTAINERS: &[NspiSpecialTableContainer] = &[
     NspiSpecialTableContainer {
         display_name: "All Contacts",
         dn: "/guid=69f67788f05649cd862d51c09217eaa8",
-        container_id: 4,
+        container_id: 0x12,
         depth: 1,
         flags: AB_RECIPIENTS | AB_UNMODIFIABLE,
         is_master: false,

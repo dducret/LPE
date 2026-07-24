@@ -1,5 +1,327 @@
 use super::*;
 
+pub(super) fn nspi_dn_to_mid_request(names: &[&str]) -> Vec<u8> {
+    let mut request = Vec::new();
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.push(0xFF);
+    request.extend_from_slice(&(names.len() as u32).to_le_bytes());
+    for name in names {
+        request.extend_from_slice(name.as_bytes());
+        request.push(0);
+    }
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request
+}
+
+fn nspi_get_props_request(current_rec: u32, code_page: u32, tags: &[u32]) -> Vec<u8> {
+    let mut request = Vec::new();
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.push(0xFF);
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&current_rec.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&code_page.to_le_bytes());
+    request.extend_from_slice(&0x0409u32.to_le_bytes());
+    request.extend_from_slice(&0x0809u32.to_le_bytes());
+    request.push(0xFF);
+    request.extend_from_slice(&(tags.len() as u32).to_le_bytes());
+    for tag in tags {
+        request.extend_from_slice(&tag.to_le_bytes());
+    }
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request
+}
+
+async fn nspi_principal_mid(service: &ExchangeService<FakeStore>) -> u32 {
+    let legacy_dn = test_account_legacy_dn("alice@example.test");
+    let request = nspi_dn_to_mid_request(&[&legacy_dn]);
+    let headers = nspi_bound_headers(service, "DNToMId").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    u32::from_le_bytes(body[13..17].try_into().unwrap())
+}
+
+async fn assert_nspi_dn_to_mid_request_rejected(request: &[u8]) {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let headers = nspi_bound_headers(&service, "DNToMId").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "5");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("invalid DNToMId string array"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_dn_to_mid_does_not_alias_organization_to_principal() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = nspi_dn_to_mid_request(&["/O=LPE"]);
+    let headers = nspi_bound_headers(&service, "DNToMId").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(body[8], 1);
+    assert_eq!(u32::from_le_bytes(body[9..13].try_into().unwrap()), 1);
+    let organization_mid = u32::from_le_bytes(body[13..17].try_into().unwrap());
+    assert_eq!(organization_mid, 0);
+
+    let request = nspi_get_props_request(organization_mid, 1252, &[0x8C96_101E]);
+    let headers = nspi_bound_headers(&service, "GetProps").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+
+    assert_eq!(
+        u32::from_le_bytes(body[4..8].try_into().unwrap()),
+        0x0004_0380
+    );
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1252);
+    assert_eq!(body[12], 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(body[17..21].try_into().unwrap()),
+        0x8C96_000A
+    );
+    assert_eq!(
+        u32::from_le_bytes(body[21..25].try_into().unwrap()),
+        0x8004_010F
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_dn_to_mid_preserves_large_array_order_and_duplicates() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let legacy_dn = test_account_legacy_dn("alice@example.test");
+    let names = vec![legacy_dn.as_str(); 129];
+    let request = nspi_dn_to_mid_request(&names);
+    let headers = nspi_bound_headers(&service, "DNToMId").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(body[8], 1);
+    assert_eq!(
+        u32::from_le_bytes(body[9..13].try_into().unwrap()),
+        names.len() as u32
+    );
+    let mids = (0..names.len())
+        .map(|index| {
+            let offset = 13 + index * 4;
+            u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap())
+        })
+        .collect::<Vec<_>>();
+    assert_ne!(mids[0], 0);
+    assert!(mids.iter().all(|mid| *mid == mids[0]));
+    assert_eq!(
+        u32::from_le_bytes(body[13 + names.len() * 4..].try_into().unwrap()),
+        0
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_dn_to_mid_rejects_missing_auxiliary_size_without_names() {
+    let mut request = Vec::new();
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.push(0);
+
+    assert_nspi_dn_to_mid_request_rejected(&request).await;
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_dn_to_mid_rejects_truncated_auxiliary_buffer() {
+    let legacy_dn = test_account_legacy_dn("alice@example.test");
+    let mut request = nspi_dn_to_mid_request(&[&legacy_dn]);
+    request.truncate(request.len() - 4);
+    request.extend_from_slice(&2u32.to_le_bytes());
+    request.push(0xAA);
+
+    assert_nspi_dn_to_mid_request_rejected(&request).await;
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_dn_to_mid_rejects_trailing_bytes_after_auxiliary_buffer() {
+    let legacy_dn = test_account_legacy_dn("alice@example.test");
+    let mut request = nspi_dn_to_mid_request(&[&legacy_dn]);
+    request.push(0xAA);
+
+    assert_nspi_dn_to_mid_request_rejected(&request).await;
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_get_props_returns_one_error_for_one_missing_property() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let principal_mid = nspi_principal_mid(&service).await;
+    let request = nspi_get_props_request(principal_mid, 1252, &[0x8C96_101E]);
+    let headers = nspi_bound_headers(&service, "GetProps").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_le_bytes(body[4..8].try_into().unwrap()),
+        0x0004_0380
+    );
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1252);
+    assert_eq!(body[12], 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(body[17..21].try_into().unwrap()),
+        0x8C96_000A
+    );
+    assert_eq!(
+        u32::from_le_bytes(body[21..25].try_into().unwrap()),
+        0x8004_010F
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_get_props_unknown_current_rec_returns_ordered_errors() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = nspi_get_props_request(0x7FFF_FFFE, 1252, &[0x3002_001F]);
+    let headers = nspi_bound_headers(&service, "GetProps").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_le_bytes(body[4..8].try_into().unwrap()),
+        0x0004_0380
+    );
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1252);
+    assert_eq!(body[12], 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(body[17..21].try_into().unwrap()),
+        0x3002_000A
+    );
+    assert_eq!(
+        u32::from_le_bytes(body[21..25].try_into().unwrap()),
+        0x8004_010F
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_get_props_preserves_display_type_ex_and_null_slots() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let principal_mid = nspi_principal_mid(&service).await;
+    let requested_tags = [
+        0x3002_001F,
+        0x3003_001F,
+        0x0FFE_0003,
+        0x3900_0003,
+        0x39FE_001F,
+        0x3905_0003,
+        0x0000_0001,
+    ];
+    let request = nspi_get_props_request(principal_mid, 1200, &requested_tags);
+    let headers = nspi_bound_headers(&service, "GetProps").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
+    assert_eq!(body[12], 1);
+    assert_eq!(
+        u32::from_le_bytes(body[13..17].try_into().unwrap()),
+        requested_tags.len() as u32
+    );
+    assert!(contains_bytes(&body, &0x3905_0003u32.to_le_bytes()));
+    assert!(contains_bytes(&body, &0x0000_0001u32.to_le_bytes()));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_get_props_encodes_null_as_a_tag_without_value_bytes() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let principal_mid = nspi_principal_mid(&service).await;
+    let request = nspi_get_props_request(principal_mid, 1200, &[0x3905_0003, 0x0000_0001]);
+    let headers = nspi_bound_headers(&service, "GetProps").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
+    assert_eq!(body[12], 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 2);
+    assert_eq!(
+        u32::from_le_bytes(body[17..21].try_into().unwrap()),
+        0x3905_0003
+    );
+    assert_eq!(
+        u32::from_le_bytes(body[25..29].try_into().unwrap()),
+        0x0000_0001
+    );
+    assert_eq!(u32::from_le_bytes(body[29..33].try_into().unwrap()), 0);
+    assert_eq!(body.len(), 33);
+}
+
 #[tokio::test]
 async fn mapi_over_http_accepts_rca_octet_stream_resolve_names_probe() {
     let store = FakeStore {
@@ -261,12 +583,9 @@ async fn mapi_over_http_nspi_bootstrap_requests_handle_stale_cleanup_and_reject_
 
     let mut dn_to_mid_headers = mapi_headers("DNToMId");
     dn_to_mid_headers.insert("cookie", HeaderValue::from_str(&stale_cookie).unwrap());
+    let dn_to_mid_request = nspi_dn_to_mid_request(&["alice@example.test"]);
     let dn_to_mid = service
-        .handle_mapi(
-            MapiEndpoint::Nspi,
-            &dn_to_mid_headers,
-            b"alice@example.test\0",
-        )
+        .handle_mapi(MapiEndpoint::Nspi, &dn_to_mid_headers, &dn_to_mid_request)
         .await
         .unwrap();
     assert_eq!(dn_to_mid.status(), StatusCode::OK);
@@ -600,8 +919,9 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
     assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
 
     let dn_to_mid_headers = nspi_bound_headers(&service, "DNToMId").await;
+    let dn_to_mid_request = nspi_dn_to_mid_request(&["bob.contact@example.test"]);
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &dn_to_mid_headers, visible_lookup)
+        .handle_mapi(MapiEndpoint::Nspi, &dn_to_mid_headers, &dn_to_mid_request)
         .await
         .unwrap();
     let body = response_bytes(response).await;
@@ -810,8 +1130,9 @@ async fn mapi_over_http_nspi_ids_ignore_generic_mapi_identity_cache_collisions()
     assert_ne!(visible_mid, poisoned_mid);
 
     let dn_to_mid_headers = nspi_bound_headers(&service, "DNToMId").await;
+    let dn_to_mid_request = nspi_dn_to_mid_request(&["cache.collision@example.test"]);
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &dn_to_mid_headers, lookup)
+        .handle_mapi(MapiEndpoint::Nspi, &dn_to_mid_headers, &dn_to_mid_request)
         .await
         .unwrap();
     let body = response_bytes(response).await;
@@ -1198,9 +1519,10 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
     );
     assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
 
-    let proxy_addresses_request = hex_bytes(
+    let mut proxy_addresses_request = hex_bytes(
         "00000000ff000000000000000012000080000000000000000000000000b00400000904000009080000ff010000001f100f8000000000",
     );
+    proxy_addresses_request[13..17].copy_from_slice(&self_mid.to_le_bytes());
     let response = service
         .handle_mapi(MapiEndpoint::Nspi, &props_headers, &proxy_addresses_request)
         .await
@@ -1310,12 +1632,9 @@ async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
     assert!(!contains_bytes(&body, &utf16z("mallory@other.test")));
 
     let dn_to_mid_headers = nspi_bound_headers(&service, "DNToMId").await;
+    let dn_to_mid_request = nspi_dn_to_mid_request(&["mallory@other.test"]);
     let response = service
-        .handle_mapi(
-            MapiEndpoint::Nspi,
-            &dn_to_mid_headers,
-            b"mallory@other.test\0",
-        )
+        .handle_mapi(MapiEndpoint::Nspi, &dn_to_mid_headers, &dn_to_mid_request)
         .await
         .unwrap();
     let body = response_bytes(response).await;
@@ -1529,8 +1848,12 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
         "UpdateStat",
     ] {
         let headers = nspi_bound_headers(&service, request_type).await;
+        let request = match request_type {
+            "DNToEPH" | "DNToMId" => vec![0; 9],
+            _ => vec![0; 32],
+        };
         let response = service
-            .handle_mapi(MapiEndpoint::Nspi, &headers, &[0; 32])
+            .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
             .await
             .unwrap();
 
@@ -1647,7 +1970,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         "All Users",
                         b"/guid=5f462d24409b4de39ac520f4bb7bf2a1\0".as_slice(),
                         1,
-                        2,
+                        0x10,
                         0x0000_0009,
                         0,
                     ),
@@ -1655,7 +1978,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         "All Groups",
                         b"/guid=ca66e476bca14d44aa1012e422225805\0".as_slice(),
                         1,
-                        3,
+                        0x11,
                         0x0000_0009,
                         0,
                     ),
@@ -1663,7 +1986,7 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         "All Contacts",
                         b"/guid=69f67788f05649cd862d51c09217eaa8\0".as_slice(),
                         1,
-                        4,
+                        0x12,
                         0x0000_0009,
                         0,
                     ),
@@ -1732,9 +2055,14 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                         "{request_type}: {name}"
                     );
                     offset += 4;
+                    let returned_container_id =
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap());
+                    assert!(
+                        returned_container_id == 0 || returned_container_id >= 0x10,
+                        "{request_type}: {name}: reserved Minimal Entry ID {returned_container_id:#010x}"
+                    );
                     assert_eq!(
-                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
-                        container_id,
+                        returned_container_id, container_id,
                         "{request_type}: {name}"
                     );
                     offset += 4;
@@ -1762,16 +2090,11 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                 assert_eq!(body[8], 1, "{request_type}");
                 assert_eq!(
                     u32::from_le_bytes(body[9..13].try_into().unwrap()),
-                    1,
-                    "{request_type}"
-                );
-                assert_ne!(
-                    u32::from_le_bytes(body[13..17].try_into().unwrap()),
                     0,
                     "{request_type}"
                 );
                 assert_eq!(
-                    u32::from_le_bytes(body[17..21].try_into().unwrap()),
+                    u32::from_le_bytes(body[13..17].try_into().unwrap()),
                     0,
                     "{request_type}"
                 );
