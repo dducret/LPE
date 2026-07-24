@@ -13307,6 +13307,15 @@ fn strict_record_content_body_property(
     message: &mut StrictContentMessageBuilder,
     property: StrictFastTransferProperty,
 ) -> Result<(), String> {
+    // [MS-OXCFXICS] sections 2.2.4.1.5.1 and 3.2.5.10 permit one
+    // MetaTagFXDelProp for each included child collection, so it is not a
+    // normal unique message property.
+    if property.tag == 0x4016_0003 {
+        match strict_decode_u32_property(&property)? {
+            0x0E12_000D | 0x0E13_000D => return Ok(()),
+            tag => return Err(format!("unexpected MetaTagFXDelProp target 0x{tag:08x}")),
+        }
+    }
     if message.body_tags.contains(&property.tag) {
         return Err(format!(
             "duplicate property 0x{:08x} inside message content",

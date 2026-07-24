@@ -249,7 +249,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         note_id,
                         mapi_mailstore::change_number_for_store_id(note_id),
                         false,
-                        true,
+                        false,
                     );
                     session.record_notification(MapiNotificationEvent::content(
                         folder_id,
@@ -334,7 +334,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         journal_entry_id,
                         mapi_mailstore::change_number_for_store_id(journal_entry_id),
                         false,
-                        true,
+                        false,
                     );
                     session.record_notification(MapiNotificationEvent::content(
                         folder_id,
@@ -653,7 +653,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                     message_id,
                     mapi_mailstore::change_number_for_store_id(message_id),
                     false,
-                    true,
+                    false,
                 );
             }
             if staged_property_write {
@@ -876,7 +876,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 item_id,
                 mapi_mailstore::change_number_for_store_id(item_id),
                 false,
-                true,
+                false,
             );
             append_save_changes_message_response(
                 session,
@@ -975,7 +975,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                     item_id,
                     mapi_mailstore::change_number_for_store_id(item_id),
                     false,
-                    true,
+                    false,
                 );
                 append_save_changes_message_response(
                     session,
@@ -1213,7 +1213,10 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 message_id,
                 mapi_mailstore::canonical_message_change_number(&email),
                 associated,
-                !associated,
+                // [MS-OXCFXICS] sections 2.2.1.1.4 and 3.2.5.9.4.6:
+                // saving a Message advances its appropriate seen set; a
+                // content save does not itself advance CnsetRead.
+                false,
             );
             let canonical_email_id = email.id;
             created_emails.push(email);

@@ -21,6 +21,30 @@ fn property_filters_match_ptyp_unspecified_by_property_id() {
     ));
 }
 
+#[test]
+fn content_sync_child_collections_follow_property_filters_independently() {
+    assert_eq!(
+        content_sync_message_children(SYNC_TYPE_CONTENTS, SYNC_FLAG_NORMAL, &[]),
+        FastTransferMessageChildren::all(),
+    );
+    assert_eq!(
+        content_sync_message_children(
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL,
+            &[PID_TAG_MESSAGE_RECIPIENTS],
+        ),
+        FastTransferMessageChildren::new(false, true),
+    );
+    assert_eq!(
+        content_sync_message_children(
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL | 0x0080,
+            &[PID_TAG_MESSAGE_RECIPIENTS],
+        ),
+        FastTransferMessageChildren::new(true, false),
+    );
+}
+
 fn wire_id_bytes(object_id: u64) -> [u8; 8] {
     crate::mapi::identity::wire_id_bytes_from_object_id(object_id).unwrap()
 }
@@ -2661,7 +2685,7 @@ fn fai_foreign_source_key_identity_is_used_by_selected_and_full_idset_given() {
 }
 
 #[test]
-fn microsoft_oxcfxics_fai_content_sync_does_not_insert_null_property_before_next_marker() {
+fn microsoft_oxcfxics_fai_content_sync_delimits_empty_child_collections_before_next_marker() {
     let first_canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999395").unwrap();
     let second_canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999396").unwrap();
     let first_item_id = crate::mapi::identity::mapi_store_id(395);
@@ -2729,28 +2753,37 @@ fn microsoft_oxcfxics_fai_content_sync_does_not_insert_null_property_before_next
         1,
     );
 
-    // [MS-OXCFXICS] sections 2.2.4.2 and 2.2.4.3.11-2.2.4.3.14:
-    // the next marker follows the FAI message property list directly; a null
-    // property tag is not an item terminator in the FastTransfer grammar.
+    // [MS-OXCFXICS] sections 2.2.4.3.12 and 3.2.5.10: included empty child
+    // collections are delimited with MetaTagFXDelProp before the next marker;
+    // a null property tag is not an item terminator in the FastTransfer grammar.
+    let empty_message_children = [
+        META_TAG_FX_DEL_PROP.to_le_bytes(),
+        PID_TAG_MESSAGE_RECIPIENTS.to_le_bytes(),
+        META_TAG_FX_DEL_PROP.to_le_bytes(),
+        PID_TAG_MESSAGE_ATTACHMENTS.to_le_bytes(),
+    ]
+    .concat();
     let first_expected_boundary = [
-        final_property_tag.to_le_bytes(),
-        first_property_value.to_le_bytes(),
-        INCR_SYNC_PROGRESS_PER_MSG.to_le_bytes(),
+        final_property_tag.to_le_bytes().as_slice(),
+        first_property_value.to_le_bytes().as_slice(),
+        empty_message_children.as_slice(),
+        INCR_SYNC_PROGRESS_PER_MSG.to_le_bytes().as_slice(),
     ]
     .concat();
     let second_expected_boundary = [
-        final_property_tag.to_le_bytes(),
-        second_property_value.to_le_bytes(),
-        INCR_SYNC_STATE_BEGIN.to_le_bytes(),
+        final_property_tag.to_le_bytes().as_slice(),
+        second_property_value.to_le_bytes().as_slice(),
+        empty_message_children.as_slice(),
+        INCR_SYNC_STATE_BEGIN.to_le_bytes().as_slice(),
     ]
     .concat();
     assert!(
         contains_bytes(&buffer, &first_expected_boundary),
-        "first FAI message must be followed directly by IncrSyncProgressPerMsg"
+        "first FAI message must delimit its empty child collections before IncrSyncProgressPerMsg"
     );
     assert!(
         contains_bytes(&buffer, &second_expected_boundary),
-        "last FAI message must be followed directly by IncrSyncStateBegin"
+        "last FAI message must delimit its empty child collections before IncrSyncStateBegin"
     );
 }
 

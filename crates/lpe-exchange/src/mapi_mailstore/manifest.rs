@@ -865,10 +865,12 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_BODY_W) {
             write_utf16_property(&mut buffer, PID_TAG_BODY_W, &email.body_text);
         }
-        if subject_in_scope && (sync_type != SYNC_TYPE_CONTENTS || sync_property_tags.is_empty()) {
-            write_fast_transfer_visible_recipients(&mut buffer, email);
-            write_fast_transfer_attachments(&mut buffer, attachments);
-        }
+        write_fast_transfer_message_children(
+            &mut buffer,
+            content_sync_message_children(sync_type, sync_flags, sync_property_tags),
+            Some(email),
+            attachments,
+        );
         let original_order = message_changes.len();
         message_changes.push((delivery_sort_time, original_order, buffer));
     }
@@ -1062,13 +1064,12 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 write_special_message_property(&mut buffer, object, *tag, value);
             }
         }
-        if subject_in_scope && (sync_type != SYNC_TYPE_CONTENTS || sync_property_tags.is_empty()) {
-            // [MS-OXCFXICS] section 2.2.4.3 carries the complete FastTransfer
-            // message after IncrSyncMessage. Calendar objects are special
-            // projections, but their NewAttach/EndAttach stream is identical
-            // to canonical mail and must not be reduced to PidTagHasAttachments.
-            write_fast_transfer_attachments(&mut buffer, attachments);
-        }
+        write_fast_transfer_message_children(
+            &mut buffer,
+            content_sync_message_children(sync_type, sync_flags, sync_property_tags),
+            None,
+            attachments,
+        );
         let original_order = message_changes.len();
         message_changes.push((delivery_sort_time, original_order, buffer));
     }

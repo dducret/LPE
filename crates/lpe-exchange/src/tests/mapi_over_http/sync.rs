@@ -8831,11 +8831,14 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
     assert_eq!(store.imported_emails.lock().unwrap().len(), 1);
     let imported_email = store.emails.lock().unwrap().last().unwrap().clone();
     let imported_change_number = mapi_mailstore::canonical_message_change_number(&imported_email);
-    assert_content_upload_final_state_includes(
-        &response_rops,
-        &[imported_change_number],
-        &[],
-        &[imported_change_number],
+    // [MS-OXCFXICS] sections 2.2.1.1.4 and 3.2.5.9.4.6: importing and
+    // saving a new normal Message advances CnsetSeen only. No read-state ROP
+    // is issued by this request, so CnsetRead remains empty.
+    assert_content_upload_final_state_includes(&response_rops, &[imported_change_number], &[], &[]);
+    let upload_state = &mapi_fast_transfer_chunks(&response_rops)[0].1;
+    assert!(
+        mapi_binary_property_value(upload_state, META_TAG_CNSET_READ).is_empty(),
+        "a new normal Message must not be acknowledged as a read-state change"
     );
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
@@ -8936,11 +8939,11 @@ async fn mapi_over_http_microsoft_oxcfxics_4_2_1_message_upload_returns_transfer
     assert_eq!(recorded.len(), 1);
     let saved_email = emails.lock().unwrap().last().unwrap().clone();
     let saved_change_number = mapi_mailstore::canonical_message_change_number(&saved_email);
-    assert_content_upload_final_state_includes(
-        &response_rops,
-        &[saved_change_number],
-        &[],
-        &[saved_change_number],
+    assert_content_upload_final_state_includes(&response_rops, &[saved_change_number], &[], &[]);
+    let upload_state = &mapi_fast_transfer_chunks(&response_rops)[0].1;
+    assert!(
+        mapi_binary_property_value(upload_state, META_TAG_CNSET_READ).is_empty(),
+        "a new normal Message must not be acknowledged as a read-state change"
     );
 
     assert_eq!(recorded[0].mailbox_id, inbox_id);
@@ -11506,6 +11509,21 @@ async fn mapi_over_http_inbox_fai_download_honors_uploaded_state_with_empty_norm
         .message_changes
         .iter()
         .all(|message| message.associated));
+    // Outlook's 0xA139 synchronization configuration uses PropertyTags as an
+    // exclusion list. Neither child collection is excluded, so
+    // [MS-OXCFXICS] sections 3.2.5.9.1.1 and 3.2.5.10 require an FXDelProp
+    // delimiter for each empty FAI child collection.
+    let initial_transfer = &mapi_fast_transfer_chunks(&initial_response)[0].1;
+    let empty_message_children = [
+        0x03, 0x00, 0x16, 0x40, // MetaTagFXDelProp.
+        0x0D, 0x00, 0x12, 0x0E, // PidTagMessageRecipients.
+        0x03, 0x00, 0x16, 0x40, // MetaTagFXDelProp.
+        0x0D, 0x00, 0x13, 0x0E, // PidTagMessageAttachments.
+    ];
+    assert!(
+        contains_bytes(initial_transfer, &empty_message_children),
+        "FAI sync must delimit included empty recipient and attachment collections"
+    );
     assert!(initial_stream.cnset_seen.is_empty());
     assert!(initial_stream.cnset_read.is_empty());
     let uploaded_state = vec![

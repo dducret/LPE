@@ -243,6 +243,31 @@ fn content_property_in_scope(
     }
 }
 
+fn content_sync_message_children(
+    sync_type: u8,
+    sync_flags: u16,
+    sync_property_tags: &[u32],
+) -> FastTransferMessageChildren {
+    // [MS-OXCFXICS] sections 3.2.5.9.1.1 and 3.2.5.10: in a contents
+    // synchronization, PropertyTags are an exclusion list unless
+    // OnlySpecifiedProperties is set. Recipient and attachment collections
+    // follow the same inclusion rule as top-level properties.
+    FastTransferMessageChildren::new(
+        content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_MESSAGE_RECIPIENTS,
+        ),
+        content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_MESSAGE_ATTACHMENTS,
+        ),
+    )
+}
+
 fn content_sync_includes_normal(sync_type: u8, sync_flags: u16) -> bool {
     sync_type != SYNC_TYPE_CONTENTS
         || sync_flags & (SYNC_FLAG_NORMAL | SYNC_FLAG_FAI) == 0
@@ -702,13 +727,28 @@ fn write_fast_transfer_message_content(
 ) {
     write_utf16_property(buffer, PID_TAG_SUBJECT_W, &email.subject);
     write_utf16_property(buffer, PID_TAG_BODY_W, &email.body_text);
+    write_fast_transfer_message_children(buffer, message_children, Some(email), attachments);
+}
+
+fn write_fast_transfer_message_children(
+    buffer: &mut Vec<u8>,
+    message_children: FastTransferMessageChildren,
+    email: Option<&JmapEmail>,
+    attachments: &[AttachmentSyncFact],
+) {
+    // [MS-OXCFXICS] sections 2.2.4.3.12 and 3.2.5.10 require an
+    // MetaTagFXDelProp prefix for every included collection, even when that
+    // collection is empty, so the client can distinguish it from a filtered
+    // out collection.
     if message_children.recipients {
         write_i32_property(
             buffer,
             META_TAG_FX_DEL_PROP,
             PID_TAG_MESSAGE_RECIPIENTS as i32,
         );
-        write_fast_transfer_visible_recipients(buffer, email);
+        if let Some(email) = email {
+            write_fast_transfer_visible_recipients(buffer, email);
+        }
     }
     if message_children.attachments {
         write_i32_property(

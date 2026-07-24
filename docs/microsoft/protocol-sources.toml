@@ -1058,6 +1058,7 @@ used_for = [
   "RopFastTransferSourceGetBuffer TransferBuffer projection of persisted NamedView FAI properties without generated view descriptors",
   "Filtered direct Message CopyTo and CopyProperties projection of one server-generated PidTagSearchKey after read-only client input is discarded",
   "Filtered direct and ICS special-message projection of effective PidTagAccess, PidTagAccessLevel, PidTagHasAttachments, and PidTagMessageStatus",
+  "ICS upload Message saves advance the normal or FAI seen set without advancing CnsetRead",
 ]
 sections = [
   "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",
@@ -1146,6 +1147,7 @@ sections = [
   "3.2.5.9.4.3 Receiving a RopSynchronizationImportHierarchyChange ROP Request",
   "3.2.5.9.4.4 Receiving a RopSynchronizationImportMessageMove ROP Request",
   "3.2.5.9.4.5 Receiving a RopSynchronizationImportDeletes ROP Request",
+  "3.2.5.9.4.6 Receiving a RopSynchronizationImportReadStateChanges ROP Request",
   "3.2.5.9.4.7 Receiving a RopGetLocalReplicaIds ROP Request",
   "3.2.5.9.4.8 Receiving a RopSetLocalReplicaMidsetDeleted ROP Request",
   "3.2.5.10 Effect of Property and Subobject Filters on Download",
