@@ -596,7 +596,7 @@ used_for = [
   "Named-property ID mapping behavior for RopGetPropertyIdsFromNames and RopGetNamesFromPropertyIds",
   "Outlook Contacts existing-registration lookup semantics and 0x0000 entries for unmappable Flags=0x00 names",
   "Post-calendar Outlook view diagnostics for named-property mapping batches",
-  "Single server-generated PidTagRecordKey and PidTagSearchKey identity properties in folder-associated ICS and direct FastTransfer property lists",
+  "Single PidTagRecordKey and PidTagSearchKey identity properties in each folder-associated message FastTransfer property list",
   "Outlook appointment PidTagHtml stream opening, writing, and save-time persistence",
   "Existing Calendar Event Body and HTML stream staging, CommitStream visibility, Release discard, and parent-Message persistence",
   "Existing associated-configuration Message property and stream staging until atomic RopSaveChangesMessage persistence",
@@ -725,6 +725,7 @@ used_for = [
   "PidTagBodyHtml and PidTagHtml identities and types used by Calendar Event property and stream staging",
   "Separation of Calendar PidLidLocation from address-book PidTagLocation and PidTagLastModifierEntryId",
   "PidTagLocalCommitTime identity and UTC PtypTime value projected after Calendar Event Save",
+  "PidTagLocalCommitTimeMax identity, PtypTime type, and top-level Message change watermark used by Outlook after Inbox FAI synchronization",
   "PSETID_Address and PSETID_Common identities plus Contact LIDs used by the Outlook Contacts named-property pre-map batch",
   "PidTagLastModificationTime fallback key for OrderByDeliveryTime content synchronization",
   "Provider-defined internal FastTransfer download exclusions for PidTagAssociated and PidTagMid",
@@ -761,6 +762,7 @@ sections = [
   "2.766 PidTagLastModificationTime",
   "2.767 PidTagLastModifierEntryId",
   "2.774 PidTagLocalCommitTime",
+  "2.775 PidTagLocalCommitTimeMax",
   "2.778 PidTagLocation",
   "2.791 PidTagMessageDeliveryTime",
   "2.793 PidTagMessageFlags",
@@ -832,6 +834,7 @@ used_for = [
   "Server-generated PidTagSearchKey projection for every Message object after client creation",
   "Required general PidTagAccess and PidTagAccessLevel properties on folder-associated Message objects opened read-only by Outlook",
   "Computed PidTagHasAttachments and effective PidTagMessageStatus projection for configuration FAI FastTransfer",
+  "Exchange 2010 through 2019 product behavior that does not support PidTagRecordKey",
 ]
 sections = [
   "1.3.2 Folder Associated Information Messages",
@@ -891,6 +894,7 @@ sections = [
   "4.5 Attach Text File",
   "4.5.1 RopCreateAttachment Request Buffer",
   "4.5.2 RopCreateAttachment Response Buffer",
+  "6 Appendix A: Product Behavior, section 2.2.1.1 footnote 3",
   "4.5.3 Setting Properties",
   "4.5.4 RopSaveChangesAttachment Request Buffer",
   "4.5.5 RopSaveChangesAttachment Response Buffer",
@@ -1040,6 +1044,7 @@ used_for = [
   "PredecessorChangeList conflict detection examples for FailOnConflict content uploads",
   "Imported message and hierarchy deletion flags and PtypMultipleBinary GID list semantics",
   "Preservation of persisted FAI SourceKey, ChangeKey, and PredecessorChangeList across ICS upload and download when NoForeignIdentifiers is absent",
+  "Separation of a folder change number from the PidTagLocalCommitTimeMax aggregate updated by contained Message changes",
   "ICS FAI imports discard client-supplied CreationTime and LastModifierName, then direct CopyTo and ICS download project canonical server values",
   "Atomic Common Views WLink import, client-reserved MID validation, conflict disposition, deletion tombstones, and ObjectDeleted replay behavior",
   "Deferred Common Views associated-message classification at Save after imported identity headers and staged properties are complete",
@@ -1281,6 +1286,7 @@ used_for = [
   "Outlook startup folder-open existence/access and hierarchy-table object contracts",
   "Outlook Calendar same-folder and Calendar-to-Deleted-Items message move and partial-completion semantics",
   "Durable MAPI folder hierarchy version times and the LocalCommitTimeMax boundary",
+  "PidTagLocalCommitTimeMax as the latest change time of a top-level Message or direct child folder, excluding objects inside subfolders",
 ]
 sections = [
   "2.2.1.1 RopOpenFolder ROP",

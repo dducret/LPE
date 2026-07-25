@@ -898,6 +898,12 @@ pub trait ExchangeStore: AccountAuthStore {
 
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>>;
 
+    fn fetch_mapi_mailbox_content_commit_times<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiMailboxContentCommitTime>>;
+
     fn ensure_jmap_system_mailboxes<'a>(
         &'a self,
         account_id: Uuid,

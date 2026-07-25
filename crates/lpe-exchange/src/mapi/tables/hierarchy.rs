@@ -559,6 +559,45 @@ pub(super) fn serialize_hierarchy_row(
     columns: &[u32],
     mailbox_guid: Uuid,
 ) -> Vec<u8> {
+    let local_commit_time_max =
+        snapshot.folder_local_commit_time_max(hierarchy_row_id(&row), mailboxes);
+    if let Some(local_commit_time_max) = local_commit_time_max {
+        if columns
+            .iter()
+            .any(|column| canonical_property_storage_tag(*column) == PID_TAG_LOCAL_COMMIT_TIME_MAX)
+        {
+            let mut serialized = Vec::new();
+            for column in columns {
+                if canonical_property_storage_tag(*column) == PID_TAG_LOCAL_COMMIT_TIME_MAX {
+                    write_mapi_value(
+                        &mut serialized,
+                        *column,
+                        &MapiValue::U64(local_commit_time_max),
+                    );
+                } else {
+                    serialized.extend_from_slice(&serialize_hierarchy_row_from_backing_object(
+                        row,
+                        mailboxes,
+                        snapshot,
+                        std::slice::from_ref(column),
+                        mailbox_guid,
+                    ));
+                }
+            }
+            return serialized;
+        }
+    }
+
+    serialize_hierarchy_row_from_backing_object(row, mailboxes, snapshot, columns, mailbox_guid)
+}
+
+fn serialize_hierarchy_row_from_backing_object(
+    row: HierarchyRow<'_>,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    columns: &[u32],
+    mailbox_guid: Uuid,
+) -> Vec<u8> {
     match row {
         HierarchyRow::Mailbox(mailbox) => {
             let folder_id = mapi_folder_id(mailbox);

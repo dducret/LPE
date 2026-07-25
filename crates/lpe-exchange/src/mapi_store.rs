@@ -23,6 +23,7 @@ use crate::store::{
     MapiNavigationShortcutClientProperties, MapiNavigationShortcutRecord,
 };
 
+mod folder_commit_time;
 mod folder_versions;
 pub(crate) use crate::store::MapiFolderVersion;
 pub(crate) use folder_versions::mapi_folder_identity_requests;
@@ -32,6 +33,8 @@ use folder_versions::MapiFolderVersions;
 pub(crate) struct MapiMailStoreSnapshot {
     folders: Vec<MapiFolder>,
     folder_versions: MapiFolderVersions,
+    mailbox_content_commit_times: HashMap<Uuid, u64>,
+    contact_commit_times: HashMap<Uuid, u64>,
     public_folders: Vec<MapiPublicFolder>,
     public_folder_items: Vec<MapiPublicFolderItem>,
     public_folder_replicas: Vec<MapiPublicFolderReplica>,
@@ -438,9 +441,14 @@ impl<T: ExchangeStore> MapiStore for T {
                 .await?;
             let task_collections = self.fetch_accessible_task_collections(account_id).await?;
             let mut contacts = Vec::new();
+            let mut contact_sync_versions = Vec::new();
             for collection in &contact_collections {
                 contacts.extend(
                     self.fetch_accessible_contacts_in_collection(account_id, &collection.id)
+                        .await?,
+                );
+                contact_sync_versions.extend(
+                    self.fetch_contact_sync_versions(account_id, &collection.id)
                         .await?,
                 );
             }
@@ -636,6 +644,9 @@ impl<T: ExchangeStore> MapiStore for T {
             let folder_permissions = self
                 .fetch_mapi_folder_permissions(account_id, &mailbox_ids)
                 .await?;
+            let mailbox_content_commit_times = self
+                .fetch_mapi_mailbox_content_commit_times(account_id, &mailbox_ids)
+                .await?;
             MapiMailStoreSnapshot::new_with_scoped_calendar_identities(
                 mailboxes,
                 emails,
@@ -651,6 +662,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 &identity_records,
             )
             .and_then(|snapshot| snapshot.with_contact_identities(&identity_records))
+            .map(|snapshot| snapshot.with_contact_sync_versions(contact_sync_versions))
             .map(|snapshot| snapshot.with_calendar_attachments(calendar_attachments))
             .and_then(|snapshot| snapshot.with_event_versions(event_versions))
             .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))
@@ -684,6 +696,9 @@ impl<T: ExchangeStore> MapiStore for T {
                 )
             })
             .map(|snapshot| snapshot.with_public_folder_replicas(public_folder_replicas))
+            .map(|snapshot| {
+                snapshot.with_mailbox_content_commit_times(mailbox_content_commit_times)
+            })
         })
     }
 }

@@ -80,6 +80,28 @@ fn navigation_shortcut_message(
 }
 
 impl MapiMailStoreSnapshot {
+    pub(crate) fn with_mailbox_content_commit_times(
+        mut self,
+        commit_times: Vec<crate::store::MapiMailboxContentCommitTime>,
+    ) -> Self {
+        self.mailbox_content_commit_times = commit_times
+            .into_iter()
+            .map(|commit_time| (commit_time.mailbox_id, commit_time.last_modification_time))
+            .collect();
+        self
+    }
+
+    pub(crate) fn with_contact_sync_versions(mut self, versions: Vec<(Uuid, String)>) -> Self {
+        self.contact_commit_times = versions
+            .into_iter()
+            .filter_map(|(contact_id, updated_at)| {
+                let commit_time = crate::mapi_mailstore::filetime_from_rfc3339_utc(&updated_at);
+                (commit_time != 0).then_some((contact_id, commit_time))
+            })
+            .collect();
+        self
+    }
+
     pub(crate) fn with_search_folder_definitions(
         mut self,
         search_folder_definitions: Vec<SearchFolderDefinition>,
@@ -503,6 +525,10 @@ impl MapiMailStoreSnapshot {
         debug_assert_eq!(identity.object_kind, MapiIdentityObjectKind::Contact);
         debug_assert_eq!(identity.canonical_id, contact.id);
         let contact_id = identity.object_id;
+        if identity.last_modification_time != 0 {
+            self.contact_commit_times
+                .insert(contact.id, identity.last_modification_time);
+        }
         if let Some(current) = self
             .contacts
             .iter_mut()

@@ -45,7 +45,6 @@ pub(crate) struct SpecialMessageFastTransferSelection {
     access_level: bool,
     has_attachments: bool,
     message_status: bool,
-    record_key: bool,
     search_key: bool,
 }
 
@@ -57,7 +56,6 @@ impl SpecialMessageFastTransferSelection {
             access_level: true,
             has_attachments: true,
             message_status: true,
-            record_key: true,
             search_key: true,
         }
     }
@@ -79,11 +77,6 @@ impl SpecialMessageFastTransferSelection {
                 rop_id,
                 property_tags,
                 PID_TAG_MESSAGE_STATUS,
-            ),
-            record_key: fast_transfer_property_included(
-                rop_id,
-                property_tags,
-                PID_TAG_RECORD_KEY,
             ),
             search_key: fast_transfer_property_included(rop_id, property_tags, PID_TAG_SEARCH_KEY),
         }
@@ -361,18 +354,10 @@ fn write_fast_transfer_special_message_content(
             special_message_status(object) as i32,
         );
     }
-    // [MS-OXCMSG] section 2.2.1.1 and [MS-OXCPRPT] sections 2.2.1.8
-    // and 2.2.1.9 require the server-generated RecordKey and SearchKey on
-    // every Message object. Both remain transmittable in the direct
-    // messageContent root under [MS-OXCFXICS] sections 3.2.5.8.1.1 and
-    // 3.2.5.12, subject to the CopyTo/CopyProperties property filter.
-    if selection.record_key {
-        write_binary_property(
-            buffer,
-            PID_TAG_RECORD_KEY,
-            &source_key_for_store_id(object.item_id),
-        );
-    }
+    // [MS-OXCMSG] sections 2.2.1.1 and 3.2.5.2 and [MS-OXCPRPT]
+    // section 2.2.1.9: every Message has a server-generated, read-only
+    // SearchKey. It remains transmittable in the direct messageContent root
+    // under [MS-OXCFXICS] sections 3.2.5.8.1.1 and 3.2.5.12.
     if selection.search_key {
         write_binary_property(
             buffer,

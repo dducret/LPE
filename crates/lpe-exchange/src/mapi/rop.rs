@@ -1378,7 +1378,12 @@ fn serialize_session_folder_row(
             continue;
         }
 
-        if let Some(value) = snapshot
+        if let Some(value) =
+            folder_local_commit_time_max_property_value(snapshot, folder_id, mailboxes, *column)
+        {
+            write_mapi_value(&mut row, *column, &value);
+            continue;
+        } else if let Some(value) = snapshot
             .folder_version(folder_id)
             .and_then(|version| folder_version_property_value(version, *column))
         {

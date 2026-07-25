@@ -1771,7 +1771,6 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
         (PID_TAG_ACCESS_LEVEL, "PidTagAccessLevel"),
         (PID_TAG_HAS_ATTACHMENTS, "PidTagHasAttachments"),
         (PID_TAG_MESSAGE_STATUS, "PidTagMessageStatus"),
-        (PID_TAG_RECORD_KEY, "PidTagRecordKey"),
         (PID_TAG_SEARCH_KEY, "PidTagSearchKey"),
     ] {
         assert_eq!(
@@ -1832,25 +1831,6 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
     }
 
     let direct_copy = transfer(RopId::FastTransferSourceCopyTo.as_u8(), &[]);
-    let copy_properties = transfer(
-        RopId::FastTransferSourceCopyProperties.as_u8(),
-        &[PID_TAG_RECORD_KEY],
-    );
-    let server_record_key = mapi_mailstore::source_key_for_store_id(item_id);
-    let mut expected_record_key = PID_TAG_RECORD_KEY.to_le_bytes().to_vec();
-    expected_record_key.extend_from_slice(&(server_record_key.len() as u32).to_le_bytes());
-    expected_record_key.extend_from_slice(&server_record_key);
-    for (operation, buffer) in [
-        ("CopyTo", direct_copy.as_slice()),
-        ("CopyProperties", copy_properties.as_slice()),
-    ] {
-        assert!(
-            buffer
-                .windows(expected_record_key.len())
-                .any(|property| property == expected_record_key),
-            "{operation} must emit the canonical PidTagRecordKey value"
-        );
-    }
     let mut expected_status = PID_TAG_MESSAGE_STATUS.to_le_bytes().to_vec();
     expected_status.extend_from_slice(&3i32.to_le_bytes());
     assert!(

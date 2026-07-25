@@ -720,6 +720,12 @@ pub(crate) struct EwsImMemberInput {
     pub(crate) display_name: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MapiMailboxContentCommitTime {
+    pub(crate) mailbox_id: Uuid,
+    pub(crate) last_modification_time: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiContentTableQuery {
     pub(crate) mailbox_id: Uuid,

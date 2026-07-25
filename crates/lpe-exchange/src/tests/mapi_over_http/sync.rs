@@ -6441,12 +6441,47 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
 #[tokio::test]
 async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("20260724-2304-4078-8000-000000000001").unwrap();
+    let expected_calendar_commit_time =
+        mapi_mailstore::filetime_from_rfc3339_utc("2026-07-15T10:00:00Z");
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
             inbox_id, "inbox", "Inbox",
         )])),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-07-15".to_string(),
+            time: "10:00".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Hierarchy fallback".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: "[]".to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        event_versions: Arc::new(Mutex::new(HashMap::from([(event_id, 1)]))),
         fail_query_jmap_email_ids: true,
+        fail_fetch_all_jmap_email_ids: true,
         ..Default::default()
     };
     let queried_jmap_email_ids = store.queried_jmap_email_ids.clone();
@@ -6601,6 +6636,16 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         .folder_changes
         .iter()
         .all(|folder| folder.folder_id.is_some()));
+    let calendar = decoded
+        .folder_changes
+        .iter()
+        .find(|folder| folder.display_name == "Calendar")
+        .expect("Calendar folderChange");
+    assert_eq!(
+        calendar.local_commit_time_max,
+        Some(expected_calendar_commit_time),
+        "the hierarchy fallback must load canonical Calendar content before projecting LocalCommitTimeMax"
+    );
     assert!(decoded.folder_changes.iter().all(|folder| {
         let expected_parent = match folder.display_name.as_str() {
             "Conflicts" | "Local Failures" | "Server Failures" => test_mapi_folder_id(26),
@@ -7242,10 +7287,16 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
         categories: Vec::new(),
         draft: false,
     });
+    let expected_local_commit_time_max = test_filetime("2026-05-20", "12:00") as u64;
+    let mapi_mailbox_content_commit_times = Arc::new(Mutex::new(HashMap::from([(
+        inbox_id,
+        expected_local_commit_time_max,
+    )])));
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox, sent])),
         emails: Arc::new(Mutex::new(vec![email])),
+        mapi_mailbox_content_commit_times,
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -7301,7 +7352,11 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
     );
     assert_eq!(inbox.content_count, None);
     assert_eq!(inbox.content_unread_count, None);
-    assert!(inbox.local_commit_time_max.unwrap_or_default() > 0);
+    assert_eq!(
+        inbox.local_commit_time_max,
+        Some(expected_local_commit_time_max),
+        "hierarchy ICS must preserve the canonical top-level message watermark"
+    );
     assert_eq!(inbox.deleted_count_total, Some(0));
 }
 
@@ -10407,15 +10462,24 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     let mut imported_pcl = vec![imported_change_key.len() as u8];
     imported_pcl.extend_from_slice(&imported_change_key);
     let imported_last_modification_time = test_filetime("2026-07-18", "15:15");
+    let previous_email_last_modification_time = test_filetime("2026-07-18", "15:14");
+    let email_last_modification_time = test_filetime("2026-07-18", "15:16");
 
     let account = FakeStore::account();
+    let inbox_mailbox_id = "55555555-5555-4555-9555-555555555501";
+    let inbox_mailbox_uuid = Uuid::parse_str(inbox_mailbox_id).unwrap();
+    let mapi_mailbox_content_commit_times = Arc::new(Mutex::new(HashMap::from([(
+        inbox_mailbox_uuid,
+        previous_email_last_modification_time as u64,
+    )])));
     let store = FakeStore {
         session: Some(account.clone()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            "55555555-5555-4555-9555-555555555501",
+            inbox_mailbox_id,
             "inbox",
             "Inbox",
         )])),
+        mapi_mailbox_content_commit_times: mapi_mailbox_content_commit_times.clone(),
         ..Default::default()
     };
     *store.next_mapi_global_counter.lock().unwrap() = 0x023e;
@@ -10600,6 +10664,53 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert!(config.properties_json.get("0x7c080102").is_none());
     assert!(config.properties_json.get("0x0e0b0102").is_none());
 
+    // This is the first divergence observed in 202607242304: Outlook had just
+    // downloaded the 15:15 FAI, while the preceding Inbox content watermark
+    // was 15:14. The folder aggregate must expose the later FAI commit.
+    let mut fai_watermark_rops = Vec::new();
+    append_rop_open_folder(
+        &mut fai_watermark_rops,
+        0,
+        1,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    );
+    append_rop_get_properties_specific(
+        &mut fai_watermark_rops,
+        1,
+        &[PID_TAG_LOCAL_COMMIT_TIME_MAX],
+    );
+    renew_mapi_request_id(&mut execute_headers);
+    let fai_watermark_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&fai_watermark_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let fai_watermark_response_rops =
+        response_rops_from_execute_response(fai_watermark_response).await;
+    let fai_watermark_row =
+        mapi_get_properties_specific_standard_row_offset(&fai_watermark_response_rops, 1).unwrap();
+    assert_eq!(
+        u64::from_le_bytes(
+            fai_watermark_response_rops[fai_watermark_row + 1..fai_watermark_row + 9]
+                .try_into()
+                .unwrap()
+        ),
+        imported_last_modification_time as u64,
+        "PidTagLocalCommitTimeMax must advance to the later persisted Inbox FAI modification"
+    );
+
+    // Simulate the next canonical mailbox-message mutation after the FAI
+    // commit. The selective reconnect snapshot deliberately loads no normal
+    // message: LocalCommitTimeMax must use the independent PostgreSQL mailbox
+    // aggregate rather than the projected message window.
+    mapi_mailbox_content_commit_times
+        .lock()
+        .unwrap()
+        .insert(inbox_mailbox_uuid, email_last_modification_time as u64);
+
     let reconnect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
@@ -10652,6 +10763,83 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert!(contains_bytes(&reopen_response_rops, &imported_source_key));
     assert!(contains_bytes(&reopen_response_rops, &imported_change_key));
     assert!(contains_bytes(&reopen_response_rops, &imported_pcl));
+
+    // The 202607242304 restart downloads this persisted Inbox FAI and then
+    // polls the Inbox content watermark. [MS-OXCFOLD] section
+    // 2.2.2.2.1.14 defines PidTagLocalCommitTimeMax as the most recent change
+    // to a top-level object in the folder. The later canonical normal-message
+    // mutation must therefore supersede the FAI after reconnect.
+    let mut folder_watermark_rops = Vec::new();
+    append_rop_get_properties_specific(
+        &mut folder_watermark_rops,
+        1,
+        &[PID_TAG_LOCAL_COMMIT_TIME_MAX],
+    );
+    renew_mapi_request_id(&mut reopen_headers);
+    let folder_watermark_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &reopen_headers,
+            &execute_body(&rop_buffer(
+                &folder_watermark_rops,
+                &[reopen_response_handles[0], reopen_response_handles[1]],
+            )),
+        )
+        .await
+        .unwrap();
+    let folder_watermark_response_rops =
+        response_rops_from_execute_response(folder_watermark_response).await;
+    let folder_watermark_row =
+        mapi_get_properties_specific_standard_row_offset(&folder_watermark_response_rops, 1)
+            .unwrap();
+    assert_eq!(
+        u64::from_le_bytes(
+            folder_watermark_response_rops[folder_watermark_row + 1..folder_watermark_row + 9]
+                .try_into()
+                .unwrap()
+        ),
+        email_last_modification_time as u64,
+        "PidTagLocalCommitTimeMax must project the latest canonical Inbox object modification"
+    );
+
+    let mut hierarchy_rops = Vec::new();
+    append_rop_open_folder(
+        &mut hierarchy_rops,
+        0,
+        3,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut hierarchy_rops, 3, 4, 8192);
+    renew_mapi_request_id(&mut reopen_headers);
+    let hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &reopen_headers,
+            &execute_body(&rop_buffer(
+                &hierarchy_rops,
+                &[
+                    reopen_response_handles[0],
+                    reopen_response_handles[1],
+                    reopen_response_handles[2],
+                    u32::MAX,
+                    u32::MAX,
+                ],
+            )),
+        )
+        .await
+        .unwrap();
+    let hierarchy_response_rops = response_rops_from_execute_response(hierarchy_response).await;
+    let hierarchy = strict_hierarchy_sync_transfer_from_response(&hierarchy_response_rops).unwrap();
+    let inbox = hierarchy
+        .folder_changes
+        .iter()
+        .find(|folder| folder.display_name.eq_ignore_ascii_case("inbox"))
+        .expect("Inbox hierarchy folderChange");
+    assert_eq!(
+        inbox.local_commit_time_max,
+        Some(email_last_modification_time as u64),
+        "hierarchy ICS must project the latest canonical Inbox object modification"
+    );
 
     // Exact second Execute from trace 202607211751: the Message handle opened
     // above is reused for direct messageContent CopyTo with BestBody and

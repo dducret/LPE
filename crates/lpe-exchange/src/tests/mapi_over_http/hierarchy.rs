@@ -2,6 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_number() {
+    let contact_id = Uuid::parse_str("20260724-2304-4078-8000-000000000002").unwrap();
+    let expected_local_commit_time =
+        mapi_mailstore::filetime_from_rfc3339_utc("2026-07-15T10:00:07Z");
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -12,6 +15,12 @@ async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_
         contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
             "default", "contacts", "Contacts",
         )])),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact(
+            &contact_id.to_string(),
+            "Élodie Durand",
+            "elodie@example.test",
+        )])),
+        contact_versions: Arc::new(Mutex::new(HashMap::from([(contact_id, 7)]))),
         ..Default::default()
     };
     let contacts_identity_id =
@@ -59,6 +68,7 @@ async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_
             PID_TAG_CHANGE_NUMBER,
             PID_TAG_CHANGE_KEY,
             PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_LOCAL_COMMIT_TIME_MAX,
         ],
     );
 
@@ -88,6 +98,11 @@ async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_
     let advertised_change_key = read_rop_binary_u16(&response_rops, &mut row_offset).unwrap();
     let advertised_predecessor_change_list =
         read_rop_binary_u16(&response_rops, &mut row_offset).unwrap();
+    let advertised_local_commit_time = u64::from_le_bytes(
+        response_rops[row_offset..row_offset + 8]
+            .try_into()
+            .unwrap(),
+    );
     let expected_change_number = store.mapi_identity_change_numbers.lock().unwrap()
         [&mapi_mailstore::virtual_special_mailbox_id(crate::mapi::identity::CONTACTS_FOLDER_ID)];
 
@@ -100,6 +115,10 @@ async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_
     assert_eq!(
         advertised_predecessor_change_list,
         imported_predecessor_change_list
+    );
+    assert_eq!(
+        advertised_local_commit_time, expected_local_commit_time,
+        "Contacts LocalCommitTimeMax must come from the canonical Contact update timestamp"
     );
 }
 

@@ -25,18 +25,21 @@ pub(crate) use folders::*;
 pub(crate) use manifest::sync_manifest_buffer_with_attachments;
 #[cfg(test)]
 pub(crate) use manifest::sync_manifest_buffer_with_final_state;
-#[cfg(test)]
-pub(crate) use manifest::sync_manifest_buffer_with_special_objects_and_final_state;
 pub(crate) use manifest::{
     canonical_folder_change_number, canonical_message_change_number,
     canonical_message_change_number_with_attachments, change_key_for_change_number,
     change_number_for_store_id, filetime_from_change_number, filetime_from_rfc3339_utc,
     predecessor_change_list, source_key_for_mailbox_folder, source_key_for_mailbox_role,
     source_key_for_store_id, source_key_for_uuid,
-    sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions,
+    sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times,
     sync_state_token_with_attachments, sync_state_token_with_special_objects,
     virtual_special_mailbox, AttachmentSyncFact, FaiContentSyncDebugContext,
     MessageAttachmentSyncFacts,
+};
+#[cfg(test)]
+pub(crate) use manifest::{
+    sync_manifest_buffer_with_special_objects_and_final_state,
+    sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions,
 };
 pub(crate) use special_message::{
     fast_transfer_message_content_buffer_with_special_object, fast_transfer_property_included,
@@ -316,7 +319,17 @@ fn local_commit_time_max(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
+    folder_commit_times: &[(u64, u64)],
 ) -> u64 {
+    if let Some(commit_time) = folder_commit_times
+        .iter()
+        .filter(|(candidate_folder_id, _)| *candidate_folder_id == folder_id)
+        .map(|(_, commit_time)| *commit_time)
+        .max()
+    {
+        return commit_time;
+    }
+
     emails
         .iter()
         .filter(|email| email_unread_in_manifest_folder(email, folder_id, mailboxes).is_some())

@@ -4,6 +4,72 @@ macro_rules! store_impl_mailbox_config {
         Box::pin(async move { self.fetch_jmap_mailboxes(account_id).await })
     }
 
+    fn fetch_mapi_mailbox_content_commit_times<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiMailboxContentCommitTime>> {
+        Box::pin(async move {
+            if mailbox_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let rows = sqlx::query(
+                r#"
+                WITH commit_candidates AS (
+                    SELECT mailbox_id, updated_at AS commit_time
+                    FROM mailbox_messages
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND mailbox_id = ANY($3)
+
+                    UNION ALL
+
+                    SELECT mailbox_id, created_at AS commit_time
+                    FROM mail_change_log
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND mailbox_id = ANY($3)
+                      AND object_kind = 'mailbox_message'
+                )
+                SELECT
+                    mailbox_id,
+                    to_char(
+                        MAX(commit_time) AT TIME ZONE 'UTC',
+                        'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                    ) AS updated_at
+                FROM commit_candidates
+                GROUP BY mailbox_id
+                ORDER BY mailbox_id
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(mailbox_ids)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(|row| {
+                    let mailbox_id = row.try_get("mailbox_id")?;
+                    let updated_at = row.try_get::<String, _>("updated_at")?;
+                    let last_modification_time =
+                        crate::mapi_mailstore::filetime_from_rfc3339_utc(&updated_at);
+                    if last_modification_time == 0 {
+                        return Err(anyhow::anyhow!(
+                            "invalid MAPI mailbox content commit time for {mailbox_id}"
+                        ));
+                    }
+                    Ok(MapiMailboxContentCommitTime {
+                        mailbox_id,
+                        last_modification_time,
+                    })
+                })
+                .collect()
+        })
+    }
+
     fn ensure_jmap_system_mailboxes<'a>(
         &'a self,
         account_id: Uuid,

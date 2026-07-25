@@ -144,7 +144,7 @@ pub(in crate::mapi) fn hierarchy_sync_selective_fallback_plan(
     saw_hierarchy_configure.then_some(MapiAccessPlan {
         requires_full_snapshot: false,
         requires_associated_contents: false,
-        object_ids: Vec::new(),
+        object_ids: vec![crate::mapi::identity::IPM_SUBTREE_FOLDER_ID],
         content_queries: Vec::new(),
     })
 }

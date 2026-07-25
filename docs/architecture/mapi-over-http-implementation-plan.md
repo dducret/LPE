@@ -178,19 +178,38 @@ before it is advertised.
   3.2.5.8.1.2, 3.2.5.10, 3.2.5.12, and 4.5, `[MS-OXPROPS]`
   sections 2.717, 2.793, and 2.800, and `[MS-OXCDATA]` section 2.11.1.
 - The `202607242304` real-Outlook rerun, after the NSPI correction, increased
-  the synchronization-report count from 1 to 2 and then 3. Before each report,
-  Outlook downloaded the persisted Inbox
-  `IPM.Configuration.MessageListSettings` FAI through a direct
-  `RopFastTransferSourceCopyTo` with an empty exclusion list. The resulting
-  `messageContent` omitted `PidTagRecordKey`, although the ICS projection of
-  the same object contained it. Direct special-message FastTransfer now emits
-  exactly one server-generated `PidTagRecordKey`, derived from the stable local
-  object identity, whenever the CopyTo exclusion or CopyProperties inclusion
-  filter selects it. This follows `[MS-OXCMSG]` section 2.2.1.1,
-  `[MS-OXCPRPT]` section 2.2.1.8, and `[MS-OXCFXICS]` sections
-  2.2.3.1.1.1.1, 2.2.3.1.1.2.1, 2.2.4.3.16, 3.2.5.8.1.1,
-  3.2.5.8.1.2, and 3.2.5.12. Elimination of the Outlook report remains subject
-  to a real-client rerun.
+  the synchronization-report count from 1 to 2 and then 3. Outlook created
+  each report in Deleted Items after downloading the persisted Inbox
+  `IPM.Configuration.MessageListSettings` FAI. Its direct
+  `RopFastTransferSourceCopyTo` payload omitted `PidTagRecordKey`, but this is
+  not a credible root cause: `[MS-OXCMSG]` section 6 product note `<3>` states
+  that Exchange 2010, 2013, 2016, and 2019 do not support that property, so
+  Outlook 16 must tolerate its absence. The experimental RecordKey projection
+  was therefore removed rather than retained as a trace-specific workaround.
+  The first confirmed divergence is the immediately following Inbox
+  `PidTagLocalCommitTimeMax` (`0x670A`, `PtypTime`) read. In both
+  `202607241721` and `202607242304`, LPE returned a synthetic time derived from
+  the folder CN even though the just-downloaded FAI had a later canonical
+  `PidTagLastModificationTime`. Outlook timestamped the synchronization report
+  90 ms and 74 ms, respectively, after receiving that stale folder watermark.
+  LPE now obtains the normal-message watermark from one canonical PostgreSQL
+  aggregate per mailbox over `mailbox_messages.updated_at` and
+  `mail_change_log.created_at` for `mailbox_message` changes. It is independent
+  of both the bounded full-snapshot message window and selective snapshots that
+  load no normal messages. The result is combined only with real persisted FAI,
+  collaboration-object, and direct-child-folder modification times; synthetic
+  FILETIME values derived from change numbers are never mixed with those real
+  timestamps. The legacy change-number fallback remains only for callers that
+  have no canonical folder aggregate at all. The PostgreSQL regression verifies
+  import, read/flag mutation, source and destination move activity, attachment
+  add/delete, and message deletion. The realistic MessageListSettings
+  import/reconnect regression verifies that a later mailbox-message aggregate
+  supersedes the FAI timestamp through the subsequent folder
+  `RopGetPropertiesSpecific` and hierarchy ICS, while the hierarchy-table
+  regression verifies the same override between adjacent columns. Elimination
+  of the Outlook report still requires a real-client rerun. This follows
+  `[MS-OXPROPS]` section 2.775, `[MS-OXCFOLD]` section 2.2.2.2.1.14,
+  `[MS-OXCFXICS]` section 3.1.5.3, and `[MS-OXCMSG]` section 2.2.1.49.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.

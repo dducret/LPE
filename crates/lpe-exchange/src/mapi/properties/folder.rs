@@ -10,6 +10,18 @@ const FOLDER_VIEWS_VALID: u32 = 0x0000_0020;
 const FOLDER_COMMON_VIEWS_VALID: u32 = 0x0000_0040;
 const FOLDER_FINDER_VALID: u32 = 0x0000_0080;
 
+pub(in crate::mapi) fn folder_local_commit_time_max_property_value(
+    snapshot: &crate::mapi_store::MapiMailStoreSnapshot,
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    property_tag: u32,
+) -> Option<MapiValue> {
+    (canonical_property_storage_tag(property_tag) == PID_TAG_LOCAL_COMMIT_TIME_MAX)
+        .then(|| snapshot.folder_local_commit_time_max(folder_id, mailboxes))
+        .flatten()
+        .map(MapiValue::U64)
+}
+
 pub(in crate::mapi) fn logon_property_value(
     principal: &AccountPrincipal,
     property_tag: u32,

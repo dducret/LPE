@@ -1341,6 +1341,13 @@ pub(super) fn folder_properties_for_open_from_mailboxes(
             properties.insert(PID_TAG_DISPLAY_NAME_W, value);
         }
     }
+    if let Some(local_commit_time_max) = snapshot.folder_local_commit_time_max(folder_id, mailboxes)
+    {
+        properties.insert(
+            PID_TAG_LOCAL_COMMIT_TIME_MAX,
+            MapiValue::U64(local_commit_time_max),
+        );
+    }
     properties.insert(
         PID_TAG_ASSOCIATED_CONTENT_COUNT,
         MapiValue::U32(associated_folder_message_count(folder_id, snapshot)),

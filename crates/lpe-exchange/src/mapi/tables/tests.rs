@@ -3729,6 +3729,30 @@ fn ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folde
         Uuid::nil(),
     );
     assert_eq!(u32::from_le_bytes(serialized_count.try_into().unwrap()), 1);
+    let serialized_commit_time = serialize_hierarchy_row(
+        *calendar_row,
+        &mailboxes,
+        &snapshot,
+        &[
+            PID_TAG_CONTENT_COUNT,
+            PID_TAG_LOCAL_COMMIT_TIME_MAX,
+            PID_TAG_CONTENT_UNREAD_COUNT,
+        ],
+        Uuid::nil(),
+    );
+    assert_eq!(
+        u32::from_le_bytes(serialized_commit_time[0..4].try_into().unwrap()),
+        1
+    );
+    assert_eq!(
+        u64::from_le_bytes(serialized_commit_time[4..12].try_into().unwrap()),
+        mapi_mailstore::filetime_from_rfc3339_utc("2026-06-01T10:00:00Z"),
+        "hierarchy table rows must expose the latest canonical top-level item change"
+    );
+    assert_eq!(
+        u32::from_le_bytes(serialized_commit_time[12..16].try_into().unwrap()),
+        0
+    );
 
     for (folder_id, expected) in [(TASKS_FOLDER_ID, "IPF.Task")] {
         let row = rows

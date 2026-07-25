@@ -289,6 +289,19 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         &all_special_sync_objects,
     );
     let folder_versions = snapshot.folder_versions();
+    let folder_commit_times = if sync_type == MapiSyncType::Hierarchy.as_u8() {
+        all_sync_mailboxes
+            .iter()
+            .filter_map(|mailbox| {
+                let folder_id = try_mapi_folder_id(mailbox)?;
+                snapshot
+                    .folder_local_commit_time_max(folder_id, mailboxes)
+                    .map(|commit_time| (folder_id, commit_time))
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let download_change_facts = mapi_mailstore::download_change_facts(
         sync_type,
         sync_flags,
@@ -300,7 +313,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         &folder_versions,
     );
     let initial_state = mapi_mailstore::initial_sync_state_stream(sync_type);
-    let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions(
+    let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times(
         principal.account_id,
         sync_type,
         sync_flags,
@@ -320,6 +333,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         &aggregate_sync_emails,
         &aggregate_attachment_facts,
         &folder_versions,
+        &folder_commit_times,
         changes.current_change_sequence,
     );
     mapi_mailstore::log_hierarchy_transfer_debug(

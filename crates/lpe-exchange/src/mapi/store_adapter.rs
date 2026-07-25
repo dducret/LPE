@@ -375,7 +375,7 @@ where
         .filter(|identity| identity.object_kind == MapiIdentityObjectKind::JournalEntry)
         .map(|identity| identity.canonical_id)
         .collect::<Vec<_>>();
-    let contacts = if snapshot_backed_contents {
+    let (contacts, contact_sync_versions) = if snapshot_backed_contents {
         log_mapi_store_load_step(
             account_id,
             plan,
@@ -383,6 +383,7 @@ where
             contact_collections.len(),
         );
         let mut contacts = Vec::new();
+        let mut contact_sync_versions = Vec::new();
         for collection in &contact_collections {
             contacts.extend(
                 store
@@ -392,18 +393,30 @@ where
                         format!("fetch MAPI contacts in collection {}", collection.id)
                     })?,
             );
+            contact_sync_versions.extend(
+                store
+                    .fetch_contact_sync_versions(account_id, &collection.id)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "fetch MAPI Contact sync versions in collection {}",
+                            collection.id
+                        )
+                    })?,
+            );
         }
-        contacts
+        (contacts, contact_sync_versions)
     } else {
         log_mapi_store_load_step(account_id, plan, "fetch contacts by id", contact_ids.len());
-        if contact_ids.is_empty() {
+        let contacts = if contact_ids.is_empty() {
             Vec::new()
         } else {
             store
                 .fetch_accessible_contacts_by_ids(account_id, &contact_ids)
                 .await
                 .with_context(|| format!("fetch {} MAPI contacts by id", contact_ids.len()))?
-        }
+        };
+        (contacts, Vec::new())
     };
     let events = if snapshot_backed_contents {
         log_mapi_store_load_step(
@@ -741,6 +754,10 @@ where
         .fetch_mapi_folder_permissions(account_id, &mailbox_ids)
         .await
         .context("fetch MAPI folder permissions")?;
+    let mailbox_content_commit_times = store
+        .fetch_mapi_mailbox_content_commit_times(account_id, &mailbox_ids)
+        .await
+        .context("fetch MAPI mailbox content commit times")?;
 
     log_mapi_store_load_summary(
         account_id,
@@ -787,6 +804,7 @@ where
         &snapshot_identities,
     )?
     .with_contact_identities(&snapshot_identities)?
+    .with_contact_sync_versions(contact_sync_versions)
     .with_event_versions(event_versions)
     .context("apply durable MAPI Event versions to selective snapshot")?
     .with_notes_and_journal(notes, journal_entries)
@@ -801,7 +819,8 @@ where
     .with_recoverable_items(recoverable_items)
     .with_reminders(reminders)
     .with_content_windows(content_windows)
-    .with_calendar_attachments(calendar_attachments);
+    .with_calendar_attachments(calendar_attachments)
+    .with_mailbox_content_commit_times(mailbox_content_commit_times);
     Ok(snapshot)
 }
 

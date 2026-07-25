@@ -68,9 +68,10 @@ use crate::{
         MapiContentTableQueryResult, MapiContentTableSortField, MapiCustomPropertyObjectKind,
         MapiCustomPropertyValue, MapiEventCreateOutcome, MapiFolderHierarchyCommitOutcome,
         MapiFolderProfilePropertyValue, MapiFolderVersion, MapiIdentityLookupRecord,
-        MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping,
-        MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint,
-        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
+        MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
+        MapiMailboxContentCommitTime, MapiNamedPropertyMapping, MapiNotificationPoll,
+        MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
+        UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -172,6 +173,28 @@ impl PostgresMapiFixture {
         self.admin_pool.close().await;
         Ok(())
     }
+}
+
+fn postgres_mapi_audit(action: &str, subject: Uuid) -> lpe_storage::AuditEntryInput {
+    lpe_storage::AuditEntryInput {
+        actor: "alice@example.test".to_string(),
+        action: action.to_string(),
+        subject: subject.to_string(),
+    }
+}
+
+async fn postgres_mapi_mailbox_commit_time(
+    storage: &Storage,
+    account_id: Uuid,
+    mailbox_id: Uuid,
+) -> Option<u64> {
+    storage
+        .fetch_mapi_mailbox_content_commit_times(account_id, &[mailbox_id])
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .map(|commit_time| commit_time.last_modification_time)
 }
 
 async fn postgres_mapi_calendar_fixture() -> anyhow::Result<Option<PostgresMapiFixture>> {
@@ -298,6 +321,239 @@ async fn postgres_mapi_calendar_fixture_drop_cleans_temporary_schema() -> anyhow
         "dropping an unfinished Calendar fixture left temporary schema {schema_name} behind"
     );
     Ok(())
+}
+
+#[tokio::test]
+async fn postgres_mapi_mailbox_content_commit_time_tracks_canonical_mail_mutations() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let account_id = fixture.account_id;
+    let mailboxes = fixture
+        .storage
+        .ensure_jmap_system_mailboxes(account_id)
+        .await
+        .unwrap();
+    let inbox_id = mailboxes
+        .iter()
+        .find(|mailbox| mailbox.role == "inbox")
+        .unwrap()
+        .id;
+    let archive_id = mailboxes
+        .iter()
+        .find(|mailbox| mailbox.role == "archive")
+        .unwrap()
+        .id;
+    assert_eq!(
+        postgres_mapi_mailbox_commit_time(&fixture.storage, account_id, inbox_id).await,
+        None
+    );
+
+    let imported = fixture
+        .storage
+        .import_jmap_email(
+            JmapImportedEmailInput {
+                account_id,
+                submitted_by_account_id: account_id,
+                mailbox_id: inbox_id,
+                source: "mapi-save-message".to_string(),
+                raw_message: None,
+                from_display: Some("Alice Calendar".to_string()),
+                from_address: "alice@example.test".to_string(),
+                sender_display: None,
+                sender_address: None,
+                to: Vec::new(),
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Canonical LocalCommitTimeMax mutation".to_string(),
+                body_text: "PostgreSQL-backed MAPI aggregate".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: Some(format!("<{}@example.test>", Uuid::new_v4())),
+                mime_blob_ref: String::new(),
+                size_octets: 64,
+                received_at: None,
+                thread_id: None,
+                attachments: Vec::new(),
+            },
+            postgres_mapi_audit("mapi-save-message", account_id),
+        )
+        .await
+        .unwrap();
+    let imported_commit_time =
+        postgres_mapi_mailbox_commit_time(&fixture.storage, account_id, inbox_id)
+            .await
+            .unwrap();
+
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    fixture
+        .storage
+        .update_jmap_email_flags(
+            account_id,
+            imported.id,
+            Some(false),
+            Some(true),
+            postgres_mapi_audit("mapi-set-message-flags", imported.id),
+        )
+        .await
+        .unwrap();
+    let flagged_commit_time =
+        postgres_mapi_mailbox_commit_time(&fixture.storage, account_id, inbox_id)
+            .await
+            .unwrap();
+    assert!(flagged_commit_time > imported_commit_time);
+
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    fixture
+        .storage
+        .move_jmap_email_from_mailbox(
+            account_id,
+            inbox_id,
+            imported.id,
+            archive_id,
+            postgres_mapi_audit("mapi-move-message", imported.id),
+        )
+        .await
+        .unwrap();
+    let source_move_commit_time =
+        postgres_mapi_mailbox_commit_time(&fixture.storage, account_id, inbox_id)
+            .await
+            .unwrap();
+    let target_move_commit_time =
+        postgres_mapi_mailbox_commit_time(&fixture.storage, account_id, archive_id)
+            .await
+            .unwrap();
+    assert!(source_move_commit_time > flagged_commit_time);
+    assert!(target_move_commit_time > flagged_commit_time);
+
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    let (_, attachment) = fixture
+        .storage
+        .add_message_attachment(
+            account_id,
+            imported.id,
+            AttachmentUploadInput {
+                file_name: "watermark.txt".to_string(),
+                media_type: "text/plain".to_string(),
+                disposition: Some("attachment".to_string()),
+                content_id: None,
+                blob_bytes: b"canonical attachment".to_vec(),
+            },
+            postgres_mapi_audit("mapi-add-attachment", imported.id),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let attachment_add_commit_time =
+        postgres_mapi_mailbox_commit_time(&fixture.storage, account_id, archive_id)
+            .await
+            .unwrap();
+    assert!(attachment_add_commit_time > target_move_commit_time);
+
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    fixture
+        .storage
+        .delete_message_attachment(
+            account_id,
+            &attachment.file_reference,
+            postgres_mapi_audit("mapi-delete-attachment", imported.id),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let attachment_delete_commit_time =
+        postgres_mapi_mailbox_commit_time(&fixture.storage, account_id, archive_id)
+            .await
+            .unwrap();
+    assert!(attachment_delete_commit_time > attachment_add_commit_time);
+
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    fixture
+        .storage
+        .delete_jmap_email_from_mailbox(
+            account_id,
+            archive_id,
+            imported.id,
+            postgres_mapi_audit("mapi-delete-message", imported.id),
+        )
+        .await
+        .unwrap();
+    let deleted_commit_time =
+        postgres_mapi_mailbox_commit_time(&fixture.storage, account_id, archive_id)
+            .await
+            .unwrap();
+    assert!(deleted_commit_time > attachment_delete_commit_time);
+
+    fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
+async fn postgres_mapi_contacts_local_commit_time_tracks_canonical_update() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let account_id = fixture.account_id;
+    let contact = fixture
+        .storage
+        .create_accessible_contact(
+            account_id,
+            Some("default"),
+            UpsertClientContactInput {
+                account_id,
+                name: "Élodie Durand".to_string(),
+                email: "elodie@example.test".to_string(),
+                phone: "+41 22 555 01 02".to_string(),
+                organization_name: "LPE".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let first_snapshot = fixture
+        .storage
+        .load_mapi_mail_store(account_id, 500)
+        .await
+        .unwrap();
+    let first_commit_time = first_snapshot
+        .folder_local_commit_time_max(
+            crate::mapi::identity::CONTACTS_FOLDER_ID,
+            &first_snapshot.mailboxes(),
+        )
+        .expect("created canonical Contact must advance Contacts LocalCommitTimeMax");
+
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    fixture
+        .storage
+        .update_accessible_contact(
+            account_id,
+            contact.id,
+            UpsertClientContactInput {
+                account_id,
+                name: "Élodie Durand".to_string(),
+                email: "elodie.durand@example.test".to_string(),
+                phone: "+41 22 555 01 03".to_string(),
+                organization_name: "LPE Suisse".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let updated_snapshot = fixture
+        .storage
+        .load_mapi_mail_store(account_id, 500)
+        .await
+        .unwrap();
+    let updated_commit_time = updated_snapshot
+        .folder_local_commit_time_max(
+            crate::mapi::identity::CONTACTS_FOLDER_ID,
+            &updated_snapshot.mailboxes(),
+        )
+        .expect("updated canonical Contact must retain Contacts LocalCommitTimeMax");
+    assert!(
+        updated_commit_time > first_commit_time,
+        "canonical Contact update must advance Contacts LocalCommitTimeMax"
+    );
+
+    fixture.cleanup().await.unwrap();
 }
 
 #[tokio::test]
@@ -3384,6 +3640,7 @@ struct FakeStore {
     mapi_checkpoints: Arc<Mutex<HashMap<(Option<Uuid>, MapiCheckpointKind), MapiSyncCheckpoint>>>,
     stale_protocol_local_folder_properties: Arc<Mutex<HashMap<(u64, u32), Vec<u8>>>>,
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
+    mapi_mailbox_content_commit_times: Arc<Mutex<HashMap<Uuid, u64>>>,
     mapi_folder_permissions: Arc<Mutex<Vec<MapiFolderPermission>>>,
     mapi_calendar_permissions: Arc<Mutex<Vec<MapiFolderPermission>>>,
     mapi_folder_permission_audits: Arc<Mutex<Vec<lpe_storage::AuditEntryInput>>>,
@@ -3426,6 +3683,7 @@ struct FakeStore {
         Arc<Mutex<Vec<(Uuid, u64, crate::store::MapiLocalReplicaDeletedRange)>>>,
     omit_principal_from_directory: bool,
     fail_query_jmap_email_ids: bool,
+    fail_fetch_all_jmap_email_ids: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
     mapi_mail_store_load_continue: Option<Arc<tokio::sync::Notify>>,
 }
@@ -7149,13 +7407,14 @@ impl ExchangeStore for FakeStore {
             .iter()
             .filter(|contact| contact.collection_id == collection_id)
             .map(|contact| {
+                let version = versions.get(&contact.id).copied().unwrap_or_default();
                 (
                     contact.id,
-                    versions
-                        .get(&contact.id)
-                        .copied()
-                        .unwrap_or_default()
-                        .to_string(),
+                    format!(
+                        "2026-07-15T10:{:02}:{:02}Z",
+                        (version / 60) % 60,
+                        version % 60
+                    ),
                 )
             })
             .collect();
@@ -8966,6 +9225,27 @@ impl ExchangeStore for FakeStore {
         })
     }
 
+    fn fetch_mapi_mailbox_content_commit_times<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiMailboxContentCommitTime>> {
+        let commit_times = self
+            .mapi_mailbox_content_commit_times
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(mailbox_id, _)| mailbox_ids.contains(mailbox_id))
+            .map(
+                |(mailbox_id, last_modification_time)| MapiMailboxContentCommitTime {
+                    mailbox_id: *mailbox_id,
+                    last_modification_time: *last_modification_time,
+                },
+            )
+            .collect();
+        Box::pin(async move { Ok(commit_times) })
+    }
+
     fn ensure_jmap_system_mailboxes<'a>(
         &'a self,
         account_id: Uuid,
@@ -10310,6 +10590,13 @@ impl ExchangeStore for FakeStore {
     }
 
     fn fetch_all_jmap_email_ids<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
+        if self.fail_fetch_all_jmap_email_ids {
+            return Box::pin(async {
+                Err(anyhow::anyhow!(
+                    "forced complete JMAP Email identifier load failure"
+                ))
+            });
+        }
         let ids = self
             .emails
             .lock()

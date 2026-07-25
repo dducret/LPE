@@ -4026,15 +4026,21 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     let mailbox_id = "55555555-5555-5555-5555-555555555555";
     let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
     inbox.total_emails = 1;
-    let folder_change = mapi_mailstore::canonical_folder_change_number(&inbox);
     let mut email = FakeStore::email(message_id, mailbox_id, "inbox", "Cached mode message");
     email.flagged = true;
     let message_change_number = mapi_mailstore::canonical_message_change_number(&email);
     let message_commit_time = mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at);
+    let mailbox_uuid = Uuid::parse_str(mailbox_id).unwrap();
+    let folder_content_commit_time =
+        mapi_mailstore::filetime_from_rfc3339_utc("2026-05-20T12:00:00Z");
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         emails: Arc::new(Mutex::new(vec![email])),
+        mapi_mailbox_content_commit_times: Arc::new(Mutex::new(HashMap::from([(
+            mailbox_uuid,
+            folder_content_commit_time,
+        )]))),
         ..Default::default()
     };
     let folder_change_numbers = store.mapi_identity_change_numbers.clone();
@@ -4099,7 +4105,6 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    let mailbox_uuid = Uuid::parse_str(mailbox_id).unwrap();
     let durable_folder_change_number = folder_change_numbers.lock().unwrap()[&mailbox_uuid];
     let durable_folder_last_modification_time =
         folder_last_modification_times.lock().unwrap()[&mailbox_uuid];
@@ -4131,7 +4136,7 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     );
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::filetime_from_change_number(folder_change).to_le_bytes()
+        &folder_content_commit_time.to_le_bytes()
     ));
     assert!(contains_bytes(
         &response_rops,
