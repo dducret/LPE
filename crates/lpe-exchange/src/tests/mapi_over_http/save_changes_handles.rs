@@ -106,6 +106,175 @@ async fn mapi_over_http_calendar_import_save_restores_containing_folder_response
 }
 
 #[tokio::test]
+async fn mapi_over_http_fai_save_then_get_change_key_keeps_same_input_handle_in_buffer() {
+    // Outlook 16 trace 202607241721 imports Inbox FAI, then sends three
+    // SetProperties ROPs followed by RopSaveChangesMessage 0x0C
+    // (response=0,input=0) and RopGetPropertiesSpecific 0x07 (input=0) for
+    // PidTagChangeKey 0x65E20102 in one single-handle buffer.
+    // [MS-OXCROPS] sections 1.3.2 and 2.2.6.3 distinguish the input and
+    // response handle tables, while [MS-OXCFXICS] section 3.3.4.3.3.2.2.2
+    // requires the post-save property read to return the saved Message state.
+    let imported_message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_7f67);
+    let imported_source_key = crate::mapi::identity::source_key_for_object_id(imported_message_id);
+    let imported_change_key = [
+        0xf8, 0x0c, 0x74, 0x3a, 0xc0, 0xfa, 0x02, 0x41, 0xa9, 0x01, 0x08, 0x7c, 0xed, 0x77, 0xf5,
+        0xce, 0x00, 0x00, 0x04, 0x14,
+    ];
+    let mut imported_predecessor_change_list = vec![imported_change_key.len() as u8];
+    imported_predecessor_change_list.extend_from_slice(&imported_change_key);
+
+    let account = FakeStore::account();
+    let imported_counter =
+        crate::mapi::identity::global_counter_from_store_id(imported_message_id).unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mapi_local_replica_ranges: Arc::new(Mutex::new(vec![(
+            account.account_id,
+            imported_counter,
+            imported_counter + 1,
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut import_values = Vec::new();
+    append_mapi_binary_property(&mut import_values, PID_TAG_SOURCE_KEY, &imported_source_key);
+    append_mapi_i64_property(
+        &mut import_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        test_filetime("2026-07-24", "15:18"),
+    );
+    append_mapi_binary_property(&mut import_values, PID_TAG_CHANGE_KEY, &imported_change_key);
+    append_mapi_binary_property(
+        &mut import_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &imported_predecessor_change_list,
+    );
+
+    let mut import_rops = Vec::new();
+    append_rop_open_folder(
+        &mut import_rops,
+        0,
+        1,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    );
+    import_rops.extend_from_slice(&[
+        0x7e, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+        0x72, 0x00, 0x02, 0x03, 0x10, // RopSynchronizationImportMessageChange, FAI.
+    ]);
+    import_rops.extend_from_slice(&4u16.to_le_bytes());
+    import_rops.extend_from_slice(&import_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &import_rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    let (response_rops, response_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(
+        contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]),
+        "ImportMessageChange failed: {response_rops:02x?}"
+    );
+    let inbox_handle = response_handles[1];
+    let imported_message_handle = response_handles[3];
+
+    let mut first_batch = Vec::new();
+    append_mapi_utf16_property(
+        &mut first_batch,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Configuration.MessageListSettings",
+    );
+    append_mapi_i32_property(&mut first_batch, PID_TAG_MESSAGE_FLAGS, 0x449);
+    append_mapi_i32_property(&mut first_batch, 0x0017_0003, 1); // PidTagImportance.
+
+    let mut second_batch = Vec::new();
+    append_mapi_bool_property(&mut second_batch, 0x0E1F_000B, true); // PidTagRtfInSync.
+
+    let mut third_batch = Vec::new();
+    append_mapi_utf16_property(&mut third_batch, 0x003D_001F, ""); // PidTagSubjectPrefix.
+    append_mapi_utf16_property(
+        &mut third_batch,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "IPM.Configuration.MessageListSettings",
+    );
+
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 0, 3, &first_batch);
+    append_rop_set_properties(&mut save_rops, 0, 1, &second_batch);
+    append_rop_set_properties(&mut save_rops, 0, 2, &third_batch);
+    append_rop_save_changes_message_with_flags(&mut save_rops, 0, 0, 0x08);
+    append_rop_get_properties_specific(&mut save_rops, 0, &[PID_TAG_CHANGE_KEY]);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &[imported_message_handle])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    let (response_rops, response_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(
+        contains_bytes(&response_rops, &[0x0c, 0x00, 0, 0, 0, 0]),
+        "SaveChangesMessage failed: {response_rops:02x?}"
+    );
+    let mut expected_get_properties = vec![0x07, 0x00, 0, 0, 0, 0, 0];
+    expected_get_properties.extend_from_slice(&(imported_change_key.len() as u16).to_le_bytes());
+    expected_get_properties.extend_from_slice(&imported_change_key);
+    assert!(
+        contains_bytes(&response_rops, &expected_get_properties),
+        "GetPropertiesSpecific after Save must read the imported FAI ChangeKey from the Message handle: {response_rops:02x?}"
+    );
+    assert_eq!(
+        response_handles,
+        [inbox_handle],
+        "the final response handle table must still project the containing Inbox folder"
+    );
+
+    let mut save_release_rops = Vec::new();
+    append_rop_save_changes_message_with_flags(&mut save_release_rops, 0, 0, 0x08);
+    save_release_rops.extend_from_slice(&[0x01, 0x00, 0x00]); // RopRelease.
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_release_rops, &[imported_message_handle])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    let (response_rops, response_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(&response_rops, &[0x0c, 0x00, 0, 0, 0, 0]));
+    assert_eq!(
+        response_handles,
+        [0],
+        "a later Release must not let deferred parent projection resurrect the slot"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_failed_save_keeps_the_open_message_response_handle() {
     // [MS-OXCMSG] sections 2.2.3.3.1 and 3.2.5.3 define the containing
     // Folder response handle for a successful SaveChangesMessage. An error

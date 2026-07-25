@@ -921,6 +921,7 @@ where
     let mut created_emails: Vec<JmapEmail> = Vec::new();
     let mut echo_input_handle_table = false;
     let mut released_handle_indexes = Vec::new();
+    let mut deferred_save_changes_response_handles = Vec::new();
     record_execute_stream_batch_observation(
         principal,
         request_id,
@@ -941,13 +942,21 @@ where
         .flatten()
         .and_then(|handle| {
             if session.pending_embedded_message_ids.contains_key(&handle) {
-                Some(SaveChangesResponseHandleTarget::EmbeddedMessage(handle))
+                Some((
+                    handle,
+                    SaveChangesResponseHandleTarget::EmbeddedMessage(handle),
+                ))
             } else {
                 session
                     .handles
                     .get(&handle)
                     .and_then(MapiObject::folder_id)
-                    .map(SaveChangesResponseHandleTarget::ContainingFolder)
+                    .map(|folder_id| {
+                        (
+                            handle,
+                            SaveChangesResponseHandleTarget::ContainingFolder(folder_id),
+                        )
+                    })
             }
         });
         let mut completed_hierarchy_sync = None;
@@ -1339,13 +1348,23 @@ where
             ) && responses.get(response_len_before + 2..response_len_before + 6)
                 == Some(&[0, 0, 0, 0])
             {
-                if let Some(target) = save_changes_response_handle_target {
-                    restore_save_changes_response_handle(
-                        session,
-                        &mut handle_slots,
-                        &request,
-                        target,
-                    );
+                if let Some((input_handle, target)) = save_changes_response_handle_target {
+                    // [MS-OXCFXICS] 3.3.4.3.3.2.2.2 reads the saved Message
+                    // state later in the same buffer even when both indexes alias.
+                    if request.input_handle_index() == Some(request.response_handle_index()) {
+                        deferred_save_changes_response_handles.push((
+                            request.clone(),
+                            input_handle,
+                            target,
+                        ));
+                    } else {
+                        restore_save_changes_response_handle(
+                            session,
+                            &mut handle_slots,
+                            &request,
+                            target,
+                        );
+                    }
                 }
             }
         }
@@ -1356,6 +1375,15 @@ where
         );
         if typed_request.unsupported_is_terminal() {
             break;
+        }
+    }
+    for (request, input_handle, target) in deferred_save_changes_response_handles {
+        if handle_slots
+            .get(usize::from(request.response_handle_index()))
+            .copied()
+            == Some(input_handle)
+        {
+            restore_save_changes_response_handle(session, &mut handle_slots, &request, target);
         }
     }
     if let Some(cursor) = session.notification_cursor {
