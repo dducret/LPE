@@ -494,7 +494,8 @@ where
     {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            if let Some(fallback_plan) = hierarchy_sync_selective_fallback_plan(&execute.rop_buffer)
+            if let Some(fallback_plan) =
+                hierarchy_sync_selective_fallback_plan(&session, &execute.rop_buffer)
             {
                 tracing::warn!(
                     rca_debug = true,

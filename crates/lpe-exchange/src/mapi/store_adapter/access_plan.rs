@@ -57,60 +57,7 @@ pub(in crate::mapi) fn plan_mapi_store_access(
         {
             return MapiAccessPlan::full();
         }
-        if let Some(folder_id) = request.folder_id() {
-            push_unique(
-                &mut plan.object_ids,
-                session.resolve_special_folder_alias(folder_id),
-            );
-        }
-        if let Some(message_id) = request.message_id() {
-            push_unique(&mut plan.object_ids, message_id);
-        }
-        if let Some(message_id) = request.status_message_id() {
-            push_unique(
-                &mut plan.object_ids,
-                session.resolve_special_folder_alias(message_id),
-            );
-        }
-        if let Some(object_id) = request.long_term_source_object_id() {
-            push_unique(&mut plan.object_ids, object_id);
-        }
-        for message_id in request
-            .message_ids()
-            .into_iter()
-            .chain(request.move_copy_message_ids())
-            .chain(request.fast_transfer_message_ids())
-            .chain(request.import_delete_message_ids())
-            .chain(
-                request
-                    .import_read_state_changes()
-                    .into_iter()
-                    .map(|(message_id, _)| message_id),
-            )
-        {
-            push_unique(&mut plan.object_ids, message_id);
-        }
-        if let Some(message_id) = request.import_message_id() {
-            push_unique(&mut plan.object_ids, message_id);
-        }
-        if let Some(import_move) = request.import_move() {
-            push_unique(&mut plan.object_ids, import_move.source_folder_id);
-            push_unique(&mut plan.object_ids, import_move.source_message_id);
-        }
-        if let Some(folder_id) = request.delete_folder_id() {
-            push_unique(&mut plan.object_ids, folder_id);
-        }
-        if let Some(target_handle) = request.move_copy_target_handle(&handle_slots) {
-            if let Some(object) = session.handles.get(&target_handle) {
-                add_object_ids_for_handle(&mut plan, object);
-            }
-        }
-        if let Some(handle) = input_handle(&handle_slots, &request) {
-            if let Some(object) = simulated_handles.get(&handle) {
-                add_object_ids_for_handle(&mut plan, object);
-            }
-        }
-        simulate_table_access(
+        extend_access_plan_for_request(
             &mut plan,
             session,
             &mut simulated_handles,
@@ -125,28 +72,132 @@ pub(in crate::mapi) fn plan_mapi_store_access(
     plan
 }
 
+fn extend_access_plan_for_request(
+    plan: &mut MapiAccessPlan,
+    session: &MapiSession,
+    simulated_handles: &mut HashMap<u32, MapiObject>,
+    simulated_next_handle: &mut u32,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+) {
+    if let Some(folder_id) = request.folder_id() {
+        push_unique(
+            &mut plan.object_ids,
+            session.resolve_special_folder_alias(folder_id),
+        );
+    }
+    if let Some(message_id) = request.message_id() {
+        push_unique(&mut plan.object_ids, message_id);
+    }
+    if let Some(message_id) = request.status_message_id() {
+        push_unique(
+            &mut plan.object_ids,
+            session.resolve_special_folder_alias(message_id),
+        );
+    }
+    if let Some(object_id) = request.long_term_source_object_id() {
+        push_unique(&mut plan.object_ids, object_id);
+    }
+    for message_id in request
+        .message_ids()
+        .into_iter()
+        .chain(request.move_copy_message_ids())
+        .chain(request.fast_transfer_message_ids())
+        .chain(request.import_delete_message_ids())
+        .chain(
+            request
+                .import_read_state_changes()
+                .into_iter()
+                .map(|(message_id, _)| message_id),
+        )
+    {
+        push_unique(&mut plan.object_ids, message_id);
+    }
+    if let Some(message_id) = request.import_message_id() {
+        push_unique(&mut plan.object_ids, message_id);
+    }
+    if let Some(import_move) = request.import_move() {
+        push_unique(&mut plan.object_ids, import_move.source_folder_id);
+        push_unique(&mut plan.object_ids, import_move.source_message_id);
+    }
+    if let Some(folder_id) = request.delete_folder_id() {
+        push_unique(&mut plan.object_ids, folder_id);
+    }
+    if let Some(target_handle) = request.move_copy_target_handle(&handle_slots) {
+        if let Some(object) = session.handles.get(&target_handle) {
+            add_object_ids_for_handle(plan, object);
+        }
+    }
+    if let Some(handle) = input_handle(&handle_slots, &request) {
+        if let Some(object) = simulated_handles.get(&handle) {
+            add_object_ids_for_handle(plan, object);
+        }
+    }
+    simulate_table_access(
+        plan,
+        session,
+        simulated_handles,
+        simulated_next_handle,
+        handle_slots,
+        request,
+    );
+}
+
 pub(in crate::mapi) fn hierarchy_sync_selective_fallback_plan(
+    session: &MapiSession,
     rop_buffer: &[u8],
 ) -> Option<MapiAccessPlan> {
-    let (requests, _) = split_rop_buffer(rop_buffer)?;
+    let (requests, handle_table) = split_rop_buffer(rop_buffer)?;
+    let mut handle_slots = read_handle_table(handle_table).ok()?;
+    let mut plan = MapiAccessPlan {
+        requires_full_snapshot: false,
+        requires_associated_contents: false,
+        object_ids: Vec::new(),
+        content_queries: Vec::new(),
+    };
+    let mut simulated_handles = session.handles.clone();
+    let mut simulated_next_handle = session.next_handle;
+    let mut hierarchy_sync_handle_indexes = HashSet::new();
     let mut saw_hierarchy_configure = false;
     let mut cursor = Cursor::new(requests);
     while cursor.remaining() > 0 {
         let request = read_rop_request(&mut cursor).ok()?;
-        match request.rop_id {
-            0x70 if request.sync_type() == 0x02 => saw_hierarchy_configure = true,
-            0x4E if saw_hierarchy_configure => {}
-            rop_id if rop_requires_full_snapshot(rop_id) => return None,
-            _ => {}
+        let hierarchy_configure = request.rop_id == 0x70 && request.sync_type() == 0x02;
+        let hierarchy_get_buffer = request.rop_id == 0x4E
+            && request
+                .input_handle_index()
+                .is_some_and(|index| hierarchy_sync_handle_indexes.contains(&index));
+        if rop_requires_full_snapshot(request.rop_id)
+            && !rop_uses_session_state_only(&simulated_handles, &handle_slots, &request)
+            && !hierarchy_configure
+            && !hierarchy_get_buffer
+        {
+            return None;
+        }
+        extend_access_plan_for_request(
+            &mut plan,
+            session,
+            &mut simulated_handles,
+            &mut simulated_next_handle,
+            &mut handle_slots,
+            &request,
+        );
+        if plan.requires_full_snapshot {
+            return None;
+        }
+        if hierarchy_configure {
+            saw_hierarchy_configure = true;
+            if let Some(output_index) = request.output_handle_index {
+                hierarchy_sync_handle_indexes.insert(output_index);
+            }
+            push_unique(
+                &mut plan.object_ids,
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            );
         }
     }
 
-    saw_hierarchy_configure.then_some(MapiAccessPlan {
-        requires_full_snapshot: false,
-        requires_associated_contents: false,
-        object_ids: vec![crate::mapi::identity::IPM_SUBTREE_FOLDER_ID],
-        content_queries: Vec::new(),
-    })
+    saw_hierarchy_configure.then_some(plan)
 }
 
 pub(in crate::mapi) fn requires_snapshot_backed_contents(

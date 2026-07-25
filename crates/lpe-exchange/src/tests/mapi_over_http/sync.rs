@@ -6445,10 +6445,16 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     let event_id = Uuid::parse_str("20260724-2304-4078-8000-000000000001").unwrap();
     let expected_calendar_commit_time =
         mapi_mailstore::filetime_from_rfc3339_utc("2026-07-15T10:00:00Z");
+    let mut inbox = FakeStore::mailbox(inbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
     let store = FakeStore {
         session: Some(account.clone()),
-        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            inbox_id, "inbox", "Inbox",
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "24242424-2424-4242-8242-242424242424",
+            inbox_id,
+            "inbox",
+            "Hierarchy fallback keeps the selective Inbox query",
         )])),
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
             "default", "calendar", "Calendar",
@@ -6480,11 +6486,9 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
             body_html: String::new(),
         }])),
         event_versions: Arc::new(Mutex::new(HashMap::from([(event_id, 1)]))),
-        fail_query_jmap_email_ids: true,
         fail_fetch_all_jmap_email_ids: true,
         ..Default::default()
     };
-    let queried_jmap_email_ids = store.queried_jmap_email_ids.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -6498,16 +6502,24 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
     append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    append_rop_open_folder(&mut rops, 0, 3, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_query_subject_rows(&mut rops, 3, 4, 1);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
-    assert_eq!(queried_jmap_email_ids.load(Ordering::SeqCst), 0);
     let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Hierarchy fallback keeps the selective Inbox query")
+    ));
     let get_buffer_response_offset = response_rops
         .windows(6)
         .position(|window| window == [0x4E, 0x02, 0x00, 0x00, 0x00, 0x00])
