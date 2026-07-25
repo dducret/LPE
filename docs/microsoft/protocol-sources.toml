@@ -596,7 +596,7 @@ used_for = [
   "Named-property ID mapping behavior for RopGetPropertyIdsFromNames and RopGetNamesFromPropertyIds",
   "Outlook Contacts existing-registration lookup semantics and 0x0000 entries for unmappable Flags=0x00 names",
   "Post-calendar Outlook view diagnostics for named-property mapping batches",
-  "Single PidTagRecordKey and PidTagSearchKey identity properties in each folder-associated message FastTransfer property list",
+  "Single server-generated PidTagRecordKey and PidTagSearchKey identity properties in folder-associated ICS and direct FastTransfer property lists",
   "Outlook appointment PidTagHtml stream opening, writing, and save-time persistence",
   "Existing Calendar Event Body and HTML stream staging, CommitStream visibility, Release discard, and parent-Message persistence",
   "Existing associated-configuration Message property and stream staging until atomic RopSaveChangesMessage persistence",

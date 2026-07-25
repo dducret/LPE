@@ -177,6 +177,20 @@ before it is advertised.
   2.2.3.1.1.1.1, 2.2.3.1.1.2.1, 2.2.4.3.16, 3.2.5.8.1.1,
   3.2.5.8.1.2, 3.2.5.10, 3.2.5.12, and 4.5, `[MS-OXPROPS]`
   sections 2.717, 2.793, and 2.800, and `[MS-OXCDATA]` section 2.11.1.
+- The `202607242304` real-Outlook rerun, after the NSPI correction, increased
+  the synchronization-report count from 1 to 2 and then 3. Before each report,
+  Outlook downloaded the persisted Inbox
+  `IPM.Configuration.MessageListSettings` FAI through a direct
+  `RopFastTransferSourceCopyTo` with an empty exclusion list. The resulting
+  `messageContent` omitted `PidTagRecordKey`, although the ICS projection of
+  the same object contained it. Direct special-message FastTransfer now emits
+  exactly one server-generated `PidTagRecordKey`, derived from the stable local
+  object identity, whenever the CopyTo exclusion or CopyProperties inclusion
+  filter selects it. This follows `[MS-OXCMSG]` section 2.2.1.1,
+  `[MS-OXCPRPT]` section 2.2.1.8, and `[MS-OXCFXICS]` sections
+  2.2.3.1.1.1.1, 2.2.3.1.1.2.1, 2.2.4.3.16, 3.2.5.8.1.1,
+  3.2.5.8.1.2, and 3.2.5.12. Elimination of the Outlook report remains subject
+  to a real-client rerun.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
