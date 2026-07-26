@@ -572,7 +572,7 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                     mapi_mailstore::source_key_for_store_id(message.id),
                 )),
                 PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(
-                    mapi_mailstore::source_key_for_store_id(message.id),
+                    crate::mapi::identity::generated_message_search_key(&message.canonical_id),
                 )),
                 PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
                     mapi_mailstore::source_key_for_store_id(message.folder_id),

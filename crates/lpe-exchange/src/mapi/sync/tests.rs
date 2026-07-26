@@ -548,9 +548,10 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
 
         let item_payload = &buffer[item.item_start_offset..item.item_end_offset];
         let server_record_key = mapi_mailstore::source_key_for_store_id(item_id);
+        let server_search_key = crate::mapi::identity::generated_message_search_key(&canonical_id);
         for (tag, expected_value) in [
             (PID_TAG_RECORD_KEY, server_record_key.as_slice()),
-            (PID_TAG_SEARCH_KEY, server_record_key.as_slice()),
+            (PID_TAG_SEARCH_KEY, server_search_key.as_slice()),
         ] {
             assert_eq!(
                 item.property_tags
@@ -571,8 +572,8 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             );
         }
         let mut copy_search_key = PID_TAG_SEARCH_KEY.to_le_bytes().to_vec();
-        copy_search_key.extend_from_slice(&(server_record_key.len() as u32).to_le_bytes());
-        copy_search_key.extend_from_slice(&server_record_key);
+        copy_search_key.extend_from_slice(&(server_search_key.len() as u32).to_le_bytes());
+        copy_search_key.extend_from_slice(&server_search_key);
         assert_eq!(
             copy_buffer
                 .windows(copy_search_key.len())

@@ -425,6 +425,13 @@ pub(crate) fn source_key_for_object_id(object_id: u64) -> Vec<u8> {
     key
 }
 
+pub(crate) fn generated_message_search_key(canonical_id: &Uuid) -> Vec<u8> {
+    // [MS-OXCPRPT] section 2.2.1.9 defines the stable, unique Message
+    // search identity. Microsoft MAPI represents PidTagSearchKey on Messages
+    // as a 16-byte MAPIUID, not as the 22-byte SourceKey XID.
+    canonical_id.as_bytes().to_vec()
+}
+
 #[allow(dead_code)]
 pub(crate) fn object_id_from_source_key(source_key: &[u8]) -> Option<u64> {
     if source_key.len() != 22 || source_key[..16] != STORE_REPLICA_GUID {

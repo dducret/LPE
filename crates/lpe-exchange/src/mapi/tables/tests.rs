@@ -7805,9 +7805,9 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
     );
     assert_eq!(
         associated_config_property_value(&message, PID_TAG_SEARCH_KEY),
-        Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
-            message.id
-        )))
+        Some(MapiValue::Binary(
+            crate::mapi::identity::generated_message_search_key(&message.canonical_id)
+        ))
     );
     assert_eq!(
         associated_config_property_value(&message, PID_TAG_PARENT_SOURCE_KEY),

@@ -175,7 +175,9 @@ pub(super) fn special_message_search_key(object: &SpecialMessageSyncFact) -> Vec
     // [MS-OXCPRPT] section 2.2.1.9: SearchKey is a read-only search identity.
     special_message_binary_property(object, PID_TAG_SEARCH_KEY)
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| source_key_for_store_id(object.item_id))
+        .unwrap_or_else(|| {
+            crate::mapi::identity::generated_message_search_key(&object.canonical_id)
+        })
 }
 
 pub(super) fn special_message_change_key(object: &SpecialMessageSyncFact) -> Vec<u8> {

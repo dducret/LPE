@@ -11044,8 +11044,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     );
     assert_eq!(
         search_keys[0].value,
-        crate::mapi_mailstore::source_key_for_store_id(imported_message_id),
-        "direct CopyTo must generate the stable server SearchKey after the submitted read-only value was discarded"
+        crate::mapi::identity::generated_message_search_key(&config.id),
+        "direct CopyTo must generate the stable 16-byte Message SearchKey after the submitted read-only value was discarded"
     );
     // [MS-OXCMSG] section 2.2.1.1 requires these server-owned general
     // properties on every Message object. [MS-OXCPRPT] sections 2.2.1.1

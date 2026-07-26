@@ -260,6 +260,25 @@ before it is advertised.
   follows `[MS-OXPROPS]` sections 1.3.3 and 2.860,
   `[MS-OXCFOLD]` section 2.2.2.2.1.7, and `[MS-OXCFXICS]` sections
   2.2.3.1.1.1.1, 2.2.4.3.16, 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12.
+- The `202607261508` rerun retained the failure after both EntryID corrections.
+  PostgreSQL records the first new Deleted Items synchronization report at
+  `15:06:21.181`, after the Inbox `MessageListSettings` direct CopyTo completed
+  at `15:06:13.133`; the report body's `15:06:12` value is therefore the start
+  of the synchronization operation, not its database insertion time. Every ROP
+  completed successfully and the collector state was coherent. The first
+  remaining cross-surface semantic divergence in the CopyTo payload was
+  `PidTagSearchKey`: Outlook's initial import supplied a 16-byte Message search
+  identity, while LPE discarded that server-owned input and generated the
+  22-byte `PidTagSourceKey` XID as its replacement. The official Microsoft
+  MAPI `MAPIUID` definition identifies a Message `PR_SEARCH_KEY` as a 16-byte
+  MAPIUID; `[MS-OXCPRPT]` section 2.2.1.9 defines its stable, unique and copied
+  semantics, `[MS-OXPROPS]` section 2.999 defines tag `0x300B0102`, and
+  `[MS-OXCFXICS]` section 4.5 corroborates the 16-byte Message value in its
+  FastTransfer examples. The generated fallback now uses the durable canonical
+  UUID as that MAPIUID across direct CopyTo, FAI ICS and table/GetProps
+  projections. Persisted SearchKeys remain preserved, and the 22-byte
+  SourceKey, ChangeKey and predecessor list are unchanged. This is an isolated
+  interoperability hypothesis pending real Outlook validation.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.

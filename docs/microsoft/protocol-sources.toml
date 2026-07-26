@@ -615,6 +615,7 @@ used_for = [
   "RopGetPropertiesSpecific response-buffer budgeting, per-property NotEnoughMemory, and stream fallback for oversized Outlook Calendar HTML",
   "Server-owned PidTagAccess and PidTagAccessLevel projection in special-message FastTransfer downloads",
   "RopSetProperties durable round-trip of Inbox PidTagAdditionalRenEntryIds client state",
+  "Stable unique FAI PidTagSearchKey semantics while generated Message search identities use the Microsoft MAPI 16-byte MAPIUID representation",
 ]
 sections = [
   "2.2.1 Common Object Properties",
@@ -1095,6 +1096,7 @@ used_for = [
   "Stable FastTransfer projection of unchanged persisted associated-configuration properties after JSON rehydration",
   "RopFastTransferSourceGetBuffer TransferBuffer projection of persisted NamedView FAI properties without generated view descriptors",
   "Filtered direct Message CopyTo and CopyProperties projection of one server-generated PidTagSearchKey after read-only client input is discarded",
+  "FastTransfer content-download examples corroborating a 16-byte Message PidTagSearchKey distinct from the 22-byte PidTagSourceKey XID",
   "Filtered direct and ICS special-message projection of effective PidTagAccess, PidTagAccessLevel, PidTagHasAttachments, and PidTagMessageStatus",
   "Account-scoped PidTagEntryId consistency across configuration FAI, navigation shortcut, and named-view GetProps, ICS, and filtered direct Message CopyTo or CopyProperties projections",
   "ICS upload Message saves advance the normal or FAI seen set without advancing CnsetRead",

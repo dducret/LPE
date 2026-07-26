@@ -1171,6 +1171,59 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
 }
 
 #[test]
+fn outlook_fai_copyto_generates_a_mapiuid_search_key() {
+    let mailbox_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+    let canonical_id = Uuid::parse_str("ec2adc4b-4cc5-65fc-dcad-11588e3a88c6").unwrap();
+    let item_id = crate::mapi::identity::mapi_store_id(602);
+    crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+    let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        mailbox_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        item_id,
+    )
+    .unwrap();
+    let parent_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        mailbox_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    )
+    .unwrap();
+    let special = SpecialMessageSyncFact {
+        folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+        item_id,
+        canonical_id,
+        associated: true,
+        subject: "IPM.Configuration.MessageListSettings".to_string(),
+        body_text: None,
+        message_class: "IPM.Configuration.MessageListSettings".to_string(),
+        last_modified_filetime: filetime_from_rfc3339_utc("2026-07-26T11:09:21Z"),
+        message_size: 998,
+        read_state: None,
+        named_properties: vec![
+            (
+                PID_TAG_MESSAGE_FLAGS,
+                SpecialMessagePropertyValue::U32(0x0000_0449),
+            ),
+            (0x7C06_0003, SpecialMessagePropertyValue::U32(0)),
+        ],
+        named_property_definitions: Default::default(),
+    };
+
+    let buffer = fast_transfer_message_content_buffer_with_special_object(
+        Some(&entry_id),
+        Some(&parent_entry_id),
+        &special,
+        0x09,
+        SpecialMessageFastTransferSelection::all(),
+        FastTransferMessageChildren::all(),
+    );
+
+    // Microsoft MAPIUID is the 16-byte message search identity used by
+    // PidTagSearchKey. The 202607261508 Outlook collector instead received
+    // LPE's 22-byte SourceKey XID in this direct CopyTo projection.
+    assert_variable_property_present(&buffer, PID_TAG_SEARCH_KEY, canonical_id.as_bytes());
+}
+
+#[test]
 fn microsoft_oxcfxics_fast_transfer_copy_folder_uses_top_folder_markers() {
     let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
     crate::mapi::identity::remember_mapi_identity(
