@@ -32,7 +32,6 @@ pub(in crate::mapi) use event_properties::*;
 pub(in crate::mapi) use logon::*;
 pub(in crate::mapi) use named_properties::*;
 pub(in crate::mapi) use object_ids::*;
-pub(in crate::mapi) use parse::*;
 use property_limits::*;
 pub(in crate::mapi) use receive_folders::*;
 #[cfg(test)]
@@ -42,6 +41,7 @@ pub(in crate::mapi) use responses::*;
 pub(in crate::mapi) use restrictions::*;
 pub(in crate::mapi) use serialize::*;
 pub(in crate::mapi) use typed_requests::*;
+pub(in crate::mapi) use {parse::*, property_rows::*};
 
 #[allow(dead_code)]
 pub(in crate::mapi) fn rop_get_properties_specific_response(
@@ -726,7 +726,8 @@ fn write_flagged_property_row(
     size_limited_properties: &[bool],
     custom_values: &HashMap<u32, Vec<u8>>,
 ) {
-    response.push(1);
+    let has_errors = !unsupported_tags.is_empty() || size_limited_properties.contains(&true);
+    write_get_properties_specific_flagged_row_header(response, has_errors);
     for (index, tag) in columns.iter().enumerate() {
         if size_limited_properties.get(index) == Some(&true) {
             if let Some((_value_tag, property_type)) =

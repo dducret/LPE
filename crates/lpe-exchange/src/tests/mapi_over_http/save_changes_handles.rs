@@ -1,11 +1,11 @@
 use super::*;
 
 fn last_get_properties_binary_value(response_rops: &[u8]) -> Vec<u8> {
-    let prefix = [0x07, 0x00, 0, 0, 0, 0];
+    let prefix = [0x07, 0x00, 0x80, 0x03, 0x04, 0x00];
     let offset = response_rops
         .windows(prefix.len())
         .rposition(|window| window == prefix)
-        .expect("RopGetPropertiesSpecific success response");
+        .expect("RopGetPropertiesSpecific ErrorsReturned response");
     let flagged = response_rops[offset + prefix.len()] != 0;
     let mut value_offset = offset + prefix.len() + 1;
     if flagged {

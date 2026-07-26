@@ -626,6 +626,7 @@ fn response_rop_fixed_frame_end(
                     .saturating_add(id_count.saturating_mul(2)),
             )
         }),
+        (0x07, Some(crate::mapi::rop::ROP_WARNING_ERRORS_RETURNED)) => None,
         (_, Some(code)) if code != 0 => Some(start.saturating_add(6)),
         (_, Some(_)) => None,
         (_, None) => None,

@@ -679,7 +679,7 @@ used_for = [
   "FlatEntryList and PropertyProblem structures used by Outlook reply-recipient deletion and property mutation responses",
   "RopGetPropertiesSpecific PropertyRow and per-property error encoding checks",
   "FlaggedPropertyRow MAPI_E_NOT_FOUND encoding for an absent private associated-configuration property instead of a synthetic zero-length value",
-  "Unresolved RopGetPropertiesSpecific partial-property ReturnValue conflict between MS-OXCDATA section 2.4.3 and MS-OXCROPS section 2.2.8.3.2",
+  "RopGetPropertiesSpecific partial-property ErrorsReturned warning from MS-OXCDATA section 2.4.3 with the RowData shape from MS-OXCROPS section 2.2.8.3.2",
   "Calendar default-view Message EntryID folder and message identity",
   "Calendar FAI QueryRows flagged-property encoding for selected properties absent from a FolderDesign.NamedView message",
   "Common Views FindRow and QueryRows flagged-property encoding across heterogeneous FolderDesign.NamedView and WunderBar.Link rows",

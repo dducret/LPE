@@ -547,7 +547,7 @@ async fn mapi_over_http_microsoft_oxcmsg_save_message_keep_open_read_write_impor
     assert!(
         contains_bytes(
             response_rops,
-            &[0x07, 0x02, 0, 0, 0, 0, 1, 0x0A, 0x0F, 0x01, 0x04, 0x80]
+            &[0x07, 0x02, 0x80, 0x03, 0x04, 0x00, 1, 0x0A, 0x0F, 0x01, 0x04, 0x80,]
         ),
         "response_rops={response_rops:02x?}"
     );
@@ -11122,12 +11122,13 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         .iter()
         .any(|property| property.tag == 0x836B_001F));
 
-    // Trace 202607231148 repeats this OpenMessage/CopyTo/GetPropertiesSpecific
+    // Trace 202607262126 repeats this OpenMessage/CopyTo/GetPropertiesSpecific
     // sequence after the FAI was saved with PidTagRoamingDatatypes=0 and no
     // roaming stream. [MS-OXOCFG] section 2.2.2.1 scopes that zero value to
     // the roaming XML and dictionary streams only. Because 0x0E0B0102 is not
-    // persisted, [MS-OXCDATA] sections 2.4.2 and 2.11.5 require a flagged
-    // MAPI_E_NOT_FOUND cell rather than a fabricated PtypBinary value.
+    // persisted, [MS-OXCDATA] sections 2.4.2, 2.4.3, and 2.11.5 require an
+    // ErrorsReturned warning and a flagged MAPI_E_NOT_FOUND cell rather than
+    // a fabricated PtypBinary value.
     let direct_tags = [
         PID_TAG_ENTRY_ID,
         0x0E09_0102, // PidTagParentEntryId.
@@ -11160,8 +11161,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     let direct_get_response_rops = response_rops_from_execute_response(direct_get_response).await;
     assert_eq!(
         direct_get_response_rops.get(..6),
-        Some(&[0x07, 0x01, 0, 0, 0, 0][..]),
-        "GetPropertiesSpecific must use the success response from [MS-OXCPRPT] section 2.2.2.2: {direct_get_response_rops:02x?}"
+        Some(&[0x07, 0x01, 0x80, 0x03, 0x04, 0x00][..]),
+        "GetPropertiesSpecific must return ErrorsReturned as illustrated by [MS-OXCDATA] section 2.4.3 when a requested property is absent: {direct_get_response_rops:02x?}"
     );
     assert_eq!(
         direct_get_response_rops.get(6),

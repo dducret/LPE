@@ -915,6 +915,31 @@ fn execute_rop_response_summary_skips_bare_warning_getprops_payload_marker() {
 }
 
 #[test]
+fn execute_rop_response_summary_keeps_errors_returned_getprops_row() {
+    let mut responses = vec![0x07, 0x01];
+    responses.extend_from_slice(&0x0004_0380u32.to_le_bytes());
+    responses.extend_from_slice(&[0x01, 0x0A]);
+    responses.extend_from_slice(&0x8004_010Fu32.to_le_bytes());
+    let getprops_end = responses.len();
+    responses.extend_from_slice(&[0x29, 0x02]);
+    responses.extend_from_slice(&0u32.to_le_bytes());
+
+    let response_buffer =
+        rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(responses, &[0x0000_0001]));
+    let response_summary = summarize_response_rop_buffer(&response_buffer, &[0x07, 0x29]);
+
+    assert_eq!(response_summary.ids_csv, "0x07,0x29");
+    assert_eq!(
+        response_summary.results_csv,
+        "0x07:0x00040380,0x29:0x00000000"
+    );
+    assert!(response_summary.frames.contains(&format!(
+        "0x07@0..{getprops_end}:len={getprops_end}:out=1:rv=0x00040380"
+    )));
+    assert!(response_summary.parse_error.is_empty());
+}
+
+#[test]
 fn execute_rop_response_framing_summary_marks_multi_rop_boundaries() {
     let mut responses = Vec::new();
     responses.push(0x02);

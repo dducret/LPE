@@ -293,8 +293,22 @@ before it is advertised.
   a change to this otherwise read-only property. A realistic import, Save,
   reconnect, and CopyTo regression now requires the original 16 bytes to remain
   in canonical FAI state. LPE accepts that value only before the first Save;
-  later property, stream, and deletion attempts cannot replace it. This is the
-  next bounded interoperability correction pending a real Outlook rerun.
+  later property, stream, and deletion attempts cannot replace it. The
+  `202607262126` rerun confirms this correction is necessary but insufficient.
+- The clean `202607262126` rerun after that SearchKey correction again held the
+  report count at `N0=N1=0` and created one report on the first LPE reconnect
+  (`N2=1`). The persisted `MessageListSettings` direct
+  `RopFastTransferSourceCopyTo` response decodes completely and preserves the
+  imported SearchKey. The following `RopGetPropertiesSpecific` requests
+  ChangeKey, PCL, LastModificationTime, private tag `0x0E0B0102`, and
+  MessageClass. LPE correctly returns `ecNotFound` for only the absent private
+  tag, but incorrectly returns overall `Success`. The same response shape is
+  present in the fifteen correlated error-bearing captures. `[MS-OXCDATA]`
+  section 2.4.3 explicitly requires `ErrorsReturned` (`0x00040380`) for this
+  partially successful ROP while preserving the complete `FlaggedPropertyRow`;
+  the warning has non-failure severity. This resolves the earlier ambiguity
+  with the pure-success layout in `[MS-OXCROPS]` section 2.2.8.3.2 without
+  fabricating `0x0E0B0102`.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
@@ -311,6 +325,14 @@ in `mapi/sync/associated_config.rs`. Keep further behavior in those focused
 helpers and the public entry points as thin wiring. Verify changes with the
 special-message unit tests, the realistic `MessageListSettings`
 import/reconnect regression, and `cargo test -p lpe-exchange`.
+
+`mapi/dispatch/diagnostics.rs` also exceeds the production source-size
+threshold. This correction adds only the bounded `ErrorsReturned` payload
+classification needed to keep diagnostics aligned with the wire. Before adding
+further response-framing behavior, move `response_rop_frame_end`,
+`response_rop_fixed_frame_end`, and the next-response validation helpers into
+`mapi/dispatch/diagnostics/framing.rs`; keep summary construction and public
+diagnostic wiring in `diagnostics.rs`.
 
 ### Table Projection Contract
 
@@ -509,9 +531,10 @@ non-canonical LPE state.
   present zero-length value. A direct
   `RopGetPropertiesSpecific` returns a requested property determined to be
   absent as an `ecNotFound` cell in a `FlaggedPropertyRow`, with
-  `ReturnValue=Success` following the
-  response-specific `[MS-OXCROPS]` section 2.2.8.3.2. The property-row
-  encoding follows `[MS-OXCPRPT]` sections 2.2.1.4, 2.2.1.6, 2.2.2,
+  `ReturnValue=ErrorsReturned` (`0x00040380`) following the explicit partial
+  property example in `[MS-OXCDATA]` section 2.4.3. The warning retains the
+  success-response `RowData` shape from `[MS-OXCROPS]` section 2.2.8.3.2. The
+  property-row encoding follows `[MS-OXCPRPT]` sections 2.2.1.4, 2.2.1.6, 2.2.2,
   2.2.2.2, 3.2.5.1, and 3.2.5.4, `[MS-OXCDATA]` sections 2.4.2, 2.8.1,
   2.8.1.2, and 2.11.5,
   `[MS-OXCMSG]` sections 2.2.1.6 and 3.2.5.3, `[MS-OXOCFG]` sections 2.2.2.1 through
@@ -520,9 +543,6 @@ non-canonical LPE state.
   2.2.3.1.1.1.1, 2.2.3.2.4.2.1, 2.2.4.3.16, 2.2.4.4, 3.1.5.3,
   3.1.5.6.2.2, 3.2.5.8.1.1, 3.2.5.9.4.2, 3.2.5.10, and 3.3.5.8.7,
   and `[MS-OXBBODY]` section 2.1.3.1.
-  `[MS-OXCDATA]` section 2.4.3 instead illustrates this partial-property case
-  with `ErrorsReturned` (`0x00040380`). No product note resolves the conflict,
-  so LPE does not generalize that warning without an Exchange reference trace.
   Mutations to one open associated-configuration message are cumulative on that
   message handle through `RopSaveChangesMessage`; a later `RopSetProperties` or
   `RopDeletePropertiesNoReplicate` in the same batch must use the updated handle

@@ -218,7 +218,10 @@ pub(in crate::mapi::dispatch) fn getprops_contract_response_summary(
         value_shapes: get_properties_specific_response_values_for_debug(property_tags, response),
         ..GetPropsContractResponseSummary::default()
     };
-    if result_code != Some(0) {
+    if !matches!(
+        result_code,
+        Some(0) | Some(crate::mapi::rop::ROP_WARNING_ERRORS_RETURNED)
+    ) {
         return summary;
     }
     let row_shape = response.get(6).copied();
