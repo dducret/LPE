@@ -27,6 +27,10 @@ pub(super) fn delete_associated_config_properties(
         .iter()
         .flat_map(|tag| [*tag, canonical_property_storage_tag(*tag)])
     {
+        // [MS-OXCPRPT] section 2.2.1.9: once imported, SearchKey is stable.
+        if canonical_property_storage_tag(tag) == PID_TAG_SEARCH_KEY {
+            continue;
+        }
         if properties.remove(&tag).is_some() {
             deleted += 1;
         }
@@ -72,9 +76,14 @@ pub(super) fn set_associated_config_properties(
     // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: Outlook can
     // submit these properties during an ICS FAI upload, but the server must
     // not retain client-selected CreationTime or LastModifierName values.
+    // The initial import path can accept SearchKey per [MS-OXCMSG] section
+    // 2.2 product note <1>; subsequent changes cannot replace that identity.
     let values = values
         .into_iter()
-        .filter(|(tag, _)| !crate::mapi_store::is_associated_config_read_only_property_tag(*tag))
+        .filter(|(tag, _)| {
+            !crate::mapi_store::is_associated_config_read_only_property_tag(*tag)
+                && canonical_property_storage_tag(*tag) != PID_TAG_SEARCH_KEY
+        })
         .collect();
     apply_mapi_property_values_to_map(&mut properties, values);
     let (message_class, subject) = associated_config_class_and_subject(&properties);

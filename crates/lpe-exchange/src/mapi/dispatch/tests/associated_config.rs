@@ -400,6 +400,62 @@ fn associated_config_mutation_prefers_cumulative_saved_handle_over_stale_snapsho
 }
 
 #[test]
+fn imported_associated_config_search_key_cannot_change_after_first_save() {
+    let config_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 221,
+    );
+    let original_search_key = vec![
+        0x71, 0x1d, 0xbc, 0xb1, 0xd4, 0xde, 0x79, 0x42, 0x8d, 0xf0, 0x05, 0x51, 0xe8, 0x25, 0x67,
+        0x6d,
+    ];
+    let saved = crate::mapi_store::MapiAssociatedConfigMessage {
+        id: config_id,
+        folder_id: INBOX_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x6d617069_6d6c_7343_8000_000000000221),
+        message_class: "IPM.Configuration.MessageListSettings".to_string(),
+        subject: "IPM.Configuration.MessageListSettings".to_string(),
+        properties_json: serde_json::json!({
+            "0x300b0102": {
+                "type": "binary",
+                "value": "711dbcb1d4de79428df00551e825676d"
+            }
+        }),
+    };
+
+    let changed = set_associated_config_properties(
+        &saved,
+        vec![
+            (PID_TAG_SEARCH_KEY, MapiValue::Binary(vec![0xaa; 16])),
+            (PID_TAG_ROAMING_DATATYPES, MapiValue::I32(4)),
+        ],
+    )
+    .unwrap();
+    let changed_properties = mapi_properties_from_json(&changed.properties_json);
+    assert_eq!(
+        changed_properties.get(&PID_TAG_SEARCH_KEY),
+        Some(&MapiValue::Binary(original_search_key.clone()))
+    );
+    assert_eq!(
+        changed_properties.get(&PID_TAG_ROAMING_DATATYPES),
+        Some(&MapiValue::I32(4))
+    );
+
+    let (deleted, after_delete) = delete_associated_config_properties(
+        INBOX_FOLDER_ID,
+        config_id,
+        &MapiMailStoreSnapshot::empty(),
+        Some(&changed),
+        &[PID_TAG_SEARCH_KEY],
+    )
+    .unwrap();
+    assert_eq!(deleted, 0);
+    assert_eq!(
+        mapi_properties_from_json(&after_delete.properties_json).get(&PID_TAG_SEARCH_KEY),
+        Some(&MapiValue::Binary(original_search_key))
+    );
+}
+
+#[test]
 fn associated_config_persist_normalizes_stale_configuration_roaming_dictionary() {
     let properties = HashMap::from([
         (

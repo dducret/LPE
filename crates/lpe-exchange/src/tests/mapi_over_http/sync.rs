@@ -10557,12 +10557,14 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         0x3007_0040, // PidTagCreationTime.
         test_filetime("2026-07-21", "17:23") as i64,
     );
-    // Outlook trace 202607211931 also submits this read-only SearchKey on the
-    // first save. [MS-OXCMSG] section 2.2.1.1 and [MS-OXCPRPT] section
-    // 2.2.1.9 make the server responsible for the durable projected value.
+    // Outlook trace 202607261926 submits this read-only SearchKey during the
+    // initial FAI import. [MS-OXCPRPT] section 2.2.1.9 requires the value to
+    // remain stable, while [MS-OXCMSG] section 2.2 product note <1> records
+    // that Exchange 2010 through 2019 change PidTagSearchKey despite its
+    // read-only classification. Preserve that imported replication identity.
     let submitted_search_key = [
-        0xf0, 0xeb, 0x1b, 0xbd, 0x5b, 0x8f, 0x37, 0x4c, 0x9d, 0x9a, 0x4e, 0x2f, 0x91, 0xeb, 0x05,
-        0xa6,
+        0x71, 0x1d, 0xbc, 0xb1, 0xd4, 0xde, 0x79, 0x42, 0x8d, 0xf0, 0x05, 0x51, 0xe8, 0x25, 0x67,
+        0x6d,
     ];
     append_mapi_binary_property(
         &mut save_values,
@@ -10660,18 +10662,20 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
             .copied(),
         Some(imported_last_modification_time as u64)
     );
-    for identity_tag in [
-        "0x300b0102",
-        "0x65e00102",
-        "0x65e20102",
-        "0x65e30102",
-        "0x30080040",
-    ] {
+    for identity_tag in ["0x65e00102", "0x65e20102", "0x65e30102", "0x30080040"] {
         assert!(
             config.properties_json.get(identity_tag).is_none(),
             "{identity_tag} must not be persisted in associated-configuration content JSON"
         );
     }
+    assert_eq!(
+        config.properties_json["0x300b0102"],
+        serde_json::json!({
+            "type": "binary",
+            "value": "711dbcb1d4de79428df00551e825676d"
+        }),
+        "the imported FAI SearchKey must remain canonical across reconnect"
+    );
     assert_eq!(
         config.properties_json["0x7c060003"],
         serde_json::json!({"type": "i32", "value": 0})
@@ -11043,9 +11047,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         "direct CopyTo must project exactly one server SearchKey: {transfer:02x?}"
     );
     assert_eq!(
-        search_keys[0].value,
-        crate::mapi::identity::generated_message_search_key(&config.id),
-        "direct CopyTo must generate the stable 16-byte Message SearchKey after the submitted read-only value was discarded"
+        search_keys[0].value, submitted_search_key,
+        "direct CopyTo must preserve the stable 16-byte SearchKey imported by Outlook"
     );
     // [MS-OXCMSG] section 2.2.1.1 requires these server-owned general
     // properties on every Message object. [MS-OXCPRPT] sections 2.2.1.1

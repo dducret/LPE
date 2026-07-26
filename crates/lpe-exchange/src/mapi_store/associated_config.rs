@@ -39,13 +39,14 @@ pub(crate) fn is_associated_config_read_only_property_tag(property_tag: u32) -> 
 }
 
 pub(crate) fn is_associated_config_server_owned_property_tag(property_tag: u32) -> bool {
+    // An imported FAI SearchKey is durable canonical identity, not a generated
+    // projection. [MS-OXCMSG] section 2.2 product note <1>.
     is_associated_config_read_only_property_tag(property_tag)
         || matches!(
             property_tag >> 16,
             0x0FF6 // PidTagInstanceKey
                 | 0x0FF9 // PidTagRecordKey
                 | 0x3008 // PidTagLastModificationTime
-                | 0x300B // PidTagSearchKey
                 | 0x65E0 // PidTagSourceKey
                 | 0x65E2 // PidTagChangeKey
                 | 0x65E3 // PidTagPredecessorChangeList

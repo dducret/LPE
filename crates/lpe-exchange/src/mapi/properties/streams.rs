@@ -744,7 +744,9 @@ pub(in crate::mapi) fn sync_stream_target(
             property_tag,
         } => {
             let property_tag = canonical_property_storage_tag(property_tag);
-            if crate::mapi_store::is_associated_config_read_only_property_tag(property_tag) {
+            if crate::mapi_store::is_associated_config_read_only_property_tag(property_tag)
+                || property_tag == PID_TAG_SEARCH_KEY
+            {
                 return Some(());
             }
             let value = stream_property_value(property_tag, data)?;

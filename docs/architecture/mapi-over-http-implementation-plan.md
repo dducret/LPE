@@ -276,9 +276,25 @@ before it is advertised.
   `[MS-OXCFXICS]` section 4.5 corroborates the 16-byte Message value in its
   FastTransfer examples. The generated fallback now uses the durable canonical
   UUID as that MAPIUID across direct CopyTo, FAI ICS and table/GetProps
-  projections. Persisted SearchKeys remain preserved, and the 22-byte
-  SourceKey, ChangeKey and predecessor list are unchanged. This is an isolated
-  interoperability hypothesis pending real Outlook validation.
+  projections when no imported SearchKey exists. Imported SearchKeys remain
+  preserved, and the 22-byte SourceKey, ChangeKey and predecessor list are
+  unchanged.
+- The clean `202607261926` rerun retained one synchronization report and exposed
+  the remaining product-semantic divergence. Outlook imported
+  `PidTagSearchKey=711dbcb1d4de79428df00551e825676d`, but LPE discarded it and
+  returned `ec2adc4b4cc565fcdcad11588e3a88c6` after reconnect. The direct
+  `RopFastTransferSourceCopyTo` request and its 639-byte `messageContent`
+  response otherwise decode completely and conform to `[MS-OXCFXICS]` sections
+  2.2.4.3.16, 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12. `[MS-OXCFXICS]`
+  section 3.2.5.11 does not place property `0x300B` in the
+  provider-defined nontransmittable upload range. `[MS-OXCPRPT]` section
+  2.2.1.9 requires a copied SearchKey to remain stable, and `[MS-OXCMSG]`
+  section 2.2 product note `<1>` records that Exchange 2010 through 2019 accept
+  a change to this otherwise read-only property. A realistic import, Save,
+  reconnect, and CopyTo regression now requires the original 16 bytes to remain
+  in canonical FAI state. LPE accepts that value only before the first Save;
+  later property, stream, and deletion attempts cannot replace it. This is the
+  next bounded interoperability correction pending a real Outlook rerun.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
