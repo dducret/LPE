@@ -210,6 +210,33 @@ before it is advertised.
   of the Outlook report still requires a real-client rerun. This follows
   `[MS-OXPROPS]` section 2.775, `[MS-OXCFOLD]` section 2.2.2.2.1.14,
   `[MS-OXCFXICS]` section 3.1.5.3, and `[MS-OXCMSG]` section 2.2.1.49.
+- The `202607261311` real-Outlook rerun held the synchronization-report count
+  at zero through initial connection and ordinary synchronization, then created
+  one report only after the reconnect switched the status bar from Microsoft
+  Exchange to LPE. During that reconnect Outlook opened the persisted Inbox
+  `IPM.Configuration.MessageListSettings` FAI and issued
+  `RopFastTransferSourceCopyTo` (`0x4D`) with an empty property-exclusion list.
+  LPE's parseable direct `messageContent` omitted `PidTagEntryId`
+  (`0x0FFF0102`), although `RopGetPropertiesSpecific` and the ICS projection
+  exposed the same object's stable 70-byte EntryID and PostgreSQL contained one
+  coherent canonical FAI row. This is the first demonstrated projection
+  inconsistency in that sequence. LPE now supplies the account-scoped EntryID
+  for the special-message families whose existing GetProps and ICS projections
+  use that format: associated configuration, navigation shortcuts, and Common
+  Views named views. The shared serializer applies the normal `CopyTo`
+  exclusion / `CopyProperties` inclusion filter. It deliberately does not
+  synthesize that format for conversation actions, delegate/free-busy messages,
+  or public-folder items, whose existing property projections use different
+  identity rules. A realistic import/reconnect regression first failed with
+  zero EntryID occurrences and now compares the actual CopyTo, GetProps, and
+  ICS values; filter regressions cover typed and `PtypUnspecified` tags. This
+  remains a bounded interoperability hypothesis
+  until a real Outlook rerun proves that it removes the report, because
+  `[MS-OXCFXICS]` does not name `PidTagEntryId` as an unconditional
+  `messageContent` element. The implementation follows `[MS-OXCROPS]` section
+  2.2.12.7.1, `[MS-OXCFXICS]` sections 2.2.3.1.1.1.1, 2.2.4.3.16,
+  3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12, and `[MS-OXPROPS]` sections
+  1.3.3 and 2.684.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.

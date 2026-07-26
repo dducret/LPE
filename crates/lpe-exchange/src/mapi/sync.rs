@@ -1168,7 +1168,12 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-                    *folder_id,
+                    crate::mapi::identity::message_entry_id_from_object_ids(
+                        principal.account_id,
+                        message.folder_id,
+                        message.id,
+                    )
+                    .as_deref(),
                     &special_message_with_named_property_definitions(
                         associated_config_sync_object(&message),
                         snapshot,
@@ -1191,7 +1196,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-                    *folder_id,
+                    None,
                     &special_message_with_named_property_definitions(
                         conversation_action_sync_object(&message),
                         snapshot,
@@ -1214,7 +1219,12 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-                    *folder_id,
+                    crate::mapi::identity::message_entry_id_from_object_ids(
+                        principal.account_id,
+                        message.folder_id,
+                        message.id,
+                    )
+                    .as_deref(),
                     &special_message_with_named_property_definitions(
                         navigation_shortcut_sync_object(&message, principal),
                         snapshot,
@@ -1230,7 +1240,12 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-                    *folder_id,
+                    crate::mapi::identity::message_entry_id_from_object_ids(
+                        principal.account_id,
+                        message.folder_id,
+                        message.id,
+                    )
+                    .as_deref(),
                     &special_message_with_named_property_definitions(
                         common_view_named_view_sync_object(&message, principal.account_id),
                         snapshot,
@@ -1253,7 +1268,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-                    *folder_id,
+                    None,
                     &special_message_with_named_property_definitions(
                         delegate_freebusy_sync_object(&message),
                         snapshot,
@@ -1271,7 +1286,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-                    *folder_id,
+                    None,
                     &special_message_with_named_property_definitions(
                         public_folder_item_sync_object(&item),
                         snapshot,

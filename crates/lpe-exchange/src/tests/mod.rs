@@ -13247,6 +13247,7 @@ const STRICT_PID_TAG_ACCESS_LEVEL: u32 = 0x0FF7_0003;
 struct StrictContentMessageChange {
     source_key: Vec<u8>,
     parent_source_key: Vec<u8>,
+    entry_id: Option<Vec<u8>>,
     change_key: Vec<u8>,
     predecessor_change_list: Vec<u8>,
     body_tags: Vec<u32>,
@@ -13267,6 +13268,7 @@ struct StrictContentMessageBuilder {
     access_level: Option<u32>,
     source_key: Option<Vec<u8>>,
     parent_source_key: Option<Vec<u8>>,
+    entry_id: Option<Vec<u8>>,
     change_key: Option<Vec<u8>>,
     predecessor_change_list: Option<Vec<u8>>,
     mid: Option<u64>,
@@ -13713,7 +13715,7 @@ fn strict_record_content_body_property(
     message.body_tags.push(property.tag);
     match property.tag {
         PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = Some(property.value),
-        PID_TAG_ENTRY_ID => {}
+        PID_TAG_ENTRY_ID => message.entry_id = Some(property.value),
         PID_TAG_SUBJECT_W => message.subject = Some(strict_decode_utf16z(&property.value)?),
         PID_TAG_NORMALIZED_SUBJECT_A => {
             message.subject = Some(strict_decode_string8z(&property.value)?)
@@ -13774,6 +13776,7 @@ fn strict_finish_content_message(
     message_changes.push(StrictContentMessageChange {
         source_key,
         parent_source_key,
+        entry_id: message.entry_id,
         change_key,
         predecessor_change_list,
         body_tags: message.body_tags,

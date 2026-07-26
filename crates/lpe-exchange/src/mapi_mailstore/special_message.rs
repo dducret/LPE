@@ -43,6 +43,7 @@ pub(crate) enum SpecialMessagePropertyValue {
 pub(crate) struct SpecialMessageFastTransferSelection {
     access: bool,
     access_level: bool,
+    entry_id: bool,
     has_attachments: bool,
     message_status: bool,
     search_key: bool,
@@ -54,6 +55,7 @@ impl SpecialMessageFastTransferSelection {
         Self {
             access: true,
             access_level: true,
+            entry_id: true,
             has_attachments: true,
             message_status: true,
             search_key: true,
@@ -68,6 +70,7 @@ impl SpecialMessageFastTransferSelection {
                 property_tags,
                 PID_TAG_ACCESS_LEVEL,
             ),
+            entry_id: fast_transfer_property_included(rop_id, property_tags, PID_TAG_ENTRY_ID),
             has_attachments: fast_transfer_property_included(
                 rop_id,
                 property_tags,
@@ -273,6 +276,7 @@ pub(super) fn special_message_property_is_copy_identity(property_tag: u32) -> bo
         property_tag,
         PID_TAG_SOURCE_KEY
             | PID_TAG_PARENT_SOURCE_KEY
+            | PID_TAG_ENTRY_ID
             | PID_TAG_RECORD_KEY
             | PID_TAG_SEARCH_KEY
             | PID_TAG_CHANGE_KEY
@@ -282,7 +286,7 @@ pub(super) fn special_message_property_is_copy_identity(property_tag: u32) -> bo
 }
 
 pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
-    _folder_id: u64,
+    entry_id: Option<&[u8]>,
     object: &SpecialMessageSyncFact,
     send_options: u8,
     selection: SpecialMessageFastTransferSelection,
@@ -291,6 +295,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
     let mut buffer = Vec::new();
     write_fast_transfer_special_message_content(
         &mut buffer,
+        entry_id,
         object,
         send_options,
         selection,
@@ -301,6 +306,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
 
 fn write_fast_transfer_special_message_content(
     buffer: &mut Vec<u8>,
+    entry_id: Option<&[u8]>,
     object: &SpecialMessageSyncFact,
     send_options: u8,
     selection: SpecialMessageFastTransferSelection,
@@ -314,6 +320,15 @@ fn write_fast_transfer_special_message_content(
     // properties but do not require this folder-only value in a direct Message
     // CopyTo messageContent, so LPE does not synthesize it there.
     write_binary_property(buffer, PID_TAG_SOURCE_KEY, &source_key);
+    // [MS-OXCFXICS] sections 2.2.3.1.1.1.1, 3.2.5.10, and 3.2.5.12 define
+    // the CopyTo exclusion list and provider-internal download filtering.
+    // PidTagEntryId (0x0FFF0102) is outside that range; when the object family
+    // supplies one, keep its direct projection identical to GetProps and ICS.
+    if selection.entry_id {
+        if let Some(entry_id) = entry_id {
+            write_binary_property(buffer, PID_TAG_ENTRY_ID, entry_id);
+        }
+    }
     // [MS-OXCMSG] section 2.2.1.1 requires Access and AccessLevel on every
     // Message object. [MS-OXCPRPT] sections 2.2.1.1 and 2.2.1.2 define their
     // values, and [MS-OXCFXICS] sections 3.2.5.8.1.1 and 3.2.5.8.1.2 apply

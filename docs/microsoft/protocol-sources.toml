@@ -742,6 +742,7 @@ used_for = [
   "PidTagRowid identity and PtypInteger32 type for FastTransfer recipient elements",
   "PidTagViewDescriptorBinary, PidTagViewDescriptorName, PidTagViewDescriptorStrings, and PidTagViewDescriptorVersion identities and types for persisted NamedView FAI projection",
   "PidTagParentSourceKey object applicability when projecting direct Message FastTransfer content",
+  "PidTagEntryId identity and PtypBinary property tag used by account-scoped special-message GetProps, ICS, and direct FastTransfer projections",
   "Verification that Outlook-observed, unpersisted folder tags 0x36E6001F, 0x36DE0003, 0x36E10003, 0x36EB0102, and 0x672D0003 have no MS-OXPROPS definition and must not receive synthetic projections",
 ]
 sections = [
@@ -763,6 +764,7 @@ sections = [
   "2.618 PidTagBody",
   "2.621 PidTagBodyHtml",
   "2.655 PidTagCreationTime",
+  "2.684 PidTagEntryId",
   "2.717 PidTagHasAttachments",
   "2.734 PidTagHtml",
   "2.739 PidTagImportance",
@@ -1092,6 +1094,7 @@ used_for = [
   "RopFastTransferSourceGetBuffer TransferBuffer projection of persisted NamedView FAI properties without generated view descriptors",
   "Filtered direct Message CopyTo and CopyProperties projection of one server-generated PidTagSearchKey after read-only client input is discarded",
   "Filtered direct and ICS special-message projection of effective PidTagAccess, PidTagAccessLevel, PidTagHasAttachments, and PidTagMessageStatus",
+  "Account-scoped PidTagEntryId consistency across configuration FAI, navigation shortcut, and named-view GetProps, ICS, and filtered direct Message CopyTo or CopyProperties projections",
   "ICS upload Message saves advance the normal or FAI seen set without advancing CnsetRead",
 ]
 sections = [

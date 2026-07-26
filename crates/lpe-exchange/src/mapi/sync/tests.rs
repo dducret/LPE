@@ -429,8 +429,14 @@ fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
         &sync_principal(account_id),
     );
     let buffer = associated_content_sync_buffer(account_id, CALENDAR_FOLDER_ID, &objects);
+    let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        account_id,
+        objects[0].folder_id,
+        objects[0].item_id,
+    )
+    .unwrap();
     let copy_buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-        CALENDAR_FOLDER_ID,
+        Some(&entry_id),
         &objects[0],
         0x09,
         mapi_mailstore::SpecialMessageFastTransferSelection::all(),
@@ -512,8 +518,14 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             .iter()
             .find(|object| object.message_class == message_class)
             .unwrap();
+        let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            object.folder_id,
+            object.item_id,
+        )
+        .unwrap();
         let copy_buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-            folder_id,
+            Some(&entry_id),
             object,
             0x09,
             mapi_mailstore::SpecialMessageFastTransferSelection::all(),
@@ -685,7 +697,7 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
         named_property_definitions: Default::default(),
     };
     let buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-        CALENDAR_FOLDER_ID,
+        None,
         &object,
         0x09,
         mapi_mailstore::SpecialMessageFastTransferSelection::all(),
@@ -1769,6 +1781,7 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
     for (property_tag, property_name) in [
         (PID_TAG_ACCESS, "PidTagAccess"),
         (PID_TAG_ACCESS_LEVEL, "PidTagAccessLevel"),
+        (PID_TAG_ENTRY_ID, "PidTagEntryId"),
         (PID_TAG_HAS_ATTACHMENTS, "PidTagHasAttachments"),
         (PID_TAG_MESSAGE_STATUS, "PidTagMessageStatus"),
         (PID_TAG_SEARCH_KEY, "PidTagSearchKey"),
@@ -1838,6 +1851,51 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
             .windows(expected_status.len())
             .any(|property| property == expected_status),
         "direct CopyTo must retain the canonical PidTagMessageStatus value"
+    );
+}
+
+#[test]
+fn navigation_shortcut_direct_copy_projects_its_account_scoped_entry_id() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let shortcut_id = crate::mapi::identity::mapi_store_id(0x7800);
+    let snapshot = MapiMailStoreSnapshot::empty()
+        .with_navigation_shortcuts(persisted_common_views_shortcuts(account_id));
+    let object = MapiObject::NavigationShortcut {
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        shortcut_id,
+        pending_properties: HashMap::new(),
+        deleted_properties: HashSet::new(),
+    };
+    let transfer = fast_transfer_manifest_for_object(
+        RopId::FastTransferSourceCopyTo.as_u8(),
+        0x09,
+        0,
+        &[],
+        &object,
+        &sync_principal(account_id),
+        &[],
+        &[],
+        &snapshot,
+    )
+    .expect("persisted navigation shortcut manifest")
+    .1;
+    let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        account_id,
+        COMMON_VIEWS_FOLDER_ID,
+        shortcut_id,
+    )
+    .unwrap();
+    let mut encoded = PID_TAG_ENTRY_ID.to_le_bytes().to_vec();
+    encoded.extend_from_slice(&(entry_id.len() as u32).to_le_bytes());
+    encoded.extend_from_slice(&entry_id);
+
+    assert_eq!(
+        transfer
+            .windows(encoded.len())
+            .filter(|property| *property == encoded)
+            .count(),
+        1,
+        "direct CopyTo must use the same EntryID as navigation-shortcut GetProps and ICS"
     );
 }
 

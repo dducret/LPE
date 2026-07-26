@@ -1010,6 +1010,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
 
 #[test]
 fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
+    let mailbox_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
     let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999990").unwrap();
     let item_id = crate::mapi::identity::mapi_store_id(90);
     let persisted_search_key = vec![
@@ -1017,6 +1018,12 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         0x00,
     ];
     crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+    let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        mailbox_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        item_id,
+    )
+    .unwrap();
     let special = SpecialMessageSyncFact {
         folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
         item_id,
@@ -1041,7 +1048,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         named_property_definitions: Default::default(),
     };
     let buffer = fast_transfer_message_content_buffer_with_special_object(
-        crate::mapi::identity::INBOX_FOLDER_ID,
+        Some(&entry_id),
         &special,
         0x00,
         SpecialMessageFastTransferSelection::all(),
@@ -1074,6 +1081,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     assert!(!buffer
         .windows(4)
         .any(|window| window == PID_TAG_MID.to_le_bytes()));
+    assert_variable_property_present(&buffer, PID_TAG_ENTRY_ID, &entry_id);
     assert_i32_property(&buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_FAI as i32);
     assert_variable_property_present(
         &buffer,
@@ -1103,7 +1111,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     );
 
     let outlook_buffer = fast_transfer_message_content_buffer_with_special_object(
-        crate::mapi::identity::INBOX_FOLDER_ID,
+        Some(&entry_id),
         &special,
         0x09,
         SpecialMessageFastTransferSelection::all(),
@@ -1127,7 +1135,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         .any(|window| window == PID_TAG_NORMALIZED_SUBJECT_A.to_le_bytes()));
 
     let no_children_buffer = fast_transfer_message_content_buffer_with_special_object(
-        crate::mapi::identity::INBOX_FOLDER_ID,
+        Some(&entry_id),
         &special,
         0x09,
         SpecialMessageFastTransferSelection::all(),
@@ -1140,7 +1148,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     let mut normal = special;
     normal.associated = false;
     let normal_buffer = fast_transfer_message_content_buffer_with_special_object(
-        crate::mapi::identity::INBOX_FOLDER_ID,
+        None,
         &normal,
         0x09,
         SpecialMessageFastTransferSelection::all(),

@@ -10971,6 +10971,29 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         offset = property.next_offset;
         properties.push(property);
     }
+    // [MS-OXCFXICS] sections 2.2.3.1.1.1.1, 3.2.5.10, and 3.2.5.12 define
+    // the CopyTo exclusion list and provider-internal download filtering.
+    // PidTagEntryId (0x0FFF0102) is outside that internal range; keep LPE's
+    // selected direct FAI projection coherent with GetProps and ICS.
+    let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        account.account_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        imported_message_id,
+    )
+    .unwrap();
+    let entry_ids = properties
+        .iter()
+        .filter(|property| property.tag == PID_TAG_ENTRY_ID)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        entry_ids.len(),
+        1,
+        "direct CopyTo must keep exactly one selected PidTagEntryId: {transfer:02x?}"
+    );
+    assert_eq!(
+        entry_ids[0].value, expected_entry_id,
+        "direct CopyTo must use the stable account-scoped message EntryID"
+    );
     let roaming_datatypes = properties
         .iter()
         .filter(|property| property.tag == 0x7C06_0003)
@@ -11080,6 +11103,7 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     // persisted, [MS-OXCDATA] sections 2.4.2 and 2.11.5 require a flagged
     // MAPI_E_NOT_FOUND cell rather than a fabricated PtypBinary value.
     let direct_tags = [
+        PID_TAG_ENTRY_ID,
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_LAST_MODIFICATION_TIME,
@@ -11118,7 +11142,9 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         "the absent 0x0E0B0102 property must select a FlaggedPropertyRow: {direct_get_response_rops:02x?}"
     );
     let mut value_offset = 7;
+    let mut direct_get_entry_id = None;
     for (tag, expected) in [
+        (PID_TAG_ENTRY_ID, expected_entry_id.as_slice()),
         (PID_TAG_CHANGE_KEY, imported_change_key.as_slice()),
         (PID_TAG_PREDECESSOR_CHANGE_LIST, imported_pcl.as_slice()),
     ] {
@@ -11134,13 +11160,18 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
                 .unwrap(),
         ) as usize;
         value_offset += 2;
+        let actual = &direct_get_response_rops[value_offset..value_offset + value_len];
         assert_eq!(
-            &direct_get_response_rops[value_offset..value_offset + value_len],
-            expected,
+            actual, expected,
             "{tag:#010x} must retain its canonical value: {direct_get_response_rops:02x?}"
         );
+        if tag == PID_TAG_ENTRY_ID {
+            direct_get_entry_id = Some(actual.to_vec());
+        }
         value_offset += value_len;
     }
+    let direct_get_entry_id =
+        direct_get_entry_id.expect("GetPropertiesSpecific PidTagEntryId value");
     assert_eq!(
         direct_get_response_rops[value_offset],
         0,
@@ -11198,6 +11229,16 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         .find(|message| message.source_key == imported_source_key)
         .expect("imported MessageListSettings FAI in Inbox ICS");
     assert!(downloaded.associated);
+    assert_eq!(
+        downloaded.entry_id.as_deref(),
+        Some(direct_get_entry_id.as_slice()),
+        "ICS and GetPropertiesSpecific must expose the same PidTagEntryId"
+    );
+    assert_eq!(
+        entry_ids[0].value.as_slice(),
+        direct_get_entry_id.as_slice(),
+        "direct CopyTo and GetPropertiesSpecific must expose the same PidTagEntryId"
+    );
     assert_eq!(downloaded.mid, Some(imported_message_id));
     assert_eq!(downloaded.change_key, imported_change_key);
     assert_eq!(downloaded.predecessor_change_list, imported_pcl);
