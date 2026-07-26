@@ -1,5 +1,29 @@
 use super::*;
 
+fn last_get_properties_binary_value(response_rops: &[u8]) -> Vec<u8> {
+    let prefix = [0x07, 0x00, 0, 0, 0, 0];
+    let offset = response_rops
+        .windows(prefix.len())
+        .rposition(|window| window == prefix)
+        .expect("RopGetPropertiesSpecific success response");
+    let flagged = response_rops[offset + prefix.len()] != 0;
+    let mut value_offset = offset + prefix.len() + 1;
+    if flagged {
+        assert_eq!(
+            response_rops[value_offset], 0,
+            "the first flagged property must contain a value"
+        );
+        value_offset += 1;
+    }
+    let value_size = u16::from_le_bytes(
+        response_rops[value_offset..value_offset + 2]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    value_offset += 2;
+    response_rops[value_offset..value_offset + value_size].to_vec()
+}
+
 #[tokio::test]
 async fn mapi_over_http_calendar_import_save_restores_containing_folder_response_handle() {
     // Outlook uploads a new appointment through ImportMessageChange, populates
@@ -199,8 +223,9 @@ async fn mapi_over_http_fai_save_then_get_change_key_keeps_same_input_handle_in_
     append_mapi_utf16_property(
         &mut first_batch,
         PID_TAG_MESSAGE_CLASS_W,
-        "IPM.Configuration.MessageListSettings",
+        "IPM.ExtendedRule.Message",
     );
+    append_mapi_utf16_property(&mut first_batch, PID_TAG_SUBJECT_W, "Junk E-mail Rule");
     append_mapi_i32_property(&mut first_batch, PID_TAG_MESSAGE_FLAGS, 0x449);
     append_mapi_i32_property(&mut first_batch, 0x0017_0003, 1); // PidTagImportance.
 
@@ -212,7 +237,7 @@ async fn mapi_over_http_fai_save_then_get_change_key_keeps_same_input_handle_in_
     append_mapi_utf16_property(
         &mut third_batch,
         PID_TAG_NORMALIZED_SUBJECT_W,
-        "IPM.Configuration.MessageListSettings",
+        "Junk E-mail Rule",
     );
 
     let mut save_rops = Vec::new();
@@ -249,6 +274,92 @@ async fn mapi_over_http_fai_save_then_get_change_key_keeps_same_input_handle_in_
         response_handles,
         [inbox_handle],
         "the final response handle table must still project the containing Inbox folder"
+    );
+
+    // Outlook 16 trace 202607252141 then reuses the open persisted
+    // IPM.ExtendedRule.Message, updates its condition stream, and issues
+    // SetProperties > SaveChangesMessage > GetPropertiesSpecific. The
+    // post-save PidTagChangeKey must already be the committed value in that
+    // buffer, not the pre-Execute snapshot value. [MS-OXCMSG] section 3.2.5.3
+    // and [MS-OXCFXICS] sections 2.2.1.2.7 and 3.3.4.3.3.2.2.2.
+    let rule_condition = b"extended-rule-condition";
+    let mut stream_rops = vec![0x2B, 0x00, 0x00, 0x01]; // RopOpenStream.
+    stream_rops.extend_from_slice(&0x0E9A_0102u32.to_le_bytes());
+    stream_rops.push(1);
+    stream_rops.extend_from_slice(&[0x2F, 0x00, 0x01]); // RopSetStreamSize.
+    stream_rops.extend_from_slice(&(rule_condition.len() as u64).to_le_bytes());
+    stream_rops.extend_from_slice(&[0x2D, 0x00, 0x01]); // RopWriteStream.
+    stream_rops.extend_from_slice(&(rule_condition.len() as u16).to_le_bytes());
+    stream_rops.extend_from_slice(rule_condition);
+    stream_rops.extend_from_slice(&[0x5D, 0x00, 0x01]); // RopCommitStream.
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &stream_rops,
+                &[imported_message_handle, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut update_values = Vec::new();
+    append_mapi_utf16_property(&mut update_values, 0x003D_001F, "");
+    append_mapi_utf16_property(
+        &mut update_values,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "Junk E-mail Rule",
+    );
+    let mut update_save_get_rops = Vec::new();
+    append_rop_set_properties(&mut update_save_get_rops, 0, 0, &update_values);
+    append_rop_save_changes_message_with_flags(&mut update_save_get_rops, 0, 0, 0x09);
+    append_rop_get_properties_specific(
+        &mut update_save_get_rops,
+        0,
+        &[PID_TAG_CHANGE_KEY, 0x0E0B_0102],
+    );
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &update_save_get_rops,
+                &[imported_message_handle],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    let (response_rops, _) = response_rops_and_handles_from_execute_body(&body);
+    let same_buffer_change_key = last_get_properties_binary_value(&response_rops);
+
+    let mut next_get_rops = Vec::new();
+    append_rop_get_properties_specific(&mut next_get_rops, 0, &[PID_TAG_CHANGE_KEY, 0x0E0B_0102]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&next_get_rops, &[imported_message_handle])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    let (response_rops, _) = response_rops_and_handles_from_execute_body(&body);
+    let next_request_change_key = last_get_properties_binary_value(&response_rops);
+    assert_ne!(
+        next_request_change_key, imported_change_key,
+        "the saved FAI must receive a new server ChangeKey"
+    );
+    assert_eq!(
+        same_buffer_change_key, next_request_change_key,
+        "same-buffer and next-request reads must observe the same committed ChangeKey"
     );
 
     let mut save_release_rops = Vec::new();

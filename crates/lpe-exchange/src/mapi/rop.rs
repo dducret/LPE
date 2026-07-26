@@ -357,9 +357,9 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             saved_message,
             ..
         }) => {
-            let Some(message) = snapshot
-                .associated_config_message_for_id(*config_id)
-                .or_else(|| saved_message.clone())
+            let Some(message) = saved_message
+                .clone()
+                .or_else(|| snapshot.associated_config_message_for_id(*config_id))
                 .filter(|message| message.folder_id == *folder_id)
             else {
                 return rop_error_response(
@@ -683,9 +683,9 @@ fn associated_config_modeled_property(
     else {
         return false;
     };
-    snapshot
-        .associated_config_message_for_id(*config_id)
-        .or_else(|| saved_message.clone())
+    saved_message
+        .clone()
+        .or_else(|| snapshot.associated_config_message_for_id(*config_id))
         .filter(|message| message.folder_id == *folder_id)
         .is_some_and(|message| {
             associated_config_property_value_with_mailbox_guid(&message, principal.account_id, tag)
@@ -1211,9 +1211,9 @@ pub(in crate::mapi) fn serialize_object_property(
             config_id,
             saved_message,
             ..
-        }) => snapshot
-            .associated_config_message_for_id(*config_id)
-            .or_else(|| saved_message.clone())
+        }) => saved_message
+            .clone()
+            .or_else(|| snapshot.associated_config_message_for_id(*config_id))
             .filter(|message| message.folder_id == *folder_id)
             .map(|message| {
                 serialize_associated_config_row_with_mailbox_guid(

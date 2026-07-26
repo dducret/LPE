@@ -6,11 +6,11 @@ use crate::mapi_mailstore;
 use std::time::{Duration, SystemTime};
 
 pub(in crate::mapi) fn private_logon_response_logon_flags(request_logon_flags: u8) -> u8 {
-    request_logon_flags & 0x0f | 0x01
+    request_logon_flags & 0x07 | 0x01
 }
 
 pub(in crate::mapi) fn public_folder_logon_response_logon_flags(request_logon_flags: u8) -> u8 {
-    request_logon_flags & 0x0f & !0x01
+    request_logon_flags & 0x06
 }
 
 pub(in crate::mapi) fn rop_logon_response_body(

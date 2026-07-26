@@ -418,6 +418,7 @@ sha256 = "c926eb96973fb81310bd19d99447d5dbb1d30a5e430855201bee5d554d480a8b"
 used_for = [
   "ROP request and response encoding",
   "Mailbox logon, folder open, property, table, and synchronization ROP behavior",
+  "RopLogon request and private/public success-response LogonFlags framing",
   "RopSetColumns, RopQueryRows, and RopGetPropertiesSpecific response-shape checks for Outlook Inbox startup",
   "RopSetProperties, RopDeleteProperties, RopDeletePropertiesNoReplicate, and RopSaveChangesMessage response contracts for retained Outlook message handles",
   "Successful versus failed RopSaveChangesMessage ReturnValue gating for containing-folder response-handle restoration",
@@ -446,6 +447,9 @@ used_for = [
 ]
 sections = [
   "1.3 Overview",
+  "2.2.3.1.1 RopLogon ROP Request Buffer",
+  "2.2.3.1.2 RopLogon ROP Success Response Buffer for Private Mailbox",
+  "2.2.3.1.3 RopLogon ROP Success Response Buffer for Public Folders",
   "2.2.4.1 RopOpenFolder ROP",
   "2.2.4.1.1 RopOpenFolder ROP Request Buffer",
   "2.2.4.1.2 RopOpenFolder ROP Success Response Buffer",
@@ -831,6 +835,7 @@ used_for = [
   "Message-object acceptance of additional MS-OXPROPS properties during Outlook appointment creation",
   "RopSaveChangesMessage ignores invalid or unknown SaveFlags values while still committing the message",
   "Commit of accepted client-written associated-configuration properties through RopSaveChangesMessage",
+  "Same-Execute visibility of successfully committed associated-configuration state to post-save property reads",
   "Server-generated PidTagSearchKey projection for every Message object after client creation",
   "Required general PidTagAccess and PidTagAccessLevel properties on folder-associated Message objects opened read-only by Outlook",
   "Computed PidTagHasAttachments and effective PidTagMessageStatus projection for configuration FAI FastTransfer",
@@ -1049,7 +1054,7 @@ used_for = [
   "Atomic Common Views WLink import, client-reserved MID validation, conflict disposition, deletion tombstones, and ObjectDeleted replay behavior",
   "Deferred Common Views associated-message classification at Save after imported identity headers and staged properties are complete",
   "NoForeignIdentifiers projection of local SourceKey and ParentSourceKey values instead of persisted foreign identifiers",
-  "Post-save retrieval of PidTagChangeKey on a Message object kept open by the client",
+  "Immediate same-Execute post-save retrieval of the committed PidTagChangeKey on a Message object kept open by the client",
   "Durable Calendar Event ChangeNumber, ChangeKey, PredecessorChangeList, and stable SourceKey projection across direct reads and ICS",
   "Atomic Contacts ICS import with client-reserved MID validation and durable SourceKey, ChangeKey, PredecessorChangeList, LastModificationTime, and server ChangeNumber projection after reconnect",
   "Calendar identity-material repair that distinguishes immutable object identity from the current or imported version ChangeKey",
@@ -1437,6 +1442,7 @@ used_for = [
 ]
 sections = [
   "2.2.1.1 RopLogon ROP",
+  "2.2.1.1.1 RopLogon ROP Request Buffer",
   "2.2.1.1.3 RopLogon ROP Success Response Buffer for Private Mailbox",
   "2.2.1.1.4 RopLogon ROP Success Response Buffer for Public Folders",
   "2.2.1.2 RopGetReceiveFolder ROP",

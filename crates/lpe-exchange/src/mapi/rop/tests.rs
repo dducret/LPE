@@ -4722,7 +4722,7 @@ pub(in crate::mapi) fn private_logon_places_exactly_13_folder_ids_before_respons
 }
 
 #[test]
-pub(in crate::mapi) fn private_logon_preserves_undercover_logon_flag_0x09() {
+pub(in crate::mapi) fn logon_response_flags_drop_spooler_process_and_preserve_valid_bits() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -4741,8 +4741,10 @@ pub(in crate::mapi) fn private_logon_preserves_undercover_logon_flag_0x09() {
     let response = rop_logon_response_body(&principal, &request);
     let response_flags_offset = 7 + PRIVATE_LOGON_SPECIAL_FOLDER_IDS.len() * 8;
 
-    assert_eq!(response[6], 0x09);
+    assert_eq!(response[6], 0x01);
     assert_eq!(response[response_flags_offset], 0x07);
+    assert_eq!(private_logon_response_logon_flags(0x0F), 0x07);
+    assert_eq!(public_folder_logon_response_logon_flags(0x0E), 0x06);
 }
 
 #[test]

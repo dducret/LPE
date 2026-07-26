@@ -1184,7 +1184,7 @@ mod logon_request_shape_tests {
 
         assert_eq!(
             format_logon_request_shape(&request),
-            "request_flags=0x09;private=true;open_flags=0x21000040;store_state=0x00000000;projected_response_flags=0x09;dropped_request_bits=0x00;observed_0x09_path=true"
+            "request_flags=0x09;private=true;open_flags=0x21000040;store_state=0x00000000;projected_response_flags=0x01;dropped_request_bits=0x08;observed_0x09_path=true"
         );
     }
 

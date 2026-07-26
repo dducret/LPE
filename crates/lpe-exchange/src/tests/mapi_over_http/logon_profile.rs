@@ -69,6 +69,59 @@ async fn mapi_over_http_execute_returns_private_mailbox_logon() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_spooler_logon_does_not_echo_request_only_flag() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let legacy_dn = b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice\0";
+    let mut logon_rop = vec![
+        0xFE, 0x03, 0x00, 0x09, // RopLogon, Private | SpoolerProcess
+    ];
+    logon_rop.extend_from_slice(&0x2100_0040u32.to_le_bytes());
+    logon_rop.extend_from_slice(&0u32.to_le_bytes());
+    logon_rop.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    logon_rop.extend_from_slice(legacy_dn);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&logon_rop, &[u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rop = &rop_buffer[2..2 + response_rop_size];
+
+    assert_eq!(&response_rop[..6], &[0xFE, 0x00, 0, 0, 0, 0]);
+    // [MS-OXCSTOR] 2.2.1.1.1 and 2.2.1.1.3: SpoolerProcess
+    // (0x08) is request-only; only Private, Undercover, and Ghosted are echoed.
+    assert_eq!(response_rop[6], 0x01);
+}
+
+#[tokio::test]
 async fn mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
