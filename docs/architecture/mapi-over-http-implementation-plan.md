@@ -237,6 +237,29 @@ before it is advertised.
   2.2.12.7.1, `[MS-OXCFXICS]` sections 2.2.3.1.1.1.1, 2.2.4.3.16,
   3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12, and `[MS-OXPROPS]` sections
   1.3.3 and 2.684.
+- The `202607261433` rerun then increased the report count from 1 to 2 on the
+  first Outlook process, held it at 2 during the same process, and increased it
+  to 3 after restarting Outlook. Both process starts produced the same
+  `80004002-501-0-0` view/form failure immediately after the Inbox
+  `IPM.Configuration.MessageListSettings` direct CopyTo. The corrected
+  591-byte payload contained the stable `PidTagEntryId`, proving that the
+  preceding bounded correction was necessary but insufficient. No ICS state
+  regressed before either failure. The next protocol-defined omission was
+  `PidTagParentEntryId` (`0x0E090102`): the containing Inbox Folder EntryID was
+  available through GetProps and the associated-contents table, the CopyTo
+  exclusion list was empty, and this property lies outside the provider-internal
+  FastTransfer exclusion range. For the observed associated-configuration
+  family only, the shared special-message serializer now receives the actual
+  account-scoped parent Folder EntryID and applies the same typed or
+  `PtypUnspecified` CopyTo exclusion / CopyProperties inclusion rules. A
+  realistic Outlook import/reconnect regression first failed with zero
+  occurrences and now requires exactly one value equal to both the Inbox
+  EntryID and the independent GetProps projection. This is the next bounded
+  interoperability hypothesis pending a real Outlook rerun; the specification
+  does not name this property as an unconditional `messageContent` element. It
+  follows `[MS-OXPROPS]` sections 1.3.3 and 2.860,
+  `[MS-OXCFOLD]` section 2.2.2.2.1.7, and `[MS-OXCFXICS]` sections
+  2.2.3.1.1.1.1, 2.2.4.3.16, 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.

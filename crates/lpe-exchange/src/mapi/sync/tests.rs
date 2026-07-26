@@ -435,8 +435,12 @@ fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
         objects[0].item_id,
     )
     .unwrap();
+    let parent_entry_id =
+        crate::mapi::identity::folder_entry_id_from_object_id(account_id, objects[0].folder_id)
+            .unwrap();
     let copy_buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
         Some(&entry_id),
+        Some(&parent_entry_id),
         &objects[0],
         0x09,
         mapi_mailstore::SpecialMessageFastTransferSelection::all(),
@@ -524,8 +528,12 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             object.item_id,
         )
         .unwrap();
+        let parent_entry_id =
+            crate::mapi::identity::folder_entry_id_from_object_id(account_id, object.folder_id)
+                .unwrap();
         let copy_buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
             Some(&entry_id),
+            Some(&parent_entry_id),
             object,
             0x09,
             mapi_mailstore::SpecialMessageFastTransferSelection::all(),
@@ -697,6 +705,7 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
         named_property_definitions: Default::default(),
     };
     let buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
+        None,
         None,
         &object,
         0x09,
@@ -1784,6 +1793,7 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
         (PID_TAG_ENTRY_ID, "PidTagEntryId"),
         (PID_TAG_HAS_ATTACHMENTS, "PidTagHasAttachments"),
         (PID_TAG_MESSAGE_STATUS, "PidTagMessageStatus"),
+        (PID_TAG_PARENT_ENTRY_ID, "PidTagParentEntryId"),
         (PID_TAG_SEARCH_KEY, "PidTagSearchKey"),
     ] {
         assert_eq!(

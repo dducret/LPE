@@ -10994,6 +10994,29 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         entry_ids[0].value, expected_entry_id,
         "direct CopyTo must use the stable account-scoped message EntryID"
     );
+    // [MS-OXPROPS] section 2.860 and [MS-OXCFOLD] section 2.2.2.2.1.7
+    // define PidTagParentEntryId as the EntryID of the folder containing the
+    // Message. The trace's CopyTo exclusion list is empty, so [MS-OXCFXICS]
+    // sections 2.2.3.1.1.1.1, 3.2.5.8.1.1, and 3.2.5.12 do not filter this
+    // property. Keep the CopyTo projection coherent with GetProps.
+    let expected_parent_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    )
+    .unwrap();
+    let parent_entry_ids = properties
+        .iter()
+        .filter(|property| property.tag == 0x0E09_0102) // PidTagParentEntryId.
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parent_entry_ids.len(),
+        1,
+        "direct CopyTo must keep exactly one selected PidTagParentEntryId: {transfer:02x?}"
+    );
+    assert_eq!(
+        parent_entry_ids[0].value, expected_parent_entry_id,
+        "direct CopyTo must use the stable account-scoped Inbox EntryID"
+    );
     let roaming_datatypes = properties
         .iter()
         .filter(|property| property.tag == 0x7C06_0003)
@@ -11104,6 +11127,7 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     // MAPI_E_NOT_FOUND cell rather than a fabricated PtypBinary value.
     let direct_tags = [
         PID_TAG_ENTRY_ID,
+        0x0E09_0102, // PidTagParentEntryId.
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_LAST_MODIFICATION_TIME,
@@ -11143,8 +11167,10 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     );
     let mut value_offset = 7;
     let mut direct_get_entry_id = None;
+    let mut direct_get_parent_entry_id = None;
     for (tag, expected) in [
         (PID_TAG_ENTRY_ID, expected_entry_id.as_slice()),
+        (0x0E09_0102, expected_parent_entry_id.as_slice()),
         (PID_TAG_CHANGE_KEY, imported_change_key.as_slice()),
         (PID_TAG_PREDECESSOR_CHANGE_LIST, imported_pcl.as_slice()),
     ] {
@@ -11167,11 +11193,20 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         );
         if tag == PID_TAG_ENTRY_ID {
             direct_get_entry_id = Some(actual.to_vec());
+        } else if tag == 0x0E09_0102 {
+            direct_get_parent_entry_id = Some(actual.to_vec());
         }
         value_offset += value_len;
     }
     let direct_get_entry_id =
         direct_get_entry_id.expect("GetPropertiesSpecific PidTagEntryId value");
+    let direct_get_parent_entry_id =
+        direct_get_parent_entry_id.expect("GetPropertiesSpecific PidTagParentEntryId value");
+    assert_eq!(
+        parent_entry_ids[0].value.as_slice(),
+        direct_get_parent_entry_id.as_slice(),
+        "direct CopyTo and GetPropertiesSpecific must expose the same PidTagParentEntryId"
+    );
     assert_eq!(
         direct_get_response_rops[value_offset],
         0,

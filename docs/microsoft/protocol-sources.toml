@@ -743,6 +743,7 @@ used_for = [
   "PidTagViewDescriptorBinary, PidTagViewDescriptorName, PidTagViewDescriptorStrings, and PidTagViewDescriptorVersion identities and types for persisted NamedView FAI projection",
   "PidTagParentSourceKey object applicability when projecting direct Message FastTransfer content",
   "PidTagEntryId identity and PtypBinary property tag used by account-scoped special-message GetProps, ICS, and direct FastTransfer projections",
+  "PidTagParentEntryId identity and PtypBinary type used to keep direct associated-configuration FastTransfer content coherent with its containing Folder EntryID",
   "Verification that Outlook-observed, unpersisted folder tags 0x36E6001F, 0x36DE0003, 0x36E10003, 0x36EB0102, and 0x672D0003 have no MS-OXPROPS definition and must not receive synthetic projections",
 ]
 sections = [
@@ -778,6 +779,7 @@ sections = [
   "2.798 PidTagMessageSize",
   "2.800 PidTagMessageStatus",
   "2.803 PidTagMid",
+  "2.860 PidTagParentEntryId",
   "2.863 PidTagParentSourceKey",
   "2.921 PidTagReplyTime",
   "2.938 PidTagRoamingDatatypes",
@@ -1302,6 +1304,7 @@ used_for = [
   "Outlook Calendar same-folder and Calendar-to-Deleted-Items message move and partial-completion semantics",
   "Durable MAPI folder hierarchy version times and the LocalCommitTimeMax boundary",
   "PidTagLocalCommitTimeMax as the latest change time of a top-level Message or direct child folder, excluding objects inside subfolders",
+  "PidTagParentEntryId as the EntryID of the Folder containing a Message or subfolder",
 ]
 sections = [
   "2.2.1.1 RopOpenFolder ROP",
@@ -1327,6 +1330,7 @@ sections = [
   "2.2.1.14.1 RopGetContentsTable ROP Request Buffer",
   "2.2.1.14.2 RopGetContentsTable ROP Response Buffer",
   "2.2.2.2 Folder Object Properties",
+  "2.2.2.2.1.7 PidTagParentEntryId Property",
   "2.2.2.2.1.9 PidTagHierRev Property",
   "2.2.2.2.1.13 PidTagLocalCommitTime Property",
   "2.2.2.2.1.14 PidTagLocalCommitTimeMax Property",

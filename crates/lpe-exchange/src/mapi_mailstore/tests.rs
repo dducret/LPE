@@ -1024,6 +1024,11 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         item_id,
     )
     .unwrap();
+    let parent_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        mailbox_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    )
+    .unwrap();
     let special = SpecialMessageSyncFact {
         folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
         item_id,
@@ -1049,6 +1054,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     };
     let buffer = fast_transfer_message_content_buffer_with_special_object(
         Some(&entry_id),
+        Some(&parent_entry_id),
         &special,
         0x00,
         SpecialMessageFastTransferSelection::all(),
@@ -1082,6 +1088,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         .windows(4)
         .any(|window| window == PID_TAG_MID.to_le_bytes()));
     assert_variable_property_present(&buffer, PID_TAG_ENTRY_ID, &entry_id);
+    assert_variable_property_present(&buffer, PID_TAG_PARENT_ENTRY_ID, &parent_entry_id);
     assert_i32_property(&buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_FAI as i32);
     assert_variable_property_present(
         &buffer,
@@ -1112,6 +1119,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
 
     let outlook_buffer = fast_transfer_message_content_buffer_with_special_object(
         Some(&entry_id),
+        Some(&parent_entry_id),
         &special,
         0x09,
         SpecialMessageFastTransferSelection::all(),
@@ -1136,6 +1144,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
 
     let no_children_buffer = fast_transfer_message_content_buffer_with_special_object(
         Some(&entry_id),
+        Some(&parent_entry_id),
         &special,
         0x09,
         SpecialMessageFastTransferSelection::all(),
@@ -1149,6 +1158,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     normal.associated = false;
     let normal_buffer = fast_transfer_message_content_buffer_with_special_object(
         None,
+        Some(&parent_entry_id),
         &normal,
         0x09,
         SpecialMessageFastTransferSelection::all(),

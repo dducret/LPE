@@ -46,6 +46,7 @@ pub(crate) struct SpecialMessageFastTransferSelection {
     entry_id: bool,
     has_attachments: bool,
     message_status: bool,
+    parent_entry_id: bool,
     search_key: bool,
 }
 
@@ -58,6 +59,7 @@ impl SpecialMessageFastTransferSelection {
             entry_id: true,
             has_attachments: true,
             message_status: true,
+            parent_entry_id: true,
             search_key: true,
         }
     }
@@ -80,6 +82,11 @@ impl SpecialMessageFastTransferSelection {
                 rop_id,
                 property_tags,
                 PID_TAG_MESSAGE_STATUS,
+            ),
+            parent_entry_id: fast_transfer_property_included(
+                rop_id,
+                property_tags,
+                PID_TAG_PARENT_ENTRY_ID,
             ),
             search_key: fast_transfer_property_included(rop_id, property_tags, PID_TAG_SEARCH_KEY),
         }
@@ -277,6 +284,7 @@ pub(super) fn special_message_property_is_copy_identity(property_tag: u32) -> bo
         PID_TAG_SOURCE_KEY
             | PID_TAG_PARENT_SOURCE_KEY
             | PID_TAG_ENTRY_ID
+            | PID_TAG_PARENT_ENTRY_ID
             | PID_TAG_RECORD_KEY
             | PID_TAG_SEARCH_KEY
             | PID_TAG_CHANGE_KEY
@@ -287,6 +295,7 @@ pub(super) fn special_message_property_is_copy_identity(property_tag: u32) -> bo
 
 pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
     entry_id: Option<&[u8]>,
+    parent_entry_id: Option<&[u8]>,
     object: &SpecialMessageSyncFact,
     send_options: u8,
     selection: SpecialMessageFastTransferSelection,
@@ -296,6 +305,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
     write_fast_transfer_special_message_content(
         &mut buffer,
         entry_id,
+        parent_entry_id,
         object,
         send_options,
         selection,
@@ -307,6 +317,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
 fn write_fast_transfer_special_message_content(
     buffer: &mut Vec<u8>,
     entry_id: Option<&[u8]>,
+    parent_entry_id: Option<&[u8]>,
     object: &SpecialMessageSyncFact,
     send_options: u8,
     selection: SpecialMessageFastTransferSelection,
@@ -327,6 +338,15 @@ fn write_fast_transfer_special_message_content(
     if selection.entry_id {
         if let Some(entry_id) = entry_id {
             write_binary_property(buffer, PID_TAG_ENTRY_ID, entry_id);
+        }
+    }
+    // [MS-OXPROPS] section 2.860 and [MS-OXCFOLD] section 2.2.2.2.1.7
+    // define PidTagParentEntryId as the containing Folder EntryID.
+    // [MS-OXCFXICS] sections 2.2.3.1.1.1.1, 2.2.4.3.16, 3.2.5.10, and
+    // 3.2.5.12 keep this property eligible for a direct Message CopyTo.
+    if selection.parent_entry_id {
+        if let Some(parent_entry_id) = parent_entry_id {
+            write_binary_property(buffer, PID_TAG_PARENT_ENTRY_ID, parent_entry_id);
         }
     }
     // [MS-OXCMSG] section 2.2.1.1 requires Access and AccessLevel on every
