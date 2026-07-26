@@ -182,6 +182,14 @@ effective value accepted at its first Save is preserved after the server keeps
 excluded because they are provider-internal properties. ICS
 message-change headers continue to carry `PidTagAssociated` where MS-OXCFXICS
 requires it.
+`PidTagParentSourceKey` (`0x65E10102`) is not synthesized in a direct Message
+`messageContent`: Microsoft defines it as a value on a Folder, while direct
+Message CopyTo returns the Message property and subobject root. This correction
+does not alter the separate hierarchy-synchronization folder projection.
+MS-OXCFXICS permits additional properties in `messageContent`, so this is an
+Outlook interoperability projection rule rather than a FastTransfer grammar
+prohibition. This follows [MS-OXPROPS] section 2.863 and [MS-OXCFXICS] sections
+2.2.1.2.6, 2.2.4.3.16, and 2.2.4.4.
 Included recipient and attachment collections are preceded by
 `MetaTagFXDelProp`, including when empty. For
 `RopSynchronizationConfigure`, `PropertyTags` is an exclusion list unless

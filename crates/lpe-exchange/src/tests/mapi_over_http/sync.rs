@@ -12195,7 +12195,11 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
     let chunks = mapi_fast_transfer_chunks(&response_rops);
     assert_eq!(chunks.len(), 1, "{response_rops:02x?}");
     let transfer = &chunks[0].1;
-    assert!(transfer.starts_with(&PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()));
+    assert!(!contains_bytes(
+        transfer,
+        &PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()
+    ));
+    assert!(contains_bytes(transfer, &PID_TAG_SOURCE_KEY.to_le_bytes()));
     assert!(!contains_bytes(transfer, &0x4010_0003u32.to_le_bytes()));
     assert!(!contains_bytes(transfer, &0x400D_0003u32.to_le_bytes()));
     assert!(!contains_bytes(transfer, b"LPE-MAPI-FASTTRANSFER\0"));

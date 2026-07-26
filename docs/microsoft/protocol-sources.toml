@@ -739,6 +739,7 @@ used_for = [
   "PidTagHasAttachments, PidTagMessageFlags, and PidTagMessageStatus identities and types for special-message FastTransfer projection",
   "PidTagRowid identity and PtypInteger32 type for FastTransfer recipient elements",
   "PidTagViewDescriptorBinary, PidTagViewDescriptorName, PidTagViewDescriptorStrings, and PidTagViewDescriptorVersion identities and types for persisted NamedView FAI projection",
+  "PidTagParentSourceKey object applicability when projecting direct Message FastTransfer content",
   "Verification that Outlook-observed, unpersisted folder tags 0x36E6001F, 0x36DE0003, 0x36E10003, 0x36EB0102, and 0x672D0003 have no MS-OXPROPS definition and must not receive synthetic projections",
 ]
 sections = [
@@ -773,6 +774,7 @@ sections = [
   "2.798 PidTagMessageSize",
   "2.800 PidTagMessageStatus",
   "2.803 PidTagMid",
+  "2.863 PidTagParentSourceKey",
   "2.921 PidTagReplyTime",
   "2.938 PidTagRoamingDatatypes",
   "2.939 PidTagRoamingDictionary",
@@ -1072,6 +1074,7 @@ used_for = [
   "Existing canonical-folder hierarchy uploads, duplicate detection, and conflict responses without advancing CnsetSeen",
   "Upload state ignores MetaTagIdsetGiven and returns only applicable CN sets",
   "RopFastTransferSourceCopyTo and CopyProperties Message-object messageContent root without StartMessage or StartFAIMsg wrappers",
+  "Direct Message CopyTo messageContent omits the folder-only PidTagParentSourceKey property",
   "FAI content synchronization excludes unpersisted folder-local views and Contacts helper messages",
   "Authoritative cached-mode download selection from the client-uploaded IdsetGiven, CnsetSeen, CnsetSeenFAI, and CnsetRead, including valid zero-length state streams",
   "Exact emitted SourceKey GID and REPLGUID identity in final IdsetGiven, including preserved foreign FAI identifiers",
@@ -1095,6 +1098,7 @@ sections = [
   "2.2.1.1.4 MetaTagCnsetRead ICS State Property",
   "2.2.1.2.3 PidTagChangeNumber Property",
   "2.2.1.2.5 PidTagSourceKey Property",
+  "2.2.1.2.6 PidTagParentSourceKey Property",
   "2.2.1.2.7 PidTagChangeKey Property",
   "2.2.1.2.8 PidTagPredecessorChangeList Property",
   "2.2.1.3.1 MetaTagIdsetDeleted Meta-Property",

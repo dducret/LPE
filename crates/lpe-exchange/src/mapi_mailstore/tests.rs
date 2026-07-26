@@ -1051,14 +1051,16 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     assert_tag_sequence(
         &buffer,
         &[
-            PID_TAG_PARENT_SOURCE_KEY,
             PID_TAG_SOURCE_KEY,
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_BODY_W,
             0x7C08_0102,
         ],
     );
-    assert!(buffer.starts_with(&PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()));
+    assert!(buffer.starts_with(&PID_TAG_SOURCE_KEY.to_le_bytes()));
+    assert!(!buffer
+        .windows(4)
+        .any(|window| window == PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()));
     assert!(!buffer
         .windows(4)
         .any(|window| window == FastTransferMarker::StartFAIMsg.as_u32().to_le_bytes()));

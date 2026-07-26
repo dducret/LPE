@@ -177,9 +177,13 @@ async fn mapi_over_http_contact_link_copy_to_uses_message_content_root() {
     // [MS-OXCFXICS] 2.2.4.2 and 2.2.4.4: CopyTo on a Message object
     // produces messageContent, not a message wrapped in StartFAIMsg/EndMessage.
     assert!(
-        transfer.starts_with(&PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()),
+        transfer.starts_with(&PID_TAG_SOURCE_KEY.to_le_bytes()),
         "unexpected messageContent root: {transfer:02x?}"
     );
+    assert!(!contains_bytes(
+        transfer,
+        &PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()
+    ));
     assert!(!contains_bytes(transfer, &0x4010_0003u32.to_le_bytes()));
     assert!(!contains_bytes(transfer, &0x400D_0003u32.to_le_bytes()));
     assert!(contains_bytes(

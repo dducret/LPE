@@ -282,7 +282,7 @@ pub(super) fn special_message_property_is_copy_identity(property_tag: u32) -> bo
 }
 
 pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
-    folder_id: u64,
+    _folder_id: u64,
     object: &SpecialMessageSyncFact,
     send_options: u8,
     selection: SpecialMessageFastTransferSelection,
@@ -291,7 +291,6 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
     let mut buffer = Vec::new();
     write_fast_transfer_special_message_content(
         &mut buffer,
-        folder_id,
         object,
         send_options,
         selection,
@@ -302,7 +301,6 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
 
 fn write_fast_transfer_special_message_content(
     buffer: &mut Vec<u8>,
-    folder_id: u64,
     object: &SpecialMessageSyncFact,
     send_options: u8,
     selection: SpecialMessageFastTransferSelection,
@@ -311,11 +309,10 @@ fn write_fast_transfer_special_message_content(
     let source_key = special_message_source_key(object);
     let change_key = special_message_change_key(object);
     let predecessor_change_list = special_message_predecessor_change_list(object);
-    write_binary_property(
-        buffer,
-        PID_TAG_PARENT_SOURCE_KEY,
-        &source_key_for_store_id(folder_id),
-    );
+    // [MS-OXPROPS] section 2.863 defines PidTagParentSourceKey on Folder
+    // objects. [MS-OXCFXICS] sections 2.2.4.3.16 and 2.2.4.4 permit other
+    // properties but do not require this folder-only value in a direct Message
+    // CopyTo messageContent, so LPE does not synthesize it there.
     write_binary_property(buffer, PID_TAG_SOURCE_KEY, &source_key);
     // [MS-OXCMSG] section 2.2.1.1 requires Access and AccessLevel on every
     // Message object. [MS-OXCPRPT] sections 2.2.1.1 and 2.2.1.2 define their
