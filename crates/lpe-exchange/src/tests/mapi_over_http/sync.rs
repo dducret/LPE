@@ -3149,9 +3149,12 @@ async fn mapi_over_http_common_views_keeps_identical_online_fai_messages_distinc
 async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql(
 ) -> anyhow::Result<()> {
     // [MS-OXCFOLD] section 2.2.1.14 and [MS-OXCFXICS] sections
-    // 3.2.5.9.4.2 and 3.3.5.8.7: Common Views contains FAI messages, and
-    // ImportMessageChange returns an uncommitted Message that Outlook can
-    // classify through later SetProperties before SaveChangesMessage.
+    // 2.2.3.2.4.2.1, 3.1.5.6.2.2, 3.2.5.9.4.2, and 3.3.5.8.7:
+    // Common Views contains FAI messages, and ImportMessageChange returns an
+    // uncommitted Message that Outlook can classify through later SetProperties
+    // before SaveChangesMessage. [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.6,
+    // and 3.2.5.4 keep CreationTime server-owned while preserving the imported
+    // LastModificationTime used for last-writer-wins conflict resolution.
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -3300,6 +3303,8 @@ async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ic
                identity.mapi_object_id, identity.mapi_change_number,
                identity.source_key, identity.change_key,
                identity.predecessor_change_list,
+               ((EXTRACT(EPOCH FROM (config.created_at - TIMESTAMPTZ '1601-01-01 00:00:00+00'))
+                   * 10000000)::bigint) AS creation_time,
                ((EXTRACT(EPOCH FROM (identity.updated_at - TIMESTAMPTZ '1601-01-01 00:00:00+00'))
                    * 10000000)::bigint) AS last_modification_time
         FROM mapi_associated_config_messages config
@@ -3349,6 +3354,11 @@ async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ic
     assert_eq!(
         durable.get::<i64, _>("last_modification_time") as u64,
         imported_last_modification_time as u64
+    );
+    assert!(
+        durable.get::<i64, _>("creation_time") as u64
+            <= durable.get::<i64, _>("last_modification_time") as u64,
+        "server-owned FAI CreationTime must not follow its imported LastModificationTime"
     );
 
     let reloaded = reader.load_mapi_mail_store(account_id, 500).await?;

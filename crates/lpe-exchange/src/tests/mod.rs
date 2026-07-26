@@ -883,6 +883,103 @@ async fn mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects(
 }
 
 #[tokio::test]
+async fn mapi_associated_config_import_keeps_creation_before_lmt_and_stable() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let canonical_id = Uuid::parse_str("5a9ae1b6-952d-42e6-9919-080d54f77ac2").unwrap();
+    let reservation_start = fixture
+        .storage
+        .reserve_mapi_local_replica_ids(fixture.account_id, 0x0100)
+        .await
+        .unwrap();
+    let source_key = crate::mapi::identity::source_key_for_object_id(
+        crate::mapi::identity::mapi_store_id(reservation_start + 0x25),
+    );
+    // Outlook 16.0.20131 FAI import captured on 2026-07-25. CreationTime is
+    // read-only and therefore absent here; ImportMessageChange supplies LMT.
+    // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.6, and 3.2.5.4;
+    // [MS-OXCFXICS] sections 2.2.3.2.4.2.1 and 3.1.5.6.2.2.
+    let first_lmt = 0x01dd_1c6d_3863_cae0;
+    let first_change_key = vec![
+        0xd0, 0x79, 0x1c, 0xae, 0xe9, 0x36, 0x46, 0x42, 0xbd, 0xce, 0xa2, 0xdc, 0x70, 0x9b, 0x3c,
+        0x7c, 0x00, 0x00, 0x04, 0x14,
+    ];
+    let mut first_pcl = vec![first_change_key.len() as u8];
+    first_pcl.extend_from_slice(&first_change_key);
+    let input = crate::store::CommitMapiAssociatedConfigImportInput {
+        config: crate::store::UpsertMapiAssociatedConfigInput {
+            id: Some(canonical_id),
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "IPM.Configuration.MessageListSettings".to_string(),
+            properties_json: serde_json::json!({
+                "0x0e1f000b": {"type": "bool", "value": true},
+                "0x7c060003": {"type": "u32", "value": 0}
+            }),
+        },
+        identity: crate::store::MapiFaiImportedIdentity {
+            source_key,
+            change_key: first_change_key,
+            predecessor_change_list: first_pcl,
+            last_modification_time: first_lmt,
+        },
+        fail_on_conflict: false,
+    };
+
+    let first_commit = fixture
+        .storage
+        .commit_mapi_associated_config_import(input.clone())
+        .await
+        .unwrap();
+    let first_creation = mapi_mailstore::filetime_from_rfc3339_utc(
+        first_commit.config.properties_json["__lpe_created_at"]
+            .as_str()
+            .unwrap(),
+    );
+    assert!(
+        first_creation <= first_commit.identity.last_modification_time,
+        "FAI CreationTime {first_creation:#018x} must not follow LMT {:#018x}",
+        first_commit.identity.last_modification_time
+    );
+    assert_eq!(first_commit.identity.last_modification_time, first_lmt);
+
+    let mut successor = input;
+    successor.config.properties_json["revision"] = serde_json::json!(2);
+    *successor.identity.change_key.last_mut().unwrap() = 0x15;
+    // A canonical PCL has one XID per replica GUID. LocalId 0x0415 subsumes
+    // the preceding 0x0414 version from that same replica.
+    successor.identity.predecessor_change_list = vec![successor.identity.change_key.len() as u8];
+    successor
+        .identity
+        .predecessor_change_list
+        .extend_from_slice(&successor.identity.change_key);
+    successor.identity.last_modification_time = first_lmt + 10_000_000;
+    let second_commit = fixture
+        .storage
+        .commit_mapi_associated_config_import(successor.clone())
+        .await
+        .unwrap();
+    let second_creation = mapi_mailstore::filetime_from_rfc3339_utc(
+        second_commit.config.properties_json["__lpe_created_at"]
+            .as_str()
+            .unwrap(),
+    );
+
+    fixture.cleanup().await.unwrap();
+    assert_eq!(
+        second_creation, first_creation,
+        "subsequent FAI updates must not rewrite CreationTime"
+    );
+    assert_eq!(
+        second_commit.identity.last_modification_time,
+        successor.identity.last_modification_time
+    );
+    assert!(second_creation <= second_commit.identity.last_modification_time);
+}
+
+#[tokio::test]
 async fn mapi_navigation_shortcut_upsert_preserves_distinct_message_rows() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;

@@ -58,9 +58,21 @@ async fn upsert_mapi_associated_config_in_tx(
     let row = sqlx::query(
         r#"
         INSERT INTO mapi_associated_config_messages (
-            tenant_id, id, account_id, folder_id, message_class, subject, properties_json
+            tenant_id, id, account_id, folder_id, message_class, subject, properties_json,
+            created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7,
+            COALESCE((
+                SELECT LEAST(NOW(), identity.updated_at)
+                FROM mapi_object_identities identity
+                WHERE identity.tenant_id = $1
+                  AND identity.account_id = $3
+                  AND identity.object_kind = 'associated_config'
+                  AND identity.canonical_id = $2
+                  AND identity.deleted_at IS NULL
+            ), NOW())
+        )
         ON CONFLICT (tenant_id, id)
         DO UPDATE SET
             folder_id = EXCLUDED.folder_id,

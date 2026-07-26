@@ -408,8 +408,10 @@ non-canonical LPE state.
   keys, and descriptor CLSIDs. Modeled folder families use folder-specific
   identities. Real Calendar configuration FAI rows remain canonical and are
   exposed independently of the folder-local Calendar NamedView. When Outlook
-  imports the Inbox `MessageListSettings` FAI, LPE preserves both its imported
-  SourceKey, ChangeKey, PCL, and MID and its exact client-written content. An
+  imports the Inbox `MessageListSettings` FAI, LPE preserves its imported
+  SourceKey, LastModificationTime, ChangeKey, PCL, and MID and its exact
+  client-written content. The initial server-owned CreationTime is stable and
+  no later than the imported LastModificationTime; later imports retain it. An
   explicit zero `PidTagRoamingDatatypes` remains zero; absent roaming streams,
   undocumented `0x0E0B0102`, and named content metadata remain absent from the
   saved row, FastTransfer, and direct-property projections. Reconnect and
@@ -424,13 +426,15 @@ non-canonical LPE state.
   absent as an `ecNotFound` cell in a `FlaggedPropertyRow`, with
   `ReturnValue=Success` following the
   response-specific `[MS-OXCROPS]` section 2.2.8.3.2. The property-row
-  encoding follows `[MS-OXCPRPT]` sections 2.2.2, 2.2.2.2, 3.2.5.1, and
-  3.2.5.4, `[MS-OXCDATA]` sections 2.4.2, 2.8.1, 2.8.1.2, and 2.11.5,
+  encoding follows `[MS-OXCPRPT]` sections 2.2.1.4, 2.2.1.6, 2.2.2,
+  2.2.2.2, 3.2.5.1, and 3.2.5.4, `[MS-OXCDATA]` sections 2.4.2, 2.8.1,
+  2.8.1.2, and 2.11.5,
   `[MS-OXCMSG]` sections 2.2.1.6 and 3.2.5.3, `[MS-OXOCFG]` sections 2.2.2.1 through
   2.2.2.3, 2.2.5.1, and 2.2.5.2, `[MS-OXPROPS]` sections 2.938 through 2.940,
   and `[MS-OXCFXICS]` sections
   2.2.3.1.1.1.1, 2.2.3.2.4.2.1, 2.2.4.3.16, 2.2.4.4, 3.1.5.3,
-  3.2.5.8.1.1, 3.2.5.10, and 3.3.5.8.7, and `[MS-OXBBODY]` section 2.1.3.1.
+  3.1.5.6.2.2, 3.2.5.8.1.1, 3.2.5.9.4.2, 3.2.5.10, and 3.3.5.8.7,
+  and `[MS-OXBBODY]` section 2.1.3.1.
   `[MS-OXCDATA]` section 2.4.3 instead illustrates this partial-property case
   with `ErrorsReturned` (`0x00040380`). No product note resolves the conflict,
   so LPE does not generalize that warning without an Exchange reference trace.

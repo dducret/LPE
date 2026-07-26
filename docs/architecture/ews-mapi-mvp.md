@@ -248,6 +248,18 @@ and 3.2.5.4; [MS-OXCMSG] sections 1.3.2, 3.2.5.2, and 3.2.5.3; and
 [MS-OXCFXICS] sections 2.2.3.2.4.2.1, 3.2.5.9.4.2, 3.3.4.3.3.2.2.1,
 3.3.5.8.7, and 2.2.4.3.16.
 
+### Imported configuration FAI timestamps
+
+An imported configuration FAI preserves the required
+`PidTagLastModificationTime` from its `ImportMessageChange` identity header
+alongside its MID, SourceKey, ChangeKey, and PCL. Its initial
+`PidTagCreationTime` is a stable server-owned value no later than that imported
+last-modification time, and later imports do not rewrite it. Client attempts to
+set CreationTime or LastModifierName while populating the Message remain
+ignored. This follows [MS-OXCMSG] section 1.3.2; [MS-OXCPRPT] sections 2.2.1.4,
+2.2.1.6, and 3.2.5.4; and [MS-OXCFXICS] sections 2.2.3.2.4.2.1, 3.1.5.3,
+3.1.5.6.2.2, 3.2.5.9.4.2, and 3.3.5.8.7.
+
 ## Delete, Move, Tombstone, And Recovery Matrix
 
 | Surface | LPE behavior | Cross-protocol outcome |
