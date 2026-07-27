@@ -758,7 +758,7 @@ pub(in crate::mapi) fn write_logon_property_row(
         return;
     }
 
-    write_get_properties_specific_flagged_row_header(response, true);
+    response.push(1);
     for column in columns {
         match logon_property_value(principal, *column) {
             Some(value) => {

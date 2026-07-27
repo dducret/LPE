@@ -1663,10 +1663,7 @@ async fn mapi_over_http_get_properties_specific_allows_known_unsupported_types()
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x03, 0x02, 0, 0, 0, 0]));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x07, 0x02, 0x80, 0x03, 0x04, 0x00]
-    ));
+    assert!(contains_bytes(&response_rops, &[0x07, 0x02, 0, 0, 0, 0]));
     assert!(!contains_bytes(
         &response_rops,
         &[0x07, 0x02, 0x02, 0x01, 0x04, 0x80]
@@ -1951,7 +1948,7 @@ async fn mapi_over_http_microsoft_oxcdata_property_row_example_streams_oversized
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    let marker = [0x07, 0x02, 0x80, 0x03, 0x04, 0x00, 1];
+    let marker = [0x07, 0x02, 0, 0, 0, 0, 1];
     let mut offset = response_rops
         .windows(marker.len())
         .position(|window| window == marker)
@@ -3195,7 +3192,7 @@ async fn mapi_over_http_microsoft_attach_text_file_stream_saves_canonical_attach
     assert!(
         contains_bytes(
             &response_rops,
-            &[0x07, 0x03, 0x80, 0x03, 0x04, 0x00, 1, 0x0A, 0x0F, 0x01, 0x04, 0x80,]
+            &[0x07, 0x03, 0, 0, 0, 0, 1, 0x0A, 0x0F, 0x01, 0x04, 0x80]
         ),
         "response_rops={response_rops:02x?}"
     );

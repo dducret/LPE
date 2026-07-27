@@ -301,14 +301,24 @@ before it is advertised.
   `RopFastTransferSourceCopyTo` response decodes completely and preserves the
   imported SearchKey. The following `RopGetPropertiesSpecific` requests
   ChangeKey, PCL, LastModificationTime, private tag `0x0E0B0102`, and
-  MessageClass. LPE correctly returns `ecNotFound` for only the absent private
-  tag, but incorrectly returns overall `Success`. The same response shape is
-  present in the fifteen correlated error-bearing captures. `[MS-OXCDATA]`
-  section 2.4.3 explicitly requires `ErrorsReturned` (`0x00040380`) for this
-  partially successful ROP while preserving the complete `FlaggedPropertyRow`;
-  the warning has non-failure severity. This resolves the earlier ambiguity
-  with the pure-success layout in `[MS-OXCROPS]` section 2.2.8.3.2 without
-  fabricating `0x0E0B0102`.
+  MessageClass; the absent private tag remains an `ecNotFound` cell.
+- The attempted `ErrorsReturned` interpretation was rejected by the
+  `202607262244` real-client run. At `20:43:57.528Z`, the first broad Inbox
+  `RopGetPropertiesSpecific` returned a 1,436-byte response with
+  `ReturnValue=0x00040380` and complete `RowData`; Windows recorded an
+  `EMSMDB32.DLL` access violation 70 ms later. The equivalent
+  `202607262126` response is byte-for-byte identical apart from the
+  `ReturnValue` and expected handle-table value and did not crash Outlook.
+  WER also classified the incident as `OFFICE_MODULE_VERSION_MISMATCH`
+  (`OUTLOOK.EXE` 16.0.20131.20154 versus `EMSMDB32.DLL`
+  16.0.20131.20044), so the warning is the first changed wire input and a
+  trigger candidate, not a proven native root cause without a dump.
+  `[MS-OXCROPS]` sections 2.2.8.3.2 and 2.2.8.3.3 define success with
+  `ReturnValue=0` plus `RowData`, or a nonzero failure without `RowData`.
+  `[MS-OXCDATA]` section 2.4.3 gives a conflicting generic warning example.
+  Until an Exchange reference capture resolves that conflict, LPE follows the
+  ROP-specific wire contract and retains per-property errors in the
+  `FlaggedPropertyRow` without changing the overall success value.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
@@ -325,14 +335,6 @@ in `mapi/sync/associated_config.rs`. Keep further behavior in those focused
 helpers and the public entry points as thin wiring. Verify changes with the
 special-message unit tests, the realistic `MessageListSettings`
 import/reconnect regression, and `cargo test -p lpe-exchange`.
-
-`mapi/dispatch/diagnostics.rs` also exceeds the production source-size
-threshold. This correction adds only the bounded `ErrorsReturned` payload
-classification needed to keep diagnostics aligned with the wire. Before adding
-further response-framing behavior, move `response_rop_frame_end`,
-`response_rop_fixed_frame_end`, and the next-response validation helpers into
-`mapi/dispatch/diagnostics/framing.rs`; keep summary construction and public
-diagnostic wiring in `diagnostics.rs`.
 
 ### Table Projection Contract
 
@@ -531,9 +533,10 @@ non-canonical LPE state.
   present zero-length value. A direct
   `RopGetPropertiesSpecific` returns a requested property determined to be
   absent as an `ecNotFound` cell in a `FlaggedPropertyRow`, with
-  `ReturnValue=ErrorsReturned` (`0x00040380`) following the explicit partial
-  property example in `[MS-OXCDATA]` section 2.4.3. The warning retains the
-  success-response `RowData` shape from `[MS-OXCROPS]` section 2.2.8.3.2. The
+  `ReturnValue=Success` following the response-specific `[MS-OXCROPS]` section
+  2.2.8.3.2. `[MS-OXCDATA]` section 2.4.3 instead gives a generic
+  `ErrorsReturned` example; the `202607262244` run places that nonzero value
+  with `RowData` immediately before the correlated Outlook crash. The
   property-row encoding follows `[MS-OXCPRPT]` sections 2.2.1.4, 2.2.1.6, 2.2.2,
   2.2.2.2, 3.2.5.1, and 3.2.5.4, `[MS-OXCDATA]` sections 2.4.2, 2.8.1,
   2.8.1.2, and 2.11.5,

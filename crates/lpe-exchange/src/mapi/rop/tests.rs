@@ -956,7 +956,7 @@ fn get_properties_specific_preserves_values_and_flags_absent_message_deadlines()
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x03, 0x80, 0x03, 0x04, 0x00, 0x01]);
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 0x01]);
     assert_eq!(response[7], 0);
     assert_eq!(&response[12..15], &[0x1F, 0x00, 0]);
     let subject = utf16z_bytes("Hello");
@@ -1177,7 +1177,7 @@ fn get_properties_specific_returns_not_enough_memory_for_size_limited_value() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..6], &[0x07, 0x03, 0x80, 0x03, 0x04, 0x00]);
+    assert_eq!(&response[..6], &[0x07, 0x03, 0, 0, 0, 0]);
     assert_eq!(response[6], 0x01);
     assert_eq!(response[7], 0x0A);
     assert_eq!(
@@ -1226,7 +1226,7 @@ fn get_properties_specific_size_limit_preserves_unspecified_property_type() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..6], &[0x07, 0x03, 0x80, 0x03, 0x04, 0x00]);
+    assert_eq!(&response[..6], &[0x07, 0x03, 0, 0, 0, 0]);
     assert_eq!(response[6], 0x01);
     assert_eq!(&response[7..9], &0x001Fu16.to_le_bytes());
     assert_eq!(response[9], 0x0A);
@@ -1964,10 +1964,7 @@ fn associated_config_absent_optional_getprops_returns_not_found() {
     );
 
     assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
-    assert_eq!(
-        u32::from_le_bytes(response[2..6].try_into().unwrap()),
-        ROP_WARNING_ERRORS_RETURNED
-    );
+    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
     assert_eq!(response[6], 1);
     assert_eq!(response[7], 0x0A);
     assert_eq!(
@@ -2030,10 +2027,7 @@ fn persisted_named_view_getprops_does_not_project_missing_0e0b() {
     );
 
     assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
-    assert_eq!(
-        u32::from_le_bytes(response[2..6].try_into().unwrap()),
-        ROP_WARNING_ERRORS_RETURNED
-    );
+    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
     assert_eq!(response[6], 1);
     assert_eq!(response[7], 0x0A);
     assert_eq!(
@@ -2096,10 +2090,7 @@ fn persisted_message_list_settings_getprops_does_not_project_missing_0e0b() {
     );
 
     assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
-    assert_eq!(
-        u32::from_le_bytes(response[2..6].try_into().unwrap()),
-        ROP_WARNING_ERRORS_RETURNED
-    );
+    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
     assert_eq!(response[6], 1);
     assert_eq!(response[7], 0x0A);
     assert_eq!(
@@ -2811,7 +2802,7 @@ fn microsoft_oxcdata_property_row_example_streams_oversized_body() {
     expected_row.push(0x0A);
     expected_row.extend_from_slice(&0x8007_000E_u32.to_le_bytes());
 
-    assert_eq!(&response[..7], &[0x07, 0x02, 0x80, 0x03, 0x04, 0x00, 1]);
+    assert_eq!(&response[..7], &[0x07, 0x02, 0, 0, 0, 0, 1]);
     assert_eq!(&response[7..], expected_row.as_slice());
 }
 
@@ -3134,7 +3125,7 @@ fn saved_umolk_associated_config_getprops_reports_missing_0e0b_not_found() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x03, 0x80, 0x03, 0x04, 0x00, 1]);
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 1]);
     let mut cursor = Cursor::new(&response[7..]);
     assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
@@ -3208,7 +3199,7 @@ fn umolk_associated_config_property_burst_reports_absent_values_not_found() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x03, 0x80, 0x03, 0x04, 0x00, 1]);
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 1]);
     let mut cursor = Cursor::new(&response[7..]);
     assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
@@ -3287,7 +3278,7 @@ fn umolk_trace_property_burst_does_not_fabricate_optional_standard_values() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x03, 0x80, 0x03, 0x04, 0x00, 1]);
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 1]);
     let mut cursor = Cursor::new(&response[7..]);
     for tag in absent_tags {
         assert_eq!(cursor.read_u8().unwrap(), 0x0A, "tag {tag:#010x}");
@@ -3365,7 +3356,7 @@ fn contacts_helper_associated_getprops_projects_empty_modeled_values() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x03, 0x80, 0x03, 0x04, 0x00, 1]);
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 1]);
     let mut cursor = Cursor::new(&response[7..]);
     assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(
@@ -3455,7 +3446,7 @@ fn property_row_kind_reports_fallback_defaults_as_flagged() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x03, 0x80, 0x03, 0x04, 0x00, 1]);
+    assert_eq!(&response[..7], &[0x07, 0x03, 0, 0, 0, 0, 1]);
     assert_eq!(response[7], 0x0A);
     assert_eq!(
         u32::from_le_bytes(response[8..12].try_into().unwrap()),
@@ -3466,7 +3457,11 @@ fn property_row_kind_reports_fallback_defaults_as_flagged() {
 #[test]
 fn inbox_getprops_captured_unpersisted_folder_values_are_absent() {
     // Outlook 16 request captured at 202607232116,
-    // {2CBC2463-546A-46DE-92ED-E4BE70830DA8}:14.
+    // {2CBC2463-546A-46DE-92ED-E4BE70830DA8}:14, and replayed at
+    // 202607262244, {003CDD69-01C0-415B-8EE1-4D2493F0587E}:16. Returning
+    // ErrorsReturned with RowData for the latter request immediately preceded
+    // an EMSMDB32 access violation. [MS-OXCROPS] sections 2.2.8.3.2 and
+    // 2.2.8.3.3 require Success with RowData or a failure without RowData.
     const COLUMNS: [u32; 32] = [
         0x6749_0014,
         0x0FF4_0003,
@@ -3543,7 +3538,7 @@ fn inbox_getprops_captured_unpersisted_folder_values_are_absent() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x01, 0x80, 0x03, 0x04, 0x00, 1]);
+    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
     let mut cursor = Cursor::new(&response[7..]);
     let mut property_errors = HashMap::new();
     for property_tag in COLUMNS {
@@ -3614,7 +3609,7 @@ fn newly_created_associated_message_getprops_uses_new_message_contract() {
     // client-owned roaming dictionary remains absent until the client sets it.
     assert_eq!(
         &response[..12],
-        &[0x07, 0x02, 0x80, 0x03, 0x04, 0x00, 1, 0x0A, 0x0F, 0x01, 0x04, 0x80,]
+        &[0x07, 0x02, 0, 0, 0, 0, 1, 0x0A, 0x0F, 0x01, 0x04, 0x80]
     );
     assert_eq!(response[12], 0);
     assert_eq!(u16::from_le_bytes(response[13..15].try_into().unwrap()), 3);
@@ -3718,7 +3713,7 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
             &MapiMailStoreSnapshot::empty(),
         );
 
-        assert_eq!(&response[..7], &[0x07, 0x01, 0x80, 0x03, 0x04, 0x00, 1]);
+        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
         assert_eq!(&response[7..], &[0x0a, 0x0f, 0x01, 0x04, 0x80]);
     }
 
@@ -3756,7 +3751,7 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
             &MapiMailStoreSnapshot::empty(),
         );
 
-        assert_eq!(&response[..7], &[0x07, 0x01, 0x80, 0x03, 0x04, 0x00, 1]);
+        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
         assert_eq!(response[7], 0x0A);
         assert_eq!(
             u32::from_le_bytes(response[8..12].try_into().unwrap()),
@@ -3786,7 +3781,7 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
         &MapiMailStoreSnapshot::empty(),
     );
 
-    assert_eq!(&response[..7], &[0x07, 0x01, 0x80, 0x03, 0x04, 0x00, 1]);
+    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
     assert_eq!(response[7], 0x0A);
     assert_eq!(
         u32::from_le_bytes(response[8..12].try_into().unwrap()),

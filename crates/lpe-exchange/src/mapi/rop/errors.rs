@@ -2,7 +2,6 @@ use super::*;
 
 pub(in crate::mapi) const ROP_ERROR_NOT_SUPPORTED: u32 = MapiError::NotSupported.as_u32();
 pub(in crate::mapi) const ROP_ERROR_NOT_FOUND: u32 = MapiError::NotFound.as_u32();
-pub(in crate::mapi) const ROP_WARNING_ERRORS_RETURNED: u32 = 0x0004_0380;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct RopResponseError {

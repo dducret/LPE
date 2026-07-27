@@ -2410,7 +2410,7 @@ async fn mapi_over_http_calendar_large_getprops_uses_flagged_html_and_open_strea
     assert_eq!(response_rops[0], 0x07, "expected GetPropertiesSpecific");
     assert_eq!(
         u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
-        0x0004_0380
+        0
     );
     assert_eq!(response_rops[6], 0x01);
     let html_value_offset = 7 + OUTLOOK_HTML_INDEX * 5;

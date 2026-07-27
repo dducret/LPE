@@ -1,6 +1,4 @@
-use super::{
-    parse_tagged_property, Cursor, ModifyRulesRow, RopRequest, ROP_WARNING_ERRORS_RETURNED,
-};
+use super::{parse_tagged_property, Cursor, ModifyRulesRow, RopRequest};
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -36,18 +34,6 @@ impl RopRequest {
         let count = self.modify_permissions_count().unwrap_or(0) as usize;
         parse_modify_rows(self.payload.get(3..).unwrap_or_default(), count)
     }
-}
-
-pub(in crate::mapi) fn write_get_properties_specific_flagged_row_header(
-    response: &mut Vec<u8>,
-    has_property_errors: bool,
-) {
-    // [MS-OXCDATA] section 2.4.3: a partially successful
-    // RopGetPropertiesSpecific keeps its RowData and returns ErrorsReturned.
-    if has_property_errors {
-        response[2..6].copy_from_slice(&ROP_WARNING_ERRORS_RETURNED.to_le_bytes());
-    }
-    response.push(1);
 }
 
 fn parse_modify_rows(payload: &[u8], count: usize) -> Result<Vec<ModifyRulesRow>> {
