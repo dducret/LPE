@@ -3152,9 +3152,12 @@ async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ic
     // 2.2.3.2.4.2.1, 3.1.5.6.2.2, 3.2.5.9.4.2, and 3.3.5.8.7:
     // Common Views contains FAI messages, and ImportMessageChange returns an
     // uncommitted Message that Outlook can classify through later SetProperties
-    // before SaveChangesMessage. [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.6,
-    // and 3.2.5.4 keep CreationTime server-owned while preserving the imported
-    // LastModificationTime used for last-writer-wins conflict resolution.
+    // before SaveChangesMessage. The Outlook 16.0.20131 trace captured at
+    // 2026-07-27 16:10 sets CreationTime there, separately from the imported
+    // LastModificationTime. [MS-OXCMSG] section 2.2 product note <1> documents
+    // that Exchange 2010 through 2019 change CreationTime despite its general
+    // read-only classification; [MS-OXCFXICS] sections 2.2.3.2.4.2.1 and
+    // 3.1.5.6.2.2 keep LastModificationTime as the imported conflict timestamp.
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -3173,7 +3176,8 @@ async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ic
     ];
     let mut imported_pcl = vec![imported_change_key.len() as u8];
     imported_pcl.extend_from_slice(&imported_change_key);
-    let imported_last_modification_time = test_filetime("2026-07-19", "14:00");
+    let submitted_creation_time = 134_296_349_067_760_000_i64;
+    let imported_last_modification_time = 134_296_349_073_880_000_i64;
     let baseline_cursor = reader
         .fetch_mapi_notification_cursor(account_id)
         .await?
@@ -3278,10 +3282,11 @@ async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ic
         PID_TAG_NORMALIZED_SUBJECT_W,
         "Durable Common Views settings",
     );
+    append_mapi_i64_property(&mut config_values, 0x3007_0040, submitted_creation_time);
     append_mapi_i32_property(&mut config_values, 0x7C06_0003, 4);
     append_mapi_binary_property(&mut config_values, 0x7C07_0102, b"<xml/>");
     let mut save_rops = Vec::new();
-    append_rop_set_properties(&mut save_rops, 1, 4, &config_values);
+    append_rop_set_properties(&mut save_rops, 1, 5, &config_values);
     append_rop_save_changes_message_with_flags(&mut save_rops, 0, 1, 0x08);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
@@ -3326,6 +3331,10 @@ async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ic
     .await?;
     let canonical_id = durable.get::<Uuid, _>("id");
     let content_properties = durable.get::<serde_json::Value, _>("properties_json");
+    assert!(
+        content_properties.get("0x30070040").is_none(),
+        "PidTagCreationTime must use the canonical creation column, not content JSON"
+    );
     for identity_tag in [
         "0x674a0014",
         "0x65e00102",
@@ -3355,10 +3364,10 @@ async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ic
         durable.get::<i64, _>("last_modification_time") as u64,
         imported_last_modification_time as u64
     );
-    assert!(
-        durable.get::<i64, _>("creation_time") as u64
-            <= durable.get::<i64, _>("last_modification_time") as u64,
-        "server-owned FAI CreationTime must not follow its imported LastModificationTime"
+    assert_eq!(
+        durable.get::<i64, _>("creation_time"),
+        submitted_creation_time,
+        "the FAI CreationTime submitted by Outlook must not be replaced with its imported LastModificationTime"
     );
 
     let reloaded = reader.load_mapi_mail_store(account_id, 500).await?;
@@ -3375,6 +3384,15 @@ async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ic
     assert_eq!(table_rows, sync_rows);
     assert_eq!(table_rows.len(), 1);
     assert_eq!(table_rows[0].id, message_id);
+    assert_eq!(
+        crate::mapi_mailstore::filetime_from_rfc3339_utc(
+            table_rows[0].properties_json["__lpe_created_at"]
+                .as_str()
+                .expect("reloaded FAI must expose its canonical CreationTime")
+        ),
+        submitted_creation_time as u64,
+        "FAI CreationTime must survive a PostgreSQL snapshot reload"
+    );
 
     let sync_response = content_sync_response_rops_for_store_with_flags(
         reader.clone(),
@@ -10364,8 +10382,7 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     );
     row_offset += 8;
     let last_modifier = read_rop_utf16z(&response_rops, &mut row_offset).unwrap();
-    assert_eq!(creation_time, 0);
-    assert_ne!(creation_time, SUBMITTED_CREATION_TIME as u64);
+    assert_eq!(creation_time, SUBMITTED_CREATION_TIME as u64);
     assert_eq!(last_modifier, account.display_name);
     assert_ne!(last_modifier, SUBMITTED_LAST_MODIFIER);
     assert!(imported_emails.lock().unwrap().is_empty());
@@ -16861,4 +16878,195 @@ async fn mapi_over_http_unknown_fasttransfer_marker_terminates_current_buffer() 
         &response_rops,
         &[0x7B, 0x00, 0, 0, 0, 0, 0, 0, 0, 0]
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_inbox_message_list_settings_import_preserves_creation_time_after_postgresql_reconnect(
+) -> anyhow::Result<()> {
+    // Outlook 16.0.20131 sent these distinct values during the 202607271610
+    // Inbox FAI import. [MS-OXCFXICS] section 2.2.3.2.4.2.1 places LMT in
+    // ImportMessageChange; [MS-OXCMSG] section 2.2 product note <1> states that
+    // Exchange changes CreationTime. This regression requires the exact initial
+    // value observed on the returned Message to remain stable after Save.
+    const CREATION_TIME: i64 = 134_296_349_067_760_000;
+    const LAST_MODIFICATION_TIME: i64 = 134_296_349_073_880_000;
+
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await?;
+
+    let reserved_start = storage
+        .reserve_mapi_local_replica_ids(fixture.account_id, 0x100)
+        .await?;
+    let message_id = crate::mapi::identity::mapi_store_id(reserved_start + 0x25);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let imported_change_key = vec![
+        0x7B, 0xA0, 0x82, 0x5A, 0xAC, 0x2C, 0x83, 0x41, 0xB7, 0xF3, 0x5A, 0x2B, 0x64, 0x05, 0xDD,
+        0x07, 0x00, 0x00, 0x04, 0x14,
+    ];
+    let mut imported_pcl = vec![imported_change_key.len() as u8];
+    imported_pcl.extend_from_slice(&imported_change_key);
+
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let mut identity_values = Vec::new();
+    append_mapi_binary_property(&mut identity_values, PID_TAG_SOURCE_KEY, &source_key);
+    append_mapi_i64_property(
+        &mut identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        LAST_MODIFICATION_TIME,
+    );
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_CHANGE_KEY,
+        &imported_change_key,
+    );
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &imported_pcl,
+    );
+
+    let mut message_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut message_values,
+        PID_TAG_MESSAGE_CLASS_W,
+        "IPM.Configuration.MessageListSettings",
+    );
+    append_mapi_utf16_property(
+        &mut message_values,
+        PID_TAG_SUBJECT_W,
+        "IPM.Configuration.MessageListSettings",
+    );
+    append_mapi_utf16_property(
+        &mut message_values,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "IPM.Configuration.MessageListSettings",
+    );
+    append_mapi_i64_property(&mut message_values, 0x3007_0040, CREATION_TIME);
+
+    let mut import_rops = Vec::new();
+    append_rop_open_folder(
+        &mut import_rops,
+        0,
+        1,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    );
+    import_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+        0x72, 0x00, 0x02, 0x03, 0x10, // ImportMessageChange, associated FAI.
+    ]);
+    import_rops.extend_from_slice(&4u16.to_le_bytes());
+    import_rops.extend_from_slice(&identity_values);
+    append_rop_set_properties(&mut import_rops, 3, 4, &message_values);
+    append_rop_save_changes_message_with_flags(&mut import_rops, 3, 3, 0x08);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &import_rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0A, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x03, 0, 0, 0, 0]));
+    drop(service);
+
+    let snapshot = storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await?;
+    let reloaded_message = snapshot
+        .associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
+        .into_iter()
+        .find(|message| {
+            message.id == message_id
+                && message.message_class == "IPM.Configuration.MessageListSettings"
+        })
+        .expect("saved MessageListSettings FAI in reloaded PostgreSQL snapshot");
+
+    let service = ExchangeService::new(storage.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await?;
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect))?,
+    );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await?;
+    assert_eq!(logon.status(), StatusCode::OK);
+    renew_mapi_request_id(&mut execute_headers);
+
+    let mut get_rops = Vec::new();
+    append_rop_open_folder(&mut get_rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_open_message(
+        &mut get_rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        reloaded_message.id,
+    );
+    append_rop_get_properties_specific(
+        &mut get_rops,
+        2,
+        &[0x3007_0040, PID_TAG_LAST_MODIFICATION_TIME],
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&get_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    let row_offset = mapi_get_properties_specific_standard_row_offset(&response_rops, 2)
+        .expect("reconnected MessageListSettings GetPropertiesSpecific response");
+    assert_eq!(response_rops[row_offset], 0);
+    let creation_time = u64::from_le_bytes(
+        response_rops[row_offset + 1..row_offset + 9]
+            .try_into()
+            .unwrap(),
+    );
+    let last_modification_time = u64::from_le_bytes(
+        response_rops[row_offset + 9..row_offset + 17]
+            .try_into()
+            .unwrap(),
+    );
+    assert_eq!(creation_time, CREATION_TIME as u64);
+    assert_eq!(last_modification_time, LAST_MODIFICATION_TIME as u64);
+    assert_ne!(creation_time, last_modification_time);
+
+    fixture.cleanup().await?;
+    Ok(())
 }

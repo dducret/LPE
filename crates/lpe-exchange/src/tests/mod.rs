@@ -883,7 +883,7 @@ async fn mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects(
 }
 
 #[tokio::test]
-async fn mapi_associated_config_import_keeps_creation_before_lmt_and_stable() {
+async fn mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;
     };
@@ -896,9 +896,9 @@ async fn mapi_associated_config_import_keeps_creation_before_lmt_and_stable() {
     let source_key = crate::mapi::identity::source_key_for_object_id(
         crate::mapi::identity::mapi_store_id(reservation_start + 0x25),
     );
-    // Outlook 16.0.20131 FAI import captured on 2026-07-25. CreationTime is
-    // read-only and therefore absent here; ImportMessageChange supplies LMT.
-    // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.6, and 3.2.5.4;
+    // When an FAI import omits CreationTime, LPE assigns the server creation
+    // time independently of the replicated LastModificationTime.
+    // [MS-OXCPRPT] sections 2.2.1.4 and 2.2.1.6;
     // [MS-OXCFXICS] sections 2.2.3.2.4.2.1 and 3.1.5.6.2.2.
     let first_lmt = 0x01dd_1c6d_3863_cae0;
     let first_change_key = vec![
@@ -925,24 +925,41 @@ async fn mapi_associated_config_import_keeps_creation_before_lmt_and_stable() {
             predecessor_change_list: first_pcl,
             last_modification_time: first_lmt,
         },
+        creation_time: None,
         fail_on_conflict: false,
     };
 
+    let server_time_before = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT (EXTRACT(
+                    EPOCH FROM (NOW() - TIMESTAMPTZ '1601-01-01 00:00:00+00')
+                ) * 10000000)::bigint
+        "#,
+    )
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap() as u64;
     let first_commit = fixture
         .storage
         .commit_mapi_associated_config_import(input.clone())
         .await
         .unwrap();
+    let server_time_after = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT (EXTRACT(
+                    EPOCH FROM (NOW() - TIMESTAMPTZ '1601-01-01 00:00:00+00')
+                ) * 10000000)::bigint
+        "#,
+    )
+    .fetch_one(fixture.storage.pool())
+    .await
+    .unwrap() as u64;
     let first_creation = mapi_mailstore::filetime_from_rfc3339_utc(
         first_commit.config.properties_json["__lpe_created_at"]
             .as_str()
             .unwrap(),
     );
-    assert!(
-        first_creation <= first_commit.identity.last_modification_time,
-        "FAI CreationTime {first_creation:#018x} must not follow LMT {:#018x}",
-        first_commit.identity.last_modification_time
-    );
+    assert!((server_time_before..=server_time_after).contains(&first_creation));
     assert_eq!(first_commit.identity.last_modification_time, first_lmt);
 
     let mut successor = input;
@@ -994,7 +1011,6 @@ async fn mapi_associated_config_import_keeps_creation_before_lmt_and_stable() {
         second_commit.identity.last_modification_time,
         successor.identity.last_modification_time
     );
-    assert!(second_creation <= second_commit.identity.last_modification_time);
 }
 
 #[tokio::test]

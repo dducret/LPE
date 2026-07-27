@@ -73,11 +73,10 @@ pub(super) fn set_associated_config_properties(
     values: Vec<(u32, MapiValue)>,
 ) -> Result<crate::mapi_store::MapiAssociatedConfigMessage> {
     let mut properties = associated_config_mutation_base_properties(existing);
-    // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: Outlook can
-    // submit these properties during an ICS FAI upload, but the server must
-    // not retain client-selected CreationTime or LastModifierName values.
-    // The initial import path can accept SearchKey per [MS-OXCMSG] section
-    // 2.2 product note <1>; subsequent changes cannot replace that identity.
+    // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: these values are
+    // read-only on an already committed FAI. The initial import path accepts
+    // CreationTime and SearchKey per [MS-OXCMSG] section 2.2 product note <1>;
+    // subsequent changes cannot replace either canonical value.
     let values = values
         .into_iter()
         .filter(|(tag, _)| {
@@ -209,6 +208,18 @@ where
     let imported_identity = imported_message_id
         .map(|message_id| imported_fai_identity(properties, message_id))
         .transpose()?;
+    let imported_creation_time = match (
+        imported_identity.as_ref(),
+        properties.get(&PID_TAG_CREATION_TIME),
+    ) {
+        (Some(_), Some(value)) => Some(
+            value
+                .as_i64()
+                .and_then(|value| u64::try_from(value).ok())
+                .ok_or_else(|| anyhow!("invalid imported FAI creation time"))?,
+        ),
+        _ => None,
+    };
     let (message_class, subject) = associated_config_class_and_subject(properties);
     let imported_canonical_id = imported_identity
         .as_ref()
@@ -241,6 +252,7 @@ where
             .commit_mapi_associated_config_import(CommitMapiAssociatedConfigImportInput {
                 config: input,
                 identity: imported_identity,
+                creation_time: imported_creation_time,
                 fail_on_conflict,
             })
             .await?;

@@ -205,6 +205,7 @@ pub(crate) struct UpsertMapiAssociatedConfigInput {
 pub(crate) struct CommitMapiAssociatedConfigImportInput {
     pub(crate) config: UpsertMapiAssociatedConfigInput,
     pub(crate) identity: MapiFaiImportedIdentity,
+    pub(crate) creation_time: Option<u64>,
     pub(crate) fail_on_conflict: bool,
 }
 

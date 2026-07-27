@@ -5207,11 +5207,12 @@ async fn mapi_over_http_existing_associated_config_save_is_atomic_in_postgresql(
 #[tokio::test]
 async fn mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql(
 ) -> anyhow::Result<()> {
-    // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: CreationTime
-    // and LastModifierName are server-owned. Outlook may include them during
-    // an ICS FAI upload, but they must not become client-controlled content.
-    // [MS-OXCFXICS] section 2.2.4.3.16 then requires the reloaded Message
-    // CopyTo projection to expose the server values, not the submitted ones.
+    // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: CreationTime and
+    // LastModifierName are read-only on this already committed FAI. The
+    // [MS-OXCMSG] section 2.2 product exception for initial imports does not
+    // let a later mutation replace canonical creation or modifier state.
+    // [MS-OXCFXICS] section 2.2.4.3.16 therefore requires the reloaded Message
+    // CopyTo projection to expose the canonical values, not these submissions.
     const PID_TAG_CREATION_TIME: u32 = 0x3007_0040;
     const PID_TAG_LAST_MODIFIER_NAME_W: u32 = 0x3FFA_001F;
     const SUBMITTED_CREATION_TIME: u64 = 0x01D9_8A51_7A20_0000;

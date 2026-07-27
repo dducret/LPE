@@ -100,6 +100,6 @@ async fn commit_mapi_associated_config_create_in_tx(
     // section 2.2.6.3: SaveChangesMessage publishes the FAI content and its
     // Message identity together. A content or journal failure rolls the
     // identity insertion back with the transaction.
-    let config = upsert_mapi_associated_config_in_tx(tx, tenant_id, input).await?;
+    let config = upsert_mapi_associated_config_in_tx(tx, tenant_id, input, None).await?;
     Ok(MapiAssociatedConfigCommit { config, identity })
 }

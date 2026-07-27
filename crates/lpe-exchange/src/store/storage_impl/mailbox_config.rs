@@ -343,7 +343,8 @@ macro_rules! store_impl_mailbox_config {
             let mut tx = self.pool().begin().await?;
             let mut input = input;
             input.id = Some(input.id.unwrap_or_else(Uuid::new_v4));
-            let saved = upsert_mapi_associated_config_in_tx(&mut tx, tenant_id, input).await?;
+            let saved =
+                upsert_mapi_associated_config_in_tx(&mut tx, tenant_id, input, None).await?;
             tx.commit().await?;
             Ok(saved)
         })
@@ -370,6 +371,7 @@ macro_rules! store_impl_mailbox_config {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, input.config.account_id).await?;
             let mut tx = self.pool().begin().await?;
+            let creation_time = input.creation_time;
             let identity_commit = commit_mapi_imported_fai_identity_in_tx(
                 &mut tx,
                 tenant_id,
@@ -384,7 +386,13 @@ macro_rules! store_impl_mailbox_config {
             let mut config_input = input.config;
             config_input.id = Some(identity_commit.canonical_id);
             let config = if identity_commit.apply_imported_content {
-                upsert_mapi_associated_config_in_tx(&mut tx, tenant_id, config_input).await?
+                upsert_mapi_associated_config_in_tx(
+                    &mut tx,
+                    tenant_id,
+                    config_input,
+                    creation_time,
+                )
+                .await?
             } else {
                 let config = fetch_mapi_associated_config_in_tx(
                     &mut tx,

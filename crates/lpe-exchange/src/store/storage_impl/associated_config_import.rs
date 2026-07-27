@@ -37,10 +37,16 @@ async fn upsert_mapi_associated_config_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant_id: Uuid,
     input: UpsertMapiAssociatedConfigInput,
+    creation_time: Option<u64>,
 ) -> Result<MapiAssociatedConfigRecord> {
     let id = input
         .id
         .ok_or_else(|| anyhow::anyhow!("associated config canonical ID is missing"))?;
+    let creation_time = creation_time
+        .map(|value| value - value % 10)
+        .map(i64::try_from)
+        .transpose()
+        .map_err(|_| anyhow::anyhow!("invalid imported FAI creation time"))?;
     let existed = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS (
@@ -63,15 +69,11 @@ async fn upsert_mapi_associated_config_in_tx(
         )
         VALUES (
             $1, $2, $3, $4, $5, $6, $7,
-            COALESCE((
-                SELECT LEAST(NOW(), identity.updated_at)
-                FROM mapi_object_identities identity
-                WHERE identity.tenant_id = $1
-                  AND identity.account_id = $3
-                  AND identity.object_kind = 'associated_config'
-                  AND identity.canonical_id = $2
-                  AND identity.deleted_at IS NULL
-            ), NOW())
+            COALESCE(
+                TIMESTAMPTZ '1601-01-01 00:00:00+00'
+                    + (($8::bigint / 10) * INTERVAL '1 microsecond'),
+                NOW()
+            )
         )
         ON CONFLICT (tenant_id, id)
         DO UPDATE SET
@@ -99,6 +101,7 @@ async fn upsert_mapi_associated_config_in_tx(
     .bind(input.message_class)
     .bind(input.subject)
     .bind(input.properties_json)
+    .bind(creation_time)
     .fetch_optional(&mut **tx)
     .await?
     .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?;
@@ -209,7 +212,7 @@ async fn commit_mapi_associated_config_update_in_tx(
     // [MS-OXCPRPT] sections 3.1.1 and 3.2.5.4, 3.2.5.5, and 3.2.5.13
     // plus [MS-OXCROPS] section 2.2.6.3: Message and Stream mutations are
     // handle-local until RopSaveChangesMessage publishes content and version.
-    let config = upsert_mapi_associated_config_in_tx(tx, tenant_id, input).await?;
+    let config = upsert_mapi_associated_config_in_tx(tx, tenant_id, input, None).await?;
     Ok(MapiAssociatedConfigCommit {
         config,
         identity: MapiIdentityRecord {

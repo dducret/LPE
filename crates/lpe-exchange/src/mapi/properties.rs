@@ -1347,11 +1347,15 @@ pub(in crate::mapi) fn apply_pending_associated_message_property_values(
     properties: &mut HashMap<u32, MapiValue>,
     values: impl IntoIterator<Item = (u32, MapiValue)>,
 ) {
-    // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: a client can
-    // submit these fields while importing an FAI, but it cannot set them.
+    // [MS-OXCMSG] section 2.2 product note <1>: Exchange 2010 through 2019
+    // accept PidTagCreationTime changes despite its general read-only status.
+    // Keep that Outlook import value until the first Save; LastModifierName
+    // remains server-owned, and later mutations still use the read-only rules.
     for (tag, value) in values {
         let tag = canonical_property_storage_tag(tag);
-        if !crate::mapi_store::is_associated_config_read_only_property_tag(tag) {
+        if tag == PID_TAG_CREATION_TIME
+            || !crate::mapi_store::is_associated_config_read_only_property_tag(tag)
+        {
             properties.insert(tag, value);
         }
     }

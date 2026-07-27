@@ -302,6 +302,28 @@ before it is advertised.
   imported SearchKey. The following `RopGetPropertiesSpecific` requests
   ChangeKey, PCL, LastModificationTime, private tag `0x0E0B0102`, and
   MessageClass; the absent private tag remains an `ecNotFound` cell.
+- The clean `202607271610` rerun again held `N0=N1=0`; Outlook displayed
+  `Connected to: Microsoft Exchange` during its first local connection, then
+  created `N2=1` only after the second connection displayed
+  `Connected to: LPE`. The first effective LPE synchronization exposed a
+  reproducible persisted-value divergence in the imported
+  `IPM.Configuration.MessageListSettings` FAI. Outlook submitted
+  `PidTagCreationTime=2026-07-27T14:08:26.776Z` after
+  `RopSynchronizationImportMessageChange` supplied
+  `PidTagLastModificationTime=2026-07-27T14:08:27.388Z`; LPE discarded the
+  former and returned the latter as both values after reconnect. A PostgreSQL
+  regression reproduces that exact Save and reload failure. Although
+  `[MS-OXCPRPT]` sections 2.2.1.4 and 3.2.5.4 describe CreationTime as
+  read-only, `[MS-OXCMSG]` section 2.2 product note `<1>` records that Exchange
+  2010 through 2019 change this property. LPE therefore preserves the initial
+  Outlook value at PostgreSQL microsecond precision as its single canonical
+  `created_at`; this is an interoperability inference from the product note
+  plus the real trace, not an algorithm mandated by the specification. If the
+  initial import omits the property, LPE assigns the server creation time.
+  Later changes retain the canonical value. The imported LastModificationTime
+  remains the independent ICS conflict timestamp required by `[MS-OXCFXICS]`
+  sections
+  2.2.3.2.4.2.1, 3.1.5.6.2.2, and 3.2.5.9.4.2.
 - The attempted `ErrorsReturned` interpretation was rejected by the
   `202607262244` real-client run. At `20:43:57.528Z`, the first broad Inbox
   `RopGetPropertiesSpecific` returned a 1,436-byte response with
@@ -532,9 +554,11 @@ non-canonical LPE state.
 - `RopSaveChangesMessage` commits accepted `RopSetProperties` mutations
   according to `[MS-OXCPRPT]` section 3.2.5.4. When Outlook
   imports the Inbox `MessageListSettings` FAI, LPE preserves its imported
-  SourceKey, LastModificationTime, ChangeKey, PCL, and MID and its exact
-  client-written content. The initial server-owned CreationTime is stable and
-  no later than the imported LastModificationTime; later imports retain it.
+  SourceKey, LastModificationTime, ChangeKey, PCL, MID, initial CreationTime,
+  and exact client-written content. The initial CreationTime follows the
+  Exchange product behavior documented by `[MS-OXCMSG]` section 2.2 note
+  `<1>`; when absent, LPE assigns the server creation time. Later imports
+  retain it, independently of the imported LastModificationTime.
   For a committed FAI content change, the distinct Message LocalCommitTime and
   containing-folder LocalCommitTimeMax contribution use the canonical server
   commit time, not that imported LastModificationTime. An

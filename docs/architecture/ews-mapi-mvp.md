@@ -236,32 +236,41 @@ streams. This follows [MS-OXOCFG] section 2.2.2.1, [MS-OXCROPS] sections
 is not combined with `RowData`; the `202607262244` Outlook run crashed after
 receiving that combination.
 
-For durable associated-configuration FAI messages, a client-supplied
-`PidTagCreationTime` (`0x30070040`) or `PidTagLastModifierName`
-(`0x3FFA001F`) is ignored in direct property writes, writable streams,
-FastTransfer, and ICS import. Neither tag is retained in the persisted
-configuration-property bag. `GetProps`, tables, direct `CopyTo`, and ICS
-instead derive `CreationTime` from `mapi_associated_config_messages.created_at`
-and `LastModifierName` from the owning account's canonical display name. The
-transient snapshot metadata used to carry those database fields through one
-open MAPI handle is never persisted and is not a second source of truth. An
-unsaved ICS-imported FAI has no client-supplied creation time before its first
-canonical save. This follows [MS-OXCPRPT] sections 2.2.1, 2.2.1.4, 2.2.1.5,
-and 3.2.5.4; [MS-OXCMSG] sections 1.3.2, 3.2.5.2, and 3.2.5.3; and
-[MS-OXCFXICS] sections 2.2.3.2.4.2.1, 3.2.5.9.4.2, 3.3.4.3.3.2.2.1,
-3.3.5.8.7, and 2.2.4.3.16.
+For a durable associated-configuration FAI message, later client attempts to
+change `PidTagCreationTime` (`0x30070040`) or `PidTagLastModifierName`
+(`0x3FFA001F`) are ignored. During the initial ICS import only, LPE accepts the
+CreationTime that Outlook stages through Message properties or FastTransfer;
+LastModifierName remains canonical server state in LPE. The Microsoft product
+note also lists LastModifierName, but LPE deliberately retains the owning
+account display name so a client cannot select its audit identity; the observed
+Outlook trace supplied the same effective name. Neither tag is retained in the
+persisted configuration-property bag. The accepted CreationTime is written
+once to `mapi_associated_config_messages.created_at`, while LastModifierName
+comes from the owning account's canonical display name. `GetProps`, tables,
+direct `CopyTo`, and ICS all derive their values from those canonical fields.
+The transient snapshot metadata used to carry the database fields through one
+open MAPI handle is never persisted and is not a second source of truth. This
+follows the general read-only rules in [MS-OXCPRPT] sections 2.2.1, 2.2.1.4,
+2.2.1.5, and 3.2.5.4 together with the Exchange 2010 through 2019 exception in
+[MS-OXCMSG] section 2.2 product note `<1>`; the import sequence follows
+[MS-OXCFXICS] sections 2.2.3.2.4.2.1, 3.2.5.9.4.2, 3.3.5.8.7, and
+2.2.4.3.16.
 
 ### Imported configuration FAI timestamps
 
 An imported configuration FAI preserves the required
 `PidTagLastModificationTime` from its `ImportMessageChange` identity header
-alongside its MID, SourceKey, ChangeKey, and PCL. Its initial
-`PidTagCreationTime` is a stable server-owned value no later than that imported
-last-modification time, and later imports do not rewrite it. Client attempts to
-set CreationTime or LastModifierName while populating the Message remain
-ignored. This follows [MS-OXCMSG] section 1.3.2; [MS-OXCPRPT] sections 2.2.1.4,
-2.2.1.6, and 3.2.5.4; and [MS-OXCFXICS] sections 2.2.3.2.4.2.1, 3.1.5.3,
-3.1.5.6.2.2, 3.2.5.9.4.2, and 3.3.5.8.7.
+alongside its MID, SourceKey, ChangeKey, and PCL. When Outlook supplies an
+initial `PidTagCreationTime`, LPE preserves that value at PostgreSQL
+microsecond precision as canonical creation state; when it is absent, LPE
+assigns the current server time. Later imports do not rewrite it, and
+LastModifierName remains canonical server state. Preserving the submitted
+CreationTime is an interoperability inference from the real Outlook trace and
+[MS-OXCMSG] section 2.2 product note `<1>`, not a timestamp selection algorithm
+stated by the specification. The independent imported LastModificationTime
+follows [MS-OXCPRPT] section 2.2.1.6 and
+[MS-OXCFXICS] sections 2.2.3.2.4.2.1, 3.1.5.3, 3.1.5.6.2.2,
+3.2.5.9.4.2, and 3.3.5.8.7.
 
 ## Delete, Move, Tombstone, And Recovery Matrix
 
