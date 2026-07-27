@@ -113,9 +113,17 @@ pub(super) fn append_create_message_response(
             folder_id,
             COMMON_VIEWS_FOLDER_ID | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
         ) {
+        let mut properties = initial_message_properties();
+        // [MS-OXCROPS] section 2.2.6.2.1 makes AssociatedFlag identify an
+        // FAI. Combine that server-owned bit with the [MS-OXCMSG] section
+        // 3.2.5.2 RopCreateMessage defaults before the first Save.
+        properties.insert(
+            PID_TAG_MESSAGE_FLAGS,
+            MapiValue::U32(MSGFLAG_READ | MSGFLAG_UNSENT | MSGFLAG_FAI),
+        );
         MapiObject::PendingAssociatedMessage {
             folder_id,
-            properties: initial_message_properties(),
+            properties,
             imported_message_id: None,
             fail_on_conflict: false,
         }

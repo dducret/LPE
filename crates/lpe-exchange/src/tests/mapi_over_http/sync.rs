@@ -10072,6 +10072,7 @@ async fn mapi_over_http_associated_message_uploads_do_not_create_visible_items()
         ..Default::default()
     };
     let imported_emails = store.imported_emails.clone();
+    let associated_configs = store.associated_configs.clone();
     let events = store.events.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -10083,8 +10084,16 @@ async fn mapi_over_http_associated_message_uploads_do_not_create_visible_items()
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
 
     let mut inbox_values = Vec::new();
-    append_mapi_utf16_property(&mut inbox_values, 0x001A_001F, "IPM.Configuration");
-    append_mapi_utf16_property(&mut inbox_values, PID_TAG_SUBJECT_W, "Outlook view state");
+    append_mapi_utf16_property(&mut inbox_values, 0x001A_001F, "IPM.ExtendedRule.Message");
+    append_mapi_utf16_property(
+        &mut inbox_values,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        "Junk E-mail Rule",
+    );
+    append_mapi_i32_property(&mut inbox_values, 0x65E9_0003, 49);
+    append_mapi_utf16_property(&mut inbox_values, 0x65EB_001F, "JunkEmailRule");
+    append_mapi_utf16_property(&mut inbox_values, 0x65EC_001F, "Junk E-mail Rule");
+    append_mapi_i32_property(&mut inbox_values, 0x65F3_0003, 0);
     let mut inbox_rops = Vec::new();
     append_rop_create_associated_message(&mut inbox_rops, 0, 1, test_mapi_folder_id(5));
     append_rop_set_properties(&mut inbox_rops, 1, 2, &inbox_values);
@@ -10100,6 +10109,21 @@ async fn mapi_over_http_associated_message_uploads_do_not_create_visible_items()
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
     assert_eq!(imported_emails.lock().unwrap().len(), 0);
+    {
+        let configs = associated_configs.lock().unwrap();
+        let junk_rule = configs
+            .iter()
+            .find(|config| {
+                config.message_class == "IPM.ExtendedRule.Message"
+                    && config.subject == "Junk E-mail Rule"
+            })
+            .expect("Outlook Junk E-mail Rule FAI");
+        assert_eq!(
+            junk_rule.properties_json["0x0e070003"]["value"],
+            serde_json::Value::from(0x449),
+            "RopCreateMessage AssociatedFlag defaults must survive SaveChangesMessage for the subsequent full FAI ICS change"
+        );
+    }
 
     renew_mapi_request_id(&mut execute_headers);
     let mut calendar_values = Vec::new();
