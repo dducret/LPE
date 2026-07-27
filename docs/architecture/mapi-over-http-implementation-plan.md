@@ -519,30 +519,18 @@ non-canonical LPE state.
   `[MS-OXOSFLD]` sections 2.2.2 and 3.1.1.1 for special-folder behavior and
   `[MS-OXOCFG]` navigation shortcut semantics: a shortcut is a Common Views FAI
   message with `WLink` properties.
-- Outlook default-view EntryID properties point at bounded synthetic
-  `IPM.Microsoft.FolderDesign.NamedView` objects for startup compatibility.
-  Folder-local named-view rows are projected in folder-associated tables only
-  for supported folders with type-specific descriptors: Inbox and mail folders,
-  Calendar, Contacts, Tasks, Notes, Journal, and supported built-in
-  search/reminder views. Calendar advertises a deterministic folder-local
-  `Calendar` NamedView. Its unopened Normal contents table
-  still receives no implicit descriptor sort; the start-time descriptor sort
-  becomes table state only through an explicit client operation. Common Views
-  still owns the bounded Common Views `Sent To` row and navigation shortcuts.
-  The folder-local `Contacts` NamedView is also exported by FAI content
-  synchronization, so a cached-mode OST receives the same view object that the
-  live associated-contents table exposes. This follows `[MS-OXOCFG]` sections
-  2.2.6 and 3.1.4.3 and `[MS-OXCFXICS]` sections 2.2.3.2.1.1.1 and 3.2.5.3.
+- LPE does not publish synthetic `IPM.Microsoft.FolderDesign.NamedView` rows or
+  default-view EntryIDs that resolve only to virtual messages. That former
+  projection was removed because it could leave Outlook with dangling EntryIDs;
+  a NamedView is exposed only when a corresponding canonical FAI message exists.
   Outlook-created or imported associated configuration rows remain durable, but
   Inbox startup enumeration does not replay broad persisted `IPM.Configuration.*`
   rows or `IPM.ExtendedRule.Message` rows; only the modeled
   `IPM.Configuration.MessageListSettings` row is exposed in the Inbox associated
   table and for Outlook's broad startup prefix probe, and exact, bounded lookups
-  expose supported configuration rows. Synthetic folder-local named views use
-  deterministic virtual message IDs, SourceKeys, RecordKeys, SearchKeys, change
-  keys, and descriptor CLSIDs. Modeled folder families use folder-specific
-  identities. Real Calendar configuration FAI rows remain canonical and are
-  exposed independently of the folder-local Calendar NamedView. When Outlook
+  expose supported configuration rows.
+- `RopSaveChangesMessage` commits accepted `RopSetProperties` mutations
+  according to `[MS-OXCPRPT]` section 3.2.5.4. When Outlook
   imports the Inbox `MessageListSettings` FAI, LPE preserves its imported
   SourceKey, LastModificationTime, ChangeKey, PCL, and MID and its exact
   client-written content. The initial server-owned CreationTime is stable and
@@ -555,11 +543,18 @@ non-canonical LPE state.
   saved row, FastTransfer, and direct-property projections. Reconnect and
   `RopOpenMessage` retain the same identity; Save and direct Message CopyTo
   retain the persisted configuration-property set. The server owns and sets
-  `PidTagMessageFlags.mfFAI`, but retains the other flag bits accepted before
-  the first successful Save: persisted `0x00000049` is therefore exported as
-  `0x00000049`, not reduced to `mfFAI` alone. An absent `PidTagBody` remains
-  absent from `BestBody` CopyTo output; an explicitly empty body remains a
-  present zero-length value. A direct
+  `PidTagMessageFlags.mfFAI` and `mfEverRead`, but retains the other flag bits
+  accepted before the first successful Save: persisted/client `0x00000049` is
+  therefore exported as `0x00000449`, not reduced to `mfFAI` alone. Both ICS
+  content download and direct Message CopyTo omit `PidTagObjectType` and
+  `PidTagRecordKey` from FAI Message objects while retaining `PidTagSourceKey`,
+  `PidTagEntryId`, `PidTagSearchKey`, `PidTagChangeKey`, and
+  `PidTagPredecessorChangeList`. This follows `[MS-OXCMSG]` section 2.2.1.1
+  product notes 2 and 3; `[MS-OXPROPS]` section 2.912 identifies
+  `PidTagRecordKey`, while `[MS-OXCFXICS]` sections 2.2.4.3.13 and 2.2.4.3.16
+  define the ICS and direct FastTransfer message surfaces. An absent
+  `PidTagBody` remains absent from `BestBody` CopyTo output; an explicitly empty
+  body remains a present zero-length value. A direct
   `RopGetPropertiesSpecific` returns a requested property determined to be
   absent as an `ecNotFound` cell in a `FlaggedPropertyRow`, with
   `ReturnValue=Success` following the response-specific `[MS-OXCROPS]` section
@@ -571,10 +566,10 @@ non-canonical LPE state.
   2.8.1.2, and 2.11.5,
   `[MS-OXCMSG]` sections 2.2.1.6 and 3.2.5.3, `[MS-OXOCFG]` sections 2.2.2.1 through
   2.2.2.3, 2.2.5.1, and 2.2.5.2, `[MS-OXPROPS]` sections 2.938 through 2.940,
-  and `[MS-OXCFXICS]` sections
+  and `[MS-OXBBODY]` section 2.1.3.1. The FastTransfer behavior follows
+  `[MS-OXCFXICS]` sections
   2.2.3.1.1.1.1, 2.2.3.2.4.2.1, 2.2.4.3.16, 2.2.4.4, 3.1.5.3,
-  3.1.5.6.2.2, 3.2.5.8.1.1, 3.2.5.9.4.2, 3.2.5.10, and 3.3.5.8.7,
-  and `[MS-OXBBODY]` section 2.1.3.1.
+  3.1.5.6.2.2, 3.2.5.8.1.1, 3.2.5.9.4.2, 3.2.5.10, and 3.3.5.8.7.
   Mutations to one open associated-configuration message are cumulative on that
   message handle through `RopSaveChangesMessage`; a later `RopSetProperties` or
   `RopDeletePropertiesNoReplicate` in the same batch must use the updated handle

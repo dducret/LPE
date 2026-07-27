@@ -11325,11 +11325,13 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         b"OLPrefsVersion"
     ));
 
-    let sync_response = content_sync_response_rops_for_store_with_flags(
+    // Replay Outlook 16.0.20131 request :22 from trace 202607271246:
+    // SendOptions 0x1d, SyncFlags 0xa139, ExtraFlags 0x0d, and the nine
+    // requested body/property tags used by its initial Inbox FAI download.
+    let sync_response = outlook_content_sync_response_rops_for_store(
         store.clone(),
         crate::mapi::identity::INBOX_FOLDER_ID,
         &[],
-        0x0010,
     )
     .await;
     let sync = strict_content_sync_transfer_from_response(&sync_response)
@@ -11365,6 +11367,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert_eq!(downloaded.access_level, Some(0x0000_0000));
     assert!(downloaded.body_tags.contains(&0x7C06_0003));
     for absent_tag in [
+        0x0FFE_0003, // PidTagObjectType.
+        0x0FF9_0102, // PidTagRecordKey.
         0x7C07_0102,
         0x7C08_0102,
         0x0E0B_0102,

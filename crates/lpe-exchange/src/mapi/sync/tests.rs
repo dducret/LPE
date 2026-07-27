@@ -35,7 +35,6 @@ fn assert_associated_fai_core_payload(item: &mapi_mailstore::ContentTransferFaiI
             PID_TAG_SOURCE_KEY,
             PID_TAG_PARENT_SOURCE_KEY,
             PID_TAG_ENTRY_ID,
-            PID_TAG_RECORD_KEY,
             PID_TAG_SEARCH_KEY,
             PID_TAG_CHANGE_KEY,
             PID_TAG_PREDECESSOR_CHANGE_LIST,
@@ -50,6 +49,9 @@ fn assert_associated_fai_core_payload(item: &mapi_mailstore::ContentTransferFaiI
     assert!(item.source_key_len > 0);
     assert!(item.parent_source_key_len > 0);
     assert!(item.entry_id_len > 0);
+    assert_eq!(item.record_key_len, 0);
+    assert!(!item.property_tags.contains(&PID_TAG_OBJECT_TYPE));
+    assert!(!item.property_tags.contains(&PID_TAG_RECORD_KEY));
     assert!(item.change_number_in_final_cnset_fai);
 }
 
@@ -122,7 +124,9 @@ fn assert_fai_boundary_summary(
         assert!(item.source_key_len > 0);
         assert!(item.parent_source_key_len > 0);
         assert!(item.entry_id_len > 0);
-        assert!(item.record_key_len > 0);
+        assert_eq!(item.record_key_len, 0);
+        assert!(!item.property_tags.contains(&PID_TAG_OBJECT_TYPE));
+        assert!(!item.property_tags.contains(&PID_TAG_RECORD_KEY));
         assert!(item.change_key_len > 0);
         assert!(item.predecessor_change_list_len > 0);
         assert!(item.property_tags.contains(&PID_TAG_SOURCE_KEY));
@@ -470,6 +474,61 @@ fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
 }
 
 #[test]
+fn outlook_inbox_fai_ics_omits_unsupported_message_identity_properties() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let canonical_id = Uuid::from_u128(0x6d617069_6d73_6750_8000_000000000201);
+    let item_id = crate::mapi::identity::mapi_store_id(0x7af0);
+    crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        crate::store::MapiAssociatedConfigRecord {
+            id: canonical_id,
+            account_id,
+            folder_id: INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "IPM.Configuration.MessageListSettings".to_string(),
+            properties_json: serde_json::json!({
+                "0x0e070003": {"type": "i32", "value": 0x49},
+                "0x7c060003": {"type": "i32", "value": 0}
+            }),
+        },
+    ]);
+    let objects = special_sync_objects_for(
+        INBOX_FOLDER_ID,
+        0x01,
+        &snapshot,
+        &sync_principal(account_id),
+    );
+
+    // Outlook 16.0.20131 request :22 in trace 202607271246 configured
+    // the initial Inbox FAI download with SyncFlags 0xa139.
+    let buffer =
+        associated_content_sync_buffer_with_flags(account_id, INBOX_FOLDER_ID, 0xa139, &objects);
+    let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
+    let item = summary
+        .fai_items
+        .iter()
+        .find(|item| item.message_class == "IPM.Configuration.MessageListSettings")
+        .unwrap();
+
+    assert_has_tags(
+        item,
+        &[
+            PID_TAG_SOURCE_KEY,
+            PID_TAG_PARENT_SOURCE_KEY,
+            PID_TAG_ENTRY_ID,
+            PID_TAG_SEARCH_KEY,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+        ],
+    );
+    // [MS-OXCMSG] v20250520 section 2.2.1.1 product notes <2> and <3>:
+    // Exchange 2010 through Exchange 2019 do not support these properties on
+    // Message objects, including FAI messages transported by ICS.
+    assert!(!item.property_tags.contains(&PID_TAG_OBJECT_TYPE));
+    assert!(!item.property_tags.contains(&PID_TAG_RECORD_KEY));
+}
+
+#[test]
 fn associated_config_fai_content_sync_emits_valid_property_definitions() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let cases = [
@@ -547,12 +606,10 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             .unwrap();
 
         let item_payload = &buffer[item.item_start_offset..item.item_end_offset];
-        let server_record_key = mapi_mailstore::source_key_for_store_id(item_id);
         let server_search_key = crate::mapi::identity::generated_message_search_key(&canonical_id);
-        for (tag, expected_value) in [
-            (PID_TAG_RECORD_KEY, server_record_key.as_slice()),
-            (PID_TAG_SEARCH_KEY, server_search_key.as_slice()),
-        ] {
+        assert!(!item.property_tags.contains(&PID_TAG_OBJECT_TYPE));
+        assert!(!item.property_tags.contains(&PID_TAG_RECORD_KEY));
+        for (tag, expected_value) in [(PID_TAG_SEARCH_KEY, server_search_key.as_slice())] {
             assert_eq!(
                 item.property_tags
                     .iter()
