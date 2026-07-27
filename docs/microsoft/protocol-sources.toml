@@ -606,7 +606,7 @@ used_for = [
   "Outlook appointment PidTagHtml stream opening, writing, and save-time persistence",
   "Existing Calendar Event Body and HTML stream staging, CommitStream visibility, Release discard, and parent-Message persistence",
   "Existing associated-configuration Message property and stream staging until atomic RopSaveChangesMessage persistence",
-  "General read-only classification of PidTagCreationTime and PidTagLastModifierName, with the documented Exchange product exception for CreationTime handled through MS-OXCMSG",
+  "General read-only classification of PidTagCreationTime and PidTagLastModifierName, with the documented Exchange product exceptions and canonical modifier-identity projection handled through MS-OXCMSG",
   "Independent PidTagCreationTime and imported PidTagLastModificationTime semantics for associated-configuration FAI messages",
   "Property mutation and deletion semantics for an existing Outlook Calendar Message object",
   "Per-handle staging of writable Calendar properties and deletions until RopSaveChangesMessage",

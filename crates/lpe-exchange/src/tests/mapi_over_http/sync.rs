@@ -16881,15 +16881,18 @@ async fn mapi_over_http_unknown_fasttransfer_marker_terminates_current_buffer() 
 }
 
 #[tokio::test]
-async fn mapi_over_http_inbox_message_list_settings_import_preserves_creation_time_after_postgresql_reconnect(
+async fn mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect(
 ) -> anyhow::Result<()> {
     // Outlook 16.0.20131 sent these distinct values during the 202607271610
     // Inbox FAI import. [MS-OXCFXICS] section 2.2.3.2.4.2.1 places LMT in
     // ImportMessageChange; [MS-OXCMSG] section 2.2 product note <1> states that
-    // Exchange changes CreationTime. This regression requires the exact initial
-    // value observed on the returned Message to remain stable after Save.
+    // Exchange changes CreationTime and LastModifierName. This regression
+    // requires the exact canonical values observed on the returned Message to
+    // remain stable after Save and in the direct CopyTo flow used by Outlook.
     const CREATION_TIME: i64 = 134_296_349_067_760_000;
     const LAST_MODIFICATION_TIME: i64 = 134_296_349_073_880_000;
+    const PID_TAG_LAST_MODIFIER_NAME_W: u32 = 0x3FFA_001F;
+    const LAST_MODIFIER_NAME: &str = "alice@example.test";
 
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
@@ -16965,6 +16968,11 @@ async fn mapi_over_http_inbox_message_list_settings_import_preserves_creation_ti
         "IPM.Configuration.MessageListSettings",
     );
     append_mapi_i64_property(&mut message_values, 0x3007_0040, CREATION_TIME);
+    append_mapi_utf16_property(
+        &mut message_values,
+        PID_TAG_LAST_MODIFIER_NAME_W,
+        LAST_MODIFIER_NAME,
+    );
 
     let mut import_rops = Vec::new();
     append_rop_open_folder(
@@ -17040,7 +17048,11 @@ async fn mapi_over_http_inbox_message_list_settings_import_preserves_creation_ti
     append_rop_get_properties_specific(
         &mut get_rops,
         2,
-        &[0x3007_0040, PID_TAG_LAST_MODIFICATION_TIME],
+        &[
+            0x3007_0040,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            PID_TAG_LAST_MODIFIER_NAME_W,
+        ],
     );
     let response = service
         .handle_mapi(
@@ -17049,7 +17061,10 @@ async fn mapi_over_http_inbox_message_list_settings_import_preserves_creation_ti
             &execute_body(&rop_buffer(&get_rops, &[1, u32::MAX, u32::MAX])),
         )
         .await?;
-    let response_rops = response_rops_from_execute_response(response).await;
+    let response_body = response_bytes(response).await;
+    let (response_rops, response_handles) =
+        response_rops_and_handles_from_execute_body(&response_body);
+    assert_eq!(response_handles.len(), 3);
     let row_offset = mapi_get_properties_specific_standard_row_offset(&response_rops, 2)
         .expect("reconnected MessageListSettings GetPropertiesSpecific response");
     assert_eq!(response_rops[row_offset], 0);
@@ -17063,9 +17078,49 @@ async fn mapi_over_http_inbox_message_list_settings_import_preserves_creation_ti
             .try_into()
             .unwrap(),
     );
+    let mut last_modifier_offset = row_offset + 17;
+    let last_modifier_name = read_rop_utf16z(&response_rops, &mut last_modifier_offset).unwrap();
     assert_eq!(creation_time, CREATION_TIME as u64);
     assert_eq!(last_modification_time, LAST_MODIFICATION_TIME as u64);
     assert_ne!(creation_time, last_modification_time);
+    assert_eq!(last_modifier_name, LAST_MODIFIER_NAME);
+
+    let mut copy_rops = Vec::new();
+    copy_rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]);
+    copy_rops.push(0); // Level: include subobjects.
+    copy_rops.extend_from_slice(&0x0000_2000u32.to_le_bytes()); // BestBody.
+    copy_rops.push(0x09); // Unicode | ForceUnicode, as sent by Outlook.
+    copy_rops.extend_from_slice(&0u16.to_le_bytes());
+    copy_rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
+    copy_rops.extend_from_slice(&4096u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &copy_rops,
+                &[
+                    response_handles[0],
+                    response_handles[1],
+                    response_handles[2],
+                    u32::MAX,
+                ],
+            )),
+        )
+        .await?;
+    let response_rops = response_rops_from_execute_response(response).await;
+    let chunks = mapi_fast_transfer_chunks(&response_rops);
+    assert_eq!(chunks.len(), 1, "{response_rops:02x?}");
+    let last_modifier_value = utf16z(LAST_MODIFIER_NAME);
+    let mut expected_last_modifier = PID_TAG_LAST_MODIFIER_NAME_W.to_le_bytes().to_vec();
+    expected_last_modifier.extend_from_slice(&(last_modifier_value.len() as u32).to_le_bytes());
+    expected_last_modifier.extend_from_slice(&last_modifier_value);
+    assert!(
+        contains_bytes(&chunks[0].1, &expected_last_modifier),
+        "CopyTo did not preserve canonical LastModifierName in {:02x?}",
+        chunks[0].1
+    );
 
     fixture.cleanup().await?;
     Ok(())

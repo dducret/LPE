@@ -315,7 +315,7 @@ macro_rules! store_impl_mailbox_config {
                            config.updated_at AT TIME ZONE 'UTC',
                            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
                        ) AS updated_at,
-                       account.display_name AS last_modifier_name
+                       account.primary_email AS last_modifier_name
                 FROM mapi_associated_config_messages config
                 JOIN accounts account
                   ON account.tenant_id = config.tenant_id

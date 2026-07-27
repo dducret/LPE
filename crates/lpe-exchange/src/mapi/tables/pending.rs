@@ -435,7 +435,7 @@ pub(in crate::mapi) fn pending_associated_message_property_value(
         // [MS-OXCPRPT] sections 2.2.1.4, 2.2.1.5, and 3.2.5.4: never
         // replay a client-supplied FAI CreationTime or LastModifierName.
         PID_TAG_CREATION_TIME => properties.get(&PID_TAG_CREATION_TIME).cloned(),
-        PID_TAG_LAST_MODIFIER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
+        PID_TAG_LAST_MODIFIER_NAME_W => Some(MapiValue::String(principal.email.clone())),
         _ => properties
             .get(&lookup_tag)
             .cloned()

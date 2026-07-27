@@ -324,6 +324,23 @@ before it is advertised.
   remains the independent ICS conflict timestamp required by `[MS-OXCFXICS]`
   sections
   2.2.3.2.4.2.1, 3.1.5.6.2.2, and 3.2.5.9.4.2.
+- The `202607272146` rerun held `N0=N1=0` while Outlook displayed
+  `Connected to: Microsoft Exchange`. After restart and a real LPE connection,
+  two deterministic startup cycles produced `N2=1` and `N3=2`. Both cycles
+  read the same persisted Inbox `MessageListSettings` FAI through identical
+  639-byte direct `CopyTo` streams before Outlook generated
+  `80004002-501-0-0`. CreationTime, LastModificationTime, SearchKey, ChangeKey,
+  and PCL were stable. The first remaining imported-value divergence was
+  `PidTagLastModifierName` (`0x3FFA001F`): Outlook had supplied
+  `test@l-p-e.ch`, while LPE returned the display name `test`.
+  `[MS-OXCPRPT]` sections 2.2.1.5 and 3.2.5.4 define the general read-only
+  behavior, while `[MS-OXCMSG]` section 2.2 product note `<1>` records the
+  Exchange 2010 through 2019 product exception for LastModifierName. LPE now
+  projects the owning account's canonical primary SMTP address through
+  `GetProps`, tables, direct `CopyTo`, and ICS, while continuing to discard
+  arbitrary client-supplied modifier identities. A PostgreSQL-backed regression
+  covers Save, process-style reload, and direct FastTransfer replay. Real
+  Outlook validation remains required.
 - The attempted `ErrorsReturned` interpretation was rejected by the
   `202607262244` real-client run. At `20:43:57.528Z`, the first broad Inbox
   `RopGetPropertiesSpecific` returned a 1,436-byte response with
@@ -555,10 +572,14 @@ non-canonical LPE state.
   according to `[MS-OXCPRPT]` section 3.2.5.4. When Outlook
   imports the Inbox `MessageListSettings` FAI, LPE preserves its imported
   SourceKey, LastModificationTime, ChangeKey, PCL, MID, initial CreationTime,
-  and exact client-written content. The initial CreationTime follows the
-  Exchange product behavior documented by `[MS-OXCMSG]` section 2.2 note
-  `<1>`; when absent, LPE assigns the server creation time. Later imports
-  retain it, independently of the imported LastModificationTime.
+  and exact client-written content. It projects LastModifierName from the owning
+  account's canonical primary SMTP address and never persists a client-selected
+  modifier identity. The initial CreationTime and LastModifierName behavior
+  follows the Exchange product behavior documented by `[MS-OXCMSG]` section 2.2
+  note `<1>` together with the general read-only rules in `[MS-OXCPRPT]`
+  sections 2.2.1.4, 2.2.1.5, and 3.2.5.4. When CreationTime is absent, LPE
+  assigns the server creation time. Later imports retain it, independently of
+  the imported LastModificationTime.
   For a committed FAI content change, the distinct Message LocalCommitTime and
   containing-folder LocalCommitTimeMax contribution use the canonical server
   commit time, not that imported LastModificationTime. An

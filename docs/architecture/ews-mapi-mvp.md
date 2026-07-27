@@ -240,14 +240,16 @@ For a durable associated-configuration FAI message, later client attempts to
 change `PidTagCreationTime` (`0x30070040`) or `PidTagLastModifierName`
 (`0x3FFA001F`) are ignored. During the initial ICS import only, LPE accepts the
 CreationTime that Outlook stages through Message properties or FastTransfer;
-LastModifierName remains canonical server state in LPE. The Microsoft product
-note also lists LastModifierName, but LPE deliberately retains the owning
-account display name so a client cannot select its audit identity; the observed
-Outlook trace supplied the same effective name. Neither tag is retained in the
-persisted configuration-property bag. The accepted CreationTime is written
+LastModifierName remains canonical server state in LPE. The `202607272146`
+Outlook trace showed that the client supplied the owning account's primary SMTP
+address while LPE returned its display name, creating a stable round-trip
+divergence before each synchronization report. LPE therefore derives
+LastModifierName from the owning account's canonical `primary_email`; it still
+does not accept a client-selected audit identity. Neither tag is retained in
+the persisted configuration-property bag. The accepted CreationTime is written
 once to `mapi_associated_config_messages.created_at`, while LastModifierName
-comes from the owning account's canonical display name. `GetProps`, tables,
-direct `CopyTo`, and ICS all derive their values from those canonical fields.
+comes from the canonical account row. `GetProps`, tables, direct `CopyTo`, and
+ICS all derive their values from those canonical fields.
 The transient snapshot metadata used to carry the database fields through one
 open MAPI handle is never persisted and is not a second source of truth. This
 follows the general read-only rules in [MS-OXCPRPT] sections 2.2.1, 2.2.1.4,
@@ -264,11 +266,11 @@ alongside its MID, SourceKey, ChangeKey, and PCL. When Outlook supplies an
 initial `PidTagCreationTime`, LPE preserves that value at PostgreSQL
 microsecond precision as canonical creation state; when it is absent, LPE
 assigns the current server time. Later imports do not rewrite it, and
-LastModifierName remains canonical server state. Preserving the submitted
-CreationTime is an interoperability inference from the real Outlook trace and
-[MS-OXCMSG] section 2.2 product note `<1>`, not a timestamp selection algorithm
-stated by the specification. The independent imported LastModificationTime
-follows [MS-OXCPRPT] section 2.2.1.6 and
+LastModifierName remains the owning account's canonical primary SMTP address.
+Preserving the submitted CreationTime is an interoperability inference from
+the real Outlook trace and [MS-OXCMSG] section 2.2 product note `<1>`, not a
+timestamp selection algorithm stated by the specification. The independent
+imported LastModificationTime follows [MS-OXCPRPT] section 2.2.1.6 and
 [MS-OXCFXICS] sections 2.2.3.2.4.2.1, 3.1.5.3, 3.1.5.6.2.2,
 3.2.5.9.4.2, and 3.3.5.8.7.
 

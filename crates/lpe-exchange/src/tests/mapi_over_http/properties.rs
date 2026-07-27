@@ -5351,7 +5351,7 @@ async fn mapi_over_http_associated_config_ignores_client_read_only_properties_in
         crate::mapi_mailstore::filetime_from_rfc3339_utc(&expected_creation_time)
     );
     assert_ne!(current_creation_time, SUBMITTED_CREATION_TIME);
-    assert_eq!(current_last_modifier, "Alice Calendar");
+    assert_eq!(current_last_modifier, "alice@example.test");
     assert_ne!(current_last_modifier, SUBMITTED_LAST_MODIFIER);
     assert_ne!(current_last_modifier, STREAM_SUBMITTED_LAST_MODIFIER);
 
@@ -5431,7 +5431,7 @@ async fn mapi_over_http_associated_config_ignores_client_read_only_properties_in
     assert_eq!(last_modifiers.len(), 1, "{:02x?}", chunks[0].1);
     assert_eq!(
         strict_decode_utf16z(&last_modifiers[0].value).unwrap(),
-        "Alice Calendar"
+        "alice@example.test"
     );
     assert_ne!(
         strict_decode_utf16z(&last_modifiers[0].value).unwrap(),

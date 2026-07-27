@@ -16,7 +16,7 @@ async fn fetch_mapi_associated_config_in_tx(
                    config.updated_at AT TIME ZONE 'UTC',
                    'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
                ) AS updated_at,
-               account.display_name AS last_modifier_name
+               account.primary_email AS last_modifier_name
         FROM mapi_associated_config_messages config
         JOIN accounts account
           ON account.tenant_id = config.tenant_id
@@ -108,7 +108,7 @@ async fn upsert_mapi_associated_config_in_tx(
     let mut saved = mapi_associated_config_from_row(row)?;
     let last_modifier_name = sqlx::query_scalar::<_, String>(
         r#"
-        SELECT display_name
+        SELECT primary_email
         FROM accounts
         WHERE tenant_id = $1 AND id = $2
         "#,
