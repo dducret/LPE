@@ -829,6 +829,7 @@ used_for = [
   "Deterministic Calendar Subject, NormalizedSubject, and empty SubjectPrefix relationship",
   "Coherent PidTagBodyHtml and PidTagHtml conversion for Calendar Event bodies",
   "Calendar Event PidTagLocalCommitTime update when RopSaveChangesMessage is processed",
+  "Committed FAI content PidTagLocalCommitTime as the server commit performed by RopSaveChangesMessage, distinct from an imported PidTagLastModificationTime",
   "Imported Contact PidTagLastModificationTime preservation across RopSaveChangesMessage and reconnect",
   "Releasing Message Object protocol example handle invalidation behavior",
   "Embedded message open response shape and attachment method semantics",

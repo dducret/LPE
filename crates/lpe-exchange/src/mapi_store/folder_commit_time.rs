@@ -89,14 +89,13 @@ impl MapiMailStoreSnapshot {
             .iter()
             .filter(|config| config.folder_id == folder_id)
         {
-            let identity = self
-                .associated_config_identity_ids
-                .iter()
-                .find(|identity| {
-                    identity.record.object_kind == MapiIdentityObjectKind::AssociatedConfig
-                        && identity.record.canonical_id == config.canonical_id
-                })?;
-            observe(identity.record.last_modification_time);
+            let commit_time = config
+                .properties_json
+                .get("__lpe_updated_at")
+                .and_then(serde_json::Value::as_str)
+                .map(crate::mapi_mailstore::filetime_from_rfc3339_utc)
+                .filter(|commit_time| *commit_time != 0)?;
+            observe(commit_time);
         }
         for child in self.folders.iter().filter(|child| {
             child.id != folder_id

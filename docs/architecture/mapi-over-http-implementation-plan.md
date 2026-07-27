@@ -319,6 +319,32 @@ before it is advertised.
   Until an Exchange reference capture resolves that conflict, LPE follows the
   ROP-specific wire contract and retains per-property errors in the
   `FlaggedPropertyRow` without changing the overall success value.
+- The `202607270652` rerun no longer crashed Outlook after restoring that
+  ROP-specific success contract, but each of its two LPE reconnects still
+  produced one `80004002-501-0-0` view/form report. Correlation with the clean
+  `202607262126` profile creation identifies the earlier semantic divergence.
+  Outlook imported five Inbox FAI messages with client
+  `PidTagLastModificationTime` values ending at `19:24:12.630Z`, while their
+  server Saves continued through approximately `19:24:14.753Z`. Three
+  subsequent `PidTagLocalCommitTimeMax` reads still returned
+  `19:24:12.630Z`, the maximum client-imported modification time rather than
+  the later canonical server commit.
+  The later ExtendedRule only masked that stale Inbox maximum after the first
+  error had already occurred. An imported FAI LastModificationTime remains the
+  replicated version time used for conflict semantics; it is not the local
+  store commit performed by `RopSaveChangesMessage`. For a committed FAI
+  content change, LPE now obtains the contribution to
+  `PidTagLocalCommitTimeMax` from the canonical
+  `mapi_associated_config_messages.updated_at` value exposed in the snapshot as
+  `__lpe_updated_at`. The `202607270652` run reproduces the report symptom, not
+  this now-masked Inbox watermark itself, so elimination still requires a new
+  database and profile. The realistic import/Save/reconnect regression keeps
+  `PidTagLastModificationTime` at the imported value while requiring both the
+  Message `PidTagLocalCommitTime` and the containing folder
+  `PidTagLocalCommitTimeMax` to expose the later server commit; a PostgreSQL
+  regression verifies the same aggregate after a real store reload. This follows
+  `[MS-OXCMSG]` sections 2.2.1.49 and 3.2.5.3, `[MS-OXCFOLD]` sections
+  2.2.2.2.1.13 and 2.2.2.2.1.14, and `[MS-OXCFXICS]` section 3.1.5.3.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
@@ -520,7 +546,10 @@ non-canonical LPE state.
   imports the Inbox `MessageListSettings` FAI, LPE preserves its imported
   SourceKey, LastModificationTime, ChangeKey, PCL, and MID and its exact
   client-written content. The initial server-owned CreationTime is stable and
-  no later than the imported LastModificationTime; later imports retain it. An
+  no later than the imported LastModificationTime; later imports retain it.
+  For a committed FAI content change, the distinct Message LocalCommitTime and
+  containing-folder LocalCommitTimeMax contribution use the canonical server
+  commit time, not that imported LastModificationTime. An
   explicit zero `PidTagRoamingDatatypes` remains zero; absent roaming streams,
   undocumented `0x0E0B0102`, and named content metadata remain absent from the
   saved row, FastTransfer, and direct-property projections. Reconnect and

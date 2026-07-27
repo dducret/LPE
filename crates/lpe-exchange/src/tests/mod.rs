@@ -966,6 +966,24 @@ async fn mapi_associated_config_import_keeps_creation_before_lmt_and_stable() {
             .as_str()
             .unwrap(),
     );
+    let second_local_commit = mapi_mailstore::filetime_from_rfc3339_utc(
+        second_commit.config.properties_json["__lpe_updated_at"]
+            .as_str()
+            .unwrap(),
+    );
+    let snapshot = fixture
+        .storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await
+        .unwrap();
+    assert_eq!(
+        snapshot.folder_local_commit_time_max(
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &snapshot.mailboxes()
+        ),
+        Some(second_local_commit),
+        "PidTagLocalCommitTimeMax must use the canonical PostgreSQL FAI commit"
+    );
 
     fixture.cleanup().await.unwrap();
     assert_eq!(
@@ -12294,6 +12312,7 @@ const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 const PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX: u32 = 0x36D9_0102;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
+const PID_TAG_LOCAL_COMMIT_TIME: u32 = 0x6709_0040;
 const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
 const PID_TAG_DELETED_COUNT_TOTAL: u32 = 0x670B_0003;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;

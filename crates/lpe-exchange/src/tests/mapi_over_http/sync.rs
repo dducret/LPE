@@ -10485,7 +10485,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     imported_pcl.extend_from_slice(&imported_change_key);
     let imported_last_modification_time = test_filetime("2026-07-18", "15:15");
     let previous_email_last_modification_time = test_filetime("2026-07-18", "15:14");
-    let email_last_modification_time = test_filetime("2026-07-18", "15:16");
+    let associated_config_commit_time = test_filetime("2026-07-18", "15:16");
+    let email_last_modification_time = test_filetime("2026-07-18", "15:17");
 
     let account = FakeStore::account();
     let inbox_mailbox_id = "55555555-5555-4555-9555-555555555501";
@@ -10690,9 +10691,27 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert!(config.properties_json.get("0x7c080102").is_none());
     assert!(config.properties_json.get("0x0e0b0102").is_none());
 
-    // This is the first divergence observed in 202607242304: Outlook had just
-    // downloaded the 15:15 FAI, while the preceding Inbox content watermark
-    // was 15:14. The folder aggregate must expose the later FAI commit.
+    associated_configs
+        .lock()
+        .unwrap()
+        .iter_mut()
+        .find(|stored| stored.id == config.id)
+        .unwrap()
+        .properties_json
+        .as_object_mut()
+        .unwrap()
+        .insert(
+            "__lpe_updated_at".to_string(),
+            serde_json::json!("2026-07-18T15:16:00.000000Z"),
+        );
+
+    // This is the first divergence observed in the clean-profile 202607262126
+    // run; 202607270652 reproduced its synchronization-report symptom. Outlook
+    // imports the FAI with a client LastModificationTime, while
+    // RopSaveChangesMessage commits it later in the server store.
+    // [MS-OXCMSG] sections 2.2.1.49 and 3.2.5.3 require LocalCommitTime to use
+    // that server commit, and [MS-OXCFOLD] section 2.2.2.2.1.14 requires the
+    // folder aggregate to expose the same later top-level-object change.
     let mut fai_watermark_rops = Vec::new();
     append_rop_open_folder(
         &mut fai_watermark_rops,
@@ -10724,8 +10743,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
                 .try_into()
                 .unwrap()
         ),
-        imported_last_modification_time as u64,
-        "PidTagLocalCommitTimeMax must advance to the later persisted Inbox FAI modification"
+        associated_config_commit_time as u64,
+        "PidTagLocalCommitTimeMax must use the FAI server commit, not its imported LastModificationTime"
     );
 
     // Simulate the next canonical mailbox-message mutation after the FAI
@@ -10767,6 +10786,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
             PID_TAG_SOURCE_KEY,
             PID_TAG_CHANGE_KEY,
             PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            PID_TAG_LOCAL_COMMIT_TIME,
         ],
     );
     let reopen_response = service
@@ -10786,9 +10807,37 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         contains_bytes(&reopen_response_rops, &[0x03, 0x02, 0, 0, 0, 0]),
         "OpenMessage for imported MID 0x23e failed: {reopen_response_rops:02x?}"
     );
-    assert!(contains_bytes(&reopen_response_rops, &imported_source_key));
-    assert!(contains_bytes(&reopen_response_rops, &imported_change_key));
-    assert!(contains_bytes(&reopen_response_rops, &imported_pcl));
+    let mut reopen_row =
+        mapi_get_properties_specific_standard_row_offset(&reopen_response_rops, 2).unwrap() + 1;
+    assert_eq!(
+        read_rop_binary_u16(&reopen_response_rops, &mut reopen_row).unwrap(),
+        imported_source_key
+    );
+    assert_eq!(
+        read_rop_binary_u16(&reopen_response_rops, &mut reopen_row).unwrap(),
+        imported_change_key
+    );
+    assert_eq!(
+        read_rop_binary_u16(&reopen_response_rops, &mut reopen_row).unwrap(),
+        imported_pcl
+    );
+    assert_eq!(
+        i64::from_le_bytes(
+            reopen_response_rops[reopen_row..reopen_row + 8]
+                .try_into()
+                .unwrap()
+        ),
+        imported_last_modification_time
+    );
+    reopen_row += 8;
+    assert_eq!(
+        i64::from_le_bytes(
+            reopen_response_rops[reopen_row..reopen_row + 8]
+                .try_into()
+                .unwrap()
+        ),
+        associated_config_commit_time
+    );
 
     // The 202607242304 restart downloads this persisted Inbox FAI and then
     // polls the Inbox content watermark. [MS-OXCFOLD] section
