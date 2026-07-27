@@ -10383,7 +10383,7 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     row_offset += 8;
     let last_modifier = read_rop_utf16z(&response_rops, &mut row_offset).unwrap();
     assert_eq!(creation_time, SUBMITTED_CREATION_TIME as u64);
-    assert_eq!(last_modifier, account.display_name);
+    assert_eq!(last_modifier, account.email);
     assert_ne!(last_modifier, SUBMITTED_LAST_MODIFIER);
     assert!(imported_emails.lock().unwrap().is_empty());
     {
@@ -16883,8 +16883,9 @@ async fn mapi_over_http_unknown_fasttransfer_marker_terminates_current_buffer() 
 #[tokio::test]
 async fn mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect(
 ) -> anyhow::Result<()> {
-    // Outlook 16.0.20131 sent these distinct values during the 202607271610
-    // Inbox FAI import. [MS-OXCFXICS] section 2.2.3.2.4.2.1 places LMT in
+    // Outlook 16.0.20131 sent distinct CreationTime/LMT values during the
+    // 202607271610 Inbox FAI import and its canonical SMTP LastModifierName
+    // during 202607272146. [MS-OXCFXICS] section 2.2.3.2.4.2.1 places LMT in
     // ImportMessageChange; [MS-OXCMSG] section 2.2 product note <1> states that
     // Exchange changes CreationTime and LastModifierName. This regression
     // requires the exact canonical values observed on the returned Message to
