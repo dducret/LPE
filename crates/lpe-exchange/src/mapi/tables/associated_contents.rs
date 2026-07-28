@@ -452,9 +452,9 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
         return Some(MapiValue::U32(0));
     }
     if lookup_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-        && crate::mapi_store::is_outlook_configuration_message_class_name(
-            &message.message_class,
-            "IPM.Configuration.MessageListSettings",
+        && matches!(
+            message.message_class.as_str(),
+            "IPM.Configuration.MessageListSettings" | "IPM.ExtendedRule.Message"
         )
     {
         // Exchange 15.1.2507.34 returns this stable 46-byte, folder-derived

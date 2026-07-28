@@ -1831,7 +1831,7 @@ fn logon_getprops_projects_extended_rule_size_limit() {
     assert_eq!(response[6], 0);
     assert_eq!(
         u32::from_le_bytes(response[7..11].try_into().unwrap()),
-        35 * 1024
+        25 * 1024
     );
 }
 
@@ -4520,7 +4520,7 @@ pub(in crate::mapi) fn restriction_parser_rejects_trailing_bytes() {
 }
 
 #[test]
-pub(in crate::mapi) fn outlook_logon_bootstrap_details_use_valid_store_icons() {
+pub(in crate::mapi) fn outlook_logon_bootstrap_details_match_exchange_absent_store_properties() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -4552,17 +4552,10 @@ pub(in crate::mapi) fn outlook_logon_bootstrap_details_use_valid_store_icons() {
     assert!(details.contains("r4=0x00000001"));
     assert!(details.contains("dn_null_terminated=true"));
     assert!(details.contains("private=true"));
-    assert!(details.contains("max_submit_message_size_kb=35840"));
-    assert!(details.contains("ico_len=70"));
-    assert!(details.contains("reserved=0x0000"));
-    assert!(details.contains("type=0x0001"));
-    assert!(details.contains("count=1"));
-    assert!(details.contains("bit_count=32"));
-    assert!(details.contains("length_matches_directory=true"));
-    assert_eq!(row_shape.estimated_rop_payload_bytes, 297);
-    assert_eq!(row_shape.property_row_bytes, 290);
-    assert_eq!(row_shape.icon_row_bytes, 144);
-    assert_eq!(row_shape.non_icon_row_bytes, 146);
+    assert!(details.contains("max_submit_message_size_kb=25600"));
+    assert!(!details.contains("ico_len="));
+    assert_eq!(row_shape.icon_row_bytes, 0);
+    assert!(row_shape.non_icon_row_bytes > 0);
 }
 
 #[test]

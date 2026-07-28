@@ -472,8 +472,19 @@ before it is advertised.
   unchanged from `202607280946`. The Exchange probe also returns
   `PidTagMessageStatus` (`0x0E170003`) as zero, while LPE's same recovery
   payload preserved an imported value of one. LPE now normalizes that property
-  to zero only for `IPM.Configuration.MessageListSettings`; the next rerun
-  decides whether that is the remaining merge incompatibility.
+  to zero only for `IPM.Configuration.MessageListSettings`. The same
+  projection applies to direct `CopyTo`, preventing a persisted client value
+  from contradicting the subsequent `GetProps` response.
+- The Exchange 15.1.2507.34 root-store probes in `202607281134` return
+  `MAPI_E_NOT_FOUND` for `PidTagServerTypeDisplayName` (`0x341D001F`),
+  `PidTagServerConnectedIcon` (`0x341E0102`),
+  `PidTagServerAccountIcon` (`0x341F0102`), and `PidTagOutlookStoreState`
+  (`0x346F0003`); LPE now returns the same absent-property result instead of
+  synthesizing values. The traced `PidTagMaxSubmitMessageSize` is 25 KiB.
+- The same Exchange capture returns the 46-byte folder-derived `0x0E0B0102`
+  EntryID for `IPM.ExtendedRule.Message` as well as
+  `IPM.Configuration.MessageListSettings`; LPE projects it for both traced
+  associated-message classes.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.

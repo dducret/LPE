@@ -8843,15 +8843,15 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
         &bootstrap_store_props_rops,
         &utf16z("Alice")
     ));
-    assert!(contains_bytes(&bootstrap_store_props_rops, &utf16z("LPE")));
-    assert!(contains_bytes(
-        &bootstrap_store_props_rops,
-        &[0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x01]
-    ));
-    assert!(contains_bytes(
-        &bootstrap_store_props_rops,
-        &[0x30, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]
-    ));
+    assert!(!contains_bytes(&bootstrap_store_props_rops, &utf16z("LPE")));
+    assert_eq!(
+        bootstrap_store_props_rops
+            .windows(4)
+            .filter(|value| *value == 0x8004_010Fu32.to_le_bytes())
+            .count(),
+        4,
+        "Exchange returns MAPI_E_NOT_FOUND for the three server-icon properties and OutlookStoreState"
+    );
 
     let mut trace_store_props_headers = mapi_headers("Execute");
     trace_store_props_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());
@@ -8966,7 +8966,7 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
     cookie = mapi_cookie_header(&max_submit_response);
     let max_submit_rops = response_rops_from_execute_response(max_submit_response).await;
     assert!(contains_bytes(&max_submit_rops, &[0x07, 0x00, 0, 0, 0, 0]));
-    assert!(contains_bytes(&max_submit_rops, &35840u32.to_le_bytes()));
+    assert!(contains_bytes(&max_submit_rops, &25600u32.to_le_bytes()));
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());

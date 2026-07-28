@@ -41,11 +41,6 @@ pub(in crate::mapi) fn logon_property_value(
             )
             .expect("public-folder root uses a valid MAPI folder ID"),
         )),
-        PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => Some(MapiValue::String("LPE".to_string())),
-        PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON => {
-            Some(MapiValue::Binary(OUTLOOK_STORE_ICON_ICO.to_vec()))
-        }
-        PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(true)),
         PID_TAG_USER_GUID => Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec())),
         PID_TAG_MESSAGE_SIZE_EXTENDED => principal
@@ -57,7 +52,7 @@ pub(in crate::mapi) fn logon_property_value(
             .quota_mb
             .map(|value| MapiValue::U32(value.saturating_mul(1024))),
         PID_TAG_MAX_SUBMIT_MESSAGE_SIZE | PID_TAG_EXTENDED_RULE_SIZE_LIMIT => {
-            Some(MapiValue::U32(35 * 1024))
+            Some(MapiValue::U32(25 * 1024))
         }
         PID_TAG_PST_PATH_W => Some(MapiValue::String(String::new())),
         _ => special_folder_identification_property_value(principal.account_id, property_tag),

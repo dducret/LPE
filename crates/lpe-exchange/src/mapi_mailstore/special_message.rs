@@ -264,6 +264,12 @@ pub(super) fn special_message_has_attachments(object: &SpecialMessageSyncFact) -
 }
 
 pub(super) fn special_message_status(object: &SpecialMessageSyncFact) -> u32 {
+    if crate::mapi_store::is_outlook_configuration_message_class_name(
+        &object.message_class,
+        "IPM.Configuration.MessageListSettings",
+    ) {
+        return 0;
+    }
     special_message_u32_property(object, PID_TAG_MESSAGE_STATUS).unwrap_or(0)
 }
 
@@ -390,6 +396,7 @@ fn write_fast_transfer_special_message_content(
     // HasAttachments/mfHasAttach projection. Section 2.2.1.8 defines
     // MessageStatus; its zero fallback matches LPE's effective default and
     // the content-synchronization example in [MS-OXCFXICS] section 4.5.
+    // MessageListSettings also has an Exchange-observed zero server projection.
     // CopyTo/CopyProperties apply their exclusion/inclusion lists to both.
     if selection.has_attachments {
         write_bool_property(

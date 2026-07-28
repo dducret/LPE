@@ -1914,12 +1914,12 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
 
     let direct_copy = transfer(RopId::FastTransferSourceCopyTo.as_u8(), &[]);
     let mut expected_status = PID_TAG_MESSAGE_STATUS.to_le_bytes().to_vec();
-    expected_status.extend_from_slice(&3i32.to_le_bytes());
+    expected_status.extend_from_slice(&0i32.to_le_bytes());
     assert!(
         direct_copy
             .windows(expected_status.len())
             .any(|property| property == expected_status),
-        "direct CopyTo must retain the canonical PidTagMessageStatus value"
+        "direct CopyTo must match the MessageListSettings GetProps status projection"
     );
 }
 

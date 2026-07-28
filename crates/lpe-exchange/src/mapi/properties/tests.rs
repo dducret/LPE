@@ -4915,7 +4915,7 @@ fn unsupported_property_types_fail_explicitly() {
 }
 
 #[test]
-fn logon_projects_valid_server_icon_payloads() {
+fn logon_omits_exchange_absent_server_type_properties() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -4925,12 +4925,22 @@ fn logon_projects_valid_server_icon_payloads() {
         quota_used_octets: None,
     };
 
-    for tag in [PID_TAG_SERVER_CONNECTED_ICON, PID_TAG_SERVER_ACCOUNT_ICON] {
+    for tag in [
+        PID_TAG_SERVER_TYPE_DISPLAY_NAME_W,
+        PID_TAG_SERVER_CONNECTED_ICON,
+        PID_TAG_SERVER_ACCOUNT_ICON,
+        PID_TAG_OUTLOOK_STORE_STATE,
+    ] {
         assert_eq!(
             logon_property_value(&principal, tag),
-            Some(MapiValue::Binary(OUTLOOK_STORE_ICON_ICO.to_vec()))
+            None,
+            "Exchange 15.1.2507.34 returns MAPI_E_NOT_FOUND for {tag:#010x}"
         );
     }
+    assert_eq!(
+        logon_property_value(&principal, PID_TAG_MAX_SUBMIT_MESSAGE_SIZE),
+        Some(MapiValue::U32(25 * 1024))
+    );
 }
 
 #[test]
@@ -7133,7 +7143,7 @@ fn logon_projects_outlook_bootstrap_identity_metadata() {
 
     assert_eq!(
         logon_property_value(&principal, PID_TAG_OUTLOOK_STORE_STATE),
-        Some(MapiValue::U32(0))
+        None
     );
     assert_eq!(
         logon_property_value(&principal, PID_TAG_RESOURCE_FLAGS),
@@ -7191,11 +7201,11 @@ fn logon_projects_max_submit_message_size() {
 
     assert_eq!(
         logon_property_value(&principal, PID_TAG_MAX_SUBMIT_MESSAGE_SIZE),
-        Some(MapiValue::U32(35 * 1024))
+        Some(MapiValue::U32(25 * 1024))
     );
     assert_eq!(
         logon_property_value(&principal, PID_TAG_EXTENDED_RULE_SIZE_LIMIT),
-        Some(MapiValue::U32(35 * 1024))
+        Some(MapiValue::U32(25 * 1024))
     );
     assert_eq!(
         logon_property_value(&principal, PID_TAG_MESSAGE_SIZE_EXTENDED),

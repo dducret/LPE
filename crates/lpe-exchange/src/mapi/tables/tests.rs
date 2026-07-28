@@ -7913,6 +7913,23 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
         ),
         None
     );
+    let extended_rule = MapiAssociatedConfigMessage {
+        message_class: "IPM.ExtendedRule.Message".to_string(),
+        subject: "Junk E-mail Rule".to_string(),
+        ..message.clone()
+    };
+    assert_eq!(
+        associated_config_property_value_with_mailbox_guid(
+            &extended_rule,
+            mailbox_guid,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        ),
+        crate::mapi::identity::outlook_message_list_settings_entry_id(
+            mailbox_guid,
+            INBOX_FOLDER_ID
+        )
+        .map(MapiValue::Binary)
+    );
     assert_eq!(
         associated_config_property_value(&message, PID_NAME_CONTENT_CLASS_W_TAG),
         Some(MapiValue::String("urn:content-classes:message".to_string()))
