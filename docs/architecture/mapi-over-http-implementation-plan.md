@@ -384,6 +384,27 @@ before it is advertised.
   regression verifies the same aggregate after a real store reload. This follows
   `[MS-OXCMSG]` sections 2.2.1.49 and 3.2.5.3, `[MS-OXCFOLD]` sections
   2.2.2.2.1.13 and 2.2.2.2.1.14, and `[MS-OXCFXICS]` section 3.1.5.3.
+- The `202607272220` rerun increased the existing synchronization-report count
+  from `N0=2` to `N1=3` and `N2=4`. Both failures followed the same read-only
+  (`OpenModeFlags=0x00`) Inbox `IPM.Configuration.MessageListSettings` open,
+  direct `CopyTo`, `GetProps`, and collector transfer-state sequence. All 223
+  captured HTTP exchanges, MAPI response codes, and decoded ROP return values
+  succeeded; `0x80004002` was generated locally by Outlook and means
+  `NoInterface` under `[MS-OXCDATA]` section 2.4. The 657-byte FastTransfer
+  streams decode completely and are identical. `PidTagAccessLevel=0` is
+  therefore consistent with the read-only message handle and is not a defect.
+  The persisted FAI's collector state also contains the five server change
+  numbers assigned to the preceding Outlook imports in
+  `MetaTagCnsetSeenFAI`, as required by `[MS-OXCFXICS]` section 3.1.5.3.
+  Comparison with `202607272146` instead proves that the deployed projection
+  changed `PidTagLastModifierName` and `PidTagMessageSize` while retaining the
+  same `PidTagChangeKey`, `PidTagPredecessorChangeList`, change number, and
+  `PidTagLastModificationTime`. That existing database and OST can no longer
+  validate the correction: `[MS-OXCFXICS]` sections 2.2.1.2.7, 2.2.1.2.8, and
+  3.1.5.3 require the version identifiers to identify the current object
+  version and a new change number for each modification. The next validation
+  must use an empty `0.5.1-sql` database and a new Outlook profile/OST, without
+  another projection change first.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
