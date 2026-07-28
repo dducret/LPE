@@ -47,6 +47,7 @@ pub(crate) struct SpecialMessageFastTransferSelection {
     has_attachments: bool,
     message_status: bool,
     parent_entry_id: bool,
+    parent_source_key: bool,
     search_key: bool,
 }
 
@@ -60,6 +61,7 @@ impl SpecialMessageFastTransferSelection {
             has_attachments: true,
             message_status: true,
             parent_entry_id: true,
+            parent_source_key: true,
             search_key: true,
         }
     }
@@ -87,6 +89,11 @@ impl SpecialMessageFastTransferSelection {
                 rop_id,
                 property_tags,
                 PID_TAG_PARENT_ENTRY_ID,
+            ),
+            parent_source_key: fast_transfer_property_included(
+                rop_id,
+                property_tags,
+                PID_TAG_PARENT_SOURCE_KEY,
             ),
             search_key: fast_transfer_property_included(rop_id, property_tags, PID_TAG_SEARCH_KEY),
         }
@@ -328,11 +335,21 @@ fn write_fast_transfer_special_message_content(
     let source_key = special_message_source_key(object);
     let change_key = special_message_change_key(object);
     let predecessor_change_list = special_message_predecessor_change_list(object);
-    // [MS-OXPROPS] section 2.863 defines PidTagParentSourceKey on Folder
-    // objects. [MS-OXCFXICS] sections 2.2.4.3.16 and 2.2.4.4 permit other
-    // properties but do not require this folder-only value in a direct Message
-    // CopyTo messageContent, so LPE does not synthesize it there.
     write_binary_property(buffer, PID_TAG_SOURCE_KEY, &source_key);
+    // LPE exposes the containing-folder SourceKey on Message objects through
+    // GetProps, tables, and ICS. [MS-OXCFXICS] sections 2.2.4.3.16,
+    // 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12 require direct CopyTo to apply its
+    // exclusion list to that same property bag.
+    if object.associated
+        && crate::mapi_store::is_outlook_configuration_message_class(&object.message_class)
+        && selection.parent_source_key
+    {
+        write_binary_property(
+            buffer,
+            PID_TAG_PARENT_SOURCE_KEY,
+            &special_message_parent_source_key(object),
+        );
+    }
     // [MS-OXCFXICS] sections 2.2.3.1.1.1.1, 3.2.5.10, and 3.2.5.12 define
     // the CopyTo exclusion list and provider-internal download filtering.
     // PidTagEntryId (0x0FFF0102) is outside that range; when the object family

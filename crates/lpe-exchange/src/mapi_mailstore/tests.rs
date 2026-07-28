@@ -1029,6 +1029,8 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         crate::mapi::identity::INBOX_FOLDER_ID,
     )
     .unwrap();
+    let parent_source_key =
+        crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::INBOX_FOLDER_ID);
     let special = SpecialMessageSyncFact {
         folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
         item_id,
@@ -1071,9 +1073,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         ],
     );
     assert!(buffer.starts_with(&PID_TAG_SOURCE_KEY.to_le_bytes()));
-    assert!(!buffer
-        .windows(4)
-        .any(|window| window == PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()));
+    assert_variable_property_present(&buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
     assert!(!buffer
         .windows(4)
         .any(|window| window == FastTransferMarker::StartFAIMsg.as_u32().to_le_bytes()));
@@ -1167,6 +1167,9 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     assert!(!normal_buffer
         .windows(4)
         .any(|window| window == PID_TAG_ASSOCIATED.to_le_bytes()));
+    assert!(!normal_buffer
+        .windows(4)
+        .any(|window| window == PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()));
     assert_i32_property(&normal_buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_READ as i32);
 }
 

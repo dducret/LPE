@@ -405,6 +405,31 @@ before it is advertised.
   version and a new change number for each modification. The next validation
   must use an empty `0.5.1-sql` database and a new Outlook profile/OST, without
   another projection change first.
+- The clean `202607280707` validation used an empty canonical `0.5.1-sql`
+  database and a new Outlook profile/OST. It held the synchronization-report
+  count at `N0=N1=0` and produced one report after the first reconnect
+  (`N2=1`), falsifying the stale-version hypothesis. The imported Inbox
+  `IPM.Configuration.MessageListSettings` FAI retained one stable MID, SourceKey,
+  SearchKey, ChangeKey, PCL, LastModificationTime, CreationTime,
+  LastModifierName, MessageFlags, and content bag. Outlook's read-only
+  `OpenMessage`, direct `RopFastTransferSourceCopyTo`, follow-up GetProps, and
+  collector transfer-state ROPs all returned success. The report upload began
+  4.16 seconds after the 657-byte direct CopyTo completed. The same object had
+  already been accepted through ICS with its containing Inbox
+  `PidTagParentSourceKey` (`0x65E10102`), while the direct CopyTo omitted that
+  value despite an empty exclusion list. LPE also exposes that containing-folder
+  identity through Message GetProps and tables. The special-message direct
+  serializer now projects exactly one identical ParentSourceKey for Outlook
+  configuration FAI messages and applies the normal typed or
+  `PtypUnspecified` CopyTo exclusion / CopyProperties inclusion filters. Other
+  FAI families retain their existing direct projection. The expected direct
+  stream is therefore 687 bytes; CN, CK, PCL, timestamps, content, and transfer
+  state are unchanged. `[MS-OXPROPS]` section 2.863 defines ParentSourceKey
+  canonically on folders, so this Message projection is an explicit LPE/Outlook
+  interoperability contract rather than an unconditional protocol requirement.
+  The CopyTo property-selection behavior follows `[MS-OXCFXICS]` sections
+  2.2.3.1.1.1.1, 2.2.4.3.16, 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12. Elimination
+  of the report requires a real Outlook rerun.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
@@ -614,7 +639,8 @@ non-canonical LPE state.
   therefore exported as `0x00000449`, not reduced to `mfFAI` alone. Both ICS
   content download and direct Message CopyTo omit `PidTagObjectType` and
   `PidTagRecordKey` from FAI Message objects while retaining `PidTagSourceKey`,
-  `PidTagEntryId`, `PidTagSearchKey`, `PidTagChangeKey`, and
+  the LPE containing-folder `PidTagParentSourceKey` projection on Outlook
+  configuration FAI messages, `PidTagEntryId`, `PidTagSearchKey`, `PidTagChangeKey`, and
   `PidTagPredecessorChangeList`. This follows `[MS-OXCMSG]` section 2.2.1.1
   product notes 2 and 3; `[MS-OXPROPS]` section 2.912 identifies
   `PidTagRecordKey`, while `[MS-OXCFXICS]` sections 2.2.4.3.13 and 2.2.4.3.16

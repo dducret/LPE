@@ -1852,6 +1852,7 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
         (PID_TAG_HAS_ATTACHMENTS, "PidTagHasAttachments"),
         (PID_TAG_MESSAGE_STATUS, "PidTagMessageStatus"),
         (PID_TAG_PARENT_ENTRY_ID, "PidTagParentEntryId"),
+        (PID_TAG_PARENT_SOURCE_KEY, "PidTagParentSourceKey"),
         (PID_TAG_SEARCH_KEY, "PidTagSearchKey"),
     ] {
         assert_eq!(

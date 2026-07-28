@@ -12293,6 +12293,8 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
     );
     let associated_source_key =
         crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let parent_source_key =
+        crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::INBOX_FOLDER_ID);
     let associated_config_id = Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a7").unwrap();
     let account = FakeStore::account();
     let store = FakeStore {
@@ -12378,10 +12380,16 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
     let chunks = mapi_fast_transfer_chunks(&response_rops);
     assert_eq!(chunks.len(), 1, "{response_rops:02x?}");
     let transfer = &chunks[0].1;
-    assert!(!contains_bytes(
-        transfer,
-        &PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()
-    ));
+    let mut expected_parent_source_key = PID_TAG_PARENT_SOURCE_KEY.to_le_bytes().to_vec();
+    expected_parent_source_key.extend_from_slice(&(parent_source_key.len() as u32).to_le_bytes());
+    expected_parent_source_key.extend_from_slice(&parent_source_key);
+    assert_eq!(
+        transfer
+            .windows(expected_parent_source_key.len())
+            .filter(|window| *window == expected_parent_source_key)
+            .count(),
+        1
+    );
     assert!(contains_bytes(transfer, &PID_TAG_SOURCE_KEY.to_le_bytes()));
     assert!(!contains_bytes(transfer, &0x4010_0003u32.to_le_bytes()));
     assert!(!contains_bytes(transfer, &0x400D_0003u32.to_le_bytes()));
@@ -16908,6 +16916,8 @@ async fn mapi_over_http_inbox_message_list_settings_import_preserves_outlook_sys
         .await?;
     let message_id = crate::mapi::identity::mapi_store_id(reserved_start + 0x25);
     let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let parent_source_key =
+        crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::INBOX_FOLDER_ID);
     let imported_change_key = vec![
         0x7B, 0xA0, 0x82, 0x5A, 0xAC, 0x2C, 0x83, 0x41, 0xB7, 0xF3, 0x5A, 0x2B, 0x64, 0x05, 0xDD,
         0x07, 0x00, 0x00, 0x04, 0x14,
@@ -17121,6 +17131,18 @@ async fn mapi_over_http_inbox_message_list_settings_import_preserves_outlook_sys
         contains_bytes(&chunks[0].1, &expected_last_modifier),
         "CopyTo did not preserve canonical LastModifierName in {:02x?}",
         chunks[0].1
+    );
+    let mut expected_parent_source_key = PID_TAG_PARENT_SOURCE_KEY.to_le_bytes().to_vec();
+    expected_parent_source_key.extend_from_slice(&(parent_source_key.len() as u32).to_le_bytes());
+    expected_parent_source_key.extend_from_slice(&parent_source_key);
+    assert_eq!(
+        chunks[0]
+            .1
+            .windows(expected_parent_source_key.len())
+            .filter(|window| *window == expected_parent_source_key)
+            .count(),
+        1,
+        "CopyTo must project the same containing-folder SourceKey as ICS"
     );
 
     fixture.cleanup().await?;
