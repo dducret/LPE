@@ -466,6 +466,14 @@ before it is advertised.
   direct FastTransfer stream remains unchanged. The next clean Outlook rerun
   must determine whether correcting the earlier post-save GetProps response
   prevents the later CopyTo recovery path and synchronization report.
+- The `202607281300` rerun confirms the `0x0E0B0102` correction on wire:
+  Outlook's direct post-CopyTo probe receives a successful 46-byte value with
+  no problem cells, yet `N2=1` remains and both direct CopyTo payloads are
+  unchanged from `202607280946`. The Exchange probe also returns
+  `PidTagMessageStatus` (`0x0E170003`) as zero, while LPE's same recovery
+  payload preserved an imported value of one. LPE now normalizes that property
+  to zero only for `IPM.Configuration.MessageListSettings`; the next rerun
+  decides whether that is the remaining merge incompatibility.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.

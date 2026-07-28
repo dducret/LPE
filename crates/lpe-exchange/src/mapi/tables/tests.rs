@@ -7878,6 +7878,16 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
         associated_config_property_value(&message, 0x685D_0003),
         Some(MapiValue::U32(value)) if value != 0
     ));
+    let explicit_message_status = MapiAssociatedConfigMessage {
+        properties_json: serde_json::json!({
+            "0x0e170003": {"type": "u32", "value": 1}
+        }),
+        ..message.clone()
+    };
+    assert_eq!(
+        associated_config_property_value(&explicit_message_status, PID_TAG_MESSAGE_STATUS),
+        Some(MapiValue::U32(0))
+    );
     assert_eq!(
         associated_config_property_value_with_mailbox_guid(
             &message,

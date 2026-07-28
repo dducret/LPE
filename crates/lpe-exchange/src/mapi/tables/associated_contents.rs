@@ -440,6 +440,17 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
     property_tag: u32,
 ) -> Option<MapiValue> {
     let lookup_tag = canonical_property_storage_tag(property_tag);
+    if lookup_tag == PID_TAG_MESSAGE_STATUS
+        && crate::mapi_store::is_outlook_configuration_message_class_name(
+            &message.message_class,
+            "IPM.Configuration.MessageListSettings",
+        )
+    {
+        // Exchange 15.1.2507.34 normalizes this server-state property to zero
+        // in the MessageListSettings GetProps probe, even when Outlook's
+        // imported FastTransfer state carries a nonzero value.
+        return Some(MapiValue::U32(0));
+    }
     if lookup_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
         && crate::mapi_store::is_outlook_configuration_message_class_name(
             &message.message_class,
