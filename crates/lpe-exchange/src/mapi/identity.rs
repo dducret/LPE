@@ -301,16 +301,31 @@ pub(crate) fn folder_entry_id_from_object_id(
     folder_entry_id_with_provider(mailbox_guid.to_bytes_le(), object_id)
 }
 
+pub(crate) fn outlook_message_list_settings_entry_id(
+    mailbox_guid: Uuid,
+    object_id: u64,
+) -> Option<Vec<u8>> {
+    folder_entry_id_with_provider_and_type(mailbox_guid.to_bytes_le(), object_id, 0x000D)
+}
+
 pub(crate) fn public_folder_entry_id_from_object_id(object_id: u64) -> Option<Vec<u8>> {
     folder_entry_id_with_provider(PUBLIC_FOLDER_PROVIDER_UID, object_id)
 }
 
 fn folder_entry_id_with_provider(provider_uid: [u8; 16], object_id: u64) -> Option<Vec<u8>> {
+    folder_entry_id_with_provider_and_type(provider_uid, object_id, 1)
+}
+
+fn folder_entry_id_with_provider_and_type(
+    provider_uid: [u8; 16],
+    object_id: u64,
+    entry_type: u16,
+) -> Option<Vec<u8>> {
     let global_counter = global_counter_from_store_id(object_id)?;
     let mut entry_id = Vec::with_capacity(46);
     entry_id.extend_from_slice(&0u32.to_le_bytes());
     entry_id.extend_from_slice(&provider_uid);
-    entry_id.extend_from_slice(&1u16.to_le_bytes());
+    entry_id.extend_from_slice(&entry_type.to_le_bytes());
     entry_id.extend_from_slice(&STORE_REPLICA_GUID);
     entry_id.extend_from_slice(&globcnt_bytes(global_counter));
     entry_id.extend_from_slice(&0u16.to_le_bytes());
@@ -506,6 +521,22 @@ mod tests {
             object_id_from_folder_identifier_bytes(&entry_id),
             Some(object_id)
         );
+    }
+
+    #[test]
+    fn message_list_settings_entry_id_matches_exchange_private_shape() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let entry_id =
+            outlook_message_list_settings_entry_id(mailbox_guid, INBOX_FOLDER_ID).unwrap();
+
+        assert_eq!(entry_id.len(), 46);
+        assert_eq!(&entry_id[..4], &0u32.to_le_bytes());
+        assert_eq!(&entry_id[4..20], &mailbox_guid.to_bytes_le());
+        assert_eq!(&entry_id[20..22], &0x000D_u16.to_le_bytes());
+        assert_eq!(&entry_id[22..38], &STORE_REPLICA_GUID);
+        assert_eq!(&entry_id[38..44], &globcnt_bytes(INBOX_FOLDER_COUNTER));
+        assert_eq!(&entry_id[44..46], &0u16.to_le_bytes());
+        assert_eq!(object_id_from_folder_entry_id(&entry_id), None);
     }
 
     #[test]

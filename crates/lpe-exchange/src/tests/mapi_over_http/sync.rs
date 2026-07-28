@@ -11212,18 +11212,16 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         .iter()
         .any(|property| property.tag == 0x836B_001F));
 
-    // Trace 202607231148 repeats this OpenMessage/CopyTo/GetPropertiesSpecific
-    // sequence after the FAI was saved with PidTagRoamingDatatypes=0 and no
-    // roaming stream. [MS-OXOCFG] section 2.2.2.1 scopes that zero value to
-    // the roaming XML and dictionary streams only. Because 0x0E0B0102 is not
-    // persisted, [MS-OXCDATA] sections 2.4.2 and 2.11.5 require a flagged
-    // MAPI_E_NOT_FOUND cell rather than a fabricated PtypBinary value.
+    // Exchange 15.1.2507.34 trace 202607281134 returns 0x664F000B as
+    // MAPI_E_NOT_FOUND and projects 0x0E0B0102 as a stable 46-byte,
+    // folder-derived EntryID in the MessageListSettings GetProps row.
     let direct_tags = [
         PID_TAG_ENTRY_ID,
         0x0E09_0102, // PidTagParentEntryId.
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_LAST_MODIFICATION_TIME,
+        0x664F_000B,
         0x0E0B_0102,
         PID_TAG_MESSAGE_CLASS_W,
     ];
@@ -11314,7 +11312,7 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     value_offset += 8;
     assert_eq!(
         direct_get_response_rops[value_offset], 0x0A,
-        "0x0E0B0102 must be absent rather than fabricated: {direct_get_response_rops:02x?}"
+        "Exchange returns 0x664F000B as MAPI_E_NOT_FOUND: {direct_get_response_rops:02x?}"
     );
     value_offset += 1;
     assert_eq!(
@@ -11324,9 +11322,32 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
                 .unwrap(),
         ),
         0x8004_010F,
-        "0x0E0B0102 must encode MAPI_E_NOT_FOUND: {direct_get_response_rops:02x?}"
+        "0x664F000B must encode MAPI_E_NOT_FOUND: {direct_get_response_rops:02x?}"
     );
     value_offset += 4;
+    assert_eq!(
+        direct_get_response_rops[value_offset], 0,
+        "0x0E0B0102 must be a successful FlaggedPropertyValue: {direct_get_response_rops:02x?}"
+    );
+    value_offset += 1;
+    let private_entry_id_len = u16::from_le_bytes(
+        direct_get_response_rops[value_offset..value_offset + 2]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    value_offset += 2;
+    let expected_private_entry_id = crate::mapi::identity::outlook_message_list_settings_entry_id(
+        account.account_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    )
+    .unwrap();
+    assert_eq!(private_entry_id_len, expected_private_entry_id.len());
+    assert_eq!(
+        &direct_get_response_rops[value_offset..value_offset + private_entry_id_len],
+        expected_private_entry_id.as_slice(),
+        "0x0E0B0102 must use the Exchange folder-derived EntryID shape: {direct_get_response_rops:02x?}"
+    );
+    value_offset += private_entry_id_len;
     assert!(
         direct_get_response_rops.get(value_offset) == Some(&0),
         "PidTagMessageClass must be a successful FlaggedPropertyValue: {direct_get_response_rops:02x?}"

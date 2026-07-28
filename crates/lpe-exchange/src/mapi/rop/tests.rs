@@ -2037,7 +2037,7 @@ fn persisted_named_view_getprops_does_not_project_missing_0e0b() {
 }
 
 #[test]
-fn persisted_message_list_settings_getprops_does_not_project_missing_0e0b() {
+fn persisted_message_list_settings_getprops_projects_exchange_private_entry_id() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::nil(),
@@ -2071,7 +2071,7 @@ fn persisted_message_list_settings_getprops_does_not_project_missing_0e0b() {
         payload,
     };
 
-    assert!(fallback_default_specific_property(
+    assert!(!fallback_default_specific_property(
         Some(&object),
         &principal,
         &[],
@@ -2091,12 +2091,17 @@ fn persisted_message_list_settings_getprops_does_not_project_missing_0e0b() {
 
     assert_eq!(response[0], RopId::GetPropertiesSpecific.as_u8());
     assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
-    assert_eq!(response[6], 1);
-    assert_eq!(response[7], 0x0A);
+    assert_eq!(response[6], 0);
+    let expected = crate::mapi::identity::outlook_message_list_settings_entry_id(
+        principal.account_id,
+        INBOX_FOLDER_ID,
+    )
+    .unwrap();
     assert_eq!(
-        u32::from_le_bytes(response[8..12].try_into().unwrap()),
-        0x8004_010F
+        u16::from_le_bytes(response[7..9].try_into().unwrap()) as usize,
+        expected.len()
     );
+    assert_eq!(&response[9..], expected.as_slice());
 }
 
 #[test]

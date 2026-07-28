@@ -440,6 +440,22 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
     property_tag: u32,
 ) -> Option<MapiValue> {
     let lookup_tag = canonical_property_storage_tag(property_tag);
+    if lookup_tag == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        && crate::mapi_store::is_outlook_configuration_message_class_name(
+            &message.message_class,
+            "IPM.Configuration.MessageListSettings",
+        )
+    {
+        // Exchange 15.1.2507.34 returns this stable 46-byte, folder-derived
+        // value in Outlook's post-save GetProps probe. The tag has no public
+        // MS-OXPROPS mapping, so keep the compatibility projection bounded to
+        // the one observed message family.
+        return crate::mapi::identity::outlook_message_list_settings_entry_id(
+            mailbox_guid,
+            message.folder_id,
+        )
+        .map(MapiValue::Binary);
+    }
     let properties = mapi_properties_from_json(&message.properties_json);
     properties
         .get(&lookup_tag)

@@ -7879,7 +7879,28 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
         Some(MapiValue::U32(value)) if value != 0
     ));
     assert_eq!(
-        associated_config_property_value(&message, OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B),
+        associated_config_property_value_with_mailbox_guid(
+            &message,
+            mailbox_guid,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        ),
+        crate::mapi::identity::outlook_message_list_settings_entry_id(
+            mailbox_guid,
+            INBOX_FOLDER_ID
+        )
+        .map(MapiValue::Binary)
+    );
+    let account_prefs = MapiAssociatedConfigMessage {
+        message_class: "IPM.Configuration.AccountPrefs".to_string(),
+        subject: "IPM.Configuration.AccountPrefs".to_string(),
+        ..message.clone()
+    };
+    assert_eq!(
+        associated_config_property_value_with_mailbox_guid(
+            &account_prefs,
+            mailbox_guid,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
+        ),
         None
     );
     assert_eq!(
@@ -7947,7 +7968,8 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
             &explicit_no_streams,
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
         ),
-        None
+        crate::mapi::identity::outlook_message_list_settings_entry_id(Uuid::nil(), INBOX_FOLDER_ID)
+            .map(MapiValue::Binary)
     );
     let explicit_compatibility_binary = MapiAssociatedConfigMessage {
         properties_json: serde_json::json!({
@@ -7961,7 +7983,8 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
             &explicit_compatibility_binary,
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
         ),
-        Some(MapiValue::Binary(vec![1, 2]))
+        crate::mapi::identity::outlook_message_list_settings_entry_id(Uuid::nil(), INBOX_FOLDER_ID)
+            .map(MapiValue::Binary)
     );
     let explicit_roaming_xml = MapiAssociatedConfigMessage {
         properties_json: serde_json::json!({
@@ -7974,7 +7997,8 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
             &explicit_roaming_xml,
             OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
         ),
-        None
+        crate::mapi::identity::outlook_message_list_settings_entry_id(Uuid::nil(), INBOX_FOLDER_ID)
+            .map(MapiValue::Binary)
     );
     assert_eq!(
         associated_config_property_value(&explicit_no_streams, PID_NAME_CONTENT_CLASS_W_TAG),

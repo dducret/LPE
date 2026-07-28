@@ -430,6 +430,42 @@ before it is advertised.
   The CopyTo property-selection behavior follows `[MS-OXCFXICS]` sections
   2.2.3.1.1.1.1, 2.2.4.3.16, 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12. Elimination
   of the report requires a real Outlook rerun.
+- The clean `202607280946` rerun retained `N0=N1=0` and produced `N2=1`,
+  falsifying the direct `PidTagParentSourceKey` omission as the cause of the
+  report. Both direct `MessageListSettings` CopyTo payloads are 687 bytes and
+  byte-for-byte identical apart from their transient response handle-table
+  values. Each contains the exact Inbox ParentSourceKey, and every ROP and MAPI
+  HTTP response succeeds. The first CopyTo completed at
+  `2026-07-28T07:45:39.647Z`; Outlook's compressed-RTF synchronization report
+  records `80004002-501-0-0` (`NoInterface`) during that same local
+  view/form merge. Outlook nevertheless imported and saved one new
+  `IPM.Configuration.AccountPrefs` FAI and reported that one view/form was
+  added to the online folder before it uploaded the report to Deleted Items.
+  The two follow-up property probes are also identical: ChangeKey, PCL,
+  LastModificationTime, and MessageClass succeed, while private binary tag
+  `0x0E0B0102` returns an `ecNotFound` property cell. That property ID is not
+  defined by `[MS-OXPROPS]`, so this trace alone did not justify synthesizing a
+  value.
+  The zero MessageId in the successful
+  `RopSynchronizationImportMessageChange` response is also not a defect:
+  `[MS-OXCROPS]` section 2.2.13.2.2 requires that field to be zero. The
+  remaining failure is local to Outlook's import/merge of an otherwise
+  parseable direct `messageContent`.
+- Exchange reference captures at `202607281118` and `202607281134`, using
+  Outlook `16.0.20131.20044` against Exchange `15.01.2507.034`, contain the
+  exact post-save `MessageListSettings` GetProps probe. Exchange returns
+  `0x0E0B0102` successfully as the same 46-byte binary value in both captures
+  while ChangeKey, PCL, and LastModificationTime advance; it returns
+  `0x664F000B` as `ecNotFound`. The private value has the account-scoped parent
+  Folder EntryID shape with entry type `0x000D`, the store replica GUID, and the
+  parent folder global counter. This proves that LPE's `ecNotFound` result is a
+  real Exchange divergence even though the tag remains absent from public
+  `[MS-OXPROPS]`. LPE now computes that bounded property only for
+  `IPM.Configuration.MessageListSettings` GetProps, table, and stream access.
+  Neither Exchange capture contains `RopFastTransferSourceCopyTo`, so the
+  direct FastTransfer stream remains unchanged. The next clean Outlook rerun
+  must determine whether correcting the earlier post-save GetProps response
+  prevents the later CopyTo recovery path and synchronization report.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.

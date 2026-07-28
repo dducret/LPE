@@ -6150,7 +6150,7 @@ fn associated_config_missing_binary_property_opens_writable_stream() {
 }
 
 #[test]
-fn associated_config_unknown_binary_property_does_not_open_as_empty_stream() {
+fn message_list_settings_private_binary_stream_is_projected_without_widening_other_classes() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let config_id = crate::mapi::identity::mapi_store_id(0x13f);
     let rule_organizer_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED);
@@ -6256,16 +6256,19 @@ fn associated_config_unknown_binary_property_does_not_open_as_empty_stream() {
         &snapshot,
     )
     .is_none());
-    assert!(property_stream_data(
-        &mut session,
-        1,
-        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
-        0,
-        &[],
-        account_id,
-        &snapshot,
-    )
-    .is_none());
+    assert_eq!(
+        property_stream_data(
+            &mut session,
+            1,
+            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
+            0,
+            &[],
+            account_id,
+            &snapshot,
+        ),
+        crate::mapi::identity::outlook_message_list_settings_entry_id(account_id, INBOX_FOLDER_ID)
+            .map(|value| (value, None))
+    );
 }
 
 #[test]
