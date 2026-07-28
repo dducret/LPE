@@ -374,14 +374,6 @@ pub(super) fn outlook_inbox_exact_virtual_associated_config_for_id(
         })
 }
 
-pub(crate) fn outlook_inbox_broad_startup_associated_config_defaults(
-) -> Vec<MapiAssociatedConfigMessage> {
-    outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
-        .into_iter()
-        .filter(|message| message.message_class == OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS)
-        .collect()
-}
-
 pub(crate) fn modeled_virtual_associated_config_message_for_canonical_id(
     canonical_id: Uuid,
 ) -> Option<MapiAssociatedConfigMessage> {

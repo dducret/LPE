@@ -234,7 +234,6 @@ pub(crate) use associated_config::{
     is_outlook_umolk_user_options_message_class,
     modeled_virtual_associated_config_message_for_canonical_id,
     outlook_default_folder_named_view_id, outlook_default_folder_named_view_name,
-    outlook_inbox_broad_startup_associated_config_defaults,
     outlook_inbox_exact_virtual_associated_config_for_message_class,
     OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID, OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
     OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS,

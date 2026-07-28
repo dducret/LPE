@@ -615,14 +615,10 @@ fn inbox_associated_configs_do_not_emit_unpersisted_defaults() {
             suppressed_id
         ));
     }
-    let message_list_settings = snapshot
+    assert!(snapshot
         .associated_config_message_for_id(OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID)
-        .expect("broad virtual Inbox FAI row should open by MID");
-    assert_eq!(
-        message_list_settings.message_class,
-        OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_CLASS
-    );
-    assert!(snapshot.associated_config_identity_matches_folder(
+        .is_none());
+    assert!(!snapshot.associated_config_identity_matches_folder(
         crate::mapi::identity::INBOX_FOLDER_ID,
         OUTLOOK_INBOX_MESSAGE_LIST_SETTINGS_CONFIG_ID
     ));

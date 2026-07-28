@@ -635,10 +635,10 @@ fn inbox_fai_handoff_visibility_context_separates_prefix_and_named_view_rows() {
 
     assert!(context.contains("advertised_default_view_folder_id=none"));
     assert!(context.contains("default_view_id=none"));
-    assert!(context.contains("current_count=1"), "{context}");
-    assert!(context.contains("unfiltered_count=1"), "{context}");
+    assert!(context.contains("current_count=0"), "{context}");
+    assert!(context.contains("unfiltered_count=0"), "{context}");
     assert!(
-        context.contains("prefix_ipm_configuration_count=1"),
+        context.contains("prefix_ipm_configuration_count=0"),
         "{context}"
     );
     assert!(context.contains("exact_named_view_count=0"));

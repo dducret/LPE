@@ -665,10 +665,13 @@ non-canonical LPE state.
   a NamedView is exposed only when a corresponding canonical FAI message exists.
   Outlook-created or imported associated configuration rows remain durable, but
   Inbox startup enumeration does not replay broad persisted `IPM.Configuration.*`
-  rows or `IPM.ExtendedRule.Message` rows; only the modeled
-  `IPM.Configuration.MessageListSettings` row is exposed in the Inbox associated
-  table and for Outlook's broad startup prefix probe, and exact, bounded lookups
-  expose supported configuration rows.
+  rows or `IPM.ExtendedRule.Message` rows. In particular, LPE does not synthesize
+  an empty `IPM.Configuration.MessageListSettings` row for the broad startup
+  prefix probe: Exchange 2016 capture `202607281754` follows the normal
+  synchronization and client-save path, whereas LPE's synthetic row led Outlook
+  to its failing CopyTo recovery path. Only Outlook-created or imported durable
+  configuration rows are exposed; exact, bounded lookups retain their supported
+  virtual projections.
 - `RopSaveChangesMessage` commits accepted `RopSetProperties` mutations
   according to `[MS-OXCPRPT]` section 3.2.5.4. When Outlook
   imports the Inbox `MessageListSettings` FAI, LPE preserves its imported

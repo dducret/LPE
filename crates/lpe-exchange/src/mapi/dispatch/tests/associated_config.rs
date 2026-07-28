@@ -638,7 +638,7 @@ fn inbox_associated_config_summary_reports_modeled_startup_rows() {
         "{summary}"
     );
     assert!(
-        summary.contains("class=IPM.Configuration.MessageListSettings"),
+        !summary.contains("class=IPM.Configuration.MessageListSettings"),
         "{summary}"
     );
     assert!(
