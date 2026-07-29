@@ -1338,6 +1338,10 @@ pub(super) fn folder_properties_for_open_from_mailboxes(
         properties.insert(PID_TAG_CONTENT_UNREAD_COUNT, MapiValue::U32(unread_count));
     }
     if folder_id == INBOX_FOLDER_ID {
+        // The opened-folder map contains only projected values. Exchange 2016
+        // returns MAPI_E_NOT_FOUND for this unpersisted Inbox property in the
+        // matching RopGetPropertiesSpecific probe.
+        properties.remove(&PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W);
         if let Some(value) =
             special_folder_property_value(folder_id, PID_TAG_DISPLAY_NAME_W, principal.account_id)
         {

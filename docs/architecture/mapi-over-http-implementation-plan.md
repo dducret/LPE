@@ -514,9 +514,11 @@ before it is advertised.
   every UTF-16 code unit. In the exact
   Inbox `RopGetPropertiesSpecific` form probe, Exchange returns
   `MAPI_E_NOT_FOUND` for the unpersisted `PidTagDefaultPostMessageClass`
-  (`0x36E5001F`) whereas LPE synthesized `IPM.Note`. LPE now returns the
-  same property error for an unpersisted Inbox value while retaining an
-  explicitly persisted value. The other apparent form/view candidates already
+  (`0x36E5001F`) whereas LPE synthesized `IPM.Note`. The initial response-path
+  guard was shadowed by the synthetic value in the opened Inbox projection.
+  LPE now removes that projected value, so the existing absent-property path
+  returns the same error while a value set on the active folder handle remains
+  available. The other apparent form/view candidates already
   match Exchange's absent-property cells under `[MS-OXCROPS]` section
   2.2.8.3.2. This aligns the demonstrated responses; a new Outlook run is
   still required to establish whether it removes `N2`.
@@ -671,6 +673,13 @@ non-canonical LPE state.
   Outlook's initial Calendar FAI parser. Fresh-profile Calendar FAI content sync
   is therefore allowed to be state-only until Outlook creates real associated
   configuration messages that LPE can persist and replay.
+  The `202607291610` first-profile trace shows that Outlook's local
+  "Upgrading Calendar Labels for Color Categories" UI creates the Inbox FAI
+  markers `IPM.Microsoft.PendingChange.MigrateCategoriesList` and
+  `IPM.Microsoft.MigrationStatus`; it does not send a
+  `IPM.Configuration.CategoryList` operation. Those client migration markers
+  must be persisted and replayed, not replaced with a server-synthesized
+  category list.
 - Conversation Action Settings exposes only FAI rows projected from canonical
   `conversation_actions` records. With no canonical action, its
   associated-contents table is empty and its ICS stream is state-only; LPE must

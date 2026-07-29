@@ -259,10 +259,7 @@ fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
         properties.get(&PID_TAG_CONTAINER_CLASS_W),
         Some(&MapiValue::String("IPF.Note".to_string()))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
-        Some(&MapiValue::String("IPM.Note".to_string()))
-    );
+    assert!(!properties.contains_key(&PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W));
     assert_eq!(
         properties.get(&PID_TAG_RIGHTS),
         Some(&MapiValue::U32(MAPI_FOLDER_ACCESS))
