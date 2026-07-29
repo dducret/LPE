@@ -624,6 +624,8 @@ pub(in crate::mapi) fn folder_version_property_value(
 pub(in crate::mapi) fn mapi_mailbox_display_name(mailbox: &JmapMailbox) -> String {
     if mailbox.role.eq_ignore_ascii_case("inbox") {
         "Inbox".to_string()
+    } else if mailbox.role.eq_ignore_ascii_case("junk") {
+        "Junk E-mail".to_string()
     } else if mailbox.role == "conversation_history" {
         "Conversation History".to_string()
     } else {

@@ -6302,7 +6302,7 @@ fn message_list_settings_private_binary_stream_is_projected_without_widening_oth
 }
 
 #[test]
-fn mapi_mailbox_display_name_normalizes_canonical_inbox() {
+fn mapi_mailbox_display_name_normalizes_canonical_special_folders() {
     let inbox = mailbox(
         "11111111-1111-1111-1111-111111111111",
         None,
@@ -6315,11 +6315,22 @@ fn mapi_mailbox_display_name_normalizes_canonical_inbox() {
         "",
         "INBOX Reports",
     );
+    let junk = mailbox(
+        "33333333-3333-3333-3333-333333333333",
+        None,
+        "junk",
+        "Junk Email",
+    );
 
     assert_eq!(mapi_mailbox_display_name(&inbox), "Inbox");
     assert_eq!(
         mailbox_property_value_with_context(&inbox, &[], PID_TAG_DISPLAY_NAME_W),
         Some(MapiValue::String("Inbox".to_string()))
+    );
+    assert_eq!(mapi_mailbox_display_name(&junk), "Junk E-mail");
+    assert_eq!(
+        mailbox_property_value_with_context(&junk, &[], PID_TAG_DISPLAY_NAME_W),
+        Some(MapiValue::String("Junk E-mail".to_string()))
     );
     assert_eq!(mapi_mailbox_display_name(&custom), "INBOX Reports");
 }
