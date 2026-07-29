@@ -95,9 +95,9 @@ fn default_hierarchy_columns_cover_table_projection_contract() {
 }
 
 #[test]
-fn default_store_identity_columns_include_offline_reminders_entry_id() {
-    assert!(default_store_property_tags().contains(&PID_TAG_REM_OFFLINE_ENTRY_ID));
-    assert!(default_folder_identity_property_tags().contains(&PID_TAG_REM_OFFLINE_ENTRY_ID));
+fn default_store_identity_columns_omit_offline_reminders_entry_id() {
+    assert!(!default_store_property_tags().contains(&PID_TAG_REM_OFFLINE_ENTRY_ID));
+    assert!(!default_folder_identity_property_tags().contains(&PID_TAG_REM_OFFLINE_ENTRY_ID));
 }
 
 #[test]
@@ -7527,6 +7527,7 @@ fn rule_organizer_without_client_payload_has_no_synthetic_stream_property() {
 
 #[test]
 fn delegate_freebusy_projects_outlook_view_probe_properties() {
+    let mailbox_guid = Uuid::nil();
     let message = MapiDelegateFreeBusyMessage {
         id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4),
         folder_id: FREEBUSY_DATA_FOLDER_ID,
@@ -7548,6 +7549,8 @@ fn delegate_freebusy_projects_outlook_view_probe_properties() {
     };
 
     for tag in [
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
         0x6841_0003,
         0x6842_000B,
         0x6843_000B,
@@ -7566,12 +7569,33 @@ fn delegate_freebusy_projects_outlook_view_probe_properties() {
         0x0E0B_0102,
     ] {
         assert!(
-            delegate_freebusy_property_value(&message, tag).is_some(),
+            delegate_freebusy_property_value(&message, mailbox_guid, tag).is_some(),
             "missing modeled freebusy property 0x{tag:08x}"
         );
     }
+    let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        mailbox_guid,
+        message.folder_id,
+        message.id,
+    )
+    .unwrap();
+    assert_eq!(
+        delegate_freebusy_property_value(&message, mailbox_guid, PID_TAG_ENTRY_ID),
+        Some(MapiValue::Binary(entry_id.clone()))
+    );
+    assert_eq!(entry_id.len(), 70);
+    assert_eq!(
+        delegate_freebusy_property_value(&message, mailbox_guid, PID_TAG_INSTANCE_KEY),
+        Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(message.id)
+        ))
+    );
+    assert_eq!(
+        delegate_freebusy_property_value(&message, mailbox_guid, 0x6843_000B),
+        Some(MapiValue::Bool(true))
+    );
     assert_ne!(
-        delegate_freebusy_property_value(&message, PID_TAG_LAST_MODIFICATION_TIME),
+        delegate_freebusy_property_value(&message, mailbox_guid, PID_TAG_LAST_MODIFICATION_TIME),
         Some(MapiValue::I64(0))
     );
 }
@@ -9136,7 +9160,7 @@ fn special_folder_property_omits_unconfigured_archive_policy_identities() {
     );
     assert_eq!(
         special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_ARCHIVE_PERIOD, Uuid::nil()),
-        Some(MapiValue::U32(0))
+        None
     );
 }
 

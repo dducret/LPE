@@ -296,7 +296,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                 if let Some((index, message)) =
                     find_row(rows.as_slice(), *position, request, |message| {
                         restriction_matches(Some(&restriction), |property_tag| {
-                            delegate_freebusy_property_value(message, property_tag)
+                            delegate_freebusy_property_value(message, mailbox_guid, property_tag)
                         })
                     })
                 {
@@ -304,7 +304,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_delegate_freebusy_row(message, &columns),
+                        &serialize_delegate_freebusy_row(message, mailbox_guid, &columns),
                     );
                 } else {
                     return rop_find_row_no_match_response(request);

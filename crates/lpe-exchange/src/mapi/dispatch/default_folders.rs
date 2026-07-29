@@ -16,7 +16,6 @@ pub(super) fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64
         PID_TAG_IPM_NOTE_ENTRY_ID => Some(NOTES_FOLDER_ID),
         PID_TAG_IPM_TASK_ENTRY_ID => Some(TASKS_FOLDER_ID),
         PID_TAG_REM_ONLINE_ENTRY_ID => Some(REMINDERS_FOLDER_ID),
-        PID_TAG_REM_OFFLINE_ENTRY_ID => Some(REMINDERS_FOLDER_ID),
         PID_TAG_IPM_DRAFTS_ENTRY_ID => Some(DRAFTS_FOLDER_ID),
         tag if is_scalar_default_folder_entry_id_property_tag(tag) => None,
         _ => None,

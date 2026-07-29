@@ -406,7 +406,12 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                     0x8004_010F,
                 );
             };
-            serialize_freebusy_row_staged(message, &columns, pending.as_deref())
+            serialize_freebusy_row_staged(
+                message,
+                principal.account_id,
+                &columns,
+                pending.as_deref(),
+            )
         }
         Some(MapiObject::RecoverableItem { folder_id, item_id }) => {
             let Some(item) = snapshot.recoverable_item_for_id(*folder_id, *item_id) else {
@@ -631,18 +636,26 @@ fn fallback_default_specific_property(
         }
     }
     if let Some(MapiObject::Folder {
-        folder_id: INBOX_FOLDER_ID,
+        folder_id,
         properties,
     }) = object
     {
         let storage_tag = canonical_property_storage_tag(tag);
-        // The Exchange 2016 reference returns MAPI_E_NOT_FOUND for this
-        // unpersisted Inbox property. Preserve an explicitly stored value,
-        // but otherwise report the property as absent.
-        if storage_tag == PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W
-            && !properties.contains_key(&storage_tag)
+        if storage_tag == PID_TAG_ARCHIVE_PERIOD {
+            // [MS-OXCMSG] section 2.2.1.60.7 treats ArchivePeriod as a
+            // message property. Preserve an explicit folder value, but do not
+            // synthesize a zero value when it was never set.
+            return !properties.contains_key(&storage_tag);
+        }
+        if *folder_id == INBOX_FOLDER_ID
+            && matches!(
+                storage_tag,
+                PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W | PID_TAG_REM_OFFLINE_ENTRY_ID
+            )
         {
-            return true;
+            // Exchange 2016 test1_202607281134.saz raw/249 returns
+            // MAPI_E_NOT_FOUND for these unpersisted Inbox properties.
+            return !properties.contains_key(&storage_tag);
         }
     }
     if let Some(MapiObject::Message {
@@ -937,7 +950,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                         | PID_TAG_FOLDER_TYPE
                         | PID_TAG_RETENTION_PERIOD
                         | PID_TAG_RETENTION_FLAGS
-                        | PID_TAG_ARCHIVE_PERIOD
                         | OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C
                 )
         }
@@ -953,7 +965,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                     | PID_TAG_FOLDER_TYPE
                     | PID_TAG_RETENTION_PERIOD
                     | PID_TAG_RETENTION_FLAGS
-                    | PID_TAG_ARCHIVE_PERIOD
             )
         }
         _ => false,
@@ -1283,7 +1294,14 @@ pub(in crate::mapi) fn serialize_object_property(
         }) => snapshot
             .delegate_freebusy_message_for_id(*message_id)
             .filter(|message| message.folder_id == *folder_id)
-            .map(|message| serialize_freebusy_row_staged(message, &[tag], pending.as_deref()))
+            .map(|message| {
+                serialize_freebusy_row_staged(
+                    message,
+                    principal.account_id,
+                    &[tag],
+                    pending.as_deref(),
+                )
+            })
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);

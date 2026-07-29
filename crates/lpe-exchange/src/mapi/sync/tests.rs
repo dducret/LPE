@@ -2229,3 +2229,49 @@ fn fast_transfer_manifest_rejects_delegate_freebusy_from_wrong_folder() {
 
     assert!(manifest.is_none());
 }
+
+#[test]
+fn local_freebusy_direct_copy_projects_account_scoped_entry_id() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let snapshot = MapiMailStoreSnapshot::empty().with_delegate_freebusy_messages(Vec::new());
+    let object = MapiObject::DelegateFreeBusyMessage {
+        folder_id: FREEBUSY_DATA_FOLDER_ID,
+        message_id: crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID,
+        pending_appointment_tombstone: None,
+    };
+
+    let (_, transfer) = fast_transfer_manifest_for_object(
+        RopId::FastTransferSourceCopyTo.as_u8(),
+        0x09,
+        0,
+        &[],
+        &object,
+        &sync_principal(account_id),
+        &[],
+        &[],
+        &snapshot,
+    )
+    .expect("LocalFreebusy CopyTo manifest");
+    let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        account_id,
+        FREEBUSY_DATA_FOLDER_ID,
+        crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID,
+    )
+    .unwrap();
+    let mut expected_entry_id = PID_TAG_ENTRY_ID.to_le_bytes().to_vec();
+    expected_entry_id.extend_from_slice(&(entry_id.len() as u32).to_le_bytes());
+    expected_entry_id.extend_from_slice(&entry_id);
+
+    assert!(
+        transfer
+            .windows(expected_entry_id.len())
+            .any(|value| value == expected_entry_id),
+        "CopyTo must expose the LocalFreebusy GetProps EntryID"
+    );
+    assert!(
+        transfer
+            .windows(6)
+            .any(|value| value == [0x0B, 0x00, 0x43, 0x68, 0x01, 0x00]),
+        "CopyTo must retain PidTagScheduleInfoDontMailDelegates"
+    );
+}

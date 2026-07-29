@@ -227,12 +227,12 @@ before it is advertised.
   coherent canonical FAI row. This is the first demonstrated projection
   inconsistency in that sequence. LPE now supplies the account-scoped EntryID
   for the special-message families whose existing GetProps and ICS projections
-  use that format: associated configuration, navigation shortcuts, and Common
-  Views named views. The shared serializer applies the normal `CopyTo`
-  exclusion / `CopyProperties` inclusion filter. It deliberately does not
-  synthesize that format for conversation actions, delegate/free-busy messages,
-  or public-folder items, whose existing property projections use different
-  identity rules. A realistic import/reconnect regression first failed with
+  use that format: associated configuration, navigation shortcuts, Common
+  Views named views, and the standard `LocalFreebusy` Delegate Information
+  object. The shared serializer applies the normal `CopyTo` exclusion /
+  `CopyProperties` inclusion filter. It deliberately does not synthesize that
+  format for conversation actions or public-folder items, whose existing
+  property projections use different identity rules. A realistic import/reconnect regression first failed with
   zero EntryID occurrences and now compares the actual CopyTo, GetProps, and
   ICS values; filter regressions cover typed and `PtypUnspecified` tags. This
   remains a bounded interoperability hypothesis
@@ -240,8 +240,8 @@ before it is advertised.
   `[MS-OXCFXICS]` does not name `PidTagEntryId` as an unconditional
   `messageContent` element. The implementation follows `[MS-OXCROPS]` section
   2.2.12.7.1, `[MS-OXCFXICS]` sections 2.2.3.1.1.1.1, 2.2.4.3.16,
-  3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12, and `[MS-OXPROPS]` sections
-  1.3.3 and 2.684.
+  3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12, `[MS-OXPROPS]` sections
+  1.3.3 and 2.684, and `[MS-OXODLGT]` section 2.2.2.1.1.
 - The `202607261433` rerun then increased the report count from 1 to 2 on the
   first Outlook process, held it at 2 during the same process, and increased it
   to 3 after restarting Outlook. Both process starts produced the same
@@ -525,6 +525,51 @@ before it is advertised.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.
+- The clean `202607291643` run still produced `N0=N1=0`, `N2=1`. The exact
+  32-tag Inbox `RopGetPropertiesSpecific` request in the Exchange 2016
+  `test1_202607281134.saz` reference (`raw/249`) returns
+  `PidTagRights (0x66390003) = 0x000007FB`; LPE had returned the unrelated
+  `PidTagAccess` mask `0x0000003F`. `PidTagRights` uses the
+  `PidTagMemberRights` permission format, not the access-mask format. LPE now
+  projects `PidTagAccess` and `PidTagRights` separately, derives shared/public
+  folder rights from their canonical grants, and includes the required
+  `EditOwned` and `DeleteOwned` bits whenever it grants `EditAny` and
+  `DeleteAny`. The exact captured request is a regression test. This is a
+  required Exchange convergence correction, but a fresh Outlook profile run is
+  still required to determine whether it removes the local view/form report.
+  This follows `[MS-OXCFOLD]` section 2.2.2.2.2.8, `[MS-OXCPERM]` section
+  2.2.7, and `[MS-OXPROPS]` section 2.937.
+- The same Exchange `raw/249` response marks `PidTagRemOfflineEntryId`
+  (`0x36D60102`) and `PidTagArchivePeriod` (`0x301E0003`) with
+  `MAPI_E_NOT_FOUND`. LPE had synthesized a second Reminders EntryID and a
+  zero folder archive period. `[MS-OXOSFLD]` section 2.2.3 lists only the
+  online Reminders EntryID, while `[MS-OXCMSG]` section 2.2.1.60.7 permits
+  ArchivePeriod on folders without assigning it a generic default or special
+  folder significance. LPE now
+  leaves both unpersisted folder properties absent, including from default
+  folder projections; an explicitly set value on an open folder remains
+  readable. The exact 32-tag regression asserts the two additional absent
+  cells. This change has no database or migration requirement.
+- The same `raw/249` reference has a material `PidTagFreeBusyEntryIds`
+  (`0x36E41102`) divergence: Exchange returns `[null, Delegate Information
+  Message EntryID, null, Freebusy Data Folder EntryID]`, while LPE had returned
+  a null second element. `[MS-OXOSFLD]` section 2.2.6 requires that second
+  EntryID to target the Delegate Information object. LPE now uses its existing
+  read-only `LocalFreebusy` projection—the required
+  `IPM.Microsoft.ScheduleData.FreeBusy` / `LocalFreebusy` object under
+  `[MS-OXODLGT]` sections 2.2.2.1.1 and 2.2.2.1.2—as that stable target. The
+  same 70-byte account-scoped EntryID is returned by GetProps and tables and is
+  emitted by direct CopyTo and content sync; the virtual object remains present
+  alongside canonical delegate/free-busy rows. Its required
+  `PidTagScheduleInfoDontMailDelegates` projection is true under
+  `[MS-OXODLGT]` section 2.2.2.2.7. This is a no-schema correction; a new
+  Outlook profile run remains required to determine its effect on `N2`.
+- Exchange's additional `PidTagExtendedFolderFlags` (`0x36DA0102`) subproperty
+  in that same request is a reserved `0x06` record under `[MS-OXOCFG]` section
+  2.2.7.1, with no specified meaning. LPE's default valid `0x01` record is
+  retained; it already preserves a client-supplied complete blob across reopen,
+  so it must not synthesize Exchange's opaque reserved trailer globally or for
+  Inbox alone.
 - Per `[MS-OXCROPS]` section 2.2.13.1.1,
   `RopSynchronizationConfigure` always carries `RestrictionDataSize`,
   `SynchronizationExtraFlags`, `PropertyTagCount`, and `PropertyTags`; the
@@ -911,10 +956,16 @@ non-canonical LPE state.
   shared calendar folders use the same canonical collection rights: read-only
   shared calendars remain visible but reject write/delete attempts without
   mutating `calendar_events` or `calendar_event_attachments`.
-  Empty delegate/free-busy projection stays empty; LPE must not create
-  placeholder `IPM.Microsoft.Delegate` or
-  `IPM.Microsoft.ScheduleData.FreeBusy` messages just to satisfy Outlook folder
-  contents.
+  LPE does not create arbitrary placeholder delegate/free-busy messages.
+  The documented exception is one stable, read-only virtual Delegate
+  Information message in Freebusy Data: `LocalFreebusy` with class
+  `IPM.Microsoft.ScheduleData.FreeBusy`. Its account-scoped Message EntryID is
+  the second `PidTagFreeBusyEntryIds` element on Root and Inbox, and the same
+  object is openable through tables, GetProps, content sync, and direct
+  FastTransfer. It is a protocol projection of canonical calendar/delegation
+  state, not a persisted delegate-data table or permission to create other
+  placeholder messages. This follows `[MS-OXOSFLD]` section 2.2.6 and
+  `[MS-OXODLGT]` sections 2.2.2.1.1, 2.2.2.1.2, and 2.2.2.2.7.
 - `PidTagSwappedToDoData` uses the documented version-1 validation. Malformed
   blobs fail validation instead of being accepted into canonical task state.
 - Journal and Notes data are canonical account-owned items. MAPI coverage must
@@ -2196,11 +2247,13 @@ stored.
 Delegate/free-busy readiness additionally requires the canonical
 `/api/mail/delegation/free-busy` layer to return delegate access objects and
 merged non-overlapping availability blocks for the target mailbox calendar.
-When no canonical delegate or free/busy state exists, the message-object list is
-empty rather than a fabricated status object. MAPI delegate/free-busy message
-objects are computed from canonical grants, sender rights, accounts, and
-calendar events; LPE does not persist a MAPI-local delegate/free-busy message
-table.
+When no canonical delegate or free/busy state exists, the data-derived
+message-object list is empty. Freebusy Data nevertheless retains its one
+documented, read-only virtual Delegate Information object, `LocalFreebusy`, so
+the Root/Inbox `PidTagFreeBusyEntryIds` contract never advertises a dangling
+EntryID. MAPI delegate/free-busy message objects are otherwise computed from
+canonical grants, sender rights, accounts, and calendar events; LPE does not
+persist a MAPI-local delegate/free-busy message table.
 This follows the Microsoft MAPI over HTTP session model, the delegate calendar
 constraints in MS-OXODLGT, the delegate-management contract in MS-OXWSDLGM, and
 the Outlook free/busy block behavior described by Microsoft's Free/Busy API

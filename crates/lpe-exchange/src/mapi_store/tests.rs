@@ -3440,9 +3440,13 @@ fn snapshot_projects_computed_delegate_freebusy_messages() {
         },
     ]);
 
-    assert_eq!(snapshot.delegate_freebusy_messages().len(), 1);
+    assert_eq!(snapshot.delegate_freebusy_messages().len(), 2);
     let projected_id = snapshot.delegate_freebusy_messages()[0].id;
     assert!(snapshot
         .delegate_freebusy_message_for_id(projected_id)
         .is_some());
+    assert!(snapshot.delegate_freebusy_messages().iter().any(|message| {
+        message.id == OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID
+            && message.message.subject == "LocalFreebusy"
+    }));
 }

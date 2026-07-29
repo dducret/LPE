@@ -496,13 +496,15 @@ pub(in crate::mapi) fn special_folder_property_value_with_change_number(
         PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
             Some(MapiValue::U32(0))
         }
-        PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_RIGHTS if folder_id != PUBLIC_FOLDERS_ROOT_FOLDER_ID => {
+            Some(MapiValue::U32(crate::mapi::permissions::owner_rights()))
+        }
         PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags_for_folder(
             folder_id,
         ))),
-        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
-            Some(MapiValue::U32(0))
-        }
+        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS => Some(MapiValue::U32(0)),
+        PID_TAG_ARCHIVE_PERIOD => None,
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
             if default_view_supported_folder(folder_id, message_class) =>
         {

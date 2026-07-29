@@ -11,6 +11,8 @@ pub(in crate::mapi) const MEMBER_ID_ANONYMOUS: u64 = u64::MAX;
 
 const RIGHTS_READ_ANY: u32 = 0x0000_0001;
 const RIGHTS_CREATE: u32 = 0x0000_0002;
+const RIGHTS_EDIT_OWNED: u32 = 0x0000_0008;
+const RIGHTS_DELETE_OWNED: u32 = 0x0000_0010;
 const RIGHTS_EDIT_ANY: u32 = 0x0000_0020;
 const RIGHTS_DELETE_ANY: u32 = 0x0000_0040;
 const RIGHTS_CREATE_SUBFOLDER: u32 = 0x0000_0080;
@@ -64,10 +66,12 @@ pub(crate) fn rights_from_grant(
         rights |= RIGHTS_READ_ANY;
     }
     if may_write {
-        rights |= RIGHTS_CREATE | RIGHTS_EDIT_ANY;
+        // [MS-OXCPERM] section 2.2.7 requires EditOwned with EditAny.
+        rights |= RIGHTS_CREATE | RIGHTS_EDIT_OWNED | RIGHTS_EDIT_ANY;
     }
     if may_delete {
-        rights |= RIGHTS_DELETE_ANY;
+        // [MS-OXCPERM] section 2.2.7 requires DeleteOwned with DeleteAny.
+        rights |= RIGHTS_DELETE_OWNED | RIGHTS_DELETE_ANY;
     }
     if may_share {
         rights |= RIGHTS_CREATE_SUBFOLDER | RIGHTS_OWNER;
@@ -153,4 +157,15 @@ fn stable_text_member_id(value: &str) -> u64 {
     value.bytes().fold(0xcbf2_9ce4_8422_2325u64, |acc, byte| {
         (acc ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grant_rights_include_required_owned_permissions() {
+        assert_eq!(rights_from_grant(true, true, true, true), 0x0000_05FB);
+        assert_eq!(owner_rights(), 0x0000_07FB);
+    }
 }

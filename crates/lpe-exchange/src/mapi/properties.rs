@@ -525,13 +525,13 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
                 FOLDER_GENERIC
             },
         )),
-        PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_RIGHTS => Some(MapiValue::U32(crate::mapi::permissions::owner_rights())),
         PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags_for_folder(
             mapi_folder_id(mailbox),
         ))),
-        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
-            Some(MapiValue::U32(0))
-        }
+        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS => Some(MapiValue::U32(0)),
+        PID_TAG_ARCHIVE_PERIOD => None,
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
             if default_view_supported_folder(
                 mapi_folder_id(mailbox),
@@ -728,11 +728,20 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
         PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(FOLDER_GENERIC)),
-        PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_RIGHTS => Some(MapiValue::U32(if folder.collection.is_owned {
+            crate::mapi::permissions::owner_rights()
+        } else {
+            crate::mapi::permissions::rights_from_grant(
+                folder.collection.rights.may_read,
+                folder.collection.rights.may_write,
+                folder.collection.rights.may_delete,
+                folder.collection.rights.may_share,
+            )
+        })),
         PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags())),
-        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
-            Some(MapiValue::U32(0))
-        }
+        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS => Some(MapiValue::U32(0)),
+        PID_TAG_ARCHIVE_PERIOD => None,
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(
             collaboration_folder_message_class(folder.kind).to_string(),
         )),
@@ -815,11 +824,16 @@ pub(in crate::mapi) fn public_folder_property_value(
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(folder.child_count > 0)),
         PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(FOLDER_GENERIC)),
-        PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_RIGHTS => Some(MapiValue::U32(crate::mapi::permissions::rights_from_grant(
+            folder.folder.rights.may_read,
+            folder.folder.rights.may_write,
+            folder.folder.rights.may_delete,
+            folder.folder.rights.may_share,
+        ))),
         PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags())),
-        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
-            Some(MapiValue::U32(0))
-        }
+        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS => Some(MapiValue::U32(0)),
+        PID_TAG_ARCHIVE_PERIOD => None,
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
             Some(MapiValue::String(folder.folder.folder_class.clone()))
         }

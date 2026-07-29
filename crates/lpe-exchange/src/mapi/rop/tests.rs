@@ -3641,12 +3641,14 @@ fn inbox_getprops_captured_unpersisted_folder_values_are_absent() {
         0x301E_0003,
         0x36DA_0102,
     ];
-    const UNPERSISTED_COLUMNS: [u32; 5] = [
+    const UNPERSISTED_COLUMNS: [u32; 7] = [
         0x36E5_001F,
         0x36E6_001F,
+        0x36D6_0102,
         0x36DE_0003,
         0x36E1_0003,
         0x36EB_0102,
+        0x301E_0003,
     ];
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
@@ -3656,9 +3658,19 @@ fn inbox_getprops_captured_unpersisted_folder_values_are_absent() {
         quota_mb: None,
         quota_used_octets: None,
     };
+    let properties = [PID_TAG_ACCESS, PID_TAG_RIGHTS]
+        .into_iter()
+        .map(|property_tag| {
+            (
+                property_tag,
+                special_folder_property_value(INBOX_FOLDER_ID, property_tag, principal.account_id)
+                    .expect("Inbox property"),
+            )
+        })
+        .collect();
     let object = MapiObject::Folder {
         folder_id: INBOX_FOLDER_ID,
-        properties: HashMap::new(),
+        properties,
     };
     let mut payload = Vec::new();
     payload.extend_from_slice(&0u16.to_le_bytes());
@@ -3692,10 +3704,14 @@ fn inbox_getprops_captured_unpersisted_folder_values_are_absent() {
     assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 1]);
     let mut cursor = Cursor::new(&response[7..]);
     let mut property_errors = HashMap::new();
+    let mut property_values = HashMap::new();
     for property_tag in COLUMNS {
         match cursor.read_u8().unwrap() {
             0 => {
-                parse_mapi_property_value(&mut cursor, property_tag).unwrap();
+                property_values.insert(
+                    property_tag,
+                    parse_mapi_property_value(&mut cursor, property_tag).unwrap(),
+                );
             }
             0x0A => {
                 property_errors.insert(property_tag, cursor.read_u32().unwrap());
@@ -3710,6 +3726,69 @@ fn inbox_getprops_captured_unpersisted_folder_values_are_absent() {
             Some(&ROP_ERROR_NOT_FOUND)
         );
     }
+    assert_eq!(
+        property_values.get(&PID_TAG_ACCESS),
+        Some(&MapiValue::I32(MAPI_FOLDER_ACCESS as i32))
+    );
+    assert_eq!(
+        property_values.get(&PID_TAG_RIGHTS),
+        Some(&MapiValue::I32(0x0000_07FB))
+    );
+}
+
+#[test]
+fn inbox_getprops_preserves_explicit_archive_and_offline_reminders_values() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let offline_reminders = vec![0x10, 0x20, 0x30];
+    let object = MapiObject::Folder {
+        folder_id: INBOX_FOLDER_ID,
+        properties: HashMap::from([
+            (PID_TAG_ARCHIVE_PERIOD, MapiValue::U32(0)),
+            (
+                PID_TAG_REM_OFFLINE_ENTRY_ID,
+                MapiValue::Binary(offline_reminders.clone()),
+            ),
+        ]),
+    };
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&0u16.to_le_bytes());
+    payload.extend_from_slice(&2u16.to_le_bytes());
+    payload.extend_from_slice(&PID_TAG_ARCHIVE_PERIOD.to_le_bytes());
+    payload.extend_from_slice(&PID_TAG_REM_OFFLINE_ENTRY_ID.to_le_bytes());
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific as u8,
+        input_handle_index: Some(1),
+        output_handle_index: None,
+        payload,
+    };
+
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
+    let mut cursor = Cursor::new(&response[7..]);
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_ARCHIVE_PERIOD).unwrap(),
+        MapiValue::I32(0)
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_REM_OFFLINE_ENTRY_ID).unwrap(),
+        MapiValue::Binary(offline_reminders)
+    );
+    assert_eq!(cursor.remaining(), 0);
 }
 
 #[test]
@@ -4034,18 +4113,18 @@ fn folder_retention_defaults_distinguish_absent_policy_identities() {
         properties: HashMap::new(),
     };
 
-    for property_tag in [
-        PID_TAG_RETENTION_PERIOD,
-        PID_TAG_RETENTION_FLAGS,
-        PID_TAG_ARCHIVE_PERIOD,
-    ] {
+    for property_tag in [PID_TAG_RETENTION_PERIOD, PID_TAG_RETENTION_FLAGS] {
         assert!(modeled_zero_or_default_property(
             Some(&folder),
             property_tag
         ));
     }
 
-    for property_tag in [PID_TAG_ARCHIVE_TAG, PID_TAG_POLICY_TAG] {
+    for property_tag in [
+        PID_TAG_ARCHIVE_TAG,
+        PID_TAG_POLICY_TAG,
+        PID_TAG_ARCHIVE_PERIOD,
+    ] {
         assert!(!modeled_zero_or_default_property(
             Some(&folder),
             property_tag
@@ -4560,7 +4639,7 @@ fn folder_getprops_projects_saved_search_definition_metadata() {
     );
     assert_eq!(
         u32::from_le_bytes(rights.try_into().unwrap()),
-        MAPI_FOLDER_ACCESS
+        crate::mapi::permissions::owner_rights()
     );
     let mut expected_extended_flags = Vec::new();
     let mut extended_flags = extended_folder_flags();

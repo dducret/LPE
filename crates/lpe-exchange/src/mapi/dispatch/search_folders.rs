@@ -84,7 +84,6 @@ pub(super) fn search_folder_handle_properties(
         PID_TAG_POLICY_TAG,
         PID_TAG_RETENTION_PERIOD,
         PID_TAG_RETENTION_FLAGS,
-        PID_TAG_ARCHIVE_PERIOD,
         PID_TAG_ENTRY_ID,
         PID_TAG_RECORD_KEY,
         PID_TAG_SOURCE_KEY,

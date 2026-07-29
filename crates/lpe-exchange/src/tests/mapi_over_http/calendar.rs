@@ -6030,8 +6030,16 @@ async fn mapi_over_http_freebusy_data_folder_projects_local_freebusy_without_can
 
 #[tokio::test]
 async fn mapi_over_http_open_message_resolves_virtual_local_freebusy_without_folder_id() {
+    let account = FakeStore::account();
+    let local_freebusy_id = crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID;
+    let local_freebusy_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        account.account_id,
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+        local_freebusy_id,
+    )
+    .unwrap();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -6041,7 +6049,6 @@ async fn mapi_over_http_open_message_resolves_virtual_local_freebusy_without_fol
         .unwrap();
     let cookie = mapi_cookie_header(&connect);
 
-    let local_freebusy_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
     let mut rops = Vec::new();
     append_rop_open_message(
         &mut rops,
@@ -6051,7 +6058,11 @@ async fn mapi_over_http_open_message_resolves_virtual_local_freebusy_without_fol
         local_freebusy_id,
     );
     rops[6..14].fill(0);
-    append_rop_get_properties_specific(&mut rops, 1, &[0x0037_001F, 0x001A_001F]);
+    append_rop_get_properties_specific(
+        &mut rops,
+        1,
+        &[0x0037_001F, 0x001A_001F, 0x0FFF_0102, 0x6843_000B],
+    );
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -6080,6 +6091,10 @@ async fn mapi_over_http_open_message_resolves_virtual_local_freebusy_without_fol
             &utf16z("IPM.Microsoft.ScheduleData.FreeBusy")
         ),
         "{response_rops:02x?}"
+    );
+    assert!(
+        contains_bytes(&response_rops, &local_freebusy_entry_id),
+        "GetProps must expose the same account-scoped LocalFreebusy EntryID: {response_rops:02x?}"
     );
 }
 
@@ -6158,9 +6173,9 @@ async fn mapi_over_http_freebusy_data_folder_content_sync_projects_canonical_fai
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 2)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 3)));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 2);
+    assert_eq!(stream.message_changes.len(), 3);
     assert!(stream
         .message_changes
         .iter()
@@ -6173,6 +6188,10 @@ async fn mapi_over_http_freebusy_data_folder_content_sync_projects_canonical_fai
         .message_changes
         .iter()
         .any(|message| message.subject == "Free/busy for owner@example.test"));
+    assert!(stream
+        .message_changes
+        .iter()
+        .any(|message| message.subject == "LocalFreebusy"));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.Delegate")

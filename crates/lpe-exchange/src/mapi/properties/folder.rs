@@ -116,10 +116,6 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
             mailbox_guid,
             REMINDERS_FOLDER_ID,
         )),
-        PID_TAG_REM_OFFLINE_ENTRY_ID => Some(special_folder_entry_id_value(
-            mailbox_guid,
-            REMINDERS_FOLDER_ID,
-        )),
         PID_TAG_IPM_DRAFTS_ENTRY_ID => Some(special_folder_entry_id_value(
             mailbox_guid,
             DRAFTS_FOLDER_ID,
@@ -164,7 +160,6 @@ pub(in crate::mapi) fn is_scalar_default_folder_entry_id_property_tag(property_t
             | PID_TAG_IPM_NOTE_ENTRY_ID
             | PID_TAG_IPM_TASK_ENTRY_ID
             | PID_TAG_REM_ONLINE_ENTRY_ID
-            | PID_TAG_REM_OFFLINE_ENTRY_ID
             | PID_TAG_IPM_DRAFTS_ENTRY_ID
     )
 }
@@ -235,7 +230,14 @@ fn additional_ren_entry_ids_ex(mailbox_guid: Uuid) -> Vec<u8> {
 fn free_busy_entry_ids(mailbox_guid: Uuid) -> Vec<Vec<u8>> {
     vec![
         Vec::new(),
-        Vec::new(),
+        // [MS-OXOSFLD] section 2.2.6 requires the Delegate Information
+        // object EntryID in the second vector slot.
+        crate::mapi::identity::message_entry_id_from_object_ids(
+            mailbox_guid,
+            FREEBUSY_DATA_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID,
+        )
+        .expect("the reserved LocalFreebusy message uses a valid MAPI identity"),
         Vec::new(),
         special_folder_entry_id(mailbox_guid, FREEBUSY_DATA_FOLDER_ID),
     ]

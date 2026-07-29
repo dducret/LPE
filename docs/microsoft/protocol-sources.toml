@@ -945,6 +945,7 @@ used_for = [
   "Configuration-data FAI table lookup sequence for SetColumns, SortTable, FindRow, QueryRows, OpenMessage, and OpenStream",
   "UMOLK/UserOptions-style configuration rows as bounded IPM.Configuration FAI messages with roaming stream properties",
   "PidTagExtendedFolderFlags read/write behavior for Outlook folder UI display state",
+  "Preservation, without synthesis, of reserved PidTagExtendedFolderFlags subproperties",
   "Canonical identity and property preservation for client-owned Common Views navigation shortcuts",
   "Canonical Common Views table/ICS parity without table-only navigation shortcuts",
   "Exact IPM.Microsoft.WunderBar.Link classification at Save for Common Views associated messages",
@@ -979,6 +980,7 @@ sections = [
   "4.2.1 PidTagViewDescriptorBinary",
   "4.2.1.11 Column \"Categories\"",
   "2.2.7 Folder Flags",
+  "2.2.7.1 ExtendedFlags Structure",
   "2.2.8 Conversation Actions",
   "3.1.4.1 Reading Configuration Data",
   "3.1.4.3 Reading View Definitions",
@@ -1502,6 +1504,7 @@ used_for = [
   "Root, Finder/Search, Common Views, Personal Views, Deferred Action, FreeBusy Data, Reminders, To-Do, tracked mail, and Conversation Action Settings compatibility",
   "Deleted Items as the default destination for deleted objects and Calendar move projection",
   "Durable preservation of Outlook PidTagAdditionalRenEntryIds client indexes",
+  "Root and Inbox PidTagFreeBusyEntryIds projection with a stable Delegate Information EntryID",
 ]
 sections = [
   "2.2.1 List of Special Folders",
@@ -2161,21 +2164,27 @@ local_cache = "docs/microsoft/cache/MS-OXODLGT.pdf"
 sha256 = "0511b5479a9823944db7246046aa61af208d7cdac8cd298abba04706a5eddde5"
 used_for = [
   "Bounded delegate access projection through canonical mailbox delegation, calendar grants, sender rights, and free/busy objects",
+  "Read-only LocalFreebusy Delegate Information projection required by Root/Inbox PidTagFreeBusyEntryIds",
   "RopSaveChangesMessage example labeling combined SaveFlags 0x0A as KeepOpenReadWrite DelayedCall",
 ]
 sections = [
   "2.2.1 Delegate Data Folder",
   "2.2.2 Delegate Information Object",
+  "2.2.2.1 Common Properties",
+  "2.2.2.1.1 PidTagMessageClass Property",
+  "2.2.2.1.2 PidTagNormalizedSubject Property",
   "2.2.2.2 Delegate Information Properties",
   "2.2.2.2.1 PidTagScheduleInfoDelegatorWantsCopy Property",
   "2.2.2.2.3 PidTagScheduleInfoDelegateNames Property",
   "2.2.2.2.5 PidTagScheduleInfoDelegateEntryIds Property",
   "2.2.2.2.6 PidTagDelegateFlags Property",
+  "2.2.2.2.7 PidTagScheduleInfoDontMailDelegates Property",
   "2.2.3 Delegate Rule",
   "3.1.4.1 Creating a Delegate Data Folder",
   "3.1.4.2 Creating a Delegate Information Object",
   "3.1.4.3 Creating a Delegation Relationship",
   "4.1 Create Delegation Relationship with Multiple Delegates",
+  "4.1.3.1 Open the Delegator Information Object",
   "4.1.3.2 Update the Delegator Information Object Properties",
 ]
 

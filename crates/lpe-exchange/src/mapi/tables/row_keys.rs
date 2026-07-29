@@ -115,7 +115,7 @@ pub(in crate::mapi) fn table_row_keys(
                     .collect::<Vec<_>>();
                 rows.retain(|message| {
                     restriction_matches(restriction.as_ref(), |property_tag| {
-                        delegate_freebusy_property_value(message, property_tag)
+                        delegate_freebusy_property_value(message, mailbox_guid, property_tag)
                     })
                 });
                 return rows.into_iter().map(|message| message.id).collect();

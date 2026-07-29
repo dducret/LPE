@@ -876,7 +876,12 @@ fn delegate_freebusy_sync_object(
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size,
         read_state: None,
-        named_properties: Vec::new(),
+        named_properties: vec![(
+            0x6843_000B,
+            mapi_mailstore::SpecialMessagePropertyValue::Bool(
+                crate::mapi_store::is_outlook_local_freebusy_message_id(message.id),
+            ),
+        )],
         named_property_definitions: HashMap::new(),
     }
 }
@@ -1277,8 +1282,17 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             Some((
                 *folder_id,
                 mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
-                    None,
-                    None,
+                    crate::mapi::identity::message_entry_id_from_object_ids(
+                        principal.account_id,
+                        message.folder_id,
+                        message.id,
+                    )
+                    .as_deref(),
+                    crate::mapi::identity::folder_entry_id_from_object_id(
+                        principal.account_id,
+                        message.folder_id,
+                    )
+                    .as_deref(),
                     &special_message_with_named_property_definitions(
                         delegate_freebusy_sync_object(&message),
                         snapshot,

@@ -146,7 +146,6 @@ fn default_folder_property_mapping_for_debug(tag: u32) -> Option<String> {
         PID_TAG_IPM_NOTE_ENTRY_ID => ("Notes", NOTES_FOLDER_ID),
         PID_TAG_IPM_TASK_ENTRY_ID => ("Tasks", TASKS_FOLDER_ID),
         PID_TAG_REM_ONLINE_ENTRY_ID => ("Reminders", REMINDERS_FOLDER_ID),
-        PID_TAG_REM_OFFLINE_ENTRY_ID => ("Reminders", REMINDERS_FOLDER_ID),
         PID_TAG_IPM_DRAFTS_ENTRY_ID => ("Drafts", DRAFTS_FOLDER_ID),
         _ => return None,
     };

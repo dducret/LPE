@@ -262,7 +262,7 @@ fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
     assert!(!properties.contains_key(&PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W));
     assert_eq!(
         properties.get(&PID_TAG_RIGHTS),
-        Some(&MapiValue::U32(MAPI_FOLDER_ACCESS))
+        Some(&MapiValue::U32(crate::mapi::permissions::owner_rights()))
     );
     assert_eq!(
         properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
@@ -279,6 +279,7 @@ fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
     assert!(!properties.contains_key(&PID_TAG_FOLDER_VIEWLIST_FLAGS));
     assert!(!properties.contains_key(&PID_TAG_ARCHIVE_TAG));
     assert!(!properties.contains_key(&PID_TAG_POLICY_TAG));
+    assert!(!properties.contains_key(&PID_TAG_REM_OFFLINE_ENTRY_ID));
     assert_eq!(
         properties.get(&PID_TAG_RETENTION_PERIOD),
         Some(&MapiValue::U32(0))
@@ -287,10 +288,7 @@ fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
         properties.get(&PID_TAG_RETENTION_FLAGS),
         Some(&MapiValue::U32(0))
     );
-    assert_eq!(
-        properties.get(&PID_TAG_ARCHIVE_PERIOD),
-        Some(&MapiValue::U32(0))
-    );
+    assert!(!properties.contains_key(&PID_TAG_ARCHIVE_PERIOD));
     let expected_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
         principal.account_id,
         INBOX_FOLDER_ID,
@@ -371,7 +369,7 @@ fn folder_properties_for_open_projects_persisted_search_folder_contract() {
     );
     assert_eq!(
         properties.get(&PID_TAG_RIGHTS),
-        Some(&MapiValue::U32(MAPI_FOLDER_ACCESS))
+        Some(&MapiValue::U32(crate::mapi::permissions::owner_rights()))
     );
     let mut expected_extended_flags = extended_folder_flags();
     expected_extended_flags.extend_from_slice(&[0x03, 0x04]);
@@ -439,7 +437,7 @@ fn folder_properties_for_open_projects_collaboration_folder_contract() {
     );
     assert_eq!(
         properties.get(&PID_TAG_RIGHTS),
-        Some(&MapiValue::U32(MAPI_FOLDER_ACCESS))
+        Some(&MapiValue::U32(crate::mapi::permissions::owner_rights()))
     );
     assert_eq!(
         properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
@@ -652,7 +650,9 @@ fn folder_properties_for_open_projects_public_folder_contract() {
     );
     assert_eq!(
         properties.get(&PID_TAG_RIGHTS),
-        Some(&MapiValue::U32(MAPI_FOLDER_ACCESS))
+        Some(&MapiValue::U32(
+            crate::mapi::permissions::rights_from_grant(true, true, true, true)
+        ))
     );
     assert_eq!(
         properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),

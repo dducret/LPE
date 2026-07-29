@@ -83,7 +83,7 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(
-        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x02, 2, 0]),
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 0x02, 3, 0]),
         "{response_rops:02x?}"
     );
     assert!(contains_bytes(
@@ -102,6 +102,7 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
         &response_rops,
         &utf16z("IPM.Microsoft.ScheduleData.FreeBusy")
     ));
+    assert!(contains_bytes(&response_rops, &utf16z("LocalFreebusy")));
     assert!(
         contains_bytes(&response_rops, &[0x03, 0x03, 0, 0, 0, 0]),
         "{response_rops:02x?}"
@@ -364,7 +365,7 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
     let snapshot = storage
         .load_mapi_mail_store(delegate_account_id, 500)
         .await?;
-    assert_eq!(snapshot.delegate_freebusy_messages().len(), 2);
+    assert_eq!(snapshot.delegate_freebusy_messages().len(), 3);
     assert!(snapshot.delegate_freebusy_messages().iter().any(|message| {
         message.message.message_kind == "delegate"
             && message
@@ -375,6 +376,10 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
     assert!(snapshot.delegate_freebusy_messages().iter().any(|message| {
         message.message.message_kind == "freebusy"
             && message.message.subject == "alice@example.test: busy"
+    }));
+    assert!(snapshot.delegate_freebusy_messages().iter().any(|message| {
+        message.id == crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID
+            && message.message.subject == "LocalFreebusy"
     }));
 
     let service = ExchangeService::new(storage.clone());

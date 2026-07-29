@@ -172,10 +172,10 @@ fn rop_query_rows_response_inner(
                     .iter()
                     .filter(|message| {
                         restriction_matches(restriction.as_ref(), |property_tag| {
-                            delegate_freebusy_property_value(message, property_tag)
+                            delegate_freebusy_property_value(message, mailbox_guid, property_tag)
                         })
                     })
-                    .map(|message| serialize_delegate_freebusy_row(message, &columns))
+                    .map(|message| serialize_delegate_freebusy_row(message, mailbox_guid, &columns))
                     .collect::<Vec<_>>()
             } else if *associated {
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {

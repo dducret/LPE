@@ -175,10 +175,7 @@ impl MapiMailStoreSnapshot {
                 message,
             })
             .collect();
-        if self.delegate_freebusy_messages.is_empty() {
-            self.delegate_freebusy_messages
-                .push(virtual_local_freebusy_message());
-        }
+        ensure_virtual_local_freebusy_message(&mut self.delegate_freebusy_messages);
         self
     }
 

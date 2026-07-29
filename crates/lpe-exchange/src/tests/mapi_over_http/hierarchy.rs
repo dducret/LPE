@@ -2134,7 +2134,11 @@ async fn mapi_over_http_folder_extended_flags_survive_reconnect() {
         .unwrap()
         .to_string();
 
-    let client_flags = vec![0x01, 0x04, 0x00, 0x00, 0x20, 0x00];
+    // Exchange 2016 raw/249 appends the reserved 0x06 record. [MS-OXOCFG]
+    // section 2.2.7.1 requires that unknown subproperties survive a rewrite.
+    let client_flags = vec![
+        0x01, 0x04, 0x00, 0x00, 0x10, 0x00, 0x06, 0x04, 0x03, 0x00, 0x00, 0x00,
+    ];
     let mut property_values = Vec::new();
     append_mapi_binary_property(&mut property_values, 0x36DA_0102, &client_flags);
 

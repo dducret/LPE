@@ -142,7 +142,7 @@ pub(super) const OUTLOOK_INBOX_AGGREGATION_ID: u64 =
 pub(crate) const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS: &str = "IPM.Microsoft.CustomAction";
 pub(super) const OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
-pub(super) const OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID: u64 =
+pub(crate) const OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
 
 pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> bool {
@@ -532,5 +532,16 @@ pub(super) fn virtual_local_freebusy_message() -> MapiDelegateFreeBusyMessage {
             payload_json: "{}".to_string(),
             updated_at: "1970-01-01T00:00:00Z".to_string(),
         },
+    }
+}
+
+pub(super) fn ensure_virtual_local_freebusy_message(
+    messages: &mut Vec<MapiDelegateFreeBusyMessage>,
+) {
+    if !messages
+        .iter()
+        .any(|message| is_outlook_local_freebusy_message_id(message.id))
+    {
+        messages.push(virtual_local_freebusy_message());
     }
 }

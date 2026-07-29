@@ -194,7 +194,7 @@ pub(in crate::mapi) fn restricted_associated_folder_message_count(
             .iter()
             .filter(|message| {
                 restriction_matches(restriction, |property_tag| {
-                    delegate_freebusy_property_value(message, property_tag)
+                    delegate_freebusy_property_value(message, mailbox_guid, property_tag)
                 })
             })
             .count()

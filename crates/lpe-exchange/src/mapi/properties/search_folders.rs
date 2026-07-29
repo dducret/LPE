@@ -30,14 +30,14 @@ pub(in crate::mapi) fn search_folder_definition_property_value(
         | PID_TAG_CONTENT_UNREAD_COUNT
         | PID_TAG_DELETED_COUNT_TOTAL
         | PID_TAG_ASSOCIATED_CONTENT_COUNT => Some(MapiValue::U32(0)),
-        PID_TAG_ACCESS | PID_TAG_RIGHTS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_RIGHTS => Some(MapiValue::U32(crate::mapi::permissions::owner_rights())),
         PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(
             extended_folder_flags_for_search_folder(definition, folder_id),
         )),
         PID_TAG_SEARCH_FOLDER_ID => Some(MapiValue::Binary(search_folder_id(definition))),
-        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
-            Some(MapiValue::U32(0))
-        }
+        PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS => Some(MapiValue::U32(0)),
+        PID_TAG_ARCHIVE_PERIOD => None,
         PID_TAG_DEFAULT_VIEW_ENTRY_ID
             if default_view_supported_folder(folder_id, message_class) =>
         {

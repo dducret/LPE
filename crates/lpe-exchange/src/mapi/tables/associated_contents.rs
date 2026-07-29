@@ -104,13 +104,15 @@ pub(in crate::mapi) fn serialize_conversation_action_row(
 
 pub(in crate::mapi) fn serialize_delegate_freebusy_row(
     message: &MapiDelegateFreeBusyMessage,
+    mailbox_guid: Uuid,
     columns: &[u32],
 ) -> Vec<u8> {
-    serialize_freebusy_row_staged(message, columns, None)
+    serialize_freebusy_row_staged(message, mailbox_guid, columns, None)
 }
 
 pub(in crate::mapi) fn serialize_freebusy_row_staged(
     message: &MapiDelegateFreeBusyMessage,
+    mailbox_guid: Uuid,
     columns: &[u32],
     pending_appointment_tombstone: Option<&[u8]>,
 ) -> Vec<u8> {
@@ -126,7 +128,7 @@ pub(in crate::mapi) fn serialize_freebusy_row_staged(
                     .to_vec(),
             ))
         } else {
-            delegate_freebusy_property_value(message, *column)
+            delegate_freebusy_property_value(message, mailbox_guid, *column)
         };
         match value {
             Some(value) => write_mapi_value(&mut row, *column, &value),
@@ -917,12 +919,19 @@ fn delegate_freebusy_message_size(message: &MapiDelegateFreeBusyMessage) -> i64 
 
 pub(in crate::mapi) fn delegate_freebusy_property_value(
     message: &MapiDelegateFreeBusyMessage,
+    mailbox_guid: Uuid,
     property_tag: u32,
 ) -> Option<MapiValue> {
     let change_number = mapi_mailstore::change_number_for_store_id(message.id);
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_MID => Some(MapiValue::U64(message.id)),
-        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+        PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
+            mailbox_guid,
+            message.folder_id,
+            message.id,
+        )
+        .map(MapiValue::Binary),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(message.id),
         )),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
@@ -966,6 +975,12 @@ pub(in crate::mapi) fn delegate_freebusy_property_value(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => Some(MapiValue::U32(0)),
         OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => Some(MapiValue::Binary(Vec::new())),
+        // [MS-OXODLGT] section 2.2.2.2.7 requires this flag on the Delegate
+        // Information object. Other free/busy rows retain the no-delegate
+        // projection.
+        0x6843_000B if crate::mapi_store::is_outlook_local_freebusy_message_id(message.id) => {
+            Some(MapiValue::Bool(true))
+        }
         0x6842_000B | 0x6843_000B | 0x684B_000B | 0x686D_000B | 0x686E_000B | 0x686F_000B => {
             Some(MapiValue::Bool(false))
         }

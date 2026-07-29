@@ -632,7 +632,7 @@ fn folder_properties_report_deleted_count_total() {
     );
     assert_eq!(
         collaboration_folder_property_value(&collection, PID_TAG_RIGHTS),
-        Some(MapiValue::U32(MAPI_FOLDER_ACCESS))
+        Some(MapiValue::U32(crate::mapi::permissions::owner_rights()))
     );
     assert_eq!(
         collaboration_folder_property_value(&collection, PID_TAG_EXTENDED_FOLDER_FLAGS),
@@ -1776,7 +1776,9 @@ fn public_folder_projects_default_post_message_class_from_folder_class() {
     );
     assert_eq!(
         public_folder_property_value(&folder, PID_TAG_RIGHTS),
-        Some(MapiValue::U32(MAPI_FOLDER_ACCESS))
+        Some(MapiValue::U32(crate::mapi::permissions::rights_from_grant(
+            true, true, true, true
+        )))
     );
     assert_eq!(
         public_folder_property_value(&folder, PID_TAG_EXTENDED_FOLDER_FLAGS),
@@ -1966,7 +1968,7 @@ fn special_folder_identification_properties_project_store_folder_ids() {
     );
     assert_eq!(
         special_folder_identification_property_value(mailbox_guid, PID_TAG_REM_OFFLINE_ENTRY_ID),
-        Some(MapiValue::Binary(reminders_entry_id.clone()))
+        None
     );
     assert_eq!(
         crate::mapi::identity::object_id_from_folder_identifier_bytes(&reminders_entry_id),
@@ -2067,7 +2069,25 @@ fn free_busy_entry_ids_advertises_freebusy_data_at_documented_index() {
     };
 
     assert_eq!(values.len(), 4);
-    assert!(values[..3].iter().all(Vec::is_empty));
+    assert!(values[0].is_empty());
+    assert_eq!(
+        values[1],
+        crate::mapi::identity::message_entry_id_from_object_ids(
+            mailbox_guid,
+            FREEBUSY_DATA_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID,
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        crate::mapi::rop::default_view_message_entry_id_target(&values[1]),
+        Some((
+            FREEBUSY_DATA_FOLDER_ID,
+            crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID,
+        ))
+    );
+    assert_eq!(values[1].len(), 70);
+    assert!(values[2].is_empty());
     assert_eq!(
         crate::mapi::identity::object_id_from_folder_identifier_bytes(&values[3]),
         Some(FREEBUSY_DATA_FOLDER_ID)
