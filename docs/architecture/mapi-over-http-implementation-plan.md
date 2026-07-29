@@ -503,6 +503,23 @@ before it is advertised.
   exact four-entry write, persistence, and reconnect. This corrects a
   documented state-corruption divergence; a fresh Outlook run must still prove
   whether it eliminates the local view/form report.
+- The clean `202607291330` run still held `N0=N1=0` and produced `N2=1`.
+  Comparing its pre-error sequence against the Exchange 2016 reference
+  `test1_202607281134.saz` found two remaining direct wire differences. The
+  Exchange `RopOpenMessage` response for ASCII
+  `IPM.Configuration.MessageListSettings` strings uses reduced Unicode
+  `TypedString` (`0x03`), while LPE used full Unicode (`0x04`). Both forms are
+  permitted by `[MS-OXCDATA]` section 2.11.7; LPE now selects the reduced form
+  for that observed Inbox message class only when it losslessly represents
+  every UTF-16 code unit. In the exact
+  Inbox `RopGetPropertiesSpecific` form probe, Exchange returns
+  `MAPI_E_NOT_FOUND` for the unpersisted `PidTagDefaultPostMessageClass`
+  (`0x36E5001F`) whereas LPE synthesized `IPM.Note`. LPE now returns the
+  same property error for an unpersisted Inbox value while retaining an
+  explicitly persisted value. The other apparent form/view candidates already
+  match Exchange's absent-property cells under `[MS-OXCROPS]` section
+  2.2.8.3.2. This aligns the demonstrated responses; a new Outlook run is
+  still required to establish whether it removes `N2`.
 - `RopSynchronizationConfigure` and `RopFastTransferSourceGetBuffer` require
   strict request and response framing. Any parser extension must be validated
   with deterministic golden vectors or local protocol builders.

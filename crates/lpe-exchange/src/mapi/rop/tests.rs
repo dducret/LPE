@@ -1339,8 +1339,55 @@ fn open_message_response_does_not_advertise_missing_recipient_rows() {
     assert_eq!(response[response.len() - 1], 0);
 
     let named_response =
-        rop_open_message_response_with_named_properties(&request, "Subject", 3, true);
+        rop_open_message_response_with_named_properties(&request, "Subject", 3, true, false);
     assert_eq!(named_response[6], 1);
+    assert_eq!(response[8], 4);
+}
+
+#[test]
+fn open_message_response_uses_reduced_unicode_for_exchange_configuration_subjects() {
+    let request = RopRequest {
+        rop_id: RopId::OpenMessage.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: Some(2),
+        payload: Vec::new(),
+    };
+
+    // Exchange 2016 test1_202607281134.saz raw/198 returns this MList
+    // NormalizedSubject as StringType 0x03. [MS-OXCDATA] section 2.11.7.
+    let response = rop_open_message_response_with_named_properties(
+        &request,
+        "IPM.Configuration.MessageListSettings",
+        0,
+        true,
+        true,
+    );
+
+    assert_eq!(response[6..9], [1, 1, 3]);
+    assert_eq!(
+        &response[9..9 + "IPM.Configuration.MessageListSettings".len() + 1],
+        b"IPM.Configuration.MessageListSettings\0"
+    );
+    assert_eq!(
+        &response[9 + "IPM.Configuration.MessageListSettings".len() + 1..],
+        &[0, 0, 0, 0, 0]
+    );
+}
+
+#[test]
+fn open_message_response_keeps_full_unicode_when_reduced_unicode_would_lose_data() {
+    let request = RopRequest {
+        rop_id: RopId::OpenMessage.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: Some(2),
+        payload: Vec::new(),
+    };
+
+    let response =
+        rop_open_message_response_with_named_properties(&request, "\u{0100}", 0, false, true);
+
+    assert_eq!(response[8], 4);
+    assert_eq!(&response[9..], &[0, 1, 0, 0, 0, 0, 0, 0, 0]);
 }
 
 #[test]
@@ -3558,6 +3605,8 @@ fn inbox_getprops_captured_unpersisted_folder_values_are_absent() {
     // ErrorsReturned with RowData for the latter request immediately preceded
     // an EMSMDB32 access violation. [MS-OXCROPS] sections 2.2.8.3.2 and
     // 2.2.8.3.3 require Success with RowData or a failure without RowData.
+    // Exchange 2016 test1_202607281134.saz raw/249 returns MAPI_E_NOT_FOUND
+    // for PidTagDefaultPostMessageClass in this Inbox probe as well.
     const COLUMNS: [u32; 32] = [
         0x6749_0014,
         0x0FF4_0003,
@@ -3592,7 +3641,13 @@ fn inbox_getprops_captured_unpersisted_folder_values_are_absent() {
         0x301E_0003,
         0x36DA_0102,
     ];
-    const UNPERSISTED_COLUMNS: [u32; 4] = [0x36E6_001F, 0x36DE_0003, 0x36E1_0003, 0x36EB_0102];
+    const UNPERSISTED_COLUMNS: [u32; 5] = [
+        0x36E5_001F,
+        0x36E6_001F,
+        0x36DE_0003,
+        0x36E1_0003,
+        0x36EB_0102,
+    ];
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),
         account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),

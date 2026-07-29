@@ -3,8 +3,8 @@ use super::{
     search_folder_message_for_id,
 };
 use super::{
-    rop_error_response, write_object_id, write_typed_string, write_u16, write_u32, write_u64,
-    RopRequest,
+    rop_error_response, write_object_id, write_typed_string,
+    write_typed_string_reduced_unicode_when_lossless, write_u16, write_u32, write_u64, RopRequest,
 };
 use crate::mapi::identity::OUTBOX_FOLDER_ID;
 use crate::mapi::identity::{INBOX_FOLDER_ID, ROOT_FOLDER_ID};
@@ -35,7 +35,7 @@ pub(in crate::mapi) fn rop_open_message_response(
     subject: &str,
     recipient_count: usize,
 ) -> Vec<u8> {
-    rop_open_message_response_with_named_properties(request, subject, recipient_count, false)
+    rop_open_message_response_with_named_properties(request, subject, recipient_count, false, false)
 }
 
 pub(in crate::mapi) fn rop_open_message_response_with_named_properties(
@@ -43,12 +43,18 @@ pub(in crate::mapi) fn rop_open_message_response_with_named_properties(
     subject: &str,
     recipient_count: usize,
     has_named_properties: bool,
+    use_reduced_unicode: bool,
 ) -> Vec<u8> {
     let mut response = vec![0x03, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
     response.push(u8::from(has_named_properties));
-    write_typed_string(&mut response, "");
-    write_typed_string(&mut response, subject);
+    if use_reduced_unicode {
+        write_typed_string_reduced_unicode_when_lossless(&mut response, "");
+        write_typed_string_reduced_unicode_when_lossless(&mut response, subject);
+    } else {
+        write_typed_string(&mut response, "");
+        write_typed_string(&mut response, subject);
+    }
     response.extend_from_slice(&(recipient_count.min(u16::MAX as usize) as u16).to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);

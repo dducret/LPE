@@ -378,6 +378,8 @@ pub(super) fn append_open_message_response(
             &message.subject,
             0,
             !associated_config_named_property_tags(&message).is_empty(),
+            folder_id == INBOX_FOLDER_ID
+                && message.message_class == "IPM.Configuration.MessageListSettings",
         );
         if is_contact_link_timestamp_config(folder_id, &message.message_class) {
             session.record_outlook_view_failure_trace_event(format!(

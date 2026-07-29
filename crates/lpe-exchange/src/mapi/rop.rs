@@ -630,6 +630,21 @@ fn fallback_default_specific_property(
             return true;
         }
     }
+    if let Some(MapiObject::Folder {
+        folder_id: INBOX_FOLDER_ID,
+        properties,
+    }) = object
+    {
+        let storage_tag = canonical_property_storage_tag(tag);
+        // The Exchange 2016 reference returns MAPI_E_NOT_FOUND for this
+        // unpersisted Inbox property. Preserve an explicitly stored value,
+        // but otherwise report the property as absent.
+        if storage_tag == PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W
+            && !properties.contains_key(&storage_tag)
+        {
+            return true;
+        }
+    }
     if let Some(MapiObject::Message {
         folder_id,
         message_id,

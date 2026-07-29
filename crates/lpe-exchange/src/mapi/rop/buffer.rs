@@ -137,6 +137,23 @@ pub(in crate::mapi) fn write_typed_string(body: &mut Vec<u8>, value: &str) {
     }
 }
 
+pub(in crate::mapi) fn write_typed_string_reduced_unicode_when_lossless(
+    body: &mut Vec<u8>,
+    value: &str,
+) {
+    if value.is_empty() {
+        body.push(0x01);
+    } else if value.encode_utf16().all(|code_unit| code_unit < 0x100) {
+        // [MS-OXCDATA] section 2.11.7: a reduced Unicode string omits each
+        // zero high byte when every UTF-16 code unit fits in one byte.
+        body.push(0x03);
+        body.extend(value.encode_utf16().map(|code_unit| code_unit as u8));
+        body.push(0);
+    } else {
+        write_typed_string(body, value);
+    }
+}
+
 pub(in crate::mapi) fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
     if let Some(payload) = rpc_header_ext_payload(buffer) {
         return split_rop_payload_spec(payload);
