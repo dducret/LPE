@@ -61,6 +61,29 @@ fn nspi_request_and_property_manifests_cover_implemented_static_values() {
     assert_eq!(nspi_known_unsupported_property_tag_name(0x3A1B_101F), None);
 }
 
+#[test]
+fn nspi_available_properties_omit_embedded_tables_for_skip_objects() {
+    let entry = ExchangeAddressBookEntry {
+        id: Uuid::nil(),
+        display_name: "Team".to_string(),
+        email: "team@example.test".to_string(),
+        entry_kind: ExchangeAddressBookEntryKind::DistributionList,
+        directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        member_emails: Vec::new(),
+        details: ExchangeAddressBookEntryDetails::default(),
+    };
+
+    let all_properties = nspi_entry_available_property_tags(&entry, 0);
+    let skip_object_properties = nspi_entry_available_property_tags(&entry, 0x0000_0001);
+
+    assert!(all_properties.contains(&0x8009_000D));
+    assert!(!skip_object_properties.contains(&0x8009_000D));
+    assert!(skip_object_properties.contains(&0x0FF6_0102));
+    assert!(skip_object_properties.contains(&0x0FF9_0102));
+    assert!(skip_object_properties.contains(&0x3F08_0003));
+    assert!(skip_object_properties.contains(&0xFFFD_0003));
+}
+
 #[tokio::test]
 async fn get_hierarchy_info_returns_successful_address_book_hierarchy() {
     let principal = AccountPrincipal {
@@ -162,7 +185,7 @@ fn microsoft_oxprops_contact_address_book_fields_project_to_nspi_rows() {
 
     for tag in [
         0x3A06_001F,
-        0x3A0B_001F,
+        0x3A11_001F,
         0x3A4F_001F,
         0x3A08_001F,
         0x3A09_001F,
@@ -190,9 +213,10 @@ fn microsoft_oxprops_contact_address_book_fields_project_to_nspi_rows() {
         "Bob"
     );
     assert_eq!(
-        nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A0B_001F)),
+        nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A11_001F)),
         "Contact"
     );
+    assert!(!nspi_property_tag_is_supported(0x3A0B_001F));
     assert_eq!(
         nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A4F_001F)),
         "Bobby"
@@ -328,6 +352,25 @@ fn nspi_entry_required_address_book_properties_match_exchange_identity_contract(
             .bytes()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn nspi_account_display_type_ex_advertises_sharing_support() {
+    let account_id = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+    let entry = ExchangeAddressBookEntry {
+        id: account_id,
+        display_name: "Alice".to_string(),
+        email: "alice@example.test".to_string(),
+        entry_kind: ExchangeAddressBookEntryKind::Account,
+        directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        member_emails: Vec::new(),
+        details: ExchangeAddressBookEntryDetails::default(),
+    };
+
+    assert_eq!(
+        nspi_u32_value(nspi_entry_value(account_id, &entry, 0x3905_0003)),
+        0x4000_0000
     );
 }
 

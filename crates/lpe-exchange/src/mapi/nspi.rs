@@ -1,6 +1,4 @@
-use super::properties::{
-    write_ascii_z, write_multi_string, write_multi_string8, NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID,
-};
+use super::properties::{write_ascii_z, NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID};
 use super::rop::*;
 use super::session::*;
 use super::transport::*;
@@ -32,10 +30,11 @@ use property_values::{
     parse_nspi_get_props_request, NSPI_BOOTSTRAP_PROPERTY_TAGS,
 };
 pub(in crate::mapi) use property_values::{
-    nspi_entry_display_type, nspi_entry_id, nspi_entry_property_value_list,
-    nspi_known_unsupported_property_tag_name, nspi_property_tag_is_supported,
-    nspi_requested_property_tags, principal_address_book_entry, principal_minimal_entry_id,
-    write_address_book_tagged_property_value, write_large_property_tag_array, NspiValue,
+    nspi_entry_available_property_tags, nspi_entry_display_type, nspi_entry_id,
+    nspi_entry_property_value_list, nspi_known_unsupported_property_tag_name,
+    nspi_property_tag_is_supported, nspi_requested_property_tags, principal_address_book_entry,
+    principal_minimal_entry_id, write_address_book_tagged_property_value,
+    write_large_property_tag_array, NspiValue,
 };
 #[cfg(test)]
 use property_values::{
@@ -76,7 +75,9 @@ where
         MapiRequestType::GetMatches => {
             nspi_matches_response(store, principal, request, request_id).await
         }
-        MapiRequestType::GetPropList => nspi_property_tags_response("GetPropList", request_id),
+        MapiRequestType::GetPropList => {
+            nspi_get_prop_list_response(store, principal, request, request_id).await
+        }
         MapiRequestType::GetProps => {
             nspi_props_response(store, principal, request, "GetProps", request_id).await
         }
@@ -444,6 +445,84 @@ where
     mapi_response(request_type, request_id, 0, body, None)
 }
 
+struct NspiGetPropListRequest {
+    flags: u32,
+    minimal_id: u32,
+}
+
+fn parse_nspi_get_prop_list_request(request: &[u8]) -> Option<NspiGetPropListRequest> {
+    let mut cursor = Cursor::new(request);
+    let flags = cursor.read_u32().ok()?;
+    let minimal_id = cursor.read_u32().ok()?;
+    let _code_page = cursor.read_u32().ok()?;
+    let auxiliary_size = cursor.read_u32().ok()? as usize;
+    cursor.read_bytes(auxiliary_size).ok()?;
+    Some(NspiGetPropListRequest { flags, minimal_id })
+}
+
+async fn nspi_get_prop_list_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    request: &[u8],
+    request_id: &str,
+) -> Response
+where
+    S: ExchangeStore,
+{
+    let entries = match store.fetch_address_book_entries(principal).await {
+        Ok(entries) => entries,
+        Err(error) => {
+            return mapi_diagnostic_response(
+                "GetPropList",
+                request_id,
+                4,
+                &format!("failed to load address book entries: {error}"),
+            );
+        }
+    };
+    if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
+        return mapi_diagnostic_response(
+            "GetPropList",
+            request_id,
+            4,
+            &format!("failed to project address book identifiers: {error}"),
+        );
+    }
+    if let Err(error) = allocate_principal_nspi_identity(store, principal).await {
+        return mapi_diagnostic_response(
+            "GetPropList",
+            request_id,
+            4,
+            &format!("failed to project authenticated address book identifier: {error}"),
+        );
+    }
+    let parsed = parse_nspi_get_prop_list_request(request);
+    let principal_entry = principal_address_book_entry(principal);
+    let principal_id = nspi_entry_id(principal.account_id, &principal_entry);
+    let entry = parsed.as_ref().and_then(|parsed| {
+        entries
+            .iter()
+            .find(|entry| nspi_entry_id(principal.account_id, entry) == parsed.minimal_id)
+            .or_else(|| (parsed.minimal_id == principal_id).then_some(&principal_entry))
+            .or_else(|| (parsed.minimal_id == 0).then_some(&principal_entry))
+    });
+    let tags = entry
+        .map(|entry| {
+            nspi_entry_available_property_tags(
+                entry,
+                parsed.as_ref().map_or(0, |parsed| parsed.flags),
+            )
+        })
+        .unwrap_or_default();
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    body.push(1);
+    write_large_property_tag_array(&mut body, &tags);
+    write_u32(&mut body, 0);
+    mapi_response("GetPropList", request_id, 0, body, None)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct NspiDnToMidMatch {
     mid: Option<u32>,
@@ -533,13 +612,7 @@ where
         .as_ref()
         .map(|parsed| parsed.code_page)
         .unwrap_or(NSPI_UNICODE_CODEPAGE);
-    let tags = nspi_get_props_property_tags(request);
     let raw_tag_candidates = nspi_raw_property_tag_candidates(request);
-    let dropped_tags = tags
-        .iter()
-        .copied()
-        .filter(|tag| !nspi_property_tag_is_supported(*tag) && *tag != 0x0000_0001)
-        .collect::<Vec<_>>();
     let principal_entry = principal_address_book_entry(principal);
     let principal_id = nspi_entry_id(principal.account_id, &principal_entry);
     let lookup_values = resolve_names_requested_values(request);
@@ -583,6 +656,12 @@ where
                 })
             })
     };
+    let tags = nspi_get_props_property_tags(request, entry.as_ref());
+    let dropped_tags = tags
+        .iter()
+        .copied()
+        .filter(|tag| !nspi_property_tag_is_supported(*tag))
+        .collect::<Vec<_>>();
     let (property_values, errors_returned) = if let Some(entry) = entry.as_ref() {
         let (values, errors_returned) =
             nspi_get_props_property_value_list(principal.account_id, entry, &tags, &entries);

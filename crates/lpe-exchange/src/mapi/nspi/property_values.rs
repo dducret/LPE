@@ -12,6 +12,8 @@ pub(super) const NSPI_BOOTSTRAP_PROPERTY_TAGS: &[u32] = &[
 ];
 
 pub(super) const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
+    0x0FF6_0102, // PidTagInstanceKey
+    0x0FF9_0102, // PidTagRecordKey
     0x0FFF_0102, // PidTagEntryId
     0x300B_0102, // PidTagSearchKey
     0x0FF8_0102, // PidTagMappingSignature
@@ -30,8 +32,10 @@ pub(super) const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x3A20_001F, // PidTagTransmittableDisplayName
     0x3A06_001E, // PidTagGivenName string8
     0x3A06_001F, // PidTagGivenName
-    0x3A0B_001E, // PidTagSurname string8
-    0x3A0B_001F, // PidTagSurname
+    0x3A0F_001E, // PidTagMessageHandlingSystemCommonName string8
+    0x3A0F_001F, // PidTagMessageHandlingSystemCommonName
+    0x3A11_001E, // PidTagSurname string8
+    0x3A11_001F, // PidTagSurname
     0x3A4F_001E, // PidTagNickname string8
     0x3A4F_001F, // PidTagNickname
     0x3A08_001E, // PidTagBusinessTelephoneNumber string8
@@ -175,6 +179,7 @@ pub(in crate::mapi) fn nspi_requested_property_tags(request: &[u8]) -> Vec<u32> 
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct NspiGetPropsRequest {
+    pub(super) flags: u32,
     pub(super) code_page: u32,
     pub(super) current_rec: Option<u32>,
     pub(super) property_tags: Option<Vec<u32>>,
@@ -184,7 +189,7 @@ pub(super) struct NspiGetPropsRequest {
 // LargePropertyTagArray, then the auxiliary buffer.
 pub(super) fn parse_nspi_get_props_request(request: &[u8]) -> Option<NspiGetPropsRequest> {
     let mut cursor = Cursor::new(request);
-    let _flags = cursor.read_u32().ok()?;
+    let flags = cursor.read_u32().ok()?;
     let has_state = cursor.read_u8().ok()? != 0;
     let (code_page, current_rec) = if has_state {
         let _sort_type = cursor.read_u32().ok()?;
@@ -216,17 +221,23 @@ pub(super) fn parse_nspi_get_props_request(request: &[u8]) -> Option<NspiGetProp
     let auxiliary_size = cursor.read_u32().ok()? as usize;
     cursor.read_bytes(auxiliary_size).ok()?;
     Some(NspiGetPropsRequest {
+        flags,
         code_page,
         current_rec,
         property_tags,
     })
 }
 
-pub(super) fn nspi_get_props_property_tags(request: &[u8]) -> Vec<u32> {
+pub(super) fn nspi_get_props_property_tags(
+    request: &[u8],
+    entry: Option<&ExchangeAddressBookEntry>,
+) -> Vec<u32> {
     if let Some(parsed) = parse_nspi_get_props_request(request) {
-        return parsed
-            .property_tags
-            .unwrap_or_else(|| NSPI_BOOTSTRAP_PROPERTY_TAGS.to_vec());
+        return parsed.property_tags.unwrap_or_else(|| {
+            entry
+                .map(|entry| nspi_entry_available_property_tags(entry, parsed.flags))
+                .unwrap_or_default()
+        });
     }
     nspi_requested_property_tags(request)
 }
@@ -234,6 +245,99 @@ pub(super) fn nspi_get_props_property_tags(request: &[u8]) -> Vec<u32> {
 pub(in crate::mapi) fn nspi_property_tag_is_supported(tag: u32) -> bool {
     NSPI_BOOTSTRAP_PROPERTY_TAGS.contains(&tag)
         || NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS.contains(&tag)
+}
+
+// MS-OXNSPI 3.1.4.1.6 constraint 5 and 3.1.4.1.7 constraint 5 require
+// GetPropList and NULL-tag GetProps to use the same entry-owned properties.
+pub(in crate::mapi) fn nspi_entry_available_property_tags(
+    entry: &ExchangeAddressBookEntry,
+    flags: u32,
+) -> Vec<u32> {
+    let mut tags = vec![
+        0x0FF6_0102, // PidTagInstanceKey
+        0x0FF8_0102, // PidTagMappingSignature
+        0x0FF9_0102, // PidTagRecordKey
+        0x0FFE_0003, // PidTagObjectType
+        0x0FFF_0102, // PidTagEntryId
+        0x3001_001F, // PidTagDisplayName
+        0x3002_001F, // PidTagAddressType
+        0x3003_001F, // PidTagEmailAddress
+        0x300B_0102, // PidTagSearchKey
+        0x3900_0003, // PidTagDisplayType
+        0x3902_0102, // PidTagTemplateid
+        0x3905_0003, // PidTagDisplayTypeEx
+        0x39FE_001F, // PidTagSmtpAddress
+        0x39FF_001F, // PidTagAddressBookDisplayNamePrintable
+        0x3A00_001F, // PidTagAccount
+        0x3A0F_001F, // PidTagMessageHandlingSystemCommonName
+        0x3A20_001F, // PidTagTransmittableDisplayName
+        0x3F08_0003, // PidTagInitialDetailsPane
+        0x800F_101F, // PidTagAddressBookProxyAddresses
+        0x803C_001F, // PidTagAddressBookObjectDistinguishedName
+        0x8C6D_0102, // PidTagAddressBookObjectGuid
+        0xFFFD_0003, // PidTagAddressBookContainerId
+    ];
+    if !entry.details.given_name.is_empty() {
+        tags.push(0x3A06_001F);
+    }
+    if !entry.details.surname.is_empty() {
+        tags.push(0x3A11_001F);
+    }
+    if !entry.details.nickname.is_empty() {
+        tags.push(0x3A4F_001F);
+    }
+    if !entry.details.primary_phone.is_empty() {
+        tags.extend([0x3A08_001F, 0x3A1A_001F]);
+    }
+    if !entry.details.home_phone.is_empty() {
+        tags.push(0x3A09_001F);
+    }
+    if !entry.details.business2_phones.is_empty() {
+        tags.extend([0x3A1B_001F, 0x3A1B_101F]);
+    }
+    if !entry.details.mobile_phone.is_empty() {
+        tags.push(0x3A1C_001F);
+    }
+    if !entry.details.company_name.is_empty() {
+        tags.push(0x3A16_001F);
+    }
+    if !entry.details.title.is_empty() {
+        tags.push(0x3A17_001F);
+    }
+    if !entry.details.department_name.is_empty() {
+        tags.push(0x3A18_001F);
+    }
+    if !entry.details.postal_address.is_empty() {
+        tags.push(0x3A15_001F);
+    }
+    if !entry.details.country.is_empty() {
+        tags.push(0x3A26_001F);
+    }
+    if !entry.details.locality.is_empty() {
+        tags.push(0x3A27_001F);
+    }
+    if !entry.details.state_or_province.is_empty() {
+        tags.push(0x3A28_001F);
+    }
+    if !entry.details.street_address.is_empty() {
+        tags.push(0x3A29_001F);
+    }
+    if !entry.details.postal_code.is_empty() {
+        tags.push(0x3A2A_001F);
+    }
+    if !entry.details.phonetic_given_name.is_empty() {
+        tags.push(0x3A8D_001F);
+    }
+    if !entry.details.phonetic_surname.is_empty() {
+        tags.push(0x3A8E_001F);
+    }
+    if entry.entry_kind == ExchangeAddressBookEntryKind::DistributionList {
+        if flags & 0x0000_0001 == 0 {
+            tags.push(0x8009_000D);
+        }
+        tags.extend([0x8CE2_0003, 0x8CE3_0003]);
+    }
+    tags
 }
 
 pub(in crate::mapi) fn nspi_resolved_entry_row(
@@ -284,7 +388,7 @@ pub(super) fn nspi_get_props_property_value_list(
     let mut errors_returned = false;
     write_u32(&mut values, tags.len() as u32);
     for property_tag in tags {
-        if nspi_property_tag_is_supported(*property_tag) || *property_tag == 0x0000_0001 {
+        if nspi_property_tag_is_supported(*property_tag) {
             write_address_book_tagged_property_value(
                 &mut values,
                 *property_tag,
@@ -351,7 +455,7 @@ pub(in crate::mapi) fn nspi_entry_value_with_directory<'a>(
         0x3A00_001F | 0x3A00_001E => NspiValue::OwnedString(nspi_entry_alias(entry)),
         0x0FFE_0003 => NspiValue::U32(MAPI_MAILUSER_OBJECT_TYPE),
         0x3900_0003 => NspiValue::U32(nspi_entry_display_type(entry)),
-        0x3905_0003 => NspiValue::U32(nspi_entry_display_type(entry)),
+        0x3905_0003 => NspiValue::U32(nspi_entry_display_type_ex(entry)),
         0x3000_0003 => NspiValue::U32(nspi_entry_id(account_id, entry)),
         0x0FF6_0102 => NspiValue::OwnedBinary(nspi_entry_instance_key(account_id, entry)),
         0x0FF9_0102 => NspiValue::OwnedBinary(nspi_entry_record_key(entry)),
@@ -362,7 +466,8 @@ pub(in crate::mapi) fn nspi_entry_value_with_directory<'a>(
         0x3005_001F | 0x3005_001E => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
         0x3A20_001F | 0x3A20_001E => NspiValue::String(&entry.display_name),
         0x3A06_001F | 0x3A06_001E => NspiValue::String(&entry.details.given_name),
-        0x3A0B_001F | 0x3A0B_001E => NspiValue::String(&entry.details.surname),
+        0x3A0F_001F | 0x3A0F_001E => NspiValue::String(&entry.display_name),
+        0x3A11_001F | 0x3A11_001E => NspiValue::String(&entry.details.surname),
         0x3A4F_001F | 0x3A4F_001E => NspiValue::String(&entry.details.nickname),
         0x3A08_001F | 0x3A08_001E | 0x3A1A_001F | 0x3A1A_001E => {
             NspiValue::String(&entry.details.primary_phone)
@@ -605,6 +710,15 @@ pub(in crate::mapi) fn nspi_entry_display_type(entry: &ExchangeAddressBookEntry)
     }
 }
 
+fn nspi_entry_display_type_ex(entry: &ExchangeAddressBookEntry) -> u32 {
+    nspi_entry_display_type(entry)
+        | if entry.entry_kind == ExchangeAddressBookEntryKind::Account {
+            0x4000_0000
+        } else {
+            0
+        }
+}
+
 pub(in crate::mapi) fn write_large_property_tag_array(body: &mut Vec<u8>, tags: &[u32]) {
     write_u32(body, tags.len() as u32);
     for tag in tags {
@@ -647,11 +761,11 @@ pub(in crate::mapi) fn write_address_book_property_value(
         }
         (0x101E, NspiValue::MultiString(values)) => {
             body.push(0xFF);
-            write_multi_string8(body, values);
+            write_nspi_multi_string8(body, values);
         }
         (0x101F, NspiValue::MultiString(values)) => {
             body.push(0xFF);
-            write_multi_string(body, values);
+            write_nspi_multi_string(body, values);
         }
         (0x000D, NspiValue::EmbeddedTable(account_id, entries)) => {
             write_embedded_address_book_table(body, *account_id, entries)
@@ -667,7 +781,7 @@ pub(in crate::mapi) fn write_address_book_property_value(
         (_, NspiValue::OwnedBinary(value)) => write_nspi_binary(body, value),
         (_, NspiValue::MultiString(values)) => {
             body.push(0xFF);
-            write_multi_string(body, values);
+            write_nspi_multi_string(body, values);
         }
         (_, NspiValue::EmbeddedTable(account_id, entries)) => {
             write_embedded_address_book_table(body, *account_id, entries)
@@ -681,6 +795,24 @@ pub(in crate::mapi) fn write_address_book_property_value(
             write_utf16z(body, value);
         }
         (_, NspiValue::Null) => {}
+    }
+}
+
+fn write_nspi_multi_string8(body: &mut Vec<u8>, values: &[String]) {
+    write_u32(body, values.len().min(u32::MAX as usize) as u32);
+    for value in values.iter().take(u32::MAX as usize) {
+        // MS-OXCMAPIHTTP 2.2.1.1 requires an element HasValue byte for
+        // PtypMultipleString8 and PtypMultipleString values.
+        body.push(0xFF);
+        write_ascii_z(body, value);
+    }
+}
+
+fn write_nspi_multi_string(body: &mut Vec<u8>, values: &[String]) {
+    write_u32(body, values.len().min(u32::MAX as usize) as u32);
+    for value in values.iter().take(u32::MAX as usize) {
+        body.push(0xFF);
+        write_utf16z(body, value);
     }
 }
 

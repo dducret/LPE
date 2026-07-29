@@ -35,6 +35,119 @@ fn nspi_get_props_request(current_rec: u32, code_page: u32, tags: &[u32]) -> Vec
     request
 }
 
+fn nspi_get_props_without_property_tags_request(
+    flags: u32,
+    current_rec: u32,
+    code_page: u32,
+) -> Vec<u8> {
+    let mut request = Vec::new();
+    request.extend_from_slice(&flags.to_le_bytes());
+    request.push(0xFF);
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&current_rec.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&code_page.to_le_bytes());
+    request.extend_from_slice(&0x0409u32.to_le_bytes());
+    request.extend_from_slice(&0x0809u32.to_le_bytes());
+    request.push(0);
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request
+}
+
+fn nspi_get_prop_list_request(flags: u32, minimal_id: u32, code_page: u32) -> Vec<u8> {
+    let mut request = Vec::new();
+    request.extend_from_slice(&flags.to_le_bytes());
+    request.extend_from_slice(&minimal_id.to_le_bytes());
+    request.extend_from_slice(&code_page.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request
+}
+
+fn nspi_get_prop_list_response_tags(body: &[u8]) -> Vec<u32> {
+    let count = u32::from_le_bytes(body[9..13].try_into().unwrap()) as usize;
+    (0..count)
+        .map(|index| {
+            let offset = 13 + index * 4;
+            u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap())
+        })
+        .collect()
+}
+
+fn nspi_get_props_response_tags(body: &[u8]) -> Vec<u32> {
+    let count = u32::from_le_bytes(body[13..17].try_into().unwrap()) as usize;
+    let mut tags = Vec::with_capacity(count);
+    let mut offset = 17usize;
+    for _ in 0..count {
+        let tag = u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap());
+        tags.push(tag);
+        offset += 4;
+        match tag & 0xFFFF {
+            0x0003 | 0x000A => offset += 4,
+            0x000B => offset += 1,
+            0x0102 => {
+                let has_value = body[offset] != 0;
+                offset += 1;
+                if has_value {
+                    let len =
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize;
+                    offset += 4 + len;
+                }
+            }
+            0x001E => {
+                let has_value = body[offset] != 0;
+                offset += 1;
+                if has_value {
+                    while body[offset] != 0 {
+                        offset += 1;
+                    }
+                    offset += 1;
+                }
+            }
+            0x001F => {
+                let has_value = body[offset] != 0;
+                offset += 1;
+                if has_value {
+                    while body[offset] != 0 || body[offset + 1] != 0 {
+                        offset += 2;
+                    }
+                    offset += 2;
+                }
+            }
+            0x101E | 0x101F => {
+                let has_value = body[offset] != 0;
+                offset += 1;
+                if has_value {
+                    let values =
+                        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize;
+                    offset += 4;
+                    for _ in 0..values {
+                        let has_value = body[offset] != 0;
+                        offset += 1;
+                        if has_value {
+                            if tag & 0xFFFF == 0x101E {
+                                while body[offset] != 0 {
+                                    offset += 1;
+                                }
+                                offset += 1;
+                            } else {
+                                while body[offset] != 0 || body[offset + 1] != 0 {
+                                    offset += 2;
+                                }
+                                offset += 2;
+                            }
+                        }
+                    }
+                }
+            }
+            other => panic!("unexpected NSPI property type {other:#06x}"),
+        }
+    }
+    tags
+}
+
 async fn nspi_principal_mid(service: &ExchangeService<FakeStore>) -> u32 {
     let legacy_dn = test_account_legacy_dn("alice@example.test");
     let request = nspi_dn_to_mid_request(&[&legacy_dn]);
@@ -251,7 +364,7 @@ async fn mapi_over_http_nspi_get_props_unknown_current_rec_returns_ordered_error
 }
 
 #[tokio::test]
-async fn mapi_over_http_nspi_get_props_preserves_display_type_ex_and_null_slots() {
+async fn mapi_over_http_nspi_get_props_returns_error_for_missing_null_slot() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -277,7 +390,10 @@ async fn mapi_over_http_nspi_get_props_preserves_display_type_ex_and_null_slots(
     let body = response_bytes(response).await;
 
     assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_le_bytes(body[4..8].try_into().unwrap()),
+        0x0004_0380
+    );
     assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
     assert_eq!(body[12], 1);
     assert_eq!(
@@ -285,11 +401,18 @@ async fn mapi_over_http_nspi_get_props_preserves_display_type_ex_and_null_slots(
         requested_tags.len() as u32
     );
     assert!(contains_bytes(&body, &0x3905_0003u32.to_le_bytes()));
-    assert!(contains_bytes(&body, &0x0000_0001u32.to_le_bytes()));
+    assert_eq!(
+        u32::from_le_bytes(body[body.len() - 12..body.len() - 8].try_into().unwrap()),
+        0x0000_000A
+    );
+    assert_eq!(
+        u32::from_le_bytes(body[body.len() - 8..body.len() - 4].try_into().unwrap()),
+        0x8004_010F
+    );
 }
 
 #[tokio::test]
-async fn mapi_over_http_nspi_get_props_encodes_null_as_a_tag_without_value_bytes() {
+async fn mapi_over_http_nspi_get_props_encodes_missing_null_tag_as_error() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -306,7 +429,10 @@ async fn mapi_over_http_nspi_get_props_encodes_null_as_a_tag_without_value_bytes
     let body = response_bytes(response).await;
 
     assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_le_bytes(body[4..8].try_into().unwrap()),
+        0x0004_0380
+    );
     assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
     assert_eq!(body[12], 1);
     assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 2);
@@ -316,10 +442,91 @@ async fn mapi_over_http_nspi_get_props_encodes_null_as_a_tag_without_value_bytes
     );
     assert_eq!(
         u32::from_le_bytes(body[25..29].try_into().unwrap()),
-        0x0000_0001
+        0x0000_000A
     );
-    assert_eq!(u32::from_le_bytes(body[29..33].try_into().unwrap()), 0);
-    assert_eq!(body.len(), 33);
+    assert_eq!(
+        u32::from_le_bytes(body[29..33].try_into().unwrap()),
+        0x8004_010F
+    );
+    assert_eq!(body.len(), 37);
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_null_get_props_matches_entry_prop_list() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let principal_mid = nspi_principal_mid(&service).await;
+    let flags = 0x0000_0001;
+
+    let prop_list_headers = nspi_bound_headers(&service, "GetPropList").await;
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &prop_list_headers,
+            &nspi_get_prop_list_request(flags, principal_mid, 1200),
+        )
+        .await
+        .unwrap();
+    let prop_list_body = response_bytes(response).await;
+    assert_eq!(
+        u32::from_le_bytes(prop_list_body[0..4].try_into().unwrap()),
+        0
+    );
+    assert_eq!(
+        u32::from_le_bytes(prop_list_body[4..8].try_into().unwrap()),
+        0
+    );
+    assert_eq!(prop_list_body[8], 1);
+    let prop_list_tags = nspi_get_prop_list_response_tags(&prop_list_body);
+
+    let props_headers = nspi_bound_headers(&service, "GetProps").await;
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &props_headers,
+            &nspi_get_props_without_property_tags_request(flags, principal_mid, 1200),
+        )
+        .await
+        .unwrap();
+    let props_body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(props_body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(props_body[4..8].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_le_bytes(props_body[8..12].try_into().unwrap()),
+        1200
+    );
+    assert_eq!(props_body[12], 1);
+    let props_tags = nspi_get_props_response_tags(&props_body);
+
+    assert_eq!(props_tags, prop_list_tags);
+    for required_tag in [
+        0x0FF6_0102,
+        0x0FF8_0102,
+        0x0FF9_0102,
+        0x0FFE_0003,
+        0x0FFF_0102,
+        0x3001_001F,
+        0x3002_001F,
+        0x3003_001F,
+        0x300B_0102,
+        0x3900_0003,
+        0x3902_0102,
+        0x3905_0003,
+        0x39FF_001F,
+        0x3A20_001F,
+        0x3F08_0003,
+        0x803C_001F,
+        0x8C6D_0102,
+        0xFFFD_0003,
+    ] {
+        assert!(props_tags.contains(&required_tag), "{required_tag:#010x}");
+    }
+    assert!(!props_tags.contains(&0x3000_0003));
+    assert!(!props_tags.contains(&0x3004_001F));
+    assert!(props_tags.iter().all(|tag| tag & 0xFFFF != 0x000A));
 }
 
 #[tokio::test]
@@ -1044,7 +1251,7 @@ async fn mapi_over_http_nspi_get_props_returns_microsoft_contact_detail_columns(
     props_request.extend_from_slice(&visible_mid.to_le_bytes());
     for tag in [
         0x3A06_001Fu32, // PidTagGivenName
-        0x3A0B_001Fu32, // PidTagSurname
+        0x3A11_001Fu32, // PidTagSurname
         0x3A4F_001Fu32, // PidTagNickname
         0x3A08_001Fu32, // PidTagBusinessTelephoneNumber
         0x3A09_001Fu32, // PidTagHomeTelephoneNumber
@@ -1536,7 +1743,32 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
     );
     assert_eq!(body[21], 0xFF);
     assert_eq!(u32::from_le_bytes(body[22..26].try_into().unwrap()), 1);
+    assert_eq!(body[26], 0xFF);
+    assert!(body[27..].starts_with(&utf16z("SMTP:alice@example.test")));
     assert!(contains_bytes(&body, &utf16z("SMTP:alice@example.test")));
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &props_headers,
+            &nspi_get_props_request(self_mid, 1252, &[0x800F_101E]),
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1252);
+    assert_eq!(body[12], 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(body[17..21].try_into().unwrap()),
+        0x800F_101E
+    );
+    assert_eq!(body[21], 0xFF);
+    assert_eq!(u32::from_le_bytes(body[22..26].try_into().unwrap()), 1);
+    assert_eq!(body[26], 0xFF);
+    assert!(body[27..].starts_with(b"SMTP:alice@example.test\0"));
 
     let mut outlook_account_row_request = Vec::new();
     outlook_account_row_request.extend_from_slice(&0x0FFF_0102u32.to_le_bytes());
@@ -1575,6 +1807,7 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         ),
         1
     );
+    assert_eq!(body[proxy_value_offset + 5], 0xFF);
     assert!(contains_bytes(&body, &utf16z("SMTP:alice@example.test")));
 }
 
@@ -1907,14 +2140,21 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                 assert!(contains_bytes(&body, &utf16z("alice@example.test")));
                 assert!(contains_bytes(&body, &utf16z("Alice")));
             }
-            "GetProps" | "GetTemplateInfo" => {
+            "GetProps" => {
                 assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
                 assert_eq!(body[12], 1, "{request_type}");
-                assert_eq!(
-                    u32::from_le_bytes(body[13..17].try_into().unwrap()),
-                    8,
-                    "{request_type}"
-                );
+                assert!(u32::from_le_bytes(body[13..17].try_into().unwrap()) >= 16);
+                assert!(contains_bytes(&body, &0x0FF6_0102u32.to_le_bytes()));
+                assert!(contains_bytes(&body, &0x0FF9_0102u32.to_le_bytes()));
+                assert!(contains_bytes(&body, &0x3F08_0003u32.to_le_bytes()));
+                assert!(contains_bytes(&body, &0xFFFD_0003u32.to_le_bytes()));
+                assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+                assert!(contains_bytes(&body, &utf16z("Alice")));
+            }
+            "GetTemplateInfo" => {
+                assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
+                assert_eq!(body[12], 1, "{request_type}");
+                assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 8);
                 assert_eq!(
                     u32::from_le_bytes(body[17..21].try_into().unwrap()),
                     0x3001_001F,
