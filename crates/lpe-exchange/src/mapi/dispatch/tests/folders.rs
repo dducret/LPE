@@ -1918,7 +1918,7 @@ fn default_folder_identification_values_preserve_additional_ren_client_state() {
 }
 
 #[test]
-fn root_default_folder_properties_retain_additional_ren_client_state() {
+fn root_default_folder_properties_complete_additional_ren_client_prefix() {
     let root = MapiObject::Folder {
         folder_id: ROOT_FOLDER_ID,
         properties: std::collections::HashMap::new(),
@@ -1926,6 +1926,11 @@ fn root_default_folder_properties_retain_additional_ren_client_state() {
     let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
         test_principal().account_id,
         CALENDAR_FOLDER_ID,
+    )
+    .unwrap();
+    let junk_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        test_principal().account_id,
+        JUNK_FOLDER_ID,
     )
     .unwrap();
 
@@ -1945,18 +1950,18 @@ fn root_default_folder_properties_retain_additional_ren_client_state() {
     );
 
     assert_eq!(
-        retained,
-        vec![
-            (
-                PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
-                MapiValue::Binary(calendar_entry_id)
-            ),
-            (
-                PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
-                MapiValue::MultiBinary(vec![Vec::new()])
-            ),
-        ]
+        retained.first(),
+        Some(&(
+            PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+            MapiValue::Binary(calendar_entry_id)
+        ))
     );
+    let Some(MapiValue::MultiBinary(values)) = retained.get(1).map(|(_, value)| value) else {
+        panic!("expected AdditionalRenEntryIds");
+    };
+    assert_eq!(values.len(), 5);
+    assert!(values[0].is_empty());
+    assert_eq!(values[4], junk_entry_id);
 }
 
 #[test]

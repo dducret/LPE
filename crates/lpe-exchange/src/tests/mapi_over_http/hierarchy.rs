@@ -2287,9 +2287,51 @@ async fn mapi_over_http_additional_ren_entry_ids_round_trip_client_state_across_
         )
         .await
         .unwrap();
+    let mut truncated_set_headers = mapi_headers("Execute");
+    truncated_set_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&set_response)).unwrap(),
+    );
     let set_response_rops = response_rops_from_execute_response(set_response).await;
     assert!(contains_bytes(
         &set_response_rops,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(stored_folder_profile_values
+        .lock()
+        .unwrap()
+        .values()
+        .any(|value| value == &expected_profile_value));
+
+    // Outlook trace 202607291055 later writes only the first four documented
+    // entries. That must not erase the Junk entry or the opaque move stamp.
+    let mut truncated_property_values = Vec::new();
+    append_mapi_multi_binary_property(
+        &mut truncated_property_values,
+        0x36D8_1102, // PidTagAdditionalRenEntryIds
+        &[&entries[0], &entries[1], &entries[2], &entries[3]],
+    );
+    let mut truncated_set_rops = Vec::new();
+    append_rop_open_folder(
+        &mut truncated_set_rops,
+        0,
+        1,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut truncated_set_rops, 1, 1, &truncated_property_values);
+    let truncated_set_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &truncated_set_headers,
+            &execute_body(&rop_buffer(&truncated_set_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(truncated_set_response.status(), StatusCode::OK);
+    let truncated_set_response_rops =
+        response_rops_from_execute_response(truncated_set_response).await;
+    assert!(contains_bytes(
+        &truncated_set_response_rops,
         &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
     ));
     assert!(stored_folder_profile_values
@@ -2321,6 +2363,82 @@ async fn mapi_over_http_additional_ren_entry_ids_round_trip_client_state_across_
 
     let get_response_rops = response_rops_from_execute_response(get_response).await;
     assert!(contains_bytes(&get_response_rops, &expected_profile_value));
+}
+
+#[tokio::test]
+async fn mapi_over_http_reopens_legacy_partial_additional_ren_entry_ids_with_junk() {
+    let account = FakeStore::account();
+    let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    let entries = [
+        crate::mapi::identity::CONFLICTS_FOLDER_ID,
+        crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+        crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
+        crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
+    ]
+    .map(|folder_id| {
+        crate::mapi::identity::folder_entry_id_from_object_id(account.account_id, folder_id)
+            .unwrap()
+    });
+    let junk_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::JUNK_FOLDER_ID,
+    )
+    .unwrap();
+    let mut legacy_profile_value = 4u32.to_le_bytes().to_vec();
+    for entry in &entries {
+        legacy_profile_value.extend_from_slice(&(entry.len() as u16).to_le_bytes());
+        legacy_profile_value.extend_from_slice(entry);
+    }
+    store
+        .mapi_folder_profile_property_values
+        .lock()
+        .unwrap()
+        .insert(
+            (
+                account.account_id,
+                crate::mapi::identity::INBOX_FOLDER_ID,
+                0x36D8_1102,
+                0x1102,
+            ),
+            legacy_profile_value,
+        );
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut headers = mapi_headers("Execute");
+    headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x36D8_1102]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    let mut expected_profile_value = 5u32.to_le_bytes().to_vec();
+    for entry in entries.iter().chain(std::iter::once(&junk_entry_id)) {
+        expected_profile_value.extend_from_slice(&(entry.len() as u16).to_le_bytes());
+        expected_profile_value.extend_from_slice(entry);
+    }
+    assert!(contains_bytes(&response_rops, &expected_profile_value));
 }
 
 #[tokio::test]

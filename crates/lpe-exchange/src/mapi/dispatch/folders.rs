@@ -1152,7 +1152,10 @@ where
                     if let Some(value) =
                         additional_ren_entry_ids_from_profile_bytes(&value.property_value)
                     {
-                        properties.insert(PID_TAG_ADDITIONAL_REN_ENTRY_IDS, value);
+                        if let Some(value) = merge_additional_ren_entry_ids(principal, None, value)
+                        {
+                            properties.insert(PID_TAG_ADDITIONAL_REN_ENTRY_IDS, value);
+                        }
                     }
                 }
             }

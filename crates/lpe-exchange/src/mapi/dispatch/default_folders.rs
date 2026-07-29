@@ -180,7 +180,16 @@ fn default_folder_identification_safe_property_value(
             special_folder_identification_property_value(principal.account_id, storage_tag)
                 .map(|value| (storage_tag, value))
         }
-        PID_TAG_ADDITIONAL_REN_ENTRY_IDS => Some((canonical_property_storage_tag(tag), value)),
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS => {
+            let existing = match object {
+                Some(MapiObject::Folder { properties, .. }) => {
+                    properties.get(&PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
+                }
+                _ => None,
+            };
+            merge_additional_ren_entry_ids(principal, existing, value)
+                .map(|value| (canonical_property_storage_tag(tag), value))
+        }
         PID_TAG_FREE_BUSY_ENTRY_IDS => {
             merge_indexed_special_folder_entry_ids(principal, tag, value)
                 .map(|value| (canonical_property_storage_tag(tag), value))
@@ -207,6 +216,44 @@ fn merge_indexed_special_folder_entry_ids(
         canonical_values.extend(client_values.into_iter().skip(canonical_len));
     }
     Some(MapiValue::MultiBinary(canonical_values))
+}
+
+// [MS-OXOSFLD] section 2.2.4 defines the special-folder entries at indexes
+// 0 through 4 and requires every other index to be preserved. Outlook can
+// submit a prefix that omits Junk at index 4, so retain the prior profile
+// values that were not supplied by the write.
+pub(super) fn merge_additional_ren_entry_ids(
+    principal: &AccountPrincipal,
+    existing: Option<&MapiValue>,
+    value: MapiValue,
+) -> Option<MapiValue> {
+    let MapiValue::MultiBinary(incoming_values) = value else {
+        return None;
+    };
+    let Some(MapiValue::MultiBinary(canonical_values)) =
+        special_folder_identification_property_value(
+            principal.account_id,
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        )
+    else {
+        return None;
+    };
+    let mut merged_values = match existing {
+        Some(MapiValue::MultiBinary(values)) => values.clone(),
+        _ => canonical_values.clone(),
+    };
+    let existing_len = merged_values.len();
+    if existing_len < canonical_values.len() {
+        merged_values.extend(canonical_values[existing_len..].iter().cloned());
+    }
+    for (index, value) in incoming_values.into_iter().enumerate() {
+        if let Some(existing_value) = merged_values.get_mut(index) {
+            *existing_value = value;
+        } else {
+            merged_values.push(value);
+        }
+    }
+    Some(MapiValue::MultiBinary(merged_values))
 }
 
 // [MS-OXOSFLD] section 2.2.4 requires preserving values at unassigned
