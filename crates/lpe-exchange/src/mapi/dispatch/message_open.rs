@@ -373,7 +373,12 @@ pub(super) fn append_open_message_response(
                 message.message_class
             ));
         }
-        let response = rop_open_message_response(request, &message.subject, 0);
+        let response = rop_open_message_response_with_named_properties(
+            request,
+            &message.subject,
+            0,
+            !associated_config_named_property_tags(&message).is_empty(),
+        );
         if is_contact_link_timestamp_config(folder_id, &message.message_class) {
             session.record_outlook_view_failure_trace_event(format!(
                 "open_contact_link_timestamp_config:request_id={request_id};folder=0x{folder_id:016x};config=0x{:016x};handle={handle};subject={}",

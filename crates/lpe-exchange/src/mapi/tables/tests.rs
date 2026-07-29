@@ -8029,11 +8029,15 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
     );
     assert_eq!(
         associated_config_property_value(&explicit_no_streams, PID_NAME_CONTENT_CLASS_W_TAG),
-        None
+        Some(MapiValue::String("urn:content-classes:message".to_string()))
     );
     assert_eq!(
         associated_config_property_value(&explicit_no_streams, PID_NAME_CONTENT_TYPE_W_TAG),
-        None
+        Some(MapiValue::String("text/xml".to_string()))
+    );
+    assert_eq!(
+        associated_config_named_property_tags(&explicit_no_streams),
+        vec![PID_NAME_CONTENT_CLASS_W_TAG, PID_NAME_CONTENT_TYPE_W_TAG]
     );
     let work_hours = MapiAssociatedConfigMessage {
         id: crate::mapi::identity::mapi_store_id(

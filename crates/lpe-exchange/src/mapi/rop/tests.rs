@@ -1337,6 +1337,97 @@ fn open_message_response_does_not_advertise_missing_recipient_rows() {
     assert_eq!(&response[response.len() - 5..response.len() - 3], &[3, 0]);
     assert_eq!(&response[response.len() - 3..response.len() - 1], &[0, 0]);
     assert_eq!(response[response.len() - 1], 0);
+
+    let named_response =
+        rop_open_message_response_with_named_properties(&request, "Subject", 3, true);
+    assert_eq!(named_response[6], 1);
+}
+
+#[test]
+fn associated_config_get_properties_all_returns_its_named_properties() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "test@example.test".to_string(),
+        display_name: "Test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let message = crate::mapi_store::MapiAssociatedConfigMessage {
+        id: crate::mapi::identity::mapi_store_id(0x7fff_ffff_ffa1),
+        folder_id: INBOX_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x6d617069_6d6c_7350_8000_0000000002a1),
+        message_class: "IPM.Configuration.MessageListSettings".to_string(),
+        subject: "IPM.Configuration.MessageListSettings".to_string(),
+        properties_json: serde_json::json!({
+            "0x7c060003": {"type": "i32", "value": 0},
+            "0x9001001f": {"type": "string", "value": "persisted named value"}
+        }),
+    };
+    assert_eq!(
+        associated_config_named_property_tags(&message),
+        vec![
+            PID_NAME_CONTENT_CLASS_W_TAG,
+            PID_NAME_CONTENT_TYPE_W_TAG,
+            0x9001_001F,
+        ]
+    );
+    let object = MapiObject::AssociatedConfig {
+        folder_id: message.folder_id,
+        config_id: message.id,
+        saved_message: Some(message),
+    };
+    let unicode_request = RopRequest {
+        rop_id: RopId::GetPropertiesAll.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: [0x00, 0x10, 0x01, 0x00].to_vec(),
+    };
+    let unicode_response = rop_get_properties_all_response(
+        &unicode_request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+    for (tag, value) in [
+        (PID_NAME_CONTENT_CLASS_W_TAG, "urn:content-classes:message"),
+        (PID_NAME_CONTENT_TYPE_W_TAG, "text/xml"),
+        (0x9001_001F, "persisted named value"),
+    ] {
+        assert!(contains_bytes(&unicode_response, &tag.to_le_bytes()));
+        assert!(contains_utf16(&unicode_response, value));
+    }
+
+    let string8_request = RopRequest {
+        rop_id: RopId::GetPropertiesAll.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: [0x00, 0x10, 0x00, 0x00].to_vec(),
+    };
+    let string8_response = rop_get_properties_all_response(
+        &string8_request,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+    for (tag, value) in [
+        (
+            (PID_NAME_CONTENT_CLASS_W_TAG & 0xffff_0000) | 0x001e,
+            "urn:content-classes:message",
+        ),
+        (
+            (PID_NAME_CONTENT_TYPE_W_TAG & 0xffff_0000) | 0x001e,
+            "text/xml",
+        ),
+        (0x9001_001E, "persisted named value"),
+    ] {
+        assert!(contains_bytes(&string8_response, &tag.to_le_bytes()));
+        assert!(contains_ascii_z(&string8_response, value));
+    }
 }
 
 #[test]

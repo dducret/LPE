@@ -11206,12 +11206,25 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert!(!properties
         .iter()
         .any(|property| property.tag == 0x0E0B_0102));
-    assert!(!properties
-        .iter()
-        .any(|property| property.tag == 0x801F_001F));
-    assert!(!properties
-        .iter()
-        .any(|property| property.tag == 0x836B_001F));
+    // Exchange advertises named properties when opening this MList FAI. LPE's
+    // configuration projection supplies its canonical content-class/type
+    // values, so direct CopyTo must carry the same defined properties.
+    for (tag, value) in [
+        (0x801F_001F, "urn:content-classes:message"),
+        (0x836B_001F, "text/xml"),
+    ] {
+        let matches = properties
+            .iter()
+            .filter(|property| property.tag == tag)
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 1, "missing 0x{tag:08x}: {transfer:02x?}");
+        let mut expected = value
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        expected.extend_from_slice(&[0, 0]);
+        assert_eq!(matches[0].value, expected, "unexpected 0x{tag:08x}");
+    }
 
     // Exchange 15.1.2507.34 trace 202607281134 returns 0x664F000B as
     // MAPI_E_NOT_FOUND and projects 0x0E0B0102 as a stable 46-byte,
@@ -11405,14 +11418,14 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert_eq!(downloaded.access, Some(0x0000_0007));
     assert_eq!(downloaded.access_level, Some(0x0000_0000));
     assert!(downloaded.body_tags.contains(&0x7C06_0003));
+    assert!(downloaded.body_tags.contains(&0x801F_001F));
+    assert!(downloaded.body_tags.contains(&0x836B_001F));
     for absent_tag in [
         0x0FFE_0003, // PidTagObjectType.
         0x0FF9_0102, // PidTagRecordKey.
         0x7C07_0102,
         0x7C08_0102,
         0x0E0B_0102,
-        0x801F_001F,
-        0x836B_001F,
     ] {
         assert!(!downloaded.body_tags.contains(&absent_tag));
     }

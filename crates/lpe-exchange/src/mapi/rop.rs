@@ -1015,6 +1015,27 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
         MapiObject::ConversationAction { .. } | MapiObject::PendingConversationAction { .. } => {
             default_conversation_action_property_tags()
         }
+        MapiObject::AssociatedConfig {
+            folder_id,
+            config_id,
+            saved_message,
+            ..
+        } => {
+            let mut tags = default_folder_property_tags();
+            if let Some(message) = saved_message
+                .clone()
+                .or_else(|| snapshot.associated_config_message_for_id(*config_id))
+                .filter(|message| message.folder_id == *folder_id)
+            {
+                // [MS-OXCMSG] section 2.2.3.1.2 requires every named
+                // property advertised by RopOpenMessage to be available via
+                // RopGetPropertiesAll on that Message object.
+                tags.extend(associated_config_named_property_tags(&message));
+                tags.sort_unstable();
+                tags.dedup();
+            }
+            tags
+        }
         _ => default_folder_property_tags(),
     };
     response.extend_from_slice(&(tags.len() as u16).to_le_bytes());

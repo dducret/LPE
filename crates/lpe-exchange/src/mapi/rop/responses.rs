@@ -35,9 +35,18 @@ pub(in crate::mapi) fn rop_open_message_response(
     subject: &str,
     recipient_count: usize,
 ) -> Vec<u8> {
+    rop_open_message_response_with_named_properties(request, subject, recipient_count, false)
+}
+
+pub(in crate::mapi) fn rop_open_message_response_with_named_properties(
+    request: &RopRequest,
+    subject: &str,
+    recipient_count: usize,
+    has_named_properties: bool,
+) -> Vec<u8> {
     let mut response = vec![0x03, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
-    response.push(0);
+    response.push(u8::from(has_named_properties));
     write_typed_string(&mut response, "");
     write_typed_string(&mut response, subject);
     response.extend_from_slice(&(recipient_count.min(u16::MAX as usize) as u16).to_le_bytes());

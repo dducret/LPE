@@ -395,21 +395,6 @@ pub(in crate::mapi) fn associated_config_property_value(
     associated_config_property_value_with_mailbox_guid(message, Uuid::nil(), property_tag)
 }
 
-pub(in crate::mapi) fn associated_config_property_is_client_absent(
-    message: Option<&MapiAssociatedConfigMessage>,
-    property_tag: u32,
-) -> bool {
-    message.is_some_and(|message| {
-        crate::mapi_store::is_outlook_configuration_message_class(&message.message_class)
-            && mapi_properties_from_json(&message.properties_json)
-                .contains_key(&PID_TAG_ROAMING_DATATYPES)
-            && matches!(
-                property_tag,
-                PID_NAME_CONTENT_CLASS_W_TAG | PID_NAME_CONTENT_TYPE_W_TAG
-            )
-    })
-}
-
 pub(in crate::mapi) fn associated_config_modeled_empty_property(
     message: Option<&MapiAssociatedConfigMessage>,
     property_tag: u32,
@@ -468,21 +453,32 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
         .map(MapiValue::Binary);
     }
     let properties = mapi_properties_from_json(&message.properties_json);
-    properties
-        .get(&lookup_tag)
-        .cloned()
+    let requested_property = MapiPropertyTag::new(lookup_tag);
+    let stored_value = properties.get(&lookup_tag).cloned().or_else(|| {
+        (requested_property.property_id() >= 0x8000
+            && matches!(
+                requested_property.property_type(),
+                Some(MapiPropertyType::String8 | MapiPropertyType::String)
+            ))
+        .then(|| {
+            properties.iter().find_map(|(stored_tag, value)| {
+                let stored_property = MapiPropertyTag::new(*stored_tag);
+                (stored_property.property_id() == requested_property.property_id()
+                    && matches!(
+                        stored_property.property_type(),
+                        Some(MapiPropertyType::String8 | MapiPropertyType::String)
+                    ))
+                .then(|| value.clone())
+            })
+        })
+        .flatten()
+    });
+    stored_value
         .filter(|_| !crate::mapi_store::is_associated_config_read_only_property_tag(lookup_tag))
         .map(|value| {
             sanitize_configuration_property_value(&message.message_class, lookup_tag, value)
         })
         .or_else(|| {
-            if associated_config_property_is_client_absent(Some(message), lookup_tag) {
-                // The persisted client configuration establishes that this
-                // compatibility property was not supplied; do not invent it.
-                // Once absent, [MS-OXCDATA] sections 2.4.2, 2.8.1.2, and
-                // 2.11.5 encode it as ecNotFound in a flagged property cell.
-                return None;
-            }
             if crate::mapi_store::is_outlook_umolk_user_options_message_class(
                 &message.message_class,
             ) && !is_umolk_computed_property(lookup_tag)
@@ -681,17 +677,21 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 {
                     Some(MapiValue::Binary(minimal_custom_action_roaming_xml_stream()))
                 }
-                PID_NAME_CONTENT_CLASS_W_TAG
-                    if crate::mapi_store::is_outlook_configuration_message_class(
-                        &message.message_class,
-                    ) =>
+                property_tag
+                    if MapiPropertyTag::new(property_tag).property_id()
+                        == MapiPropertyTag::new(PID_NAME_CONTENT_CLASS_W_TAG).property_id()
+                        && crate::mapi_store::is_outlook_configuration_message_class(
+                            &message.message_class,
+                        ) =>
                 {
                     Some(MapiValue::String("urn:content-classes:message".to_string()))
                 }
-                PID_NAME_CONTENT_TYPE_W_TAG
-                    if crate::mapi_store::is_outlook_configuration_message_class(
-                        &message.message_class,
-                    ) =>
+                property_tag
+                    if MapiPropertyTag::new(property_tag).property_id()
+                        == MapiPropertyTag::new(PID_NAME_CONTENT_TYPE_W_TAG).property_id()
+                        && crate::mapi_store::is_outlook_configuration_message_class(
+                            &message.message_class,
+                        ) =>
                 {
                     Some(MapiValue::String("text/xml".to_string()))
                 }
@@ -736,6 +736,24 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 _ => None,
             }
         })
+}
+
+pub(in crate::mapi) fn associated_config_named_property_tags(
+    message: &MapiAssociatedConfigMessage,
+) -> Vec<u32> {
+    let mut tags = mapi_properties_from_json(&message.properties_json)
+        .into_keys()
+        .filter(|tag| MapiPropertyTag::new(*tag).property_id() >= 0x8000)
+        .filter(|tag| associated_config_property_value(message, *tag).is_some())
+        .collect::<Vec<_>>();
+    for tag in [PID_NAME_CONTENT_CLASS_W_TAG, PID_NAME_CONTENT_TYPE_W_TAG] {
+        if associated_config_property_value(message, tag).is_some() {
+            tags.push(tag);
+        }
+    }
+    tags.sort_unstable();
+    tags.dedup();
+    tags
 }
 
 fn is_umolk_computed_property(property_tag: u32) -> bool {

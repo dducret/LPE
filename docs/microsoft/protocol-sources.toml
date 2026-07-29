@@ -855,6 +855,7 @@ used_for = [
   "Required general PidTagAccess and PidTagAccessLevel properties on folder-associated Message objects opened read-only by Outlook",
   "Computed PidTagHasAttachments and effective PidTagMessageStatus projection for configuration FAI FastTransfer",
   "Exchange 2010 through 2019 product behavior that does not support PidTagRecordKey",
+  "RopOpenMessage HasNamedProperties advertisement and named-property availability through RopGetPropertiesAll",
 ]
 sections = [
   "1.3.2 Folder Associated Information Messages",
@@ -879,6 +880,7 @@ sections = [
   "2.2.3.16 RopOpenEmbeddedMessage ROP",
   "2.2.3.1 RopOpenMessage ROP",
   "2.2.3.1.1 RopOpenMessage ROP Request Buffer",
+  "2.2.3.1.2 RopOpenMessage ROP Response Buffer",
   "2.2.3.2 RopCreateMessage ROP",
   "2.2.3.3 RopSaveChangesMessage ROP",
   "2.2.3.3.1 RopSaveChangesMessage ROP Request Buffer",

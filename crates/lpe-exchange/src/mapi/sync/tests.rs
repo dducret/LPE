@@ -1870,6 +1870,8 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
         (PID_TAG_BODY_W, "PidTagBody"),
         (PID_TAG_MESSAGE_SIZE, "PidTagMessageSize"),
         (0x7C06_0003, "PidTagRoamingDatatypes"),
+        (PID_NAME_CONTENT_CLASS_W_TAG, "PidNameContentClass"),
+        (PID_NAME_CONTENT_TYPE_W_TAG, "PidNameContentType"),
     ] {
         assert_eq!(
             property_count(

@@ -710,10 +710,15 @@ non-canonical LPE state.
   For a committed FAI content change, the distinct Message LocalCommitTime and
   containing-folder LocalCommitTimeMax contribution use the canonical server
   commit time, not that imported LastModificationTime. An
-  explicit zero `PidTagRoamingDatatypes` remains zero; absent roaming streams,
-  undocumented `0x0E0B0102`, and named content metadata remain absent from the
-  saved row, FastTransfer, and direct-property projections. Reconnect and
-  `RopOpenMessage` retain the same identity; Save and direct Message CopyTo
+  explicit zero `PidTagRoamingDatatypes` remains zero; absent roaming streams
+  and undocumented `0x0E0B0102` remain absent from the saved row, FastTransfer,
+  and direct-property projections. `PidTagRoamingDatatypes` governs only those
+  roaming streams: it does not suppress independently defined named content
+  metadata. For an Outlook configuration FAI, `RopOpenMessage` returns
+  `HasNamedProperties=1`, and `RopGetPropertiesAll`, direct CopyTo, and ICS
+  expose the canonical `PidNameContentClass` / `PidNameContentType` values.
+  This makes the advertised named-property surface retrievable as required by
+  [MS-OXCMSG] section 2.2.3.1.2. Reconnect and
   retain the persisted configuration-property set. The server owns and sets
   `PidTagMessageFlags.mfFAI` and `mfEverRead`, but retains the other flag bits
   accepted before the first successful Save: persisted/client `0x00000049` is

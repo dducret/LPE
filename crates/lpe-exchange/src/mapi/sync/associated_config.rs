@@ -26,7 +26,7 @@ pub(super) fn associated_config_sync_object(
     // serializes propList in the supplied sequence, while the persisted bag
     // is rehydrated as a HashMap before the same FAI version is projected.
     named_properties.sort_unstable_by_key(|(tag, _)| *tag);
-    for &tag in associated_config_default_sync_tags(message, &stored_properties) {
+    for &tag in associated_config_default_sync_tags(message) {
         let canonical_tag = canonical_property_storage_tag(tag);
         if associated_config_standard_sync_tag(canonical_tag)
             || stored_properties.contains_key(&canonical_tag)
@@ -74,16 +74,12 @@ pub(super) fn associated_config_sync_object(
 
 fn associated_config_default_sync_tags(
     message: &crate::mapi_store::MapiAssociatedConfigMessage,
-    stored_properties: &HashMap<u32, MapiValue>,
 ) -> &'static [u32] {
     if crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
-        // [MS-OXOCFG] sections 2.2.2.1 and 2.2.5.1: a persisted
-        // PidTagRoamingDatatypes value is the client's complete declaration of
-        // the streams that exist. LPE therefore preserves the client-owned bag
-        // in CopyTo/ICS instead of adding absent compatibility properties.
-        if stored_properties.contains_key(&PID_TAG_ROAMING_DATATYPES) {
-            return &[];
-        }
+        // [MS-OXOCFG] sections 2.2.2.1 and 2.2.5.1 define
+        // PidTagRoamingDatatypes only as a declaration of roaming streams.
+        // It does not suppress independently defined named properties on a
+        // configuration message.
         &[
             PID_TAG_ROAMING_DATATYPES,
             PID_TAG_ROAMING_DICTIONARY,
