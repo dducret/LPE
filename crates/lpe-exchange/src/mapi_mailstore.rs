@@ -42,9 +42,8 @@ pub(crate) use manifest::{
     sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions,
 };
 pub(crate) use special_message::{
-    fast_transfer_message_content_buffer_with_special_object, fast_transfer_property_included,
-    special_message_source_key, SpecialMessageFastTransferSelection, SpecialMessagePropertyValue,
-    SpecialMessageSyncFact,
+    fast_transfer_message_content_buffer_with_special_object, special_message_source_key,
+    SpecialMessagePropertyValue, SpecialMessageSyncFact,
 };
 
 #[cfg(test)]
@@ -145,6 +144,8 @@ const MSGFLAG_HASATTACH: u32 = 0x0000_0010;
 const MSGFLAG_FAI: u32 = 0x0000_0040;
 const FAST_TRANSFER_SEND_OPTION_UNICODE: u8 = 0x01;
 const FAST_TRANSFER_SEND_OPTION_FORCE_UNICODE: u8 = 0x08;
+const ROP_FAST_TRANSFER_SOURCE_COPY_TO: u8 = 0x4D;
+const ROP_FAST_TRANSFER_SOURCE_COPY_PROPERTIES: u8 = 0x69;
 const ATTACH_BY_VALUE: i32 = 1;
 const ATTACH_EMBEDDED_MESSAGE: i32 = 5;
 const FOLLOWUP_FLAGGED: u32 = 0x0000_0002;
@@ -206,6 +207,47 @@ impl FastTransferMessageChildren {
     pub(crate) const fn all() -> Self {
         Self::new(true, true)
     }
+}
+
+// [MS-OXCFXICS] sections 2.2.3.1.1.1.1, 2.2.3.1.1.2, and 3.2.5.10:
+// CopyTo excludes and CopyProperties includes direct Message properties.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FastTransferDirectPropertyFilter<'a> {
+    All,
+    CopyToExcluding(&'a [u32]),
+    CopyPropertiesIncluding(&'a [u32]),
+}
+
+impl<'a> FastTransferDirectPropertyFilter<'a> {
+    pub(crate) fn for_rop(rop_id: u8, property_tags: &'a [u32]) -> Self {
+        match rop_id {
+            ROP_FAST_TRANSFER_SOURCE_COPY_TO => Self::CopyToExcluding(property_tags),
+            ROP_FAST_TRANSFER_SOURCE_COPY_PROPERTIES => {
+                Self::CopyPropertiesIncluding(property_tags)
+            }
+            _ => Self::All,
+        }
+    }
+
+    pub(crate) fn includes(self, property_tag: u32) -> bool {
+        match self {
+            Self::All => true,
+            Self::CopyToExcluding(property_tags) => !property_tags
+                .iter()
+                .any(|tag| property_tag_matches(*tag, property_tag)),
+            Self::CopyPropertiesIncluding(property_tags) => property_tags
+                .iter()
+                .any(|tag| property_tag_matches(*tag, property_tag)),
+        }
+    }
+}
+
+pub(crate) fn fast_transfer_property_included(
+    rop_id: u8,
+    property_tags: &[u32],
+    property_tag: u32,
+) -> bool {
+    FastTransferDirectPropertyFilter::for_rop(rop_id, property_tags).includes(property_tag)
 }
 
 fn property_tag_excluded(excluded_property_tags: &[u32], property_tag: u32) -> bool {
@@ -712,6 +754,7 @@ pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
             &mut buffer,
             email,
             attachments,
+            FastTransferDirectPropertyFilter::All,
             FastTransferMessageChildren::all(),
         );
         write_u32(&mut buffer, END_MESSAGE);
@@ -722,6 +765,7 @@ pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
 pub(crate) fn fast_transfer_message_content_buffer_with_attachments(
     email: &JmapEmail,
     attachment_facts: &[MessageAttachmentSyncFacts],
+    property_filter: FastTransferDirectPropertyFilter<'_>,
     message_children: FastTransferMessageChildren,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
@@ -729,6 +773,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_attachments(
         &mut buffer,
         email,
         attachments_for_message(email.id, attachment_facts),
+        property_filter,
         message_children,
     );
     buffer
@@ -738,10 +783,15 @@ fn write_fast_transfer_message_content(
     buffer: &mut Vec<u8>,
     email: &JmapEmail,
     attachments: &[AttachmentSyncFact],
+    property_filter: FastTransferDirectPropertyFilter<'_>,
     message_children: FastTransferMessageChildren,
 ) {
-    write_utf16_property(buffer, PID_TAG_SUBJECT_W, &email.subject);
-    write_utf16_property(buffer, PID_TAG_BODY_W, &email.body_text);
+    if property_filter.includes(PID_TAG_SUBJECT_W) {
+        write_utf16_property(buffer, PID_TAG_SUBJECT_W, &email.subject);
+    }
+    if property_filter.includes(PID_TAG_BODY_W) {
+        write_utf16_property(buffer, PID_TAG_BODY_W, &email.body_text);
+    }
     write_fast_transfer_message_children(buffer, message_children, Some(email), attachments);
 }
 

@@ -1082,8 +1082,8 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
     snapshot: &MapiMailStoreSnapshot,
 ) -> Option<(u64, Vec<u8>)> {
     let message_children = fast_transfer_message_children(rop_id, level, property_tags);
-    let special_message_selection =
-        mapi_mailstore::SpecialMessageFastTransferSelection::for_copy_rop(rop_id, property_tags);
+    let direct_property_filter =
+        mapi_mailstore::FastTransferDirectPropertyFilter::for_rop(rop_id, property_tags);
     match object {
         MapiObject::Folder { folder_id, .. } => {
             if RopId::from_u8(rop_id) == Some(RopId::FastTransferSourceCopyFolder) {
@@ -1152,6 +1152,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 mapi_mailstore::fast_transfer_message_content_buffer_with_attachments(
                     &message,
                     &attachment_facts,
+                    direct_property_filter,
                     message_children,
                 ),
             ))
@@ -1184,7 +1185,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    special_message_selection,
+                    direct_property_filter,
                     message_children,
                 ),
             ))
@@ -1208,7 +1209,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    special_message_selection,
+                    direct_property_filter,
                     message_children,
                 ),
             ))
@@ -1237,7 +1238,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    special_message_selection,
+                    direct_property_filter,
                     message_children,
                 ),
             ))
@@ -1259,7 +1260,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    special_message_selection,
+                    direct_property_filter,
                     message_children,
                 ),
             ))
@@ -1283,7 +1284,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    special_message_selection,
+                    direct_property_filter,
                     message_children,
                 ),
             ))
@@ -1302,7 +1303,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                         snapshot,
                     ),
                     send_options,
-                    special_message_selection,
+                    direct_property_filter,
                     message_children,
                 ),
             ))

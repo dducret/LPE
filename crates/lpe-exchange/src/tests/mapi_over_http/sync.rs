@@ -7716,7 +7716,7 @@ async fn mapi_over_http_hierarchy_sync_client_state_resumes_after_completed_down
 }
 
 #[tokio::test]
-async fn mapi_over_http_fast_transfer_copy_to_message_returns_message_content_without_bcc() {
+async fn mapi_over_http_fast_transfer_copy_to_message_excludes_requested_body_property() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let message_id = "43434343-4343-4343-4343-434343434343";
     let mut email = FakeStore::email(message_id, inbox_id, "inbox", "CopyTo message");
@@ -7757,7 +7757,10 @@ async fn mapi_over_http_fast_transfer_copy_to_message_returns_message_content_wi
     rops.push(0);
     rops.extend_from_slice(&0u32.to_le_bytes());
     rops.push(0x01);
-    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    // [MS-OXCFXICS] sections 2.2.3.1.1.1.1 and 3.2.5.10: CopyTo excludes
+    // requested direct-message properties; PtypUnspecified matches Body_W.
+    rops.extend_from_slice(&0x1000_0000u32.to_le_bytes());
     rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
 
@@ -7779,7 +7782,7 @@ async fn mapi_over_http_fast_transfer_copy_to_message_returns_message_content_wi
     assert!(transfer.starts_with(&PID_TAG_SUBJECT_W.to_le_bytes()));
     assert!(!contains_bytes(transfer, b"LPE-MAPI-FASTTRANSFER\0"));
     assert!(contains_bytes(transfer, &utf16z("CopyTo message")));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         transfer,
         &utf16z("CopyTo body from canonical mail")
     ));
@@ -7874,8 +7877,7 @@ async fn mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manif
 }
 
 #[tokio::test]
-async fn mapi_over_http_fast_transfer_copy_properties_message_returns_message_content_without_bcc()
-{
+async fn mapi_over_http_fast_transfer_copy_properties_message_includes_only_requested_subject() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let message_id = "47474747-4747-4747-4747-474747474747";
     let mut email = FakeStore::email(message_id, inbox_id, "inbox", "CopyProperties message");
@@ -7916,9 +7918,8 @@ async fn mapi_over_http_fast_transfer_copy_properties_message_returns_message_co
     rops.push(0);
     rops.push(0);
     rops.push(0x01);
-    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
     rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
-    rops.extend_from_slice(&0x1000_001Fu32.to_le_bytes());
     rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
 
@@ -7940,7 +7941,7 @@ async fn mapi_over_http_fast_transfer_copy_properties_message_returns_message_co
     assert!(transfer.starts_with(&PID_TAG_SUBJECT_W.to_le_bytes()));
     assert!(!contains_bytes(transfer, b"LPE-MAPI-FASTTRANSFER\0"));
     assert!(contains_bytes(transfer, &utf16z("CopyProperties message")));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         transfer,
         &utf16z("CopyProperties body from canonical mail")
     ));

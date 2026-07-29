@@ -447,7 +447,7 @@ fn calendar_fai_content_sync_preserves_imported_ics_identity_properties() {
         Some(&parent_entry_id),
         &objects[0],
         0x09,
-        mapi_mailstore::SpecialMessageFastTransferSelection::all(),
+        mapi_mailstore::FastTransferDirectPropertyFilter::All,
         mapi_mailstore::FastTransferMessageChildren::all(),
     );
 
@@ -595,7 +595,7 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             Some(&parent_entry_id),
             object,
             0x09,
-            mapi_mailstore::SpecialMessageFastTransferSelection::all(),
+            mapi_mailstore::FastTransferDirectPropertyFilter::All,
             mapi_mailstore::FastTransferMessageChildren::all(),
         );
         let summary = mapi_mailstore::decode_content_transfer_fai_debug_summary(&buffer).unwrap();
@@ -767,7 +767,7 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
         None,
         &object,
         0x09,
-        mapi_mailstore::SpecialMessageFastTransferSelection::all(),
+        mapi_mailstore::FastTransferDirectPropertyFilter::All,
         mapi_mailstore::FastTransferMessageChildren::all(),
     );
     let mut expected = PID_LID_BUSY_STATUS_TAG.to_le_bytes().to_vec();
@@ -1815,6 +1815,8 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
             subject: "IPM.Configuration.MessageListSettings".to_string(),
             properties_json: serde_json::json!({
                 "0x0e170003": {"type": "i32", "value": 3},
+                "0x1000001f": {"type": "string", "value": "Outlook view state"},
+                "0x7c060003": {"type": "i32", "value": 4},
             }),
         },
     ]);
@@ -1854,6 +1856,20 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
         (PID_TAG_PARENT_ENTRY_ID, "PidTagParentEntryId"),
         (PID_TAG_PARENT_SOURCE_KEY, "PidTagParentSourceKey"),
         (PID_TAG_SEARCH_KEY, "PidTagSearchKey"),
+        (PID_TAG_SOURCE_KEY, "PidTagSourceKey"),
+        (PID_TAG_LAST_MODIFICATION_TIME, "PidTagLastModificationTime"),
+        (PID_TAG_CHANGE_KEY, "PidTagChangeKey"),
+        (
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            "PidTagPredecessorChangeList",
+        ),
+        (PID_TAG_MESSAGE_FLAGS, "PidTagMessageFlags"),
+        (PID_TAG_SUBJECT_W, "PidTagSubject"),
+        (PID_TAG_NORMALIZED_SUBJECT_W, "PidTagNormalizedSubject"),
+        (PID_TAG_MESSAGE_CLASS_W, "PidTagMessageClass"),
+        (PID_TAG_BODY_W, "PidTagBody"),
+        (PID_TAG_MESSAGE_SIZE, "PidTagMessageSize"),
+        (0x7C06_0003, "PidTagRoamingDatatypes"),
     ] {
         assert_eq!(
             property_count(

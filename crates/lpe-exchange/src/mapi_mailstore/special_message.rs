@@ -3,9 +3,8 @@ use crate::mapi::properties::{
     fast_transfer_named_property_for_message_tag, MapiNamedPropertyKind,
 };
 
-// [MS-OXCROPS] sections 2.2.12.7.1 and 2.2.12.8.1.
-const ROP_FAST_TRANSFER_SOURCE_COPY_TO: u8 = 0x4D;
-const ROP_FAST_TRANSFER_SOURCE_COPY_PROPERTIES: u8 = 0x69;
+use super::FastTransferDirectPropertyFilter;
+
 pub(super) const PID_TAG_MESSAGE_STATUS: u32 = 0x0E17_0003;
 pub(super) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 
@@ -37,83 +36,6 @@ pub(crate) enum SpecialMessagePropertyValue {
     String(String),
     MultiString(Vec<String>),
     Time(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SpecialMessageFastTransferSelection {
-    access: bool,
-    access_level: bool,
-    entry_id: bool,
-    has_attachments: bool,
-    message_status: bool,
-    parent_entry_id: bool,
-    parent_source_key: bool,
-    search_key: bool,
-}
-
-impl SpecialMessageFastTransferSelection {
-    #[cfg(test)]
-    pub(crate) const fn all() -> Self {
-        Self {
-            access: true,
-            access_level: true,
-            entry_id: true,
-            has_attachments: true,
-            message_status: true,
-            parent_entry_id: true,
-            parent_source_key: true,
-            search_key: true,
-        }
-    }
-
-    pub(crate) fn for_copy_rop(rop_id: u8, property_tags: &[u32]) -> Self {
-        Self {
-            access: fast_transfer_property_included(rop_id, property_tags, PID_TAG_ACCESS),
-            access_level: fast_transfer_property_included(
-                rop_id,
-                property_tags,
-                PID_TAG_ACCESS_LEVEL,
-            ),
-            entry_id: fast_transfer_property_included(rop_id, property_tags, PID_TAG_ENTRY_ID),
-            has_attachments: fast_transfer_property_included(
-                rop_id,
-                property_tags,
-                PID_TAG_HAS_ATTACHMENTS,
-            ),
-            message_status: fast_transfer_property_included(
-                rop_id,
-                property_tags,
-                PID_TAG_MESSAGE_STATUS,
-            ),
-            parent_entry_id: fast_transfer_property_included(
-                rop_id,
-                property_tags,
-                PID_TAG_PARENT_ENTRY_ID,
-            ),
-            parent_source_key: fast_transfer_property_included(
-                rop_id,
-                property_tags,
-                PID_TAG_PARENT_SOURCE_KEY,
-            ),
-            search_key: fast_transfer_property_included(rop_id, property_tags, PID_TAG_SEARCH_KEY),
-        }
-    }
-}
-
-pub(crate) fn fast_transfer_property_included(
-    rop_id: u8,
-    property_tags: &[u32],
-    property_tag: u32,
-) -> bool {
-    match rop_id {
-        ROP_FAST_TRANSFER_SOURCE_COPY_TO => !property_tags
-            .iter()
-            .any(|tag| property_tag_matches(*tag, property_tag)),
-        ROP_FAST_TRANSFER_SOURCE_COPY_PROPERTIES => property_tags
-            .iter()
-            .any(|tag| property_tag_matches(*tag, property_tag)),
-        _ => true,
-    }
 }
 
 fn special_message_binary_property(
@@ -313,7 +235,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
     parent_entry_id: Option<&[u8]>,
     object: &SpecialMessageSyncFact,
     send_options: u8,
-    selection: SpecialMessageFastTransferSelection,
+    property_filter: FastTransferDirectPropertyFilter<'_>,
     message_children: FastTransferMessageChildren,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
@@ -323,7 +245,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_special_object(
         parent_entry_id,
         object,
         send_options,
-        selection,
+        property_filter,
         message_children,
     );
     buffer
@@ -335,20 +257,22 @@ fn write_fast_transfer_special_message_content(
     parent_entry_id: Option<&[u8]>,
     object: &SpecialMessageSyncFact,
     send_options: u8,
-    selection: SpecialMessageFastTransferSelection,
+    property_filter: FastTransferDirectPropertyFilter<'_>,
     message_children: FastTransferMessageChildren,
 ) {
     let source_key = special_message_source_key(object);
     let change_key = special_message_change_key(object);
     let predecessor_change_list = special_message_predecessor_change_list(object);
-    write_binary_property(buffer, PID_TAG_SOURCE_KEY, &source_key);
+    if property_filter.includes(PID_TAG_SOURCE_KEY) {
+        write_binary_property(buffer, PID_TAG_SOURCE_KEY, &source_key);
+    }
     // LPE exposes the containing-folder SourceKey on Message objects through
     // GetProps, tables, and ICS. [MS-OXCFXICS] sections 2.2.4.3.16,
     // 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12 require direct CopyTo to apply its
     // exclusion list to that same property bag.
     if object.associated
         && crate::mapi_store::is_outlook_configuration_message_class(&object.message_class)
-        && selection.parent_source_key
+        && property_filter.includes(PID_TAG_PARENT_SOURCE_KEY)
     {
         write_binary_property(
             buffer,
@@ -360,7 +284,7 @@ fn write_fast_transfer_special_message_content(
     // the CopyTo exclusion list and provider-internal download filtering.
     // PidTagEntryId (0x0FFF0102) is outside that range; when the object family
     // supplies one, keep its direct projection identical to GetProps and ICS.
-    if selection.entry_id {
+    if property_filter.includes(PID_TAG_ENTRY_ID) {
         if let Some(entry_id) = entry_id {
             write_binary_property(buffer, PID_TAG_ENTRY_ID, entry_id);
         }
@@ -369,7 +293,7 @@ fn write_fast_transfer_special_message_content(
     // define PidTagParentEntryId as the containing Folder EntryID.
     // [MS-OXCFXICS] sections 2.2.3.1.1.1.1, 2.2.4.3.16, 3.2.5.10, and
     // 3.2.5.12 keep this property eligible for a direct Message CopyTo.
-    if selection.parent_entry_id {
+    if property_filter.includes(PID_TAG_PARENT_ENTRY_ID) {
         if let Some(parent_entry_id) = parent_entry_id {
             write_binary_property(buffer, PID_TAG_PARENT_ENTRY_ID, parent_entry_id);
         }
@@ -378,14 +302,14 @@ fn write_fast_transfer_special_message_content(
     // Message object. [MS-OXCPRPT] sections 2.2.1.1 and 2.2.1.2 define their
     // values, and [MS-OXCFXICS] sections 3.2.5.8.1.1 and 3.2.5.8.1.2 apply
     // the CopyTo exclusion and CopyProperties inclusion lists.
-    if selection.access {
+    if property_filter.includes(PID_TAG_ACCESS) {
         write_i32_property(
             buffer,
             PID_TAG_ACCESS,
             special_message_access(object) as i32,
         );
     }
-    if selection.access_level {
+    if property_filter.includes(PID_TAG_ACCESS_LEVEL) {
         write_i32_property(
             buffer,
             PID_TAG_ACCESS_LEVEL,
@@ -398,14 +322,14 @@ fn write_fast_transfer_special_message_content(
     // the content-synchronization example in [MS-OXCFXICS] section 4.5.
     // MessageListSettings also has an Exchange-observed zero server projection.
     // CopyTo/CopyProperties apply their exclusion/inclusion lists to both.
-    if selection.has_attachments {
+    if property_filter.includes(PID_TAG_HAS_ATTACHMENTS) {
         write_bool_property(
             buffer,
             PID_TAG_HAS_ATTACHMENTS,
             special_message_has_attachments(object),
         );
     }
-    if selection.message_status {
+    if property_filter.includes(PID_TAG_MESSAGE_STATUS) {
         write_i32_property(
             buffer,
             PID_TAG_MESSAGE_STATUS,
@@ -416,49 +340,68 @@ fn write_fast_transfer_special_message_content(
     // section 2.2.1.9: every Message has a server-generated, read-only
     // SearchKey. It remains transmittable in the direct messageContent root
     // under [MS-OXCFXICS] sections 3.2.5.8.1.1 and 3.2.5.12.
-    if selection.search_key {
+    if property_filter.includes(PID_TAG_SEARCH_KEY) {
         write_binary_property(
             buffer,
             PID_TAG_SEARCH_KEY,
             &special_message_search_key(object),
         );
     }
-    write_u32(buffer, PID_TAG_LAST_MODIFICATION_TIME);
-    write_i64(buffer, object.last_modified_filetime as i64);
-    write_binary_property(buffer, PID_TAG_CHANGE_KEY, &change_key);
-    write_binary_property(
-        buffer,
-        PID_TAG_PREDECESSOR_CHANGE_LIST,
-        &predecessor_change_list,
-    );
+    if property_filter.includes(PID_TAG_LAST_MODIFICATION_TIME) {
+        write_u32(buffer, PID_TAG_LAST_MODIFICATION_TIME);
+        write_i64(buffer, object.last_modified_filetime as i64);
+    }
+    if property_filter.includes(PID_TAG_CHANGE_KEY) {
+        write_binary_property(buffer, PID_TAG_CHANGE_KEY, &change_key);
+    }
+    if property_filter.includes(PID_TAG_PREDECESSOR_CHANGE_LIST) {
+        write_binary_property(
+            buffer,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            &predecessor_change_list,
+        );
+    }
     // [MS-OXCFXICS] sections 2.2.4.3.16 and 3.2.5.12, with
     // [MS-OXPROPS] section 1.3.3: direct messageContent downloads exclude
     // provider-internal PidTagAssociated (0x67AA) and PidTagMid (0x674A).
     // [MS-OXCMSG] section 2.2.1.6: mfFAI remains the transmittable FAI
     // discriminator for CopyTo/CopyProperties.
     let message_flags = special_message_flags(object);
-    write_i32_property(buffer, PID_TAG_MESSAGE_FLAGS, message_flags as i32);
-    write_utf16_property(buffer, PID_TAG_SUBJECT_W, &object.subject);
+    if property_filter.includes(PID_TAG_MESSAGE_FLAGS) {
+        write_i32_property(buffer, PID_TAG_MESSAGE_FLAGS, message_flags as i32);
+    }
+    if property_filter.includes(PID_TAG_SUBJECT_W) {
+        write_utf16_property(buffer, PID_TAG_SUBJECT_W, &object.subject);
+    }
     // [MS-OXCFXICS] sections 2.2.3.1.1.1.1 and 3.2.5.8.1.1:
     // canonical subjects are stored as Unicode, so Unicode/ForceUnicode
     // select PtypUnicode; without either flag use PtypString8.
     if send_options & (FAST_TRANSFER_SEND_OPTION_UNICODE | FAST_TRANSFER_SEND_OPTION_FORCE_UNICODE)
         != 0
     {
-        write_utf16_property(buffer, PID_TAG_NORMALIZED_SUBJECT_W, &object.subject);
-    } else {
+        if property_filter.includes(PID_TAG_NORMALIZED_SUBJECT_W) {
+            write_utf16_property(buffer, PID_TAG_NORMALIZED_SUBJECT_W, &object.subject);
+        }
+    } else if property_filter.includes(PID_TAG_NORMALIZED_SUBJECT_A) {
         write_string8_property(buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
     }
-    write_utf16_property(buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
-    if let Some(body_text) = &object.body_text {
-        write_utf16_property(buffer, PID_TAG_BODY_W, body_text);
+    if property_filter.includes(PID_TAG_MESSAGE_CLASS_W) {
+        write_utf16_property(buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
     }
-    write_i32_property(buffer, PID_TAG_MESSAGE_SIZE, object.message_size as i32);
+    if property_filter.includes(PID_TAG_BODY_W) {
+        if let Some(body_text) = &object.body_text {
+            write_utf16_property(buffer, PID_TAG_BODY_W, body_text);
+        }
+    }
+    if property_filter.includes(PID_TAG_MESSAGE_SIZE) {
+        write_i32_property(buffer, PID_TAG_MESSAGE_SIZE, object.message_size as i32);
+    }
     for (tag, value) in &object.named_properties {
         if !special_message_property_is_copy_identity(*tag)
             && !special_message_property_is_server_projected(*tag)
             && *tag != PID_TAG_MESSAGE_FLAGS
             && !provider_defined_internal_property(*tag)
+            && property_filter.includes(*tag)
         {
             write_special_message_property(buffer, object, *tag, value);
         }

@@ -138,7 +138,12 @@ before it is advertised.
   collection is preceded by `MetaTagFXDelProp` even when it is empty, while an
   excluded collection has no directive. Direct `messageContent` downloads omit
   the provider-internal `PidTagAssociated` and `PidTagMid`; FAI status remains
-  represented by the server-owned `PidTagMessageFlags.mfFAI` bit. An FAI
+  represented by the server-owned `PidTagMessageFlags.mfFAI` bit. Root-property
+  selection applies to every emitted Message property, including normal
+  canonical, generated MAPI, and persisted named properties; it is not limited
+  to a special-message subset. An empty CopyTo exclusion list retains all
+  eligible direct properties, while an empty CopyProperties inclusion list
+  retains none. Descendant collection selection remains independent. An FAI
   without a persisted flag value falls back to `mfFAI` alone, while an effective
   value accepted at the first successful Save is replayed unchanged (for
   example, `0x00000049`, not `0x00000040`). A missing `PidTagBody` remains
@@ -158,8 +163,8 @@ before it is advertised.
   2.2.3.2.1.1.1, 2.2.4.1.5.1, 2.2.4.3.12, 2.2.4.3.13, 2.2.4.3.16,
   3.2.5.8.1.1, 3.2.5.8.1.2, 3.2.5.9.1.1, 3.2.5.10, 3.2.5.12, and 4.5,
   `[MS-OXBBODY]` section 2.1.3.1, and `[MS-OXPROPS]` sections 1.3.3, 2.505,
-  and 2.507. Complete
-  filtering of the ordinary property list remains an explicit gap.
+  and 2.507. Direct Message-root filtering covers every property currently
+  emitted by the normal and special-message serializers.
 - The `202607221041` real-Outlook rerun emitted the corrected 547-byte FAI
   `CopyTo` stream but still increased the synchronization-report count from 9
   to 10 and then 11, so `PidTagAccess`/`PidTagAccessLevel` was not the sole

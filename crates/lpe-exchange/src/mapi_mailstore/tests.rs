@@ -1059,7 +1059,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         Some(&parent_entry_id),
         &special,
         0x00,
-        SpecialMessageFastTransferSelection::all(),
+        FastTransferDirectPropertyFilter::All,
         FastTransferMessageChildren::all(),
     );
 
@@ -1122,7 +1122,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         Some(&parent_entry_id),
         &special,
         0x09,
-        SpecialMessageFastTransferSelection::all(),
+        FastTransferDirectPropertyFilter::All,
         FastTransferMessageChildren::all(),
     );
     let empty_message_children = [
@@ -1147,7 +1147,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         Some(&parent_entry_id),
         &special,
         0x09,
-        SpecialMessageFastTransferSelection::all(),
+        FastTransferDirectPropertyFilter::All,
         FastTransferMessageChildren::new(false, false),
     );
     assert!(!no_children_buffer
@@ -1161,7 +1161,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         Some(&parent_entry_id),
         &normal,
         0x09,
-        SpecialMessageFastTransferSelection::all(),
+        FastTransferDirectPropertyFilter::All,
         FastTransferMessageChildren::all(),
     );
     assert!(!normal_buffer
@@ -1216,7 +1216,7 @@ fn outlook_fai_copyto_generates_a_mapiuid_search_key() {
         Some(&parent_entry_id),
         &special,
         0x09,
-        SpecialMessageFastTransferSelection::all(),
+        FastTransferDirectPropertyFilter::All,
         FastTransferMessageChildren::all(),
     );
 
