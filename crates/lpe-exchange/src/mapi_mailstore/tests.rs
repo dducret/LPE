@@ -1464,7 +1464,7 @@ fn hierarchy_transfer_debug_decoder_summarizes_serialized_stream() {
     assert_eq!(summary.change_key_lengths, vec![22]);
     assert_eq!(
         summary.final_state_property_tags,
-        vec![META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
+        vec![META_TAG_CNSET_SEEN, META_TAG_IDSET_GIVEN]
     );
     assert!(summary.final_state_expected_property_order_ok);
     assert_eq!(summary.final_state_property_lengths, vec![30, 30]);
@@ -2044,7 +2044,7 @@ fn hierarchy_transfer_omits_targeted_optional_properties_but_keeps_required_outl
     assert!(row.property_tags.contains(&PID_TAG_SUBFOLDERS));
     assert_eq!(
         summary.final_state_property_tags,
-        vec![META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
+        vec![META_TAG_CNSET_SEEN, META_TAG_IDSET_GIVEN]
     );
     assert!(summary.final_state_expected_property_order_ok);
     assert!(summary.final_state_idset_given_includes_all_expected_folder_source_counters);

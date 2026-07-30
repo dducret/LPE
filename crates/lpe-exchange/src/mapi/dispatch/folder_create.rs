@@ -323,11 +323,7 @@ pub(super) async fn append_create_folder_response<S: ExchangeStore>(
                 request.output_handle_index,
                 MapiObject::Folder {
                     folder_id,
-                    properties: search_folder_handle_properties(
-                        definition,
-                        folder_id,
-                        principal.account_id,
-                    ),
+                    properties: HashMap::new(),
                 },
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
@@ -403,11 +399,7 @@ pub(super) async fn append_create_folder_response<S: ExchangeStore>(
             request.output_handle_index,
             MapiObject::Folder {
                 folder_id,
-                properties: search_folder_handle_properties(
-                    &definition,
-                    folder_id,
-                    principal.account_id,
-                ),
+                properties: HashMap::new(),
             },
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);

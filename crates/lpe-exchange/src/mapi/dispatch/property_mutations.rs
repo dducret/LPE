@@ -5,6 +5,57 @@ pub(super) enum PropertyMutationFlow {
     StopBatch,
 }
 
+fn clear_folder_profile_property_tombstones(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    values: &[(u32, MapiValue)],
+) {
+    let Some(handle) = input_handle(handle_slots, request) else {
+        return;
+    };
+    let Some(tombstones) = session.folder_profile_property_tombstones.get_mut(&handle) else {
+        return;
+    };
+    for (property_tag, _) in values {
+        let property_tag = canonical_property_storage_tag(*property_tag);
+        if is_lazy_folder_profile_property_tag(property_tag) {
+            tombstones.remove(&property_tag);
+        }
+    }
+    if tombstones.is_empty() {
+        session.folder_profile_property_tombstones.remove(&handle);
+    }
+}
+
+fn mark_folder_profile_property_tombstones(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    property_tags: &[u32],
+) {
+    if !matches!(object, Some(MapiObject::Folder { .. })) {
+        return;
+    }
+    let Some(handle) = input_handle(handle_slots, request) else {
+        return;
+    };
+    let tombstones = property_tags
+        .iter()
+        .map(|property_tag| canonical_property_storage_tag(*property_tag))
+        .filter(|property_tag| is_lazy_folder_profile_property_tag(*property_tag))
+        .collect::<Vec<_>>();
+    if tombstones.is_empty() {
+        return;
+    }
+    session
+        .folder_profile_property_tombstones
+        .entry(handle)
+        .or_default()
+        .extend(tombstones);
+}
+
 pub(super) async fn append_set_properties_response<S>(
     store: &S,
     principal: &AccountPrincipal,
@@ -260,6 +311,12 @@ where
                             values.clone(),
                         );
                         if result.is_ok() {
+                            clear_folder_profile_property_tombstones(
+                                session,
+                                handle_slots,
+                                request,
+                                &values,
+                            );
                             if let Some(MapiObject::Folder { folder_id, .. }) = object {
                                 if persist_profile_folder_property_values(
                                     store, principal, folder_id, &values,
@@ -470,7 +527,7 @@ pub(super) async fn append_delete_properties_response<S>(
     } else if let Some(MapiObject::AssociatedConfig {
         folder_id,
         config_id,
-        saved_message,
+        ref saved_message,
     }) = object
     {
         let result = delete_associated_config_properties(
@@ -560,6 +617,15 @@ pub(super) async fn append_delete_properties_response<S>(
             Err(error) => Err(error),
         }
     };
+    if delete_result.is_ok() {
+        mark_folder_profile_property_tombstones(
+            session,
+            handle_slots,
+            request,
+            object.as_ref(),
+            &property_tags,
+        );
+    }
     match delete_result {
         Ok(()) => {
             restore_requested_property_problem_tags(
@@ -619,4 +685,94 @@ fn persisted_object_property_delete_is_idempotent(
         )
         .is_none()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folder_profile_tombstones_are_handle_local_and_clear_on_set() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "user@example.test".to_string(),
+            display_name: "User".to_string(),
+            quota_mb: None,
+            quota_used_octets: None,
+        };
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+        let folder_handle = 7;
+        let other_folder_handle = 8;
+        let object = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+        let request = RopRequest {
+            rop_id: RopId::DeleteProperties.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let handle_slots = [folder_handle];
+        session.folder_profile_property_tombstones.insert(
+            other_folder_handle,
+            HashSet::from([PID_TAG_EXTENDED_FOLDER_FLAGS]),
+        );
+
+        mark_folder_profile_property_tombstones(
+            &mut session,
+            &handle_slots,
+            &request,
+            Some(&object),
+            &[
+                PID_TAG_EXTENDED_FOLDER_FLAGS,
+                PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+                PID_TAG_DISPLAY_NAME_W,
+            ],
+        );
+
+        assert_eq!(
+            session
+                .folder_profile_property_tombstones
+                .get(&folder_handle),
+            Some(&HashSet::from([
+                PID_TAG_EXTENDED_FOLDER_FLAGS,
+                PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+            ]))
+        );
+        clear_folder_profile_property_tombstones(
+            &mut session,
+            &handle_slots,
+            &request,
+            &[(PID_TAG_EXTENDED_FOLDER_FLAGS, MapiValue::Binary(vec![1]))],
+        );
+
+        assert_eq!(
+            session
+                .folder_profile_property_tombstones
+                .get(&folder_handle),
+            Some(&HashSet::from([PID_TAG_ADDITIONAL_REN_ENTRY_IDS]))
+        );
+        assert_eq!(
+            session
+                .folder_profile_property_tombstones
+                .get(&other_folder_handle),
+            Some(&HashSet::from([PID_TAG_EXTENDED_FOLDER_FLAGS]))
+        );
+        clear_folder_profile_property_tombstones(
+            &mut session,
+            &handle_slots,
+            &request,
+            &[(
+                PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+                MapiValue::MultiBinary(Vec::new()),
+            )],
+        );
+
+        assert!(!session
+            .folder_profile_property_tombstones
+            .contains_key(&folder_handle));
+    }
 }

@@ -386,6 +386,40 @@ fn response_handle_table_can_echo_released_input_slots() {
 }
 
 #[test]
+fn release_handle_slot_forgets_folder_profile_property_tombstones() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let folder_handle = 7;
+    session.handles.insert(
+        folder_handle,
+        MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        },
+    );
+    session.folder_profile_property_tombstones.insert(
+        folder_handle,
+        HashSet::from([PID_TAG_EXTENDED_FOLDER_FLAGS]),
+    );
+    let request = RopRequest {
+        rop_id: RopId::Release.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+    let mut handle_slots = [folder_handle];
+
+    release_handle_slot(&mut session, &mut handle_slots, &request);
+
+    assert_eq!(handle_slots, [u32::MAX]);
+    assert!(!session.handles.contains_key(&folder_handle));
+    assert!(!session
+        .folder_profile_property_tombstones
+        .contains_key(&folder_handle));
+}
+
+#[test]
 fn allocate_output_handle_prefers_free_low_output_slot_handle() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");

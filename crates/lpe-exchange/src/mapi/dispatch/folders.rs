@@ -1095,6 +1095,13 @@ pub(super) fn advertised_special_folder_container_class(folder_id: u64) -> Optio
     })
 }
 
+pub(super) fn is_lazy_folder_profile_property_tag(property_tag: u32) -> bool {
+    matches!(
+        canonical_property_storage_tag(property_tag),
+        PID_TAG_EXTENDED_FOLDER_FLAGS | PID_TAG_ADDITIONAL_REN_ENTRY_IDS | PID_TAG_OST_OSTID
+    )
+}
+
 // [MS-OXCFOLD] section 3.2.5.1: RopOpenFolder returns only its result and
 // handle state. Persisted folder overlays are therefore loaded only when a
 // later ROP requests the corresponding property.
@@ -1115,6 +1122,10 @@ pub(super) async fn hydrate_folder_handle_properties_for_request<S>(
     if requested_property_tags.is_empty() {
         return;
     }
+    let tombstoned_property_tags = input_handle(handle_slots, request)
+        .and_then(|handle| session.folder_profile_property_tombstones.get(&handle))
+        .cloned()
+        .unwrap_or_default();
     let Some((folder_id, existing_property_tags)) = input_object(session, handle_slots, request)
         .and_then(|object| match object {
             MapiObject::Folder {
@@ -1150,16 +1161,18 @@ pub(super) async fn hydrate_folder_handle_properties_for_request<S>(
     if folder_id == IPM_SUBTREE_FOLDER_ID
         && requested_property_tags.contains(&PID_TAG_OST_OSTID)
         && !existing_property_tags.contains(&PID_TAG_OST_OSTID)
+        && !tombstoned_property_tags.contains(&PID_TAG_OST_OSTID)
     {
-        if let Ok(Some(ost_id)) = store
-            .fetch_mapi_ipm_subtree_ost_id(principal.account_id)
-            .await
+        if let Some(Some(ost_id)) =
+            optional_folder_profile_read(store.fetch_mapi_ipm_subtree_ost_id(principal.account_id))
+                .await
         {
             persisted_properties.insert(PID_TAG_OST_OSTID, MapiValue::Binary(ost_id));
         }
     }
     if requested_property_tags.contains(&PID_TAG_EXTENDED_FOLDER_FLAGS)
         && !existing_property_tags.contains(&PID_TAG_EXTENDED_FOLDER_FLAGS)
+        && !tombstoned_property_tags.contains(&PID_TAG_EXTENDED_FOLDER_FLAGS)
     {
         if let Some(values) =
             optional_folder_profile_read(store.fetch_mapi_folder_profile_property_values(
@@ -1182,6 +1195,7 @@ pub(super) async fn hydrate_folder_handle_properties_for_request<S>(
     if matches!(folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID)
         && requested_property_tags.contains(&PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
         && !existing_property_tags.contains(&PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
+        && !tombstoned_property_tags.contains(&PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
     {
         if let Some(values) =
             optional_folder_profile_read(store.fetch_mapi_folder_profile_property_values(

@@ -2146,6 +2146,11 @@ async fn mapi_over_http_open_folder_defers_profile_reads_until_getprops() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x02, 0x01, 0, 0, 0, 0, 0, 0],
+    ));
     assert_eq!(
         profile_reads.load(std::sync::atomic::Ordering::SeqCst),
         0,
@@ -2346,14 +2351,6 @@ async fn mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_acr
             &junk_move_stamp,
         ],
     );
-    let mut expected_profile_value = 6u32.to_le_bytes().to_vec();
-    for entry in &canonical_entries {
-        expected_profile_value.extend_from_slice(&(entry.len() as u16).to_le_bytes());
-        expected_profile_value.extend_from_slice(entry);
-    }
-    expected_profile_value.extend_from_slice(&(junk_move_stamp.len() as u16).to_le_bytes());
-    expected_profile_value.extend_from_slice(&junk_move_stamp);
-
     let mut set_rops = Vec::new();
     append_rop_open_folder(&mut set_rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
     append_rop_set_properties(&mut set_rops, 1, 1, &property_values);
@@ -2375,11 +2372,22 @@ async fn mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_acr
         &set_response_rops,
         &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
     ));
-    assert!(stored_folder_profile_values
+    let expected_profile_value = stored_folder_profile_values
         .lock()
         .unwrap()
-        .values()
-        .any(|value| value == &expected_profile_value));
+        .get(&(
+            account.account_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            0x36D8_1102,
+            0x1102,
+        ))
+        .cloned()
+        .expect("the canonical AdditionalRenEntryIds profile value is stored");
+    assert!(
+        !contains_bytes(&expected_profile_value, &entries[4]),
+        "the stale Junk EntryID must not be persisted"
+    );
+    assert!(contains_bytes(&expected_profile_value, &junk_move_stamp));
     assert_eq!(
         special_folder_aliases
             .lock()
@@ -2482,7 +2490,6 @@ async fn mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_acr
         )
         .await
         .unwrap();
-
     let get_response_rops = response_rops_from_execute_response(get_response).await;
     assert!(contains_bytes(&get_response_rops, &expected_profile_value));
     assert!(
@@ -2498,6 +2505,7 @@ async fn mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_acr
         crate::mapi::identity::INBOX_FOLDER_ID,
     );
     get_all_rops.extend_from_slice(&[0x08, 0x00, 0x01, 0x00, 0x10, 0x01, 0x00]);
+    renew_mapi_request_id(&mut reconnect_headers);
     let get_all_response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,

@@ -985,6 +985,7 @@ mod tests {
             execute_request_count: 0,
             next_handle: 2,
             handles,
+            folder_profile_property_tombstones: HashMap::new(),
             message_statuses: HashMap::new(),
             message_save_generations: HashMap::new(),
             message_handle_generations: HashMap::new(),

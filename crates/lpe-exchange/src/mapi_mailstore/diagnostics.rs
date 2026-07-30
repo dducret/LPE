@@ -951,7 +951,7 @@ pub(crate) fn hierarchy_microsoft_payload_comparison(
         }
     }
 
-    let expected_final_state_tags = [META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN];
+    let expected_final_state_tags = [META_TAG_CNSET_SEEN, META_TAG_IDSET_GIVEN];
     let final_state_missing_property_tags = expected_final_state_tags
         .iter()
         .copied()

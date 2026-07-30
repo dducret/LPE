@@ -564,10 +564,10 @@ pub(super) fn collect_final_state_debug_property(
 pub(super) fn finalize_hierarchy_debug_summary(summary: &mut HierarchyTransferDebugSummary) {
     summary.final_state_expected_property_order_ok = matches!(
         summary.final_state_property_tags.as_slice(),
-        [META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
+        [META_TAG_CNSET_SEEN, META_TAG_IDSET_GIVEN]
             | [
-                META_TAG_IDSET_GIVEN,
                 META_TAG_CNSET_SEEN,
+                META_TAG_IDSET_GIVEN,
                 META_TAG_CNSET_SEEN_FAI,
                 META_TAG_CNSET_READ
             ]

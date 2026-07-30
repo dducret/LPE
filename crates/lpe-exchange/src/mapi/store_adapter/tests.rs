@@ -19,6 +19,7 @@ fn empty_session() -> MapiSession {
         execute_request_count: 0,
         next_handle: 1,
         handles: HashMap::new(),
+        folder_profile_property_tombstones: HashMap::new(),
         message_statuses: HashMap::new(),
         message_save_generations: HashMap::new(),
         message_handle_generations: HashMap::new(),

@@ -1375,6 +1375,7 @@ pub(in crate::mapi) fn release_handle_slot(
     if *handle != u32::MAX {
         session.forget_table_notification_handle(*handle);
         session.handles.remove(handle);
+        session.folder_profile_property_tombstones.remove(handle);
         session.message_handle_generations.remove(handle);
     }
     *handle = u32::MAX;

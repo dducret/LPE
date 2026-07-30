@@ -1088,15 +1088,18 @@ fn write_replid_idset_property(output: &mut Vec<u8>, property_tag: u32, counters
 
 fn write_state(output: &mut Vec<u8>, sync_type: u8, state: &SyncStateSets) {
     write_u32(output, INCR_SYNC_STATE_BEGIN);
-    write_binary_property(
-        output,
-        META_TAG_IDSET_GIVEN,
-        &encode_replguid_sets(&state.idset_given),
-    );
+    // [MS-OXCFXICS] section 2.2.4.2 permits the state propList order.
+    // Exchange 2016 serializes MetaTagCnsetSeen before MetaTagIdsetGiven;
+    // retain that observed server order for Outlook compatibility.
     write_binary_property(
         output,
         META_TAG_CNSET_SEEN,
         &encode_replguid_sets(&state.cnset_seen),
+    );
+    write_binary_property(
+        output,
+        META_TAG_IDSET_GIVEN,
+        &encode_replguid_sets(&state.idset_given),
     );
     if sync_type == SYNC_TYPE_CONTENTS {
         write_binary_property(

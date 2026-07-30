@@ -593,8 +593,10 @@ fn sync_state_stream_from_raw_properties(
 ) -> Vec<u8> {
     let mut token = Vec::new();
     write_u32(&mut token, INCR_SYNC_STATE_BEGIN);
-    write_binary_property(&mut token, META_TAG_IDSET_GIVEN, idset_given);
+    // [MS-OXCFXICS] section 2.2.4.2 permits either propList order; Exchange
+    // 2016 emits CnsetSeen before IdsetGiven for hierarchy final state.
     write_binary_property(&mut token, META_TAG_CNSET_SEEN, cnset_seen);
+    write_binary_property(&mut token, META_TAG_IDSET_GIVEN, idset_given);
     if sync_type == SYNC_TYPE_CONTENTS {
         write_binary_property(&mut token, META_TAG_CNSET_SEEN_FAI, cnset_seen_fai);
         write_binary_property(&mut token, META_TAG_CNSET_READ, cnset_read);
@@ -631,8 +633,9 @@ fn final_sync_state_stream_with_cnsets(
     let cnset_seen = replguid_idset_from_counters(normal_change_numbers);
     let mut token = Vec::new();
     write_u32(&mut token, INCR_SYNC_STATE_BEGIN);
-    write_binary_property(&mut token, META_TAG_IDSET_GIVEN, &idset_given);
+    // Keep the generated manifest state in the same Exchange 2016 order.
     write_binary_property(&mut token, META_TAG_CNSET_SEEN, &cnset_seen);
+    write_binary_property(&mut token, META_TAG_IDSET_GIVEN, &idset_given);
     if sync_type == SYNC_TYPE_CONTENTS {
         write_binary_property(
             &mut token,
