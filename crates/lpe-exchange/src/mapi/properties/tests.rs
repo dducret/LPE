@@ -5937,6 +5937,7 @@ fn already_open_common_view_missing_descriptor_uses_empty_stream_semantics() {
         inbox_associated_config_stream_handles: std::collections::HashSet::new(),
         inbox_rule_organizer_stream_handles: std::collections::HashSet::new(),
         logon_identity: None,
+        store_replica_guid: None,
         outlook_smart_input_variant: "none".to_string(),
         outlook_smart_input_variant_applied: false,
     };
@@ -6022,6 +6023,7 @@ fn common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence() {
         inbox_associated_config_stream_handles: std::collections::HashSet::new(),
         inbox_rule_organizer_stream_handles: std::collections::HashSet::new(),
         logon_identity: None,
+        store_replica_guid: None,
         outlook_smart_input_variant: "none".to_string(),
         outlook_smart_input_variant_applied: false,
     };
@@ -6128,6 +6130,7 @@ fn associated_config_missing_binary_property_opens_writable_stream() {
         inbox_associated_config_stream_handles: std::collections::HashSet::new(),
         inbox_rule_organizer_stream_handles: std::collections::HashSet::new(),
         logon_identity: None,
+        store_replica_guid: None,
         outlook_smart_input_variant: "none".to_string(),
         outlook_smart_input_variant_applied: false,
     };
@@ -6261,6 +6264,7 @@ fn message_list_settings_private_binary_stream_is_projected_without_widening_oth
         inbox_associated_config_stream_handles: std::collections::HashSet::new(),
         inbox_rule_organizer_stream_handles: std::collections::HashSet::new(),
         logon_identity: None,
+        store_replica_guid: None,
         outlook_smart_input_variant: "none".to_string(),
         outlook_smart_input_variant_applied: false,
     };

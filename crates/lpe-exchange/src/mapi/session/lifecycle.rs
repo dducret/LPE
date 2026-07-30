@@ -140,6 +140,7 @@ pub(in crate::mapi) fn create_session(
         inbox_associated_config_stream_handles: HashSet::new(),
         inbox_rule_organizer_stream_handles: HashSet::new(),
         logon_identity: None,
+        store_replica_guid: None,
         outlook_smart_input_variant: configured_smart_input_variant(),
         outlook_smart_input_variant_applied: false,
     };

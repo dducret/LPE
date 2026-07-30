@@ -1,6 +1,15 @@
 use super::super::*;
 use super::*;
 
+#[tokio::test]
+async fn optional_folder_profile_read_returns_none_for_non_returning_read() {
+    let values =
+        super::super::folders::optional_folder_profile_read::<Vec<u8>>(std::future::pending())
+            .await;
+
+    assert!(values.is_none());
+}
+
 #[test]
 fn inbox_folder_type_getprops_probe_loads_store_snapshot() {
     let session = test_mapi_session();

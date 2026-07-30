@@ -440,10 +440,13 @@ pub(in crate::mapi) fn log_mapi_session_establish(
     let host = safe_header(headers, "host").unwrap_or_default();
     let content_type = safe_header(headers, "content-type").unwrap_or_default();
     let content_length = safe_header(headers, "content-length").unwrap_or_default();
-    let store_replica_guid_bytes = crate::mapi::identity::current_store_replica_guid();
-    let store_replica_guid = Uuid::from_bytes(store_replica_guid_bytes);
-    let store_replica_guid_hex =
-        hex_preview(&store_replica_guid_bytes, store_replica_guid_bytes.len());
+    let store_replica_guid_available = false;
+    let store_replica_guid_hex = "";
+    let store_replica_guid = "";
+    let mapping_signature_source = match endpoint {
+        MapiEndpoint::Emsmdb => "not_applicable",
+        MapiEndpoint::Nspi => "fixed_oxoabk_value",
+    };
     let outlook_smart_input_variant = configured_smart_input_variant();
 
     tracing::info!(
@@ -461,7 +464,8 @@ pub(in crate::mapi) fn log_mapi_session_establish(
         mailbox_guid = %principal.account_id,
         store_replica_guid = %store_replica_guid,
         store_replica_guid_hex = %store_replica_guid_hex,
-        mapping_signature_source = "store_replica_guid",
+        store_replica_guid_available,
+        mapping_signature_source,
         client_application = %client_application,
         client_request_id = %client_request_id,
         client_info = %client_info,

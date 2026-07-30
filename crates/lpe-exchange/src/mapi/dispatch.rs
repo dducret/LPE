@@ -478,6 +478,7 @@ where
             );
         }
     };
+    session.store_replica_guid = Some(Uuid::from_bytes(identity_scope.codec.replica_guid()));
     if let Err(error) =
         refresh_persisted_special_folder_aliases(store, principal, &mut session).await
     {

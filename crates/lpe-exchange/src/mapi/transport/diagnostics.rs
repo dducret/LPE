@@ -725,7 +725,6 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
     };
-    let store_replica_guid = crate::mapi::identity::current_store_replica_guid();
     let sync_source_summaries = session
         .handles
         .iter()
@@ -866,6 +865,24 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         .completed_sync_checkpoint_summaries
         .join("|");
     let logon_identity = session.logon_identity.clone().unwrap_or_default();
+    let store_replica_guid = session.store_replica_guid;
+    let store_replica_guid_available = store_replica_guid.is_some();
+    let expected_replica_guid = store_replica_guid
+        .map(|store_replica_guid| {
+            hex_preview(
+                store_replica_guid.as_bytes(),
+                store_replica_guid.as_bytes().len(),
+            )
+        })
+        .unwrap_or_default();
+    let logon_identity_matches_session = logon_identity_matches_store_replica_guid(
+        &logon_identity.mailbox_guid,
+        &logon_identity.replica_guid,
+        principal.account_id,
+        store_replica_guid,
+    );
+    let logon_identity_comparison_available = logon_identity_matches_session.is_some();
+    let logon_identity_matches_session = logon_identity_matches_session.unwrap_or_default();
     let recent_execute_summaries = recent_execute_debug_summaries(session, 8);
     let outlook_view_failure_trace_summary = session
         .post_hierarchy_actions
@@ -1436,11 +1453,10 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         logon_response_flags = %logon_identity.response_flags,
         logon_special_folder_ids = %logon_identity.special_folder_ids,
         expected_mailbox_guid = %principal.account_id,
-        expected_replica_guid = %hex_preview(&store_replica_guid, store_replica_guid.len()),
-        logon_identity_matches_session =
-            logon_identity.mailbox_guid == principal.account_id.to_string()
-                && logon_identity.replica_guid
-                    == hex_preview(&store_replica_guid, store_replica_guid.len()),
+        expected_replica_guid = %expected_replica_guid,
+        store_replica_guid_available,
+        logon_identity_comparison_available,
+        logon_identity_matches_session,
         client_request_id = %client_request_id,
         client_application = %client_application,
         client_info = %client_info,
@@ -1532,10 +1548,8 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         session_id_hash = %session_cookie_debug.hash,
         logon_mailbox_guid = %logon_identity.mailbox_guid,
         logon_replica_guid = %logon_identity.replica_guid,
-        logon_identity_matches_session =
-            logon_identity.mailbox_guid == principal.account_id.to_string()
-                && logon_identity.replica_guid
-                    == hex_preview(&store_replica_guid, store_replica_guid.len()),
+        logon_identity_comparison_available,
+        logon_identity_matches_session,
         client_application = %client_application,
         trace_id = %trace_id,
         client_request_id = %client_request_id,
@@ -1626,10 +1640,8 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         logon_mailbox_guid = %logon_identity.mailbox_guid,
         logon_replica_guid = %logon_identity.replica_guid,
         logon_special_folder_ids = %logon_identity.special_folder_ids,
-        logon_identity_matches_session =
-            logon_identity.mailbox_guid == principal.account_id.to_string()
-                && logon_identity.replica_guid
-                    == hex_preview(&store_replica_guid, store_replica_guid.len()),
+        logon_identity_comparison_available,
+        logon_identity_matches_session,
         client_flow_key = %client_flow_key,
         request_guid = %request_guid,
         request_counter = %request_counter,

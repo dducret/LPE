@@ -1,5 +1,9 @@
 use super::*;
 
+// Profile values are optional Outlook UI-state overlays. Allow an indexed
+// remote or transiently loaded database read, but bound each OpenFolder read.
+const OPTIONAL_FOLDER_PROFILE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 pub(super) fn private_create_folder_is_existing_response_flag() -> bool {
     true
 }
@@ -1120,12 +1124,12 @@ where
             properties.insert(PID_TAG_OST_OSTID, MapiValue::Binary(ost_id));
         }
     }
-    if let Ok(values) = store
-        .fetch_mapi_folder_profile_property_values(
+    if let Some(values) =
+        optional_folder_profile_read(store.fetch_mapi_folder_profile_property_values(
             principal.account_id,
             folder_id,
             &[PID_TAG_EXTENDED_FOLDER_FLAGS],
-        )
+        ))
         .await
     {
         for value in values {
@@ -1138,12 +1142,12 @@ where
         }
     }
     if matches!(folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID) {
-        if let Ok(values) = store
-            .fetch_mapi_folder_profile_property_values(
+        if let Some(values) =
+            optional_folder_profile_read(store.fetch_mapi_folder_profile_property_values(
                 principal.account_id,
                 INBOX_FOLDER_ID,
                 &[PID_TAG_ADDITIONAL_REN_ENTRY_IDS],
-            )
+            ))
             .await
         {
             for value in values {
@@ -1161,6 +1165,15 @@ where
         }
     }
     properties
+}
+
+pub(super) async fn optional_folder_profile_read<T>(
+    read: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> Option<T> {
+    tokio::time::timeout(OPTIONAL_FOLDER_PROFILE_READ_TIMEOUT, read)
+        .await
+        .ok()
+        .and_then(|result| result.ok())
 }
 
 pub(super) async fn persist_profile_folder_property_values<S>(

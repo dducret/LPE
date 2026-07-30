@@ -48,6 +48,7 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) inbox_associated_config_stream_handles: HashSet<u32>,
     pub(in crate::mapi) inbox_rule_organizer_stream_handles: HashSet<u32>,
     pub(in crate::mapi) logon_identity: Option<MapiLogonIdentityDebug>,
+    pub(in crate::mapi) store_replica_guid: Option<Uuid>,
     pub(in crate::mapi) outlook_smart_input_variant: String,
     pub(in crate::mapi) outlook_smart_input_variant_applied: bool,
 }
@@ -59,6 +60,54 @@ pub(in crate::mapi) struct MapiLogonIdentityDebug {
     pub(in crate::mapi) replica_guid: String,
     pub(in crate::mapi) response_flags: String,
     pub(in crate::mapi) special_folder_ids: String,
+}
+
+pub(in crate::mapi) fn logon_identity_matches_store_replica_guid(
+    logon_mailbox_guid: &str,
+    logon_replica_guid: &str,
+    account_id: Uuid,
+    store_replica_guid: Option<Uuid>,
+) -> Option<bool> {
+    store_replica_guid.map(|store_replica_guid| {
+        logon_mailbox_guid == account_id.to_string()
+            && logon_replica_guid
+                == crate::mapi::transport::hex_preview(store_replica_guid.as_bytes(), 16)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logon_identity_match_requires_cached_durable_replica_guid() {
+        let account_id = Uuid::from_u128(0x6ab41e9f_dd4a_449a_85df_88c660bad042);
+        let store_replica_guid = Uuid::from_u128(0x32e500af_3bc7_4323_906a_5e7b63cb0089);
+        let logon_replica_guid = store_replica_guid
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+
+        assert_eq!(
+            logon_identity_matches_store_replica_guid(
+                &account_id.to_string(),
+                &logon_replica_guid,
+                account_id,
+                Some(store_replica_guid),
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            logon_identity_matches_store_replica_guid(
+                &account_id.to_string(),
+                &logon_replica_guid,
+                account_id,
+                None,
+            ),
+            None
+        );
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
