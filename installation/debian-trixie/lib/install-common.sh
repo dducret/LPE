@@ -201,12 +201,38 @@ SELECT CASE WHEN
     FROM information_schema.columns
     WHERE table_schema = 'public'
       AND table_name = 'mapi_store_identity'
+  ) = 5
+  AND (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'mapi_store_identity'
       AND (
             (column_name = 'singleton' AND data_type = 'boolean' AND is_nullable = 'NO')
             OR (column_name = 'replica_guid' AND data_type = 'uuid' AND is_nullable = 'NO')
             OR (column_name = 'next_global_counter' AND data_type = 'bigint' AND is_nullable = 'NO')
+            OR (column_name = 'created_at' AND data_type = 'timestamp with time zone' AND is_nullable = 'NO')
+            OR (column_name = 'updated_at' AND data_type = 'timestamp with time zone' AND is_nullable = 'NO')
       )
-  ) = 3
+  ) = 5
+  AND (
+    SELECT COUNT(*)
+    FROM pg_attribute attribute_row
+    JOIN pg_attrdef default_row
+      ON default_row.adrelid = attribute_row.attrelid
+     AND default_row.adnum = attribute_row.attnum
+    WHERE attribute_row.attrelid = 'public.mapi_store_identity'::regclass
+      AND attribute_row.attname IN ('singleton', 'next_global_counter', 'created_at', 'updated_at')
+      AND NOT attribute_row.attisdropped
+      AND (
+            (attribute_row.attname = 'singleton'
+              AND pg_get_expr(default_row.adbin, default_row.adrelid) = 'true')
+            OR (attribute_row.attname = 'next_global_counter'
+              AND pg_get_expr(default_row.adbin, default_row.adrelid) = '43')
+            OR (attribute_row.attname IN ('created_at', 'updated_at')
+              AND pg_get_expr(default_row.adbin, default_row.adrelid) = 'now()')
+      )
+  ) = 4
   AND EXISTS (
     SELECT 1
     FROM pg_constraint
@@ -227,6 +253,7 @@ SELECT CASE WHEN
     WHERE conrelid = 'public.mapi_store_identity'::regclass
       AND contype = 'c'
       AND pg_get_constraintdef(oid) LIKE '%next_global_counter >= 43%'
+      AND pg_get_constraintdef(oid) LIKE '%next_global_counter <= 140737454800896%'
   )
   AND (SELECT COUNT(*) FROM public.mapi_store_identity) = 1
   AND EXISTS (
@@ -235,6 +262,7 @@ SELECT CASE WHEN
     WHERE singleton IS TRUE
       AND replica_guid IS NOT NULL
       AND next_global_counter >= 43
+      AND next_global_counter <= 140737454800896
   )
   AND (
     SELECT COUNT(*)
@@ -574,6 +602,356 @@ SELECT CASE WHEN
   )
 THEN 1 ELSE 0 END;
 SQL
+}
+
+schema_metadata_shape_ok() {
+  local database_url="$1"
+  local expected_schema_version="$2"
+  local table_name
+
+  [[ -n "${expected_schema_version}" ]] || {
+    echo "0"
+    return 0
+  }
+
+  table_name="$(
+    psql "${database_url}" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.schema_metadata')"
+  )" || return
+  if [[ "${table_name}" != "schema_metadata" ]]; then
+    echo "0"
+    return 0
+  fi
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At \
+    -v expected_schema_version="${expected_schema_version}" <<'SQL'
+SELECT CASE WHEN
+  (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'schema_metadata'
+  ) = 3
+  AND (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'schema_metadata'
+      AND (
+            (column_name = 'singleton' AND data_type = 'boolean' AND is_nullable = 'NO')
+            OR (column_name = 'schema_version' AND data_type = 'text' AND is_nullable = 'NO')
+            OR (column_name = 'created_at' AND data_type = 'timestamp with time zone' AND is_nullable = 'NO')
+      )
+  ) = 3
+  AND (
+    SELECT COUNT(*)
+    FROM pg_attribute attribute_row
+    JOIN pg_attrdef default_row
+      ON default_row.adrelid = attribute_row.attrelid
+     AND default_row.adnum = attribute_row.attnum
+    WHERE attribute_row.attrelid = 'public.schema_metadata'::regclass
+      AND attribute_row.attname IN ('singleton', 'created_at')
+      AND NOT attribute_row.attisdropped
+      AND (
+            (attribute_row.attname = 'singleton'
+              AND pg_get_expr(default_row.adbin, default_row.adrelid) = 'true')
+            OR (attribute_row.attname = 'created_at'
+              AND pg_get_expr(default_row.adbin, default_row.adrelid) = 'now()')
+      )
+  ) = 2
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.schema_metadata'::regclass
+      AND contype = 'p'
+      AND pg_get_constraintdef(oid) = 'PRIMARY KEY (singleton)'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.schema_metadata'::regclass
+      AND contype = 'c'
+      AND lower(pg_get_constraintdef(oid)) LIKE '%singleton = true%'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.schema_metadata'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE (
+        '%schema_version = ' || quote_literal(:'expected_schema_version') || '%'
+      )
+  )
+  AND (SELECT COUNT(*) FROM public.schema_metadata) = 1
+  AND EXISTS (
+    SELECT 1
+    FROM public.schema_metadata
+    WHERE singleton IS TRUE
+      AND schema_version = :'expected_schema_version'
+  )
+THEN 1 ELSE 0 END;
+SQL
+}
+
+canonical_required_relations_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+WITH expected(relname, relkind) AS (
+  VALUES
+    ('accounts'::text, 'r'::text),
+    ('account_sync_state', 'r'),
+    ('calendar_events', 'r'),
+    ('canonical_change_journal', 'r'),
+    ('mail_change_log', 'r'),
+    ('mailboxes', 'r'),
+    ('mapi_associated_config_messages', 'r'),
+    ('mapi_calendar_event_identity_moves', 'r'),
+    ('mapi_custom_property_values', 'r'),
+    ('mapi_folder_profile_property_values', 'r'),
+    ('mapi_local_replica_deleted_ranges', 'r'),
+    ('mapi_local_replica_id_ranges', 'r'),
+    ('mapi_mailbox_replicas', 'r'),
+    ('mapi_named_properties', 'r'),
+    ('mapi_navigation_shortcuts', 'r'),
+    ('mapi_object_identities', 'r'),
+    ('mapi_profile_settings', 'r'),
+    ('mapi_special_folder_aliases', 'r'),
+    ('mapi_store_identity', 'r'),
+    ('public_folder_items', 'r'),
+    ('public_folder_per_user_state', 'r'),
+    ('public_folder_permissions', 'r'),
+    ('public_folder_replicas', 'r'),
+    ('public_folder_trees', 'r'),
+    ('public_folders', 'r'),
+    ('recipient_suggestions', 'r'),
+    ('recoverable_items', 'r'),
+    ('retention_policy_tags', 'r'),
+    ('schema_metadata', 'r'),
+    ('search_folders', 'r'),
+    ('searchable_mail_documents', 'v'),
+    ('tombstones', 'r'),
+    ('mapi_object_identities_active_source_key_uidx', 'i'),
+    ('mapi_associated_config_messages_logical_idx', 'i'),
+    ('recipient_suggestions_active_email_idx', 'i'),
+    ('recipient_suggestions_rank_idx', 'i'),
+    ('search_folders_user_saved_name_idx', 'i')
+),
+actual AS (
+  SELECT class_row.relname::text, class_row.relkind::text
+  FROM pg_class class_row
+  JOIN pg_namespace namespace_row ON namespace_row.oid = class_row.relnamespace
+  WHERE namespace_row.nspname = 'public'
+)
+SELECT CASE WHEN NOT EXISTS (
+  SELECT * FROM expected
+  EXCEPT
+  SELECT * FROM actual
+) THEN 1 ELSE 0 END;
+SQL
+}
+
+mapi_auxiliary_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT CASE WHEN
+  EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.mapi_custom_property_values'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%public_folder_item%'
+  )
+  AND (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'mapi_navigation_shortcuts'
+      AND column_name IN ('group_header_id', 'group_name')
+  ) = 2
+  AND (
+    SELECT is_nullable
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'mapi_navigation_shortcuts'
+      AND column_name = 'target_folder_id'
+  ) = 'YES'
+  AND (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'mapi_navigation_shortcuts'
+      AND column_name = 'save_stamp'
+      AND is_nullable = 'NO'
+      AND column_default = '0'
+  ) = 1
+  AND (
+    SELECT COUNT(*)
+    FROM pg_constraint
+    WHERE conrelid = 'public.mapi_navigation_shortcuts'::regclass
+      AND conname = 'mapi_navigation_shortcuts_save_stamp_check'
+      AND pg_get_constraintdef(oid) LIKE '%save_stamp >= 0%'
+      AND pg_get_constraintdef(oid) LIKE '%4294967295%'
+  ) = 1
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.mail_change_log'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%associated_config%'
+  )
+THEN 1 ELSE 0 END;
+SQL
+}
+
+mapi_low_dynamic_property_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+WITH property_ids(property_id) AS (
+  SELECT property_id
+  FROM public.mapi_named_properties
+  UNION ALL
+  SELECT ((property_tag::bigint >> 16)::integer)
+  FROM public.mapi_custom_property_values
+  UNION ALL
+  SELECT ((property_tag::bigint >> 16)::integer)
+  FROM public.mapi_folder_profile_property_values
+  UNION ALL
+  SELECT (('x' || substring(key FROM 3 FOR 4))::bit(16)::integer)
+  FROM public.mapi_associated_config_messages config
+  CROSS JOIN LATERAL jsonb_object_keys(config.properties_json) key
+  WHERE key ~ '^0x[0-9a-fA-F]{8}$'
+)
+SELECT CASE WHEN NOT EXISTS (
+  SELECT 1
+  FROM property_ids
+  WHERE property_id >= 32768
+    AND property_id < 36864
+    AND NOT (
+      property_id BETWEEN 32768 AND 33023
+      OR property_id BETWEEN 33280 AND 33535
+      OR property_id BETWEEN 34048 AND 34303
+      OR property_id BETWEEN 34560 AND 34815
+      OR property_id BETWEEN 35072 AND 35078
+      OR property_id BETWEEN 35328 AND 35839
+      OR property_id IN (33005, 33261, 33643, 33872, 36615)
+    )
+) THEN 1 ELSE 0 END;
+SQL
+}
+
+recoverable_items_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT CASE WHEN
+  (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'accounts'
+      AND column_name IN (
+        'recoverable_items_retention_days',
+        'litigation_hold_enabled',
+        'litigation_hold_started_at'
+      )
+  ) = 3
+  AND (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'mailboxes'
+      AND column_name = 'recoverable_items_retention_days'
+  ) = 1
+  AND (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'mailboxes'
+      AND column_name = 'retention_policy_tag_id'
+  ) = 1
+  AND (
+    SELECT COUNT(*)
+    FROM pg_constraint
+    WHERE conrelid = 'public.mailboxes'::regclass
+      AND conname = 'mailboxes_retention_policy_tag_fk'
+  ) = 1
+  AND (
+    SELECT COUNT(*)
+    FROM pg_constraint
+    WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass)
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%recoverable_item%'
+  ) >= 4
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.mail_change_log'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%'
+      AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'
+      AND pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'
+  )
+THEN 1 ELSE 0 END;
+SQL
+}
+
+public_folder_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT CASE WHEN
+  (
+    SELECT COUNT(*)
+    FROM pg_constraint
+    WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass)
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%public_folder_replica%'
+  ) >= 4
+  AND (
+    SELECT COUNT(*)
+    FROM pg_constraint
+    WHERE conrelid IN ('public.account_sync_state'::regclass, 'public.canonical_change_journal'::regclass)
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%public_folders%'
+  ) = 2
+THEN 1 ELSE 0 END;
+SQL
+}
+
+canonical_schema_shape_is_current() {
+  local database_url="$1"
+  local expected_schema_version="$2"
+  local shape_counts
+  local identity_version_column_count
+  local calendar_event_lifecycle_column_count
+  local calendar_event_identity_moves_table
+  local deleted_calendar_event_constraint_count
+
+  [[ "$(schema_metadata_shape_ok "${database_url}" "${expected_schema_version}")" == "1" ]] || return 1
+  [[ "$(canonical_required_relations_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_auxiliary_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_low_dynamic_property_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(recoverable_items_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(public_folder_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_local_replica_range_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_outlook_cache_fidelity_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_identity_key_constraint_count "${database_url}")" == "3" ]] || return 1
+  [[ "$(mapi_calendar_event_move_change_key_constraint_count "${database_url}")" == "2" ]] || return 1
+  [[ "$(mapi_active_source_key_index_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_special_folder_alias_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_store_identity_shape_ok "${database_url}")" == "1" ]] || return 1
+
+  shape_counts="$(
+    psql "${database_url}" -X -v ON_ERROR_STOP=1 -At -F '|' -c "SELECT (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END), (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at') AND is_nullable = CASE column_name WHEN 'lifecycle_state' THEN 'NO' WHEN 'deleted_at' THEN 'YES' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' END), (SELECT to_regclass('public.mapi_calendar_event_identity_moves')), (SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%');"
+  )" || return 1
+  IFS='|' read -r identity_version_column_count calendar_event_lifecycle_column_count calendar_event_identity_moves_table deleted_calendar_event_constraint_count <<<"${shape_counts}" || return 1
+
+  [[ "${identity_version_column_count}" == "2" \
+    && "${calendar_event_lifecycle_column_count}" == "2" \
+    && "${calendar_event_identity_moves_table}" == "mapi_calendar_event_identity_moves" \
+    && "${deleted_calendar_event_constraint_count}" == "2" ]]
 }
 
 normalize_yes_no() {

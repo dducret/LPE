@@ -43,6 +43,11 @@ pub(crate) fn current_store_replica_guid() -> [u8; 16] {
     current_mapi_identity_codec(MapiIdentityCodec::replica_guid).unwrap_or(STORE_REPLICA_GUID)
 }
 
+pub(crate) fn durable_object_id(object_id: u64) -> Option<u64> {
+    current_mapi_identity_codec(|codec| codec.actual_object_id(object_id))
+        .unwrap_or(Some(object_id))
+}
+
 #[derive(Debug, Clone)]
 struct MapiIdentityMaterial {
     object_id: u64,

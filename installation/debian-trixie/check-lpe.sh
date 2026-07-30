@@ -334,6 +334,10 @@ mapi_active_source_key_index_shape_status="$(mapi_active_source_key_index_shape_
   || fail "MAPI active SourceKey uniqueness index is missing or invalid. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "MAPI active SourceKey uniqueness index is current"
 
+canonical_schema_shape_is_current "${DATABASE_URL}" "${expected_schema_version}" \
+  || fail "Database does not match the complete canonical ${expected_schema_version} physical shape. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "Canonical database physical shape is current"
+
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/live" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/ready" '"status":"ready"'

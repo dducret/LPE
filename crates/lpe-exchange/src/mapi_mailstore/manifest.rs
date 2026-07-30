@@ -276,11 +276,19 @@ pub(crate) fn sync_state_token_with_attachments(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
+    folder_versions: &[crate::mapi_store::MapiFolderVersion],
 ) -> Vec<u8> {
     final_sync_state_stream(
         sync_type,
         &sync_state_object_ids(sync_type, folder_id, mailboxes, emails),
-        &sync_state_change_numbers(sync_type, folder_id, mailboxes, emails, attachment_facts),
+        &sync_state_change_numbers(
+            sync_type,
+            folder_id,
+            mailboxes,
+            emails,
+            attachment_facts,
+            folder_versions,
+        ),
     )
 }
 
@@ -292,12 +300,20 @@ pub(crate) fn sync_state_token_with_special_objects(
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
     special_objects: &[SpecialMessageSyncFact],
+    folder_versions: &[crate::mapi_store::MapiFolderVersion],
 ) -> Vec<u8> {
     if sync_type != SYNC_TYPE_CONTENTS {
         return final_sync_state_stream(
             sync_type,
             &sync_state_object_ids(sync_type, folder_id, mailboxes, emails),
-            &sync_state_change_numbers(sync_type, folder_id, mailboxes, emails, attachment_facts),
+            &sync_state_change_numbers(
+                sync_type,
+                folder_id,
+                mailboxes,
+                emails,
+                attachment_facts,
+                folder_versions,
+            ),
         );
     }
     let scoped_emails = if content_sync_includes_normal(sync_type, sync_flags) {
@@ -318,6 +334,7 @@ pub(crate) fn sync_state_token_with_special_objects(
         mailboxes,
         scoped_emails,
         attachment_facts,
+        folder_versions,
     );
     let default_include_associated =
         default_content_sync_includes_associated(scoped_emails, special_objects);
@@ -1146,6 +1163,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         state_emails,
         state_attachment_facts,
         state_special_objects,
+        folder_versions,
     ));
     write_u32(&mut buffer, INCR_SYNC_END);
     buffer

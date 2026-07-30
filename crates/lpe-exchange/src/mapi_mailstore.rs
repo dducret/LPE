@@ -416,12 +416,19 @@ fn sync_state_change_numbers(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
+    folder_versions: &[crate::mapi_store::MapiFolderVersion],
 ) -> Vec<u64> {
     if sync_type == SYNC_TYPE_HIERARCHY {
         let mut change_numbers = BTreeSet::new();
         change_numbers.extend(mailboxes.iter().filter_map(|mailbox| {
             let object_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-            (object_id != folder_id).then(|| canonical_hierarchy_change_number(folder_id, mailbox))
+            (object_id != folder_id).then(|| {
+                folder_versions
+                    .iter()
+                    .find(|version| version.folder_id == object_id)
+                    .map(|version| version.change_number)
+                    .unwrap_or_else(|| canonical_hierarchy_change_number(folder_id, mailbox))
+            })
         }));
         change_numbers.into_iter().collect()
     } else {
@@ -1390,7 +1397,8 @@ pub(crate) fn fast_transfer_property_value_start(
 fn replguid_idset_from_object_ids(ids: &[u64]) -> Vec<u8> {
     let counters = ids
         .iter()
-        .filter_map(|id| crate::mapi::identity::global_counter_from_store_id(*id))
+        .filter_map(|id| crate::mapi::identity::durable_object_id(*id))
+        .filter_map(crate::mapi::identity::global_counter_from_store_id)
         .collect::<Vec<_>>();
     replguid_idset_from_counters(&counters)
 }
@@ -1410,7 +1418,8 @@ fn replguid_idset_from_counters(counters: &[u64]) -> Vec<u8> {
 fn replid_idset_from_object_ids(ids: &[u64]) -> Vec<u8> {
     let mut counters = ids
         .iter()
-        .filter_map(|id| crate::mapi::identity::global_counter_from_store_id(*id))
+        .filter_map(|id| crate::mapi::identity::durable_object_id(*id))
+        .filter_map(crate::mapi::identity::global_counter_from_store_id)
         .collect::<Vec<_>>();
     counters.sort_unstable();
     counters.dedup();

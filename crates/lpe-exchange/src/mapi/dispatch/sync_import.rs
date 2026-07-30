@@ -389,12 +389,14 @@ pub(super) fn append_synchronization_get_transfer_state_response(
         );
         let sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
         let sync_attachment_facts = sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
+        let folder_versions = snapshot.folder_versions();
         mapi_mailstore::sync_state_token_with_attachments(
             sync_type,
             folder_id,
             &sync_mailboxes,
             &sync_emails,
             &sync_attachment_facts,
+            &folder_versions,
         )
     } else {
         state

@@ -134,4 +134,10 @@ if [[ "${schema_version}" != "${expected_schema_version}" \
   exit 1
 fi
 
+if ! canonical_schema_shape_is_current "${DATABASE_URL}" "${expected_schema_version}"; then
+  echo "Schema initialization validation failed: the installed database does not match the complete canonical ${expected_schema_version} physical shape." >&2
+  echo "Initialize a fresh LPE ${expected_schema_version%-sql} database after correcting the canonical schema source." >&2
+  exit 1
+fi
+
 echo "LPE schema ${schema_version}, including MAPI local replica ranges and WLink/configuration FAI fidelity, initialized successfully."

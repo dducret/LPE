@@ -74,14 +74,6 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         ));
         return;
     };
-    let Some(source_global_counter) = source_key_global_counter(&source_key) else {
-        responses.extend_from_slice(&rop_error_response(
-            0x73,
-            request.response_handle_index(),
-            0x8004_0102,
-        ));
-        return;
-    };
     let parent_folder_id = hierarchy_values
         .iter()
         .find_map(|(tag, value)| match (tag, value) {

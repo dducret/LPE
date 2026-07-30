@@ -1400,10 +1400,28 @@ fn check_script_rejects_tagged_schema_without_mapi_identity_version_columns() {
 #[test]
 fn updater_rejects_an_incomplete_current_schema_before_stopping_lpe() {
     assert_source_contains_all(
-        "update-lpe.sh",
-        UPDATE_LPE_SCRIPT,
+        "shared canonical current-schema guard",
+        INSTALL_COMMON_SCRIPT,
         &[
             "canonical_schema_shape_is_current()",
+            "schema_metadata_shape_ok()",
+            "table_name = 'schema_metadata'",
+            "COUNT(*) FROM public.schema_metadata",
+            "PRIMARY KEY (singleton)",
+            "schema_version' AND data_type = 'text'",
+            "schema_version = :'expected_schema_version'",
+            "canonical_required_relations_shape_ok()",
+            "mapi_auxiliary_shape_ok()",
+            "mapi_low_dynamic_property_shape_ok()",
+            "recoverable_items_shape_ok()",
+            "public_folder_shape_ok()",
+            "mapi_named_properties",
+            "mapi_custom_property_values",
+            "mapi_navigation_shortcuts",
+            "mapi_associated_config_messages",
+            "recipient_suggestions_active_email_idx",
+            "recoverable_items",
+            "public_folder_replicas",
             "mapi_local_replica_range_shape_ok",
             "mapi_outlook_cache_fidelity_shape_ok",
             "mapi_identity_key_constraint_count",
@@ -1411,6 +1429,13 @@ fn updater_rejects_an_incomplete_current_schema_before_stopping_lpe() {
             "mapi_active_source_key_index_shape_ok",
             "mapi_special_folder_alias_shape_ok",
             "mapi_store_identity_shape_ok",
+        ],
+    );
+    assert_source_contains_all(
+        "update-lpe.sh",
+        UPDATE_LPE_SCRIPT,
+        &[
+            "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${EXPECTED_SCHEMA_VERSION}\"",
             "Installed schema ${EXPECTED_SCHEMA_VERSION} is incomplete",
         ],
     );
@@ -1420,6 +1445,16 @@ fn updater_rejects_an_incomplete_current_schema_before_stopping_lpe() {
         "systemctl stop \"${SERVICE_NAME}\"",
         "update-lpe.sh must reject an incomplete current schema before it stops LPE",
     );
+    for (label, source) in [
+        ("init-schema.sh", INIT_LPE_SCRIPT),
+        ("check-lpe.sh", CHECK_LPE_SCRIPT),
+    ] {
+        assert_source_contains_all(
+            label,
+            source,
+            &["canonical_schema_shape_is_current", "complete canonical"],
+        );
+    }
 }
 
 #[test]
@@ -1582,8 +1617,17 @@ fn installation_scripts_require_the_mapi_store_identity_singleton() {
         &[
             "mapi_store_identity_shape_ok()",
             "mapi_store_identity",
+            "table_name = 'mapi_store_identity'",
+            ") = 5",
+            "'created_at' AND data_type = 'timestamp with time zone'",
+            "'updated_at' AND data_type = 'timestamp with time zone'",
+            "attribute_row.attname IN ('singleton', 'next_global_counter', 'created_at', 'updated_at')",
+            "pg_get_expr(default_row.adbin, default_row.adrelid) = 'true'",
+            "pg_get_expr(default_row.adbin, default_row.adrelid) = '43'",
+            "pg_get_expr(default_row.adbin, default_row.adrelid) = 'now()'",
             "COUNT(*) FROM public.mapi_store_identity",
             "PRIMARY KEY (singleton)",
+            "next_global_counter <= 140737454800896",
             "UNIQUE (mapi_global_counter)",
             "UNIQUE (mapi_object_id)",
             "UNIQUE (source_key)",

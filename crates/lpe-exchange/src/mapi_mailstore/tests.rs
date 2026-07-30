@@ -235,7 +235,9 @@ fn hierarchy_state_keeps_deleted_items_fid_distinct_from_its_server_cn() {
 fn hierarchy_download_keeps_imported_change_key_and_predecessor_lineage() {
     let mut deleted_items = virtual_special_mailbox(crate::mapi::identity::TRASH_FOLDER_ID)
         .expect("virtual Deleted Items folder");
-    deleted_items.modseq = 58;
+    // The JMAP mailbox modseq is not the MAPI hierarchy CN once the folder
+    // has a durable imported version.
+    deleted_items.modseq = 47;
     let imported_change_key = vec![
         0x51, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
         0xa6, 0x00, 0x00, 0x04, 0x15,
@@ -3357,6 +3359,62 @@ fn final_sync_state_separates_object_idset_from_change_cnset() {
 
     assert_variable_property(&token, META_TAG_IDSET_GIVEN, &expected_idset);
     assert_variable_property(&token, META_TAG_CNSET_SEEN, &expected_cnset);
+}
+
+#[tokio::test]
+async fn scoped_final_sync_state_uses_the_durable_inbox_counter() {
+    let replica_guid = uuid::Uuid::from_u128(0x11223344_5566_7788_99aa_bbccddeeff00);
+    let mut requests = Vec::new();
+    let mut records = Vec::new();
+    for counter in crate::mapi::identity::ROOT_FOLDER_COUNTER
+        ..crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+    {
+        let canonical_id = uuid::Uuid::from_u128(counter as u128 + 1);
+        let object_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + counter - 1,
+        );
+        requests.push(crate::store::MapiIdentityRequest {
+            object_kind: crate::store::MapiIdentityObjectKind::Mailbox,
+            canonical_id,
+            reserved_global_counter: Some(counter),
+            source_key: None,
+        });
+        records.push(crate::store::MapiIdentityRecord {
+            object_kind: crate::store::MapiIdentityObjectKind::Mailbox,
+            canonical_id,
+            object_id,
+            change_number: 1,
+            source_key: Vec::new(),
+            change_key: Vec::new(),
+            predecessor_change_list: Vec::new(),
+            last_modification_time: 0,
+        });
+    }
+    let codec = crate::mapi::identity::MapiIdentityCodec::from_special_folder_identity_records(
+        replica_guid,
+        &requests,
+        &records,
+    )
+    .unwrap();
+    let (token, idset, idset_counters) =
+        crate::mapi::identity::with_current_mapi_identity_codec(codec, async {
+            let idset = replguid_idset_from_object_ids(&[crate::mapi::identity::INBOX_FOLDER_ID]);
+            let token = final_sync_state_stream(
+                SYNC_TYPE_HIERARCHY,
+                &[crate::mapi::identity::INBOX_FOLDER_ID],
+                &[],
+            );
+            let idset_counters = replguid_globset_counters(&idset).unwrap();
+            (token, idset, idset_counters)
+        })
+        .await;
+
+    let durable_inbox_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+        + crate::mapi::identity::INBOX_FOLDER_COUNTER
+        - 1;
+    assert_eq!(&idset[..16], replica_guid.as_bytes());
+    assert_eq!(idset_counters, vec![durable_inbox_counter]);
+    assert_variable_property(&token, META_TAG_IDSET_GIVEN, &idset);
 }
 
 #[test]

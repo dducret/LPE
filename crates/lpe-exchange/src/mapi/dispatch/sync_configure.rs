@@ -287,6 +287,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
             .unwrap_or_default(),
         );
     }
+    let folder_versions = snapshot.folder_versions();
     let state = mapi_mailstore::sync_state_token_with_special_objects(
         sync_type,
         sync_flags,
@@ -295,8 +296,8 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         &all_sync_emails,
         &state_attachment_facts,
         &all_special_sync_objects,
+        &folder_versions,
     );
-    let folder_versions = snapshot.folder_versions();
     let folder_commit_times = if sync_type == MapiSyncType::Hierarchy.as_u8() {
         all_sync_mailboxes
             .iter()
