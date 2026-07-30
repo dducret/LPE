@@ -16069,7 +16069,7 @@ async fn mapi_over_http_sync_import_hierarchy_change_accepts_existing_deleted_it
 }
 
 #[tokio::test]
-async fn mapi_over_http_sync_import_hierarchy_change_acknowledges_system_folder_reconciliation() {
+async fn mapi_over_http_sync_import_hierarchy_change_keeps_hidden_system_folder_alias_in_cnset() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -16123,10 +16123,18 @@ async fn mapi_over_http_sync_import_hierarchy_change_acknowledges_system_folder_
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         &mapi_mailstore::predecessor_change_list(900),
     );
-    append_mapi_utf16_property(&mut hierarchy_values, 0x3001_001F, "Sync Issues");
+    append_mapi_utf16_property(
+        &mut hierarchy_values,
+        0x3001_001F,
+        "Conversation Action Settings",
+    );
 
     let mut property_values = Vec::new();
-    append_mapi_utf16_property(&mut property_values, 0x3001_001F, "Sync Issues");
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x3001_001F,
+        "Conversation Action Settings",
+    );
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -16159,7 +16167,7 @@ async fn mapi_over_http_sync_import_hierarchy_change_acknowledges_system_folder_
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(
         contains_bytes(&response_rops, &[0x73, 0x02, 0, 0, 0, 0]),
-        "system-folder reconciliation response: {response_rops:02x?}"
+        "hidden system-folder alias response: {response_rops:02x?}"
     );
     let state_chunks = mapi_fast_transfer_chunks(&response_rops);
     assert_eq!(state_chunks.len(), 1);
@@ -16172,11 +16180,16 @@ async fn mapi_over_http_sync_import_hierarchy_change_acknowledges_system_folder_
     assert!(
         strict_replguid_globset_contains_counter(cnset_seen, &globcnt_bytes(alias_change_number),)
             .unwrap(),
-        "special-folder reconciliation must add a server CN after the client-reserved FID range"
+        "an alias whose canonical folder is not emitted in the hierarchy projection must add a server CN"
     );
+    let canonical_counter = crate::mapi::identity::global_counter_from_store_id(
+        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+    )
+    .unwrap();
     assert!(
-        !strict_replguid_globset_contains_counter(cnset_seen, &globcnt_bytes(26)).unwrap(),
-        "the canonical Sync Issues FID must not be reused as a change number"
+        !strict_replguid_globset_contains_counter(cnset_seen, &globcnt_bytes(canonical_counter))
+            .unwrap(),
+        "the canonical Conversation Action Settings FID must not be reused as a change number"
     );
     assert!(
         !strict_replguid_globset_contains_counter(
@@ -16186,11 +16199,54 @@ async fn mapi_over_http_sync_import_hierarchy_change_acknowledges_system_folder_
         .unwrap(),
         "the client-reserved alias FID must not be reused as a change number"
     );
+    renew_mapi_request_id(&mut execute_headers);
+    let alias_counter =
+        crate::mapi::identity::global_counter_from_store_id(alias_id).expect("alias GLOBCNT");
+    let alias_idset_given = strict_test_replguid_globset(&[alias_counter]);
+    let mut hierarchy_rops = Vec::new();
+    append_rop_open_folder(
+        &mut hierarchy_rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
+        &mut hierarchy_rops,
+        1,
+        2,
+        20_000,
+        &alias_idset_given,
+        &[],
+    );
+    let hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let hierarchy_response_rops = response_rops_from_execute_response(hierarchy_response).await;
+    let hierarchy_stream = strict_hierarchy_sync_transfer_from_response(&hierarchy_response_rops)
+        .expect("strictly decode hidden special-folder alias state");
+    assert!(
+        hierarchy_stream.deleted_idset.is_none(),
+        "an alias whose target is not emitted in this hierarchy projection must not be deleted"
+    );
+    assert!(
+        strict_replguid_globset_contains_counter(
+            &hierarchy_stream.idset_given,
+            &globcnt_bytes(alias_counter),
+        )
+        .unwrap(),
+        "an alias whose target is not emitted in this hierarchy projection must remain resident"
+    );
     assert!(created_mailboxes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn mapi_over_http_sync_imported_special_folder_alias_survives_a_new_session() {
+async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cnset_and_deleted_when_canonical_is_emitted(
+) {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -16207,6 +16263,9 @@ async fn mapi_over_http_sync_imported_special_folder_alias_survives_a_new_sessio
     let alias_id = crate::mapi::identity::mapi_store_id(first_reserved_counter + 0x204);
     let alias_source_key = crate::mapi::identity::source_key_for_object_id(alias_id);
     let created_mailboxes = store.created_mailboxes.clone();
+    let special_folder_aliases = store.mapi_special_folder_aliases.clone();
+    let special_folder_alias_change_numbers =
+        store.mapi_special_folder_alias_change_numbers.clone();
     let service = ExchangeService::new(store);
 
     let first_connect = service
@@ -16240,7 +16299,7 @@ async fn mapi_over_http_sync_imported_special_folder_alias_survives_a_new_sessio
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         &mapi_mailstore::predecessor_change_list(901),
     );
-    append_mapi_utf16_property(&mut hierarchy_values, PID_TAG_DISPLAY_NAME_W, "Junk E-mail");
+    append_mapi_utf16_property(&mut hierarchy_values, PID_TAG_DISPLAY_NAME_W, "Junk Email");
     let mut import_rops = Vec::new();
     append_rop_open_folder(&mut import_rops, 0, 1, test_mapi_folder_id(4));
     import_rops.extend_from_slice(&[
@@ -16250,12 +16309,20 @@ async fn mapi_over_http_sync_imported_special_folder_alias_survives_a_new_sessio
     import_rops.extend_from_slice(&6u16.to_le_bytes());
     import_rops.extend_from_slice(&hierarchy_values);
     import_rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_utf16_property(&mut import_rops, PID_TAG_DISPLAY_NAME_W, "Junk E-mail");
+    append_mapi_utf16_property(&mut import_rops, PID_TAG_DISPLAY_NAME_W, "Junk Email");
+    import_rops.extend_from_slice(&[
+        0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
+        0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
+    ]);
+    import_rops.extend_from_slice(&4096u16.to_le_bytes());
     let import_response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &first_headers,
-            &execute_body(&rop_buffer(&import_rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &import_rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -16264,6 +16331,23 @@ async fn mapi_over_http_sync_imported_special_folder_alias_survives_a_new_sessio
         &import_response_rops,
         &[0x73, 0x02, 0, 0, 0, 0]
     ));
+    let state_chunks = mapi_fast_transfer_chunks(&import_response_rops);
+    assert_eq!(state_chunks.len(), 1);
+    let cnset_seen = mapi_binary_property_value(&state_chunks[0].1, META_TAG_CNSET_SEEN);
+    let alias_change_number = special_folder_alias_change_numbers.lock().unwrap()[&alias_id];
+    assert_eq!(
+        special_folder_aliases.lock().unwrap()[&alias_id].canonical_folder_id,
+        crate::mapi::identity::JUNK_FOLDER_ID,
+        "the imported FID remains a durable redirect for stale requests"
+    );
+    assert!(
+        !strict_replguid_globset_contains_counter(
+            cnset_seen,
+            &globcnt_bytes(alias_change_number),
+        )
+        .unwrap(),
+        "the canonical-wins reconciliation must not acknowledge the Junk Email alias in MetaTagCnsetSeen"
+    );
 
     let second_connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -16276,7 +16360,17 @@ async fn mapi_over_http_sync_imported_special_folder_alias_survives_a_new_sessio
     );
     let mut open_rops = Vec::new();
     append_rop_open_folder(&mut open_rops, 0, 1, alias_id);
-    append_rop_get_properties_specific(&mut open_rops, 1, &[PID_TAG_DISPLAY_NAME_W]);
+    append_rop_get_properties_specific(
+        &mut open_rops,
+        1,
+        &[
+            PID_TAG_CHANGE_NUMBER,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            PID_TAG_DISPLAY_NAME_W,
+        ],
+    );
     let open_response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -16288,10 +16382,176 @@ async fn mapi_over_http_sync_imported_special_folder_alias_survives_a_new_sessio
     let open_response_rops = response_rops_from_execute_response(open_response).await;
     assert!(
         contains_bytes(&open_response_rops, &[0x02, 0x01, 0, 0, 0, 0]),
-        "a second EMSMDB session must resolve the FID reconciled by the first session: {open_response_rops:02x?}"
+        "a second EMSMDB session must resolve the reconciled FID for a cached request: {open_response_rops:02x?}"
     );
     assert!(contains_bytes(&open_response_rops, &utf16z("Junk E-mail")));
-    assert!(created_mailboxes.lock().unwrap().is_empty());
+    let mut canonical_version_offset =
+        mapi_get_properties_specific_standard_row_offset(&open_response_rops, 1).unwrap() + 1;
+    let canonical_junk_change_number = crate::mapi::identity::object_id_from_wire_id(
+        &open_response_rops[canonical_version_offset..canonical_version_offset + 8],
+    )
+    .and_then(crate::mapi::identity::global_counter_from_store_id)
+    .unwrap();
+    canonical_version_offset += 8;
+    let canonical_junk_change_key =
+        read_rop_binary_u16(&open_response_rops, &mut canonical_version_offset).unwrap();
+    let canonical_junk_predecessor_change_list =
+        read_rop_binary_u16(&open_response_rops, &mut canonical_version_offset).unwrap();
+    let canonical_junk_last_modification_time = u64::from_le_bytes(
+        open_response_rops[canonical_version_offset..canonical_version_offset + 8]
+            .try_into()
+            .unwrap(),
+    );
+
+    renew_mapi_request_id(&mut second_headers);
+    let reimport_change_key = crate::mapi::identity::change_key_for_change_number(902);
+    let reimport_predecessor_change_list = test_merge_mapi_predecessor_change_lists(
+        &canonical_junk_predecessor_change_list,
+        &mapi_mailstore::predecessor_change_list(902),
+    )
+    .unwrap();
+    let reimport_last_modification_time =
+        canonical_junk_last_modification_time.saturating_add(10_000_000);
+    let mut reimport_hierarchy_values = Vec::new();
+    append_mapi_binary_property(
+        &mut reimport_hierarchy_values,
+        PID_TAG_PARENT_SOURCE_KEY,
+        &mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4)),
+    );
+    append_mapi_binary_property(
+        &mut reimport_hierarchy_values,
+        PID_TAG_SOURCE_KEY,
+        &alias_source_key,
+    );
+    append_mapi_i64_property(
+        &mut reimport_hierarchy_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        reimport_last_modification_time as i64,
+    );
+    append_mapi_binary_property(
+        &mut reimport_hierarchy_values,
+        PID_TAG_CHANGE_KEY,
+        &reimport_change_key,
+    );
+    append_mapi_binary_property(
+        &mut reimport_hierarchy_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &reimport_predecessor_change_list,
+    );
+    append_mapi_utf16_property(
+        &mut reimport_hierarchy_values,
+        PID_TAG_DISPLAY_NAME_W,
+        "Junk Email",
+    );
+    let mut reimport_rops = Vec::new();
+    append_rop_open_folder(
+        &mut reimport_rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    reimport_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x00, // RopSynchronizationOpenCollector, hierarchy
+        0x73, 0x00, 0x02, // RopSynchronizationImportHierarchyChange
+    ]);
+    reimport_rops.extend_from_slice(&6u16.to_le_bytes());
+    reimport_rops.extend_from_slice(&reimport_hierarchy_values);
+    reimport_rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_utf16_property(&mut reimport_rops, PID_TAG_DISPLAY_NAME_W, "Junk Email");
+    reimport_rops.extend_from_slice(&[
+        0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
+        0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
+    ]);
+    reimport_rops.extend_from_slice(&4096u16.to_le_bytes());
+    let reimport_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &second_headers,
+            &execute_body(&rop_buffer(
+                &reimport_rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let reimport_response_rops = response_rops_from_execute_response(reimport_response).await;
+    assert!(contains_bytes(
+        &reimport_response_rops,
+        &[0x73, 0x02, 0, 0, 0, 0]
+    ));
+    let repeated_state_chunks = mapi_fast_transfer_chunks(&reimport_response_rops);
+    assert_eq!(repeated_state_chunks.len(), 1);
+    let repeated_cnset_seen =
+        mapi_binary_property_value(&repeated_state_chunks[0].1, META_TAG_CNSET_SEEN);
+    assert!(
+        !strict_replguid_globset_contains_counter(
+            repeated_cnset_seen,
+            &globcnt_bytes(alias_change_number),
+        )
+        .unwrap(),
+        "a reconnect must not mistake the resolved alias for a canonical hierarchy import"
+    );
+
+    renew_mapi_request_id(&mut second_headers);
+    let mut canonical_rops = Vec::new();
+    append_rop_open_folder(
+        &mut canonical_rops,
+        0,
+        1,
+        crate::mapi::identity::JUNK_FOLDER_ID,
+    );
+    append_rop_get_properties_specific(
+        &mut canonical_rops,
+        1,
+        &[
+            PID_TAG_CHANGE_NUMBER,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_LAST_MODIFICATION_TIME,
+        ],
+    );
+    let canonical_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &second_headers,
+            &execute_body(&rop_buffer(&canonical_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let canonical_response_rops = response_rops_from_execute_response(canonical_response).await;
+    let mut canonical_after_offset =
+        mapi_get_properties_specific_standard_row_offset(&canonical_response_rops, 1).unwrap() + 1;
+    let canonical_junk_change_number_after = crate::mapi::identity::object_id_from_wire_id(
+        &canonical_response_rops[canonical_after_offset..canonical_after_offset + 8],
+    )
+    .and_then(crate::mapi::identity::global_counter_from_store_id)
+    .unwrap();
+    canonical_after_offset += 8;
+    let canonical_junk_change_key_after =
+        read_rop_binary_u16(&canonical_response_rops, &mut canonical_after_offset).unwrap();
+    let canonical_junk_predecessor_change_list_after =
+        read_rop_binary_u16(&canonical_response_rops, &mut canonical_after_offset).unwrap();
+    let canonical_junk_last_modification_time_after = u64::from_le_bytes(
+        canonical_response_rops[canonical_after_offset..canonical_after_offset + 8]
+            .try_into()
+            .unwrap(),
+    );
+    assert_eq!(
+        canonical_junk_change_number_after, canonical_junk_change_number,
+        "a stale alias reimport must not update the canonical Junk folder"
+    );
+    assert_eq!(
+        canonical_junk_change_key_after, canonical_junk_change_key,
+        "a stale alias reimport must not replace the canonical Junk ChangeKey"
+    );
+    assert_eq!(
+        canonical_junk_predecessor_change_list_after, canonical_junk_predecessor_change_list,
+        "a stale alias reimport must not merge into the canonical Junk PCL"
+    );
+    assert_eq!(
+        canonical_junk_last_modification_time_after, canonical_junk_last_modification_time,
+        "a stale alias reimport must not update canonical Junk modification time"
+    );
 
     renew_mapi_request_id(&mut second_headers);
     let alias_counter =
@@ -16321,19 +16581,59 @@ async fn mapi_over_http_sync_imported_special_folder_alias_survives_a_new_sessio
         .await
         .unwrap();
     let hierarchy_response_rops = response_rops_from_execute_response(hierarchy_response).await;
-    let hierarchy_chunks = mapi_fast_transfer_chunks(&hierarchy_response_rops);
-    assert_eq!(hierarchy_chunks.len(), 1);
-    let hierarchy_stream = &hierarchy_chunks[0].1;
+    let hierarchy_stream = strict_hierarchy_sync_transfer_from_response(&hierarchy_response_rops)
+        .expect("strictly decode hierarchy conflict resolution");
+    let deleted_idset = hierarchy_stream
+        .deleted_idset
+        .as_deref()
+        .expect("the client-created Junk Email FID must be deleted");
     assert!(
-        !contains_bytes(hierarchy_stream, &META_TAG_IDSET_DELETED.to_le_bytes()),
-        "a successful durable special-folder alias must not be reported deleted"
-    );
-    let final_idset_given = mapi_binary_property_value(hierarchy_stream, META_TAG_IDSET_GIVEN);
-    assert!(
-        strict_replguid_globset_contains_counter(final_idset_given, &globcnt_bytes(alias_counter))
+        strict_replid_globset_contains_counter(deleted_idset, &globcnt_bytes(alias_counter))
             .unwrap(),
-        "the active alias must remain in hierarchy MetaTagIdsetGiven"
+        "the client-created Junk Email FID must be deleted when canonical Junk E-mail is emitted"
     );
+    assert!(
+        !strict_replguid_globset_contains_counter(
+            &hierarchy_stream.idset_given,
+            &globcnt_bytes(alias_counter),
+        )
+        .unwrap(),
+        "the deleted Junk Email alias must not remain in hierarchy MetaTagIdsetGiven"
+    );
+    let canonical_junk_counter =
+        crate::mapi::identity::global_counter_from_store_id(crate::mapi::identity::JUNK_FOLDER_ID)
+            .expect("canonical Junk E-mail GLOBCNT");
+    assert!(
+        strict_replguid_globset_contains_counter(
+            &hierarchy_stream.idset_given,
+            &globcnt_bytes(canonical_junk_counter),
+        )
+        .unwrap(),
+        "the canonical Junk E-mail FID must remain in hierarchy MetaTagIdsetGiven"
+    );
+    let canonical_junk_source_key =
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::JUNK_FOLDER_ID);
+    assert_eq!(
+        hierarchy_stream
+            .folder_changes
+            .iter()
+            .filter(|folder| {
+                folder.source_key == canonical_junk_source_key
+                    && folder.display_name == "Junk E-mail"
+            })
+            .count(),
+        1,
+        "the manifest must contain exactly one canonical Junk E-mail folder"
+    );
+    assert!(
+        !hierarchy_stream
+            .folder_changes
+            .iter()
+            .any(|folder| folder.source_key == alias_source_key
+                || folder.display_name == "Junk Email"),
+        "the manifest must never expose the dynamic Junk Email alias as a second folder"
+    );
+    assert!(created_mailboxes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

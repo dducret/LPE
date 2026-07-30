@@ -184,6 +184,14 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
                         folder_id,
                         mailboxes,
                     )
+                    // LPE-only reconciliation aliases are redirects, not
+                    // hierarchy objects. When the canonical target is in the
+                    // full hierarchy projection, omit the alias so normal
+                    // [MS-OXCFXICS] section 3.2.5.3 IdsetGiven comparison
+                    // emits its deletion.
+                    && !all_sync_mailboxes
+                        .iter()
+                        .any(|mailbox| mapi_folder_id(mailbox) == **canonical_folder_id)
             })
             .filter_map(|(alias_folder_id, _)| {
                 crate::mapi::identity::global_counter_from_store_id(*alias_folder_id)

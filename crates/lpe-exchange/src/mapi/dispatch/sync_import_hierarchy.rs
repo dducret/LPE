@@ -88,7 +88,10 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         .then_some(resolved_source_folder_id)
         .or_else(|| advertised_special_folder_id_for_create(parent_folder_id, &display_name));
     if let Some(canonical_folder_id) = canonical_folder_id {
-        if resolved_source_folder_id == canonical_folder_id {
+        // [MS-OXCFXICS] section 2.2.3.2.4.3.1: SourceKey identifies the
+        // imported folder. Under LPE's fixed-special-folder policy, a resolved
+        // stale alias only locates its target; it is not a tuple update.
+        if source_folder_id == canonical_folder_id {
             match store
                 .commit_mapi_folder_hierarchy_change(
                     principal.account_id,
@@ -180,12 +183,26 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 }
             };
             session.record_special_folder_alias(alias_folder_id, canonical_folder_id);
-            record_sync_upload_hierarchy_change_with_change_number(
-                session,
+            let canonical_is_emitted = sync_mailboxes_for_excluding_deleted(
                 folder_id,
-                canonical_folder_id,
-                change_number,
-            );
+                0x02,
+                mailboxes,
+                &session.deleted_advertised_special_folders,
+            )
+            .iter()
+            .any(|mailbox| mapi_folder_id(mailbox) == canonical_folder_id);
+            // This LPE-only compatibility policy treats the alias as a stale
+            // request redirect, not a hierarchy replica object. When its
+            // canonical target is in the full hierarchy projection, leave the
+            // alias CN out of MetaTagCnsetSeen for reconciliation download.
+            if !canonical_is_emitted {
+                record_sync_upload_hierarchy_change_with_change_number(
+                    session,
+                    folder_id,
+                    canonical_folder_id,
+                    change_number,
+                );
+            }
         }
         responses.extend_from_slice(&rop_synchronization_import_hierarchy_change_response(
             request,
