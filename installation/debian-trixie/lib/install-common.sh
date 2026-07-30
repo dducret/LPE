@@ -253,7 +253,10 @@ SELECT CASE WHEN
     WHERE conrelid = 'public.mapi_store_identity'::regclass
       AND contype = 'c'
       AND pg_get_constraintdef(oid) LIKE '%next_global_counter >= 43%'
-      AND pg_get_constraintdef(oid) LIKE '%next_global_counter <= 140737454800896%'
+      -- PostgreSQL renders this out-of-int4-range literal as
+      -- '140737454800896'::bigint in pg_get_constraintdef().
+      AND replace(pg_get_constraintdef(oid), '''', '')
+          LIKE '%next_global_counter <= 140737454800896%'
   )
   AND (SELECT COUNT(*) FROM public.mapi_store_identity) = 1
   AND EXISTS (

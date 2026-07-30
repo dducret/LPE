@@ -1627,6 +1627,7 @@ fn installation_scripts_require_the_mapi_store_identity_singleton() {
             "pg_get_expr(default_row.adbin, default_row.adrelid) = 'now()'",
             "COUNT(*) FROM public.mapi_store_identity",
             "PRIMARY KEY (singleton)",
+            "replace(pg_get_constraintdef(oid), '''', '')",
             "next_global_counter <= 140737454800896",
             "UNIQUE (mapi_global_counter)",
             "UNIQUE (mapi_object_id)",
