@@ -1095,54 +1095,94 @@ pub(super) fn advertised_special_folder_container_class(folder_id: u64) -> Optio
     })
 }
 
-pub(super) async fn folder_properties_for_open<S>(
+// [MS-OXCFOLD] section 3.2.5.1: RopOpenFolder returns only its result and
+// handle state. Persisted folder overlays are therefore loaded only when a
+// later ROP requests the corresponding property.
+pub(super) async fn hydrate_folder_handle_properties_for_request<S>(
     store: &S,
     principal: &AccountPrincipal,
-    session: &MapiSession,
-    folder_id: u64,
-    mailboxes: &[JmapMailbox],
-    snapshot: &MapiMailStoreSnapshot,
-) -> HashMap<u32, MapiValue>
-where
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    property_tags: &[u32],
+) where
     S: ExchangeStore,
 {
-    let mut properties =
-        folder_properties_for_open_from_mailboxes(principal, folder_id, mailboxes, snapshot);
+    let requested_property_tags = property_tags
+        .iter()
+        .map(|tag| canonical_property_storage_tag(*tag))
+        .collect::<HashSet<_>>();
+    if requested_property_tags.is_empty() {
+        return;
+    }
+    let Some((folder_id, existing_property_tags)) = input_object(session, handle_slots, request)
+        .and_then(|object| match object {
+            MapiObject::Folder {
+                folder_id,
+                properties,
+            } => Some((
+                *folder_id,
+                properties
+                    .keys()
+                    .map(|tag| canonical_property_storage_tag(*tag))
+                    .collect::<HashSet<_>>(),
+            )),
+            _ => None,
+        })
+    else {
+        return;
+    };
+
+    let mut search_properties = HashMap::new();
     if !session.search_folder_definition_was_deleted(folder_id) {
         if let Some(definition) = session.search_folder_definition(folder_id) {
-            properties.extend(search_folder_handle_properties(
-                definition,
-                folder_id,
-                principal.account_id,
-            ));
+            search_properties.extend(
+                search_folder_handle_properties(definition, folder_id, principal.account_id)
+                    .into_iter()
+                    .filter(|(tag, _)| {
+                        requested_property_tags.contains(&canonical_property_storage_tag(*tag))
+                    }),
+            );
         }
     }
-    if folder_id == IPM_SUBTREE_FOLDER_ID {
+
+    let mut persisted_properties = HashMap::new();
+    if folder_id == IPM_SUBTREE_FOLDER_ID
+        && requested_property_tags.contains(&PID_TAG_OST_OSTID)
+        && !existing_property_tags.contains(&PID_TAG_OST_OSTID)
+    {
         if let Ok(Some(ost_id)) = store
             .fetch_mapi_ipm_subtree_ost_id(principal.account_id)
             .await
         {
-            properties.insert(PID_TAG_OST_OSTID, MapiValue::Binary(ost_id));
+            persisted_properties.insert(PID_TAG_OST_OSTID, MapiValue::Binary(ost_id));
         }
     }
-    if let Some(values) =
-        optional_folder_profile_read(store.fetch_mapi_folder_profile_property_values(
-            principal.account_id,
-            folder_id,
-            &[PID_TAG_EXTENDED_FOLDER_FLAGS],
-        ))
-        .await
+    if requested_property_tags.contains(&PID_TAG_EXTENDED_FOLDER_FLAGS)
+        && !existing_property_tags.contains(&PID_TAG_EXTENDED_FOLDER_FLAGS)
     {
-        for value in values {
-            if value.property_tag == PID_TAG_EXTENDED_FOLDER_FLAGS {
-                properties.insert(
-                    PID_TAG_EXTENDED_FOLDER_FLAGS,
-                    MapiValue::Binary(value.property_value),
-                );
+        if let Some(values) =
+            optional_folder_profile_read(store.fetch_mapi_folder_profile_property_values(
+                principal.account_id,
+                folder_id,
+                &[PID_TAG_EXTENDED_FOLDER_FLAGS],
+            ))
+            .await
+        {
+            for value in values {
+                if value.property_tag == PID_TAG_EXTENDED_FOLDER_FLAGS {
+                    persisted_properties.insert(
+                        PID_TAG_EXTENDED_FOLDER_FLAGS,
+                        MapiValue::Binary(value.property_value),
+                    );
+                }
             }
         }
     }
-    if matches!(folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID) {
+    if matches!(folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID)
+        && requested_property_tags.contains(&PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
+        && !existing_property_tags.contains(&PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
+    {
         if let Some(values) =
             optional_folder_profile_read(store.fetch_mapi_folder_profile_property_values(
                 principal.account_id,
@@ -1158,14 +1198,28 @@ where
                     {
                         if let Some(value) = merge_additional_ren_entry_ids(principal, None, value)
                         {
-                            properties.insert(PID_TAG_ADDITIONAL_REN_ENTRY_IDS, value);
+                            persisted_properties.insert(PID_TAG_ADDITIONAL_REN_ENTRY_IDS, value);
                         }
                     }
                 }
             }
         }
     }
-    properties
+
+    let Some(MapiObject::Folder {
+        folder_id: current_folder_id,
+        properties,
+    }) = input_object_mut(session, handle_slots, request)
+    else {
+        return;
+    };
+    if *current_folder_id != folder_id {
+        return;
+    }
+    for (tag, value) in search_properties {
+        properties.entry(tag).or_insert(value);
+    }
+    properties.extend(persisted_properties);
 }
 
 pub(super) async fn optional_folder_profile_read<T>(

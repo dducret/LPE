@@ -5,8 +5,7 @@ pub(super) fn is_folder_open_rop(rop_id: RopId) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn append_folder_open_dispatch_response<S: ExchangeStore>(
-    store: &S,
+pub(super) fn append_folder_open_dispatch_response(
     principal: &AccountPrincipal,
     request_id: &str,
     session: &mut MapiSession,
@@ -21,7 +20,6 @@ pub(super) async fn append_folder_open_dispatch_response<S: ExchangeStore>(
 ) {
     if matches!(RopId::from_u8(request.rop_id), Some(RopId::OpenFolder)) {
         append_open_folder_response(
-            store,
             principal,
             request_id,
             session,
@@ -33,13 +31,11 @@ pub(super) async fn append_folder_open_dispatch_response<S: ExchangeStore>(
             same_execute_released_handles,
             responses,
             output_handles,
-        )
-        .await;
+        );
     }
 }
 
-pub(super) async fn append_open_folder_response<S: ExchangeStore>(
-    store: &S,
+pub(super) fn append_open_folder_response(
     principal: &AccountPrincipal,
     request_id: &str,
     session: &mut MapiSession,
@@ -161,8 +157,8 @@ pub(super) async fn append_open_folder_response<S: ExchangeStore>(
             .public_folder_replica_server_names(folder_id)
             .is_empty();
     session.record_opened_folder(folder_id);
-    let properties =
-        folder_properties_for_open(store, principal, session, folder_id, mailboxes, snapshot).await;
+    let debug_properties =
+        folder_properties_for_open_from_mailboxes(principal, folder_id, mailboxes, snapshot);
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -179,34 +175,39 @@ pub(super) async fn append_open_folder_response<S: ExchangeStore>(
         folder_id = format!("0x{folder_id:016x}"),
         folder_name = post_hierarchy_probe_folder_name(folder_id),
         role = debug_role_for_folder_id(folder_id),
-        property_count = properties.len(),
-        property_shapes = %debug_open_folder_property_shapes(&properties),
+        property_count = debug_properties.len(),
+        property_shapes = %debug_open_folder_property_shapes(&debug_properties),
         message = "rca debug mapi open folder properties"
     );
-    let inbox_contract_display_name = mapi_value_debug_string(&properties, PID_TAG_DISPLAY_NAME_W);
-    let inbox_contract_folder_type = mapi_value_debug_u32(&properties, PID_TAG_FOLDER_TYPE);
+    let inbox_contract_display_name =
+        mapi_value_debug_string(&debug_properties, PID_TAG_DISPLAY_NAME_W);
+    let inbox_contract_folder_type = mapi_value_debug_u32(&debug_properties, PID_TAG_FOLDER_TYPE);
     let inbox_contract_container_class =
-        mapi_value_debug_string(&properties, PID_TAG_CONTAINER_CLASS_W);
-    let inbox_contract_record_key = mapi_value_debug_binary_decode(&properties, PID_TAG_RECORD_KEY);
-    let inbox_contract_source_key = mapi_value_debug_binary_decode(&properties, PID_TAG_SOURCE_KEY);
+        mapi_value_debug_string(&debug_properties, PID_TAG_CONTAINER_CLASS_W);
+    let inbox_contract_record_key =
+        mapi_value_debug_binary_decode(&debug_properties, PID_TAG_RECORD_KEY);
+    let inbox_contract_source_key =
+        mapi_value_debug_binary_decode(&debug_properties, PID_TAG_SOURCE_KEY);
     let inbox_contract_parent_source_key =
-        mapi_value_debug_binary_decode(&properties, PID_TAG_PARENT_SOURCE_KEY);
-    let inbox_contract_content_count = mapi_value_debug_u32(&properties, PID_TAG_CONTENT_COUNT);
+        mapi_value_debug_binary_decode(&debug_properties, PID_TAG_PARENT_SOURCE_KEY);
+    let inbox_contract_content_count =
+        mapi_value_debug_u32(&debug_properties, PID_TAG_CONTENT_COUNT);
     let inbox_contract_unread_count =
-        mapi_value_debug_u32(&properties, PID_TAG_CONTENT_UNREAD_COUNT);
-    let inbox_contract_subfolders = mapi_value_debug_bool(&properties, PID_TAG_SUBFOLDERS);
+        mapi_value_debug_u32(&debug_properties, PID_TAG_CONTENT_UNREAD_COUNT);
+    let inbox_contract_subfolders = mapi_value_debug_bool(&debug_properties, PID_TAG_SUBFOLDERS);
     let root_ipm_contract_display_name =
-        mapi_value_debug_string(&properties, PID_TAG_DISPLAY_NAME_W);
-    let root_ipm_contract_folder_type = mapi_value_debug_u32(&properties, PID_TAG_FOLDER_TYPE);
+        mapi_value_debug_string(&debug_properties, PID_TAG_DISPLAY_NAME_W);
+    let root_ipm_contract_folder_type =
+        mapi_value_debug_u32(&debug_properties, PID_TAG_FOLDER_TYPE);
     let root_ipm_contract_container_class =
-        mapi_value_debug_string(&properties, PID_TAG_CONTAINER_CLASS_W);
+        mapi_value_debug_string(&debug_properties, PID_TAG_CONTAINER_CLASS_W);
     let root_ipm_contract_record_key =
-        mapi_value_debug_binary_decode(&properties, PID_TAG_RECORD_KEY);
+        mapi_value_debug_binary_decode(&debug_properties, PID_TAG_RECORD_KEY);
     let root_ipm_contract_source_key =
-        mapi_value_debug_binary_decode(&properties, PID_TAG_SOURCE_KEY);
+        mapi_value_debug_binary_decode(&debug_properties, PID_TAG_SOURCE_KEY);
     let root_ipm_contract_parent_source_key =
-        mapi_value_debug_binary_decode(&properties, PID_TAG_PARENT_SOURCE_KEY);
-    let default_view_entry_id_value = properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID);
+        mapi_value_debug_binary_decode(&debug_properties, PID_TAG_PARENT_SOURCE_KEY);
+    let default_view_entry_id_value = debug_properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID);
     let default_view_entry_id = default_view_entry_id_value
         .map(|value| default_view_entry_id_for_debug(PID_TAG_DEFAULT_VIEW_ENTRY_ID, value))
         .unwrap_or_else(|| "none".to_string());
@@ -234,12 +235,12 @@ pub(super) async fn append_open_folder_response<S: ExchangeStore>(
     let default_view_advertisement_state =
         session.default_view_advertisement_state_for_folder(folder_id);
     let default_view_associated_count =
-        mapi_value_debug_u32(&properties, PID_TAG_ASSOCIATED_CONTENT_COUNT);
+        mapi_value_debug_u32(&debug_properties, PID_TAG_ASSOCIATED_CONTENT_COUNT);
     let handle = session.allocate_output_handle_avoiding(
         request.output_handle_index,
         MapiObject::Folder {
             folder_id,
-            properties,
+            properties: HashMap::new(),
         },
         same_execute_released_handles,
     );

@@ -127,15 +127,11 @@ pub(super) async fn append_create_folder_response<S: ExchangeStore>(
                 response_existing_folder = response_existing,
                 message = "rca debug mapi create folder opened advertised special folder",
             );
-            let properties = folder_properties_for_open(
-                store, principal, session, folder_id, mailboxes, snapshot,
-            )
-            .await;
             let handle = session.allocate_output_handle(
                 request.output_handle_index,
                 MapiObject::Folder {
                     folder_id,
-                    properties,
+                    properties: HashMap::new(),
                 },
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
@@ -205,15 +201,11 @@ pub(super) async fn append_create_folder_response<S: ExchangeStore>(
                     return;
                 }
             };
-            let properties = folder_properties_for_open(
-                store, principal, session, folder_id, mailboxes, snapshot,
-            )
-            .await;
             let handle = session.allocate_output_handle(
                 request.output_handle_index,
                 MapiObject::Folder {
                     folder_id,
-                    properties,
+                    properties: HashMap::new(),
                 },
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
@@ -455,15 +447,11 @@ pub(super) async fn append_create_folder_response<S: ExchangeStore>(
                     message = "rca debug mapi create folder opened real folder replacing deleted advertised folder",
                 );
             }
-            let properties = folder_properties_for_open(
-                store, principal, session, folder_id, mailboxes, snapshot,
-            )
-            .await;
             let handle = session.allocate_output_handle(
                 request.output_handle_index,
                 MapiObject::Folder {
                     folder_id,
-                    properties,
+                    properties: HashMap::new(),
                 },
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);

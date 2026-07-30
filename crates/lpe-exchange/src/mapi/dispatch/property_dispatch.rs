@@ -80,6 +80,7 @@ where
         }
         Some(RopId::GetPropertiesAll) => {
             append_get_properties_all_response(
+                store,
                 principal,
                 session,
                 handle_slots,
@@ -88,7 +89,8 @@ where
                 emails,
                 snapshot,
                 responses,
-            );
+            )
+            .await;
             PropertyDispatchFlow::continue_batch()
         }
         Some(RopId::GetPropertiesList) => {

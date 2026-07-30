@@ -2758,9 +2758,31 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
         .await
         .unwrap()
         .remove(0);
+    let root_virtual_special_mailbox_id =
+        crate::mapi_mailstore::virtual_special_mailbox_id(crate::mapi::identity::ROOT_FOLDER_ID);
+    let root_virtual_special_identity = storage
+        .fetch_or_allocate_mapi_identities(
+            account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::Mailbox,
+                canonical_id: root_virtual_special_mailbox_id,
+                reserved_global_counter: Some(crate::mapi::identity::ROOT_FOLDER_COUNTER),
+                source_key: None,
+            }],
+        )
+        .await
+        .unwrap()
+        .remove(0);
     assert!(
         crate::mapi::identity::global_counter_from_store_id(virtual_special_identity.object_id)
             .unwrap()
+            >= crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+    );
+    assert!(
+        crate::mapi::identity::global_counter_from_store_id(
+            root_virtual_special_identity.object_id
+        )
+        .unwrap()
             >= crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
     );
     storage
@@ -2777,6 +2799,10 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
     // These deterministic UUID fixtures intentionally do not use
     // `virtual_special_mailbox_ids`, whose enumeration this regression exercises.
     let virtual_checkpoint_mailboxes = [
+        (
+            "root",
+            Uuid::parse_str("4c50455f-4d41-5049-0000-000000010001").unwrap(),
+        ),
         (
             "calendar",
             Uuid::parse_str("4c50455f-4d41-5049-0000-000000100001").unwrap(),
@@ -3145,6 +3171,27 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
         virtual_special_object_id_after_repair,
         Some(virtual_special_identity.object_id as i64)
     );
+    let root_virtual_special_object_id_after_repair = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT mapi_object_id
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'mailbox'
+          AND canonical_id = $3
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(root_virtual_special_mailbox_id)
+    .fetch_optional(storage.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        root_virtual_special_object_id_after_repair,
+        Some(root_virtual_special_identity.object_id as i64)
+    );
 
     let checkpoint_count = sqlx::query_scalar::<_, i64>(
         r#"
@@ -3188,7 +3235,7 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
     .await
     .unwrap();
 
-    assert_eq!(checkpoint_count, 4);
+    assert_eq!(checkpoint_count, 5);
     assert_eq!(config_count, 1);
     assert_eq!(orphaned_config_identity_count, 0);
     assert!(storage
@@ -3782,6 +3829,7 @@ struct FakeStore {
     mapi_custom_property_values: Arc<Mutex<HashMap<FakeMapiCustomPropertyKey, Vec<u8>>>>,
     mapi_folder_profile_property_values:
         Arc<Mutex<HashMap<FakeMapiFolderProfilePropertyKey, Vec<u8>>>>,
+    mapi_folder_profile_property_reads: Arc<AtomicU64>,
     mapi_checkpoints: Arc<Mutex<HashMap<(Option<Uuid>, MapiCheckpointKind), MapiSyncCheckpoint>>>,
     stale_protocol_local_folder_properties: Arc<Mutex<HashMap<(u64, u32), Vec<u8>>>>,
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
@@ -6955,6 +7003,8 @@ impl ExchangeStore for FakeStore {
         folder_id: u64,
         property_tags: &'a [u32],
     ) -> StoreFuture<'a, Vec<MapiFolderProfilePropertyValue>> {
+        self.mapi_folder_profile_property_reads
+            .fetch_add(1, Ordering::SeqCst);
         let values = self
             .mapi_folder_profile_property_values
             .lock()

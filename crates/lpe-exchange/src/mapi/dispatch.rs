@@ -1005,7 +1005,6 @@ where
             }
             Some(rop_id) if is_folder_open_rop(rop_id) => {
                 append_folder_open_dispatch_response(
-                    store,
                     principal,
                     request_id,
                     session,
@@ -1017,8 +1016,7 @@ where
                     &same_execute_released_handles,
                     &mut responses,
                     &mut output_handles,
-                )
-                .await;
+                );
             }
             Some(rop_id) if is_message_dispatch_rop(rop_id) => {
                 append_message_dispatch_response(

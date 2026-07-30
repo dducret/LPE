@@ -132,6 +132,15 @@ pub(super) async fn append_get_properties_specific_response<S>(
             );
         }
     }
+    hydrate_folder_handle_properties_for_request(
+        store,
+        principal,
+        session,
+        handle_slots,
+        request,
+        &request.property_tags(),
+    )
+    .await;
     let object = attachment_overlay_object(session, handle_slots, request, snapshot);
     let visible_emails;
     let emails_for_request = if created_emails.is_empty() {
@@ -439,16 +448,40 @@ pub(super) async fn append_get_properties_specific_response<S>(
     }
 }
 
-pub(super) fn append_get_properties_all_response(
+pub(super) async fn append_get_properties_all_response<S>(
+    store: &S,
     principal: &AccountPrincipal,
-    session: &MapiSession,
+    session: &mut MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
-) {
+) where
+    S: ExchangeStore,
+{
+    let property_tags = match input_object(session, handle_slots, request) {
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
+            ..
+        }) => {
+            let mut property_tags = default_folder_property_tags();
+            property_tags.extend(default_folder_identity_property_tags());
+            property_tags
+        }
+        Some(MapiObject::Folder { .. }) => default_folder_property_tags(),
+        _ => Vec::new(),
+    };
+    hydrate_folder_handle_properties_for_request(
+        store,
+        principal,
+        session,
+        handle_slots,
+        request,
+        &property_tags,
+    )
+    .await;
     let object = attachment_overlay_object(session, handle_slots, request, snapshot);
     responses.extend_from_slice(&rop_get_properties_all_response(
         request,
@@ -562,6 +595,15 @@ pub(super) async fn append_open_stream_response<S>(
     }
     let stream_property_tag =
         session.normalize_named_property_tag(request.stream_property_tag().unwrap_or(0));
+    hydrate_folder_handle_properties_for_request(
+        store,
+        principal,
+        session,
+        handle_slots,
+        request,
+        &[stream_property_tag],
+    )
+    .await;
     let Some((stream_data, writable_target)) = open_stream_data(
         store,
         principal,

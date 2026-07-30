@@ -307,7 +307,10 @@ pub(crate) fn virtual_special_mailbox_id(folder_id: u64) -> Uuid {
 pub(crate) fn virtual_special_mailbox_ids() -> impl Iterator<Item = Uuid> {
     (1..crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER)
         .map(crate::mapi::identity::mapi_store_id)
-        .filter(|folder_id| virtual_special_folder_metadata(*folder_id).is_some())
+        .filter(|folder_id| {
+            *folder_id == crate::mapi::identity::ROOT_FOLDER_ID
+                || virtual_special_folder_metadata(*folder_id).is_some()
+        })
         .map(virtual_special_mailbox_id)
 }
 

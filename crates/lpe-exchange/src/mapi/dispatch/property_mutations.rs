@@ -20,7 +20,7 @@ pub(super) async fn append_set_properties_response<S>(
 where
     S: ExchangeStore,
 {
-    let set_properties_object = input_object(session, handle_slots, request).cloned();
+    let mut set_properties_object = input_object(session, handle_slots, request).cloned();
     let set_properties_probe = set_properties_probe_request(request);
     log_set_properties_specific_debug(
         principal,
@@ -105,6 +105,21 @@ where
         .into_iter()
         .map(|(tag, value)| (session.normalize_named_property_tag(tag), value))
         .collect::<Vec<_>>();
+    if values
+        .iter()
+        .any(|(tag, _)| canonical_property_storage_tag(*tag) == PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
+    {
+        hydrate_folder_handle_properties_for_request(
+            store,
+            principal,
+            session,
+            handle_slots,
+            request,
+            &[PID_TAG_ADDITIONAL_REN_ENTRY_IDS],
+        )
+        .await;
+        set_properties_object = input_object(session, handle_slots, request).cloned();
+    }
     let delegate_freebusy_mutation = matches!(
         set_properties_object.as_ref(),
         Some(MapiObject::DelegateFreeBusyMessage { .. })
@@ -391,6 +406,15 @@ pub(super) async fn append_delete_properties_response<S>(
         .into_iter()
         .map(|tag| session.normalize_named_property_tag(tag))
         .collect::<Vec<_>>();
+    hydrate_folder_handle_properties_for_request(
+        store,
+        principal,
+        session,
+        handle_slots,
+        request,
+        &property_tags,
+    )
+    .await;
     let object = input_object(session, handle_slots, request).cloned();
     let delegate_freebusy_mutation = matches!(
         object.as_ref(),

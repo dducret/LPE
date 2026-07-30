@@ -2111,6 +2111,72 @@ async fn mapi_over_http_ipm_subtree_ost_identity_survives_reconnect() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_open_folder_defers_profile_reads_until_getprops() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let inbox_identity_id =
+        crate::mapi_mailstore::virtual_special_mailbox_id(crate::mapi::identity::INBOX_FOLDER_ID);
+    let inbox_folder_id = store.mapi_identities.lock().unwrap()[&inbox_identity_id];
+    let profile_reads = store.mapi_folder_profile_property_reads.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    profile_reads.store(0, std::sync::atomic::Ordering::SeqCst);
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, inbox_folder_id);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        profile_reads.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "[MS-OXCFOLD] section 3.2.5.1: bare RopOpenFolder must not load properties"
+    );
+
+    let mut get_rops = Vec::new();
+    append_rop_open_folder(&mut get_rops, 0, 1, inbox_folder_id);
+    get_rops.extend_from_slice(&[0x07, 0x00, 0x01]); // RopGetPropertiesSpecific
+    get_rops.extend_from_slice(&4096u16.to_le_bytes());
+    get_rops.extend_from_slice(&1u16.to_le_bytes());
+    get_rops.extend_from_slice(&0x36DA_0102u32.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&get_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        profile_reads.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the requested persisted ExtendedFolderFlags value must still be loaded"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_folder_extended_flags_survive_reconnect() {
     let account = FakeStore::account();
     let store = FakeStore {
@@ -2423,6 +2489,28 @@ async fn mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_acr
         !contains_bytes(&get_response_rops, &entries[4]),
         "the stale Junk EntryID must not be readvertised from the profile"
     );
+
+    let mut get_all_rops = Vec::new();
+    append_rop_open_folder(
+        &mut get_all_rops,
+        0,
+        1,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    );
+    get_all_rops.extend_from_slice(&[0x08, 0x00, 0x01, 0x00, 0x10, 0x01, 0x00]);
+    let get_all_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &reconnect_headers,
+            &execute_body(&rop_buffer(&get_all_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let get_all_response_rops = response_rops_from_execute_response(get_all_response).await;
+    assert!(contains_bytes(
+        &get_all_response_rops,
+        &expected_profile_value
+    ));
 }
 
 #[tokio::test]
