@@ -1,8 +1,9 @@
 use super::*;
 
-// Profile values are optional Outlook UI-state overlays. Allow an indexed
-// remote or transiently loaded database read, but bound each OpenFolder read.
-const OPTIONAL_FOLDER_PROFILE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+// Profile values are optional Outlook UI-state overlays. Do not let a slow
+// read consume Outlook's Execute deadline while opening a folder.
+const OPTIONAL_FOLDER_PROFILE_READ_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(100);
 
 pub(super) fn private_create_folder_is_existing_response_flag() -> bool {
     true

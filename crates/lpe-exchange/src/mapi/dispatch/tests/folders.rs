@@ -3,11 +3,14 @@ use super::*;
 
 #[tokio::test]
 async fn optional_folder_profile_read_returns_none_for_non_returning_read() {
-    let values =
-        super::super::folders::optional_folder_profile_read::<Vec<u8>>(std::future::pending())
-            .await;
+    let values = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        super::super::folders::optional_folder_profile_read::<Vec<u8>>(std::future::pending()),
+    )
+    .await
+    .expect("optional profile read must not consume the OpenFolder deadline");
 
-    assert!(values.is_none());
+    assert_eq!(values, None);
 }
 
 #[test]

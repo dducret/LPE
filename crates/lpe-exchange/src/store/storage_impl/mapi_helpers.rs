@@ -637,7 +637,7 @@ async fn repair_stale_mapi_object_identities(
     .bind(tenant_id)
     .bind(account_id)
     .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
-    .bind(preserved_mailbox_identity_ids)
+    .bind(&preserved_checkpoint_mailbox_ids)
     .execute(&mut **tx)
     .await?
     .rows_affected();

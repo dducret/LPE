@@ -2117,6 +2117,13 @@ async fn mapi_over_http_folder_extended_flags_survive_reconnect() {
         session: Some(account.clone()),
         ..Default::default()
     };
+    store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let inbox_identity_id =
+        crate::mapi_mailstore::virtual_special_mailbox_id(crate::mapi::identity::INBOX_FOLDER_ID);
+    let inbox_folder_id = store.mapi_identities.lock().unwrap()[&inbox_identity_id];
     let stored_folder_profile_values = store.mapi_folder_profile_property_values.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -2145,7 +2152,7 @@ async fn mapi_over_http_folder_extended_flags_survive_reconnect() {
     let mut set_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut set_rops, test_mapi_folder_id(5));
+    append_mapi_wire_id(&mut set_rops, inbox_folder_id);
     set_rops.push(0);
     set_rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on Inbox
@@ -2186,7 +2193,7 @@ async fn mapi_over_http_folder_extended_flags_survive_reconnect() {
     let mut get_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut get_rops, test_mapi_folder_id(5));
+    append_mapi_wire_id(&mut get_rops, inbox_folder_id);
     get_rops.push(0);
     get_rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific on reopened Inbox
