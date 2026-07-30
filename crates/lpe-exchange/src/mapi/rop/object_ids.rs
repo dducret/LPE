@@ -1,6 +1,7 @@
 use super::{rop_error_response, write_object_id, write_u32, RopRequest};
 use crate::mapi::identity::{
-    self, long_term_id_from_object_id, object_id_from_long_term_id_with_replica_guids,
+    self, long_term_id_from_object_id, object_id_from_long_term_id,
+    object_id_from_long_term_id_with_replica_guids,
 };
 use crate::mapi::tables::is_advertised_special_folder;
 use crate::mapi::wire::RopId;
@@ -25,9 +26,11 @@ pub(in crate::mapi) fn rop_id_from_long_term_id_response(
     let Some(long_term_id) = request.long_term_id() else {
         return rop_error_response(0x44, request.response_handle_index(), 0x8004_0102);
     };
-    let Some(object_id) =
-        object_id_from_long_term_id_with_replica_guids(long_term_id, replica_guid_aliases)
-            .or_else(|| stale_special_folder_object_id_from_long_term_id(long_term_id))
+    let Some(object_id) = object_id_from_long_term_id(long_term_id)
+        .or_else(|| {
+            object_id_from_long_term_id_with_replica_guids(long_term_id, replica_guid_aliases)
+        })
+        .or_else(|| stale_special_folder_object_id_from_long_term_id(long_term_id))
     else {
         return rop_error_response(0x44, request.response_handle_index(), 0x8004_010F);
     };

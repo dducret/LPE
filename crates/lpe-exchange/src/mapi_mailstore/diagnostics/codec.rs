@@ -1139,7 +1139,7 @@ pub(crate) fn replguid_globset_counters(value: &[u8]) -> Result<Vec<u64>, String
     if value.len() < 17 {
         return Err("missing_replica_guid".to_string());
     }
-    if value[..16] != STORE_REPLICA_GUID {
+    if value[..16] != crate::mapi::identity::current_store_replica_guid() {
         return Err("unexpected_replica_guid".to_string());
     }
 
@@ -1287,7 +1287,7 @@ pub(super) fn coalesced_u8_ranges(mut values: Vec<u8>) -> Vec<(u8, u8)> {
 }
 
 pub(super) fn counter_from_xid(value: &[u8]) -> Option<u64> {
-    if value.len() != 22 || value[..16] != STORE_REPLICA_GUID {
+    if value.len() != 22 || value[..16] != crate::mapi::identity::current_store_replica_guid() {
         return None;
     }
     crate::mapi::identity::global_counter_from_globcnt(value.get(16..22)?)

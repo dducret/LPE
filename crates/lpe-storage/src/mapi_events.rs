@@ -7,17 +7,19 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::{
+    mapi_store_identity::{
+        allocate_mapi_store_global_counter_in_tx, ensure_mapi_mailbox_replica_in_tx,
+        MAPI_FIRST_GLOBAL_COUNTER, MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER,
+        MAPI_MAX_GLOBAL_COUNTER,
+    },
     AccessibleEvent, CalendarEventAttachment, CanonicalChangeCategory, CollaborationRights,
     MapiEventAttachmentChanges, Storage, UpsertClientEventInput,
 };
 use imported_identity::{allocate_mapi_event_identity_in_tx, validate_imported_identity};
 
-pub(crate) const MAX_MAPI_GLOBAL_COUNTER: u64 = 0x7FFF_FFFF_FFFF;
-pub(crate) const FIRST_RESERVED_HIGH_GLOBAL_COUNTER: u64 = 0x7FFF_FE00_0000;
-pub(crate) const FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER: u64 = 43;
-pub(crate) const MAPI_STORE_REPLICA_GUID: [u8; 16] = [
-    0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f, 0x10,
-];
+pub(crate) const MAX_MAPI_GLOBAL_COUNTER: u64 = MAPI_MAX_GLOBAL_COUNTER;
+pub(crate) const FIRST_RESERVED_HIGH_GLOBAL_COUNTER: u64 = MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER;
+pub(crate) const FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER: u64 = MAPI_FIRST_GLOBAL_COUNTER;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MapiEventReminderPatch {
@@ -1274,50 +1276,28 @@ async fn rotate_mapi_event_identities_in_tx(
             bail!("stored MAPI Event change number is outside the dynamic GLOBCNT range");
         }
         let predecessor_change_list = identity.get::<Vec<u8>, _>("predecessor_change_list");
-        let replica = sqlx::query(
-            r#"
-            UPDATE mapi_mailbox_replicas
-            SET next_global_counter = next_global_counter + 1,
-                updated_at = NOW()
-            WHERE tenant_id = $1
-              AND account_id = $2
-            RETURNING replica_guid, next_global_counter - 1 AS change_number
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(account_id)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or_else(|| anyhow!("MAPI mailbox replica is missing for an Event identity"))?;
-        let change_number = replica.get::<i64, _>("change_number");
-        if change_number <= 0
-            || change_number as u64 >= FIRST_RESERVED_HIGH_GLOBAL_COUNTER
-            || change_number as u64 > MAX_MAPI_GLOBAL_COUNTER
-        {
-            bail!("MAPI dynamic global counter space exhausted");
-        }
-        let change_number = change_number as u64;
+        let (store_identity, change_number) = allocate_mapi_store_global_counter_in_tx(tx).await?;
+        ensure_mapi_mailbox_replica_in_tx(tx, *tenant_id, account_id, store_identity).await?;
         let principal_imported_identity =
             imported_identity.filter(|_| imported_principal_account_id == Some(account_id));
-        let (change_key, predecessor_change_list) = if let Some(imported) =
-            principal_imported_identity
-        {
-            // [MS-OXCFXICS] section 3.1.5.3: retain the client CK/PCL while
-            // assigning a distinct server-side CN to the imported change.
-            if source_key != imported.source_key {
-                bail!("MAPI Event SourceKey changed before the imported update");
-            }
-            imported_identity_applied = true;
-            (
-                imported.change_key.clone(),
-                imported.predecessor_change_list.clone(),
-            )
-        } else {
-            let change_key = mapi_change_key(replica.get::<Uuid, _>("replica_guid"), change_number);
-            let predecessor_change_list =
-                merge_predecessor_change_list(&predecessor_change_list, &change_key)?;
-            (change_key, predecessor_change_list)
-        };
+        let (change_key, predecessor_change_list) =
+            if let Some(imported) = principal_imported_identity {
+                // [MS-OXCFXICS] section 3.1.5.3: retain the client CK/PCL while
+                // assigning a distinct server-side CN to the imported change.
+                if source_key != imported.source_key {
+                    bail!("MAPI Event SourceKey changed before the imported update");
+                }
+                imported_identity_applied = true;
+                (
+                    imported.change_key.clone(),
+                    imported.predecessor_change_list.clone(),
+                )
+            } else {
+                let change_key = mapi_change_key(store_identity.replica_guid, change_number);
+                let predecessor_change_list =
+                    merge_predecessor_change_list(&predecessor_change_list, &change_key)?;
+                (change_key, predecessor_change_list)
+            };
         let updated = sqlx::query(
             r#"
             UPDATE mapi_object_identities

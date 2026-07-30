@@ -790,7 +790,7 @@ pub(in crate::mapi) fn serialize_logon_row(
 pub(in crate::mapi) fn serialized_replid_guid_map() -> Vec<u8> {
     let mut value = Vec::with_capacity(18);
     value.extend_from_slice(&(STORE_REPLICA_ID as u16).to_le_bytes());
-    value.extend_from_slice(&crate::mapi::identity::STORE_REPLICA_GUID);
+    value.extend_from_slice(&crate::mapi::identity::current_store_replica_guid());
     value
 }
 

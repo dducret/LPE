@@ -230,6 +230,10 @@ async fn postgres_mapi_calendar_fixture() -> anyhow::Result<Option<PostgresMapiF
         )
         .await?;
     sqlx::raw_sql(STORAGE_SCHEMA_SQL).execute(&pool).await?;
+    sqlx::query("UPDATE mapi_store_identity SET replica_guid = $1 WHERE singleton = TRUE")
+        .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+        .execute(&pool)
+        .await?;
 
     let tenant_id = Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap();
     let domain_id = Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap();
@@ -1424,11 +1428,10 @@ async fn mapi_navigation_shortcut_import_commits_content_and_identity_atomically
     let replica_allocation_floor = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT next_global_counter
-        FROM mapi_mailbox_replicas
-        WHERE account_id = $1
+        FROM mapi_store_identity
+        WHERE singleton = TRUE
         "#,
     )
-    .bind(fixture.account_id)
     .fetch_one(fixture.storage.pool())
     .await
     .unwrap();
@@ -1804,11 +1807,10 @@ async fn mapi_navigation_shortcut_import_commits_content_and_identity_atomically
     let unreserved_counter = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT next_global_counter
-        FROM mapi_mailbox_replicas
-        WHERE account_id = $1
+        FROM mapi_store_identity
+        WHERE singleton = TRUE
         "#,
     )
-    .bind(fixture.account_id)
     .fetch_one(fixture.storage.pool())
     .await
     .unwrap() as u64;
@@ -1868,10 +1870,10 @@ async fn mapi_navigation_shortcut_import_commits_content_and_identity_atomically
     .unwrap();
     let unreserved_source_rejected = unreserved_result.is_err() && unreserved_writes == 0;
 
-    // A high-water mark does not prove that a lower counter belongs to a
-    // range actually returned by RopGetLocalReplicaIds. Remove the exact
-    // reservation record while retaining next_global_counter to model that
-    // semantic gap and require the import to reject it without writes.
+    // The singleton allocation high-water does not prove that a lower
+    // counter belongs to a range actually returned by RopGetLocalReplicaIds.
+    // Remove the exact reservation record and require the import to reject
+    // it without writes.
     sqlx::query(
         r#"
         DELETE FROM mapi_local_replica_id_ranges
@@ -2084,11 +2086,10 @@ async fn mapi_navigation_shortcut_delete_tombstones_identity_and_replay_is_objec
     let next_counter_after_delete = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT next_global_counter
-        FROM mapi_mailbox_replicas
-        WHERE account_id = $1
+        FROM mapi_store_identity
+        WHERE singleton = TRUE
         "#,
     )
-    .bind(fixture.account_id)
     .fetch_one(fixture.storage.pool())
     .await
     .unwrap();
@@ -2156,11 +2157,10 @@ async fn mapi_navigation_shortcut_delete_tombstones_identity_and_replay_is_objec
     let next_counter_after_replay = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT next_global_counter
-        FROM mapi_mailbox_replicas
-        WHERE account_id = $1
+        FROM mapi_store_identity
+        WHERE singleton = TRUE
         "#,
     )
-    .bind(fixture.account_id)
     .fetch_one(fixture.storage.pool())
     .await
     .unwrap();
@@ -2631,65 +2631,19 @@ async fn postgres_mapi_sync_checkpoint_ignores_and_refreshes_expired_rows() {
 }
 
 #[tokio::test]
-async fn mapi_identity_allocator_ignores_high_reserved_counters() {
+async fn mapi_identity_allocator_rejects_an_exhausted_global_counter() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;
     };
     let storage = fixture.storage.clone();
     let account_id = fixture.account_id;
-    let tenant_id = sqlx::query_scalar::<_, Uuid>(
-        r#"
-        SELECT tenant_id
-        FROM accounts
-        WHERE id = $1
-        "#,
-    )
-    .bind(account_id)
-    .fetch_one(storage.pool())
-    .await
-    .unwrap();
-    let high_counter = crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER - 1;
-    let high_identity_id = Uuid::parse_str("21000000-0000-0000-0000-000000000001").unwrap();
-    let (high_object_id, source_key, change_key, instance_key) =
-        crate::mapi::identity::persisted_identity_material(high_counter);
-    sqlx::query(
-        r#"
-        INSERT INTO mapi_object_identities (
-            tenant_id, account_id, object_kind, canonical_id, mapi_global_counter,
-            mapi_object_id, source_key, change_key, instance_key,
-            mapi_change_number, predecessor_change_list
-        )
-        VALUES ($1, $2, 'associated_config', $3, $4, $5, $6, $7, $8, $9, $10)
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind(high_identity_id)
-    .bind(high_counter as i64)
-    .bind(high_object_id as i64)
-    .bind(source_key)
-    .bind(change_key)
-    .bind(instance_key)
-    .bind(high_counter as i64)
-    .bind(mapi_mailstore::predecessor_change_list(high_counter))
-    .execute(storage.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        r#"
-        UPDATE mapi_mailbox_replicas
-        SET next_global_counter = $3
-        WHERE tenant_id = $1 AND account_id = $2
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind((crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 1) as i64)
-    .execute(storage.pool())
-    .await
-    .unwrap();
+    sqlx::query("UPDATE mapi_store_identity SET next_global_counter = $1 WHERE singleton = TRUE")
+        .bind(crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
+        .execute(storage.pool())
+        .await
+        .unwrap();
 
-    let allocated = storage
+    let error = storage
         .fetch_or_allocate_mapi_identities(
             account_id,
             &[MapiIdentityRequest {
@@ -2700,25 +2654,10 @@ async fn mapi_identity_allocator_ignores_high_reserved_counters() {
             }],
         )
         .await
-        .unwrap()
-        .remove(0);
-    let allocated_counter =
-        crate::mapi::identity::global_counter_from_store_id(allocated.object_id).unwrap();
-    let next_counter = sqlx::query_scalar::<_, i64>(
-        r#"
-        SELECT next_global_counter
-        FROM mapi_mailbox_replicas
-        WHERE tenant_id = $1 AND account_id = $2
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .fetch_one(storage.pool())
-    .await
-    .unwrap() as u64;
-
-    assert!(allocated_counter < crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER);
-    assert!(next_counter < crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER);
+        .expect_err("the global MAPI allocator must reject exhaustion");
+    assert!(error
+        .to_string()
+        .contains("MAPI global counter space exhausted"));
 
     fixture.cleanup().await.unwrap();
 }

@@ -329,7 +329,7 @@ used_for = [
   "PidTagContainerFlags, PidTagAddressBookContainerId, and PidTagAddressBookIsMaster semantics",
   "Bounded NSPI address-book object property projection audit row",
   "Calendar navigation shortcut owner EntryID validation",
-  "PidTagDisplayTypeEx and PidTagAddressBookRoomContainers NSPI projection",
+  "PidTagDisplayTypeEx, PidTagAddressBookRoomContainers, and fixed PidTagMappingSignature NSPI projection",
 ]
 sections = [
   "2.2 Message Syntax",
@@ -342,6 +342,7 @@ sections = [
   "2.2.3 Properties that Apply to All Address Book Objects",
   "2.2.3.2 PidTagEntryId",
   "2.2.3.12 PidTagDisplayTypeEx",
+  "2.2.3.32 PidTagMappingSignature",
   "2.2.7.1 PidTagAddressBookRoomContainers",
 ]
 
@@ -1469,9 +1470,10 @@ published_version = "2025-05-20"
 local_cache = "docs/microsoft/cache/MS-OXCSTOR.pdf"
 sha256 = "c4c2fd644d533c3c1ed20646096b91f4d487f60f75ad2b922cc13d5d5fa5b67c"
 used_for = [
-  "Private mailbox and public-folder store logon, receive-folder bootstrap, store-state probes, and public-folder per-user identity lookup",
+  "Private mailbox and public-folder store logon, receive-folder bootstrap, store-state probes, public-folder per-user identity lookup, and database-wide MAPI replica initialization",
 ]
 sections = [
+  "3.2.3 Initialization",
   "2.2.1.1 RopLogon ROP",
   "2.2.1.1.1 RopLogon ROP Request Buffer",
   "2.2.1.1.3 RopLogon ROP Success Response Buffer for Private Mailbox",

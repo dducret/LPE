@@ -80,6 +80,18 @@ fn navigation_shortcut_message(
 }
 
 impl MapiMailStoreSnapshot {
+    pub(crate) fn with_identity_codec(
+        mut self,
+        identity_codec: crate::mapi::identity::MapiIdentityCodec,
+    ) -> Self {
+        self.identity_codec = identity_codec;
+        self
+    }
+
+    pub(crate) fn identity_codec(&self) -> &crate::mapi::identity::MapiIdentityCodec {
+        &self.identity_codec
+    }
+
     pub(crate) fn with_mailbox_content_commit_times(
         mut self,
         commit_times: Vec<crate::store::MapiMailboxContentCommitTime>,

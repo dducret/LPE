@@ -183,10 +183,21 @@ where
         return Err(anyhow!("RPC/HTTP EMSMDB ROP payload is empty"));
     }
 
+    let identity_scope = load_mapi_identity_scope(store, principal.account_id).await?;
     refresh_persisted_special_folder_aliases(store, principal, &mut session).await?;
-    let access_plan = plan_mapi_store_access(&session, rop_buffer);
-    let mut snapshot =
-        load_mapi_store_for_access_plan(store, principal.account_id, &access_plan, 500).await?;
+    let access_plan = crate::mapi::identity::with_current_mapi_identity_codec(
+        identity_scope.codec.clone(),
+        async { plan_mapi_store_access(&session, rop_buffer) },
+    )
+    .await;
+    let mut snapshot = load_mapi_store_for_access_plan(
+        store,
+        principal.account_id,
+        &identity_scope,
+        &access_plan,
+        500,
+    )
+    .await?;
     let mailboxes = snapshot.mailboxes();
     let emails = snapshot.emails();
     let Some(mut session) = remove_session(&session_id) else {
@@ -201,23 +212,26 @@ where
         store_session(session_id, session);
         return Err(error);
     }
-    let rop_buffer = execute_rops(
-        store,
-        principal,
-        "rpc-http",
-        &mut session,
-        &mailboxes,
-        &emails,
-        &mut snapshot,
-        validator,
-        rop_buffer,
-        0,
-        false,
-        0,
-        "rpc_http_request_not_summarized",
-        "",
-        "",
-        "rpc_http_request_not_summarized",
+    let rop_buffer = crate::mapi::identity::with_current_mapi_identity_codec(
+        snapshot.identity_codec().clone(),
+        execute_rops(
+            store,
+            principal,
+            "rpc-http",
+            &mut session,
+            &mailboxes,
+            &emails,
+            &mut snapshot,
+            validator,
+            rop_buffer,
+            0,
+            false,
+            0,
+            "rpc_http_request_not_summarized",
+            "",
+            "",
+            "rpc_http_request_not_summarized",
+        ),
     )
     .await;
     store_session(session_id, session);

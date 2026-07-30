@@ -171,6 +171,33 @@ build_web_app() {
   fi
 }
 
+canonical_schema_shape_is_current() {
+  local database_url="$1"
+  local shape_counts
+  local identity_version_column_count
+  local calendar_event_lifecycle_column_count
+  local calendar_event_identity_moves_table
+  local deleted_calendar_event_constraint_count
+
+  shape_counts="$(
+    psql "${database_url}" -X -v ON_ERROR_STOP=1 -At -F '|' -c "SELECT (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END), (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at') AND is_nullable = CASE column_name WHEN 'lifecycle_state' THEN 'NO' WHEN 'deleted_at' THEN 'YES' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' END), (SELECT to_regclass('public.mapi_calendar_event_identity_moves')), (SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%');"
+  )" || return 1
+  IFS='|' read -r identity_version_column_count calendar_event_lifecycle_column_count calendar_event_identity_moves_table deleted_calendar_event_constraint_count <<<"${shape_counts}" || return 1
+
+  [[ "${identity_version_column_count}" == "2" \
+    && "${calendar_event_lifecycle_column_count}" == "2" \
+    && "${calendar_event_identity_moves_table}" == "mapi_calendar_event_identity_moves" \
+    && "${deleted_calendar_event_constraint_count}" == "2" ]] \
+    || return 1
+  [[ "$(mapi_local_replica_range_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_outlook_cache_fidelity_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_identity_key_constraint_count "${database_url}")" == "3" ]] || return 1
+  [[ "$(mapi_calendar_event_move_change_key_constraint_count "${database_url}")" == "2" ]] || return 1
+  [[ "$(mapi_active_source_key_index_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_special_folder_alias_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mapi_store_identity_shape_ok "${database_url}")" == "1" ]] || return 1
+}
+
 git config --global --add safe.directory "${SRC_DIR}" || true
 
 RUSTUP_BIN="$(command -v rustup || true)"
@@ -220,16 +247,6 @@ if ! command -v psql >/dev/null 2>&1; then
 fi
 
 SCHEMA_FILE="${SRC_DIR}/crates/lpe-storage/sql/schema.sql"
-SOURCE_SCHEMA_VERSION="0.5.0-sql-v1"
-SCHEMA_051_PREFLIGHT_FILE="${SRC_DIR}/crates/lpe-storage/sql/updates/0.5.0-sql-v1-to-0.5.1-sql-preflight.sql"
-OUTLOOK_CACHE_FIDELITY_UPDATE_FILE="${SRC_DIR}/crates/lpe-storage/sql/updates/0.5.0-sql-v1-outlook-cache-fidelity.sql"
-SCHEMA_051_UPDATE_FILE="${SRC_DIR}/crates/lpe-storage/sql/updates/0.5.0-sql-v1-to-0.5.1-sql.sql"
-for required_schema_update in "${SCHEMA_051_PREFLIGHT_FILE}" "${OUTLOOK_CACHE_FIDELITY_UPDATE_FILE}" "${SCHEMA_051_UPDATE_FILE}"; do
-  if [[ ! -f "${required_schema_update}" ]]; then
-    echo "Required schema update file not found: ${required_schema_update}" >&2
-    exit 1
-  fi
-done
 EXPECTED_SCHEMA_VERSION="$(
   awk -F"'" '/schema_version TEXT NOT NULL CHECK/ { print $2; exit }' "${SCHEMA_FILE}"
 )"
@@ -237,194 +254,29 @@ if [[ -z "${EXPECTED_SCHEMA_VERSION}" ]]; then
   echo "Unable to read expected schema version from ${SCHEMA_FILE}" >&2
   exit 1
 fi
+EXPECTED_RELEASE_VERSION="${EXPECTED_SCHEMA_VERSION%-sql}"
 
 INSTALLED_SCHEMA_VERSION="$(
   psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE"
 )" || {
-  echo "Unable to read installed schema metadata. LPE 0.5.1 requires a database initialized with init-schema.sh or an exact 0.5.0-sql-v1 schema." >&2
+  echo "Unable to read installed schema metadata. LPE ${EXPECTED_RELEASE_VERSION} requires a database initialized with init-schema.sh." >&2
   exit 1
 }
 
-MIGRATE_SCHEMA_FROM_050=false
-case "${INSTALLED_SCHEMA_VERSION}" in
-  "${EXPECTED_SCHEMA_VERSION}")
-    ;;
-  "${SOURCE_SCHEMA_VERSION}")
-    MIGRATE_SCHEMA_FROM_050=true
-    ;;
-  *)
-    echo "Installed schema version ${INSTALLED_SCHEMA_VERSION} cannot be upgraded to ${EXPECTED_SCHEMA_VERSION}." >&2
-    echo "Only ${SOURCE_SCHEMA_VERSION} can be migrated in place; upgrades from releases before LPE 0.5.0 remain unsupported. Initialize a new empty database with init-schema.sh." >&2
-    exit 1
-    ;;
-esac
-
-if [[ "${MIGRATE_SCHEMA_FROM_050}" == "true" ]]; then
-  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -f "${SCHEMA_051_PREFLIGHT_FILE}" || {
-    echo "The ${SOURCE_SCHEMA_VERSION} database does not have the supported late canonical physical shape. Initialize a fresh LPE 0.5.1 database with init-schema.sh." >&2
-    exit 1
-  }
-  SOURCE_LOCAL_REPLICA_TABLE_COUNT="$(
-    psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name IN ('mapi_local_replica_id_ranges', 'mapi_local_replica_deleted_ranges')"
-  )" || {
-    echo "Unable to inspect preexisting MAPI local-replica tables." >&2
-    exit 1
-  }
-  if [[ "${SOURCE_LOCAL_REPLICA_TABLE_COUNT}" == "2" ]]; then
-    SOURCE_LOCAL_REPLICA_RANGE_SHAPE_OK="$(
-      mapi_local_replica_range_shape_ok "${DATABASE_URL}"
-    )" || {
-      echo "Unable to inspect the preexisting MAPI local-replica table shape." >&2
-      exit 1
-    }
-    if [[ "${SOURCE_LOCAL_REPLICA_RANGE_SHAPE_OK}" != "1" ]]; then
-      echo "The existing MAPI local-replica tables are incomplete. Initialize a fresh LPE 0.5.1 database with init-schema.sh." >&2
-      exit 1
-    fi
-  elif [[ "${SOURCE_LOCAL_REPLICA_TABLE_COUNT}" != "0" ]]; then
-    echo "The MAPI local-replica tables are only partially present. Initialize a fresh LPE 0.5.1 database with init-schema.sh." >&2
-    exit 1
-  fi
-
-  if systemctl is-active --quiet "${SERVICE_NAME}"; then
-    systemctl stop "${SERVICE_NAME}"
-  else
-    echo "Service ${SERVICE_NAME} is already inactive."
-  fi
-
-  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -f "${OUTLOOK_CACHE_FIDELITY_UPDATE_FILE}" || {
-    echo "Unable to prepare ${SOURCE_SCHEMA_VERSION} with ${OUTLOOK_CACHE_FIDELITY_UPDATE_FILE}." >&2
-    exit 1
-  }
-fi
-
-MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK="$(
-  mapi_local_replica_range_shape_ok "${DATABASE_URL}"
-)" || {
-  echo "Unable to inspect MAPI local replica range table shape." >&2
-  exit 1
-}
-if [[ "${MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK}" != "1" ]]; then
-  echo "MAPI local replica range table shape is incomplete for ${EXPECTED_SCHEMA_VERSION}." >&2
-  echo "Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
-  exit 1
-fi
-
-MAPI_OUTLOOK_CACHE_FIDELITY_SHAPE_OK="$(
-  mapi_outlook_cache_fidelity_shape_ok "${DATABASE_URL}"
-)" || {
-  echo "Unable to inspect MAPI WLink/configuration FAI fidelity shape." >&2
-  exit 1
-}
-if [[ "${MAPI_OUTLOOK_CACHE_FIDELITY_SHAPE_OK}" != "1" ]]; then
-  echo "MAPI WLink/configuration FAI fidelity shape is incomplete for ${EXPECTED_SCHEMA_VERSION}." >&2
-  echo "Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
-  exit 1
-fi
-
-MAPI_IDENTITY_VERSION_COLUMN_COUNT="$(
-  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END"
-)" || {
-  echo "Unable to inspect MAPI identity version column shapes." >&2
-  exit 1
-}
-if [[ "${MAPI_IDENTITY_VERSION_COLUMN_COUNT}" != "2" ]]; then
-  echo "MAPI identity version column shapes are invalid for ${EXPECTED_SCHEMA_VERSION}; expected bigint/bytea NOT NULL." >&2
-  echo "Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
-  exit 1
-fi
-CALENDAR_EVENT_LIFECYCLE_COLUMN_COUNT="$(
-  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at') AND is_nullable = CASE column_name WHEN 'lifecycle_state' THEN 'NO' WHEN 'deleted_at' THEN 'YES' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' END"
-)" || {
-  echo "Unable to inspect Calendar Event lifecycle column shapes." >&2
-  exit 1
-}
-MAPI_CALENDAR_EVENT_IDENTITY_MOVES_TABLE="$(
-  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.mapi_calendar_event_identity_moves')"
-)" || {
-  echo "Unable to inspect the Calendar Event identity-move table." >&2
-  exit 1
-}
-DELETED_CALENDAR_EVENT_CONSTRAINT_COUNT="$(
-  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%'"
-)" || {
-  echo "Unable to inspect deleted Calendar object-kind constraints." >&2
-  exit 1
-}
-if [[ "${CALENDAR_EVENT_LIFECYCLE_COLUMN_COUNT}" != "2" \
-  || "${MAPI_CALENDAR_EVENT_IDENTITY_MOVES_TABLE}" != "mapi_calendar_event_identity_moves" \
-  || "${DELETED_CALENDAR_EVENT_CONSTRAINT_COUNT}" != "2" ]]; then
-  echo "Calendar Event Deleted Items lifecycle shape is incomplete for ${EXPECTED_SCHEMA_VERSION}." >&2
-  echo "Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
-  exit 1
-fi
-MAPI_IDENTITY_KEY_CONSTRAINT_COUNT="$(
-  mapi_identity_key_constraint_count "${DATABASE_URL}"
-)" || {
-  echo "Unable to inspect MAPI identity key constraints." >&2
-  exit 1
-}
-MAPI_CALENDAR_EVENT_MOVE_CHANGE_KEY_CONSTRAINT_COUNT="$(
-  mapi_calendar_event_move_change_key_constraint_count "${DATABASE_URL}"
-)" || {
-  echo "Unable to inspect Calendar Event move ChangeKey constraints." >&2
-  exit 1
-}
-if [[ "${MAPI_IDENTITY_KEY_CONSTRAINT_COUNT}" != "3" \
-  || "${MAPI_CALENDAR_EVENT_MOVE_CHANGE_KEY_CONSTRAINT_COUNT}" != "2" ]]; then
-  echo "MAPI identity ChangeKey constraints are incomplete for ${EXPECTED_SCHEMA_VERSION}." >&2
-  echo "Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
-  exit 1
-fi
-MAPI_ACTIVE_SOURCE_KEY_INDEX_SHAPE_OK="$(
-  mapi_active_source_key_index_shape_ok "${DATABASE_URL}"
-)" || {
-  echo "Unable to inspect the active MAPI SourceKey uniqueness index." >&2
-  exit 1
-}
-if [[ "${MAPI_ACTIVE_SOURCE_KEY_INDEX_SHAPE_OK}" != "1" ]]; then
-  echo "MAPI active SourceKey uniqueness index is incomplete for ${EXPECTED_SCHEMA_VERSION}." >&2
-  echo "Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
-  exit 1
-fi
-MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK="$(
-  mapi_special_folder_alias_shape_ok "${DATABASE_URL}"
-)" || {
-  echo "Unable to inspect MAPI special-folder alias schema." >&2
-  exit 1
-}
-if [[ "${MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK}" != "1" ]]; then
-  echo "MAPI special-folder alias schema is incomplete for ${EXPECTED_SCHEMA_VERSION}." >&2
-  echo "Initialize a fresh LPE 0.5.1 database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
-  exit 1
-fi
-
-if [[ "${MIGRATE_SCHEMA_FROM_050}" == "true" ]]; then
-  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 \
-    -c "SET lpe.schema_target_shape_validated = '0.5.1-sql'" \
-    -f "${SCHEMA_051_UPDATE_FILE}" || {
-    echo "Unable to migrate ${SOURCE_SCHEMA_VERSION} to ${EXPECTED_SCHEMA_VERSION} with ${SCHEMA_051_UPDATE_FILE}." >&2
-    exit 1
-  }
-fi
-
-INSTALLED_SCHEMA_VERSION="$(
-  psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE"
-)" || {
-  echo "Unable to verify schema metadata after the 0.5.1 transition." >&2
-  exit 1
-}
 if [[ "${INSTALLED_SCHEMA_VERSION}" != "${EXPECTED_SCHEMA_VERSION}" ]]; then
-  echo "Schema transition finished with ${INSTALLED_SCHEMA_VERSION}; expected ${EXPECTED_SCHEMA_VERSION}." >&2
+  echo "Installed schema version ${INSTALLED_SCHEMA_VERSION} does not match ${EXPECTED_SCHEMA_VERSION}." >&2
+  echo "LPE ${EXPECTED_RELEASE_VERSION} has no in-place schema upgrade path. Initialize a fresh empty database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
+  exit 1
+fi
+if ! canonical_schema_shape_is_current "${DATABASE_URL}"; then
+  echo "Installed schema ${EXPECTED_SCHEMA_VERSION} is incomplete. Initialize a fresh LPE ${EXPECTED_RELEASE_VERSION} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh." >&2
   exit 1
 fi
 
-if [[ "${MIGRATE_SCHEMA_FROM_050}" == "false" ]]; then
-  if systemctl is-active --quiet "${SERVICE_NAME}"; then
-    systemctl stop "${SERVICE_NAME}"
-  else
-    echo "Service ${SERVICE_NAME} is already inactive."
-  fi
+if systemctl is-active --quiet "${SERVICE_NAME}"; then
+  systemctl stop "${SERVICE_NAME}"
+else
+  echo "Service ${SERVICE_NAME} is already inactive."
 fi
 
 echo "Database schema ${EXPECTED_SCHEMA_VERSION} is current."

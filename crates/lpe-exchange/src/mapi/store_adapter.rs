@@ -13,7 +13,7 @@ use super::*;
 use crate::mapi_store;
 use crate::store::{
     MapiContentTableQuery, MapiContentTableSort, MapiContentTableSortField,
-    MapiIdentityLookupRecord, MapiIdentityRequest,
+    MapiIdentityLookupRecord, MapiIdentityRecord, MapiIdentityRequest,
 };
 use anyhow::Context;
 use lpe_storage::ReminderQuery;
@@ -22,9 +22,58 @@ mod access_plan;
 
 pub(in crate::mapi) use access_plan::*;
 
+pub(in crate::mapi) struct MapiIdentityScope {
+    mailboxes: Vec<JmapMailbox>,
+    mailbox_identity_records: Vec<MapiIdentityRecord>,
+    pub(in crate::mapi) codec: crate::mapi::identity::MapiIdentityCodec,
+}
+
+pub(in crate::mapi) async fn load_mapi_identity_scope<S>(
+    store: &S,
+    account_id: Uuid,
+) -> Result<MapiIdentityScope>
+where
+    S: ExchangeStore,
+{
+    let mailboxes = store
+        .ensure_jmap_system_mailboxes(account_id)
+        .await
+        .context("ensure MAPI system mailboxes")?;
+    let mailbox_requests = mapi_identity_requests_for_mailboxes(&mailboxes);
+    let mailbox_identity_records = store
+        .fetch_or_allocate_mapi_identities(account_id, &mailbox_requests)
+        .await
+        .context("allocate MAPI mailbox identities")?;
+    let store_identity = store
+        .fetch_mapi_store_identity()
+        .await
+        .context("fetch durable MAPI store identity")?;
+    let codec = crate::mapi::identity::MapiIdentityCodec::from_special_folder_identity_records(
+        store_identity.replica_guid,
+        &mailbox_requests,
+        &mailbox_identity_records,
+    )?;
+    for identity in &mailbox_identity_records {
+        if codec.is_special_canonical_id(&identity.canonical_id) {
+            continue;
+        }
+        crate::mapi::identity::remember_mapi_identity_with_source_key(
+            identity.canonical_id,
+            identity.object_id,
+            Some(identity.source_key.clone()),
+        );
+    }
+    Ok(MapiIdentityScope {
+        mailboxes,
+        mailbox_identity_records,
+        codec,
+    })
+}
+
 pub(in crate::mapi) async fn load_mapi_store_for_access_plan<S>(
     store: &S,
     account_id: Uuid,
+    identity_scope: &MapiIdentityScope,
     plan: &MapiAccessPlan,
     full_message_limit: u64,
 ) -> Result<MapiMailStoreSnapshot>
@@ -36,32 +85,12 @@ where
         return store
             .load_mapi_mail_store(account_id, full_message_limit)
             .await
-            .context("load full MAPI mail store snapshot");
+            .context("load full MAPI mail store snapshot")
+            .map(|snapshot| snapshot.with_identity_codec(identity_scope.codec.clone()));
     }
 
-    log_mapi_store_load_step(account_id, plan, "ensure system mailboxes", 0);
-    let mut mailboxes = store
-        .ensure_jmap_system_mailboxes(account_id)
-        .await
-        .context("ensure MAPI system mailboxes")?;
-    let mailbox_requests = mapi_identity_requests_for_mailboxes(&mailboxes);
-    log_mapi_store_load_step(
-        account_id,
-        plan,
-        "allocate mailbox identities",
-        mailbox_requests.len(),
-    );
-    let allocated_mailbox_identities = store
-        .fetch_or_allocate_mapi_identities(account_id, &mailbox_requests)
-        .await
-        .context("allocate MAPI mailbox identities")?;
-    for identity in &allocated_mailbox_identities {
-        crate::mapi::identity::remember_mapi_identity_with_source_key(
-            identity.canonical_id,
-            identity.object_id,
-            Some(identity.source_key.clone()),
-        );
-    }
+    let mut mailboxes = identity_scope.mailboxes.clone();
+    let allocated_mailbox_identities = &identity_scope.mailbox_identity_records;
 
     log_mapi_store_load_step(
         account_id,
@@ -802,6 +831,7 @@ where
         tasks,
         folder_permissions,
         &snapshot_identities,
+        &identity_scope.codec,
     )?
     .with_contact_identities(&snapshot_identities)?
     .with_contact_sync_versions(contact_sync_versions)
@@ -820,7 +850,8 @@ where
     .with_reminders(reminders)
     .with_content_windows(content_windows)
     .with_calendar_attachments(calendar_attachments)
-    .with_mailbox_content_commit_times(mailbox_content_commit_times);
+    .with_mailbox_content_commit_times(mailbox_content_commit_times)
+    .with_identity_codec(identity_scope.codec.clone());
     Ok(snapshot)
 }
 

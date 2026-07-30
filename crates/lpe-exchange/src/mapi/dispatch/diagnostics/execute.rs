@@ -305,7 +305,8 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
     if logon.present {
         let response_store_identity_matches_session = logon.mailbox_guid
             == principal.account_id.to_string()
-            && logon.replica_guid == bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID);
+            && logon.replica_guid
+                == bytes_to_hex(&crate::mapi::identity::current_store_replica_guid());
         tracing::debug!(
             rca_debug = true,
             adapter = "mapi",
@@ -332,7 +333,7 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
             expected_mailbox_guid = %principal.account_id,
             replid = %logon.replid,
             replica_guid = %logon.replica_guid,
-            expected_replica_guid = %bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID),
+            expected_replica_guid = %bytes_to_hex(&crate::mapi::identity::current_store_replica_guid()),
             response_store_identity_matches_session,
             parse_error = %logon.parse_error,
             message = "rca debug mapi logon response",

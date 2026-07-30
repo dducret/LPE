@@ -11,7 +11,10 @@ struct ScopedCalendarIdentities {
 }
 
 impl ScopedCalendarIdentities {
-    fn from_records(records: &[MapiIdentityRecord]) -> Self {
+    fn from_records(
+        records: &[MapiIdentityRecord],
+        identity_codec: &crate::mapi::identity::MapiIdentityCodec,
+    ) -> Self {
         let mut folders = HashMap::new();
         let mut events = HashMap::new();
         for record in records {
@@ -32,7 +35,7 @@ impl ScopedCalendarIdentities {
         Self {
             folders,
             events,
-            folder_versions: MapiFolderVersions::from_identity_records(records),
+            folder_versions: MapiFolderVersions::from_identity_records(records, identity_codec),
         }
     }
 
@@ -82,7 +85,10 @@ mod tests {
 
     #[test]
     fn default_calendar_uses_reserved_fid_without_an_identity_record() {
-        let identities = ScopedCalendarIdentities::from_records(&[]);
+        let identities = ScopedCalendarIdentities::from_records(
+            &[],
+            &crate::mapi::identity::MapiIdentityCodec::legacy_for_tests(),
+        );
 
         for collection_id in ["default", "calendar"] {
             assert_eq!(
@@ -96,7 +102,10 @@ mod tests {
 
     #[test]
     fn custom_calendar_fails_closed_without_a_principal_scoped_identity() {
-        let identities = ScopedCalendarIdentities::from_records(&[]);
+        let identities = ScopedCalendarIdentities::from_records(
+            &[],
+            &crate::mapi::identity::MapiIdentityCodec::legacy_for_tests(),
+        );
 
         assert!(identities
             .folder_id(&calendar_collection("82828282-8282-4282-9282-828282828282"))
@@ -163,8 +172,10 @@ impl MapiMailStoreSnapshot {
         tasks: Vec<ClientTask>,
         folder_permissions: Vec<MapiFolderPermission>,
         identity_records: &[MapiIdentityRecord],
+        identity_codec: &crate::mapi::identity::MapiIdentityCodec,
     ) -> Result<Self> {
-        let calendar_identities = ScopedCalendarIdentities::from_records(identity_records);
+        let calendar_identities =
+            ScopedCalendarIdentities::from_records(identity_records, identity_codec);
         Self::build(
             mailboxes,
             emails,
@@ -383,6 +394,7 @@ impl MapiMailStoreSnapshot {
             .collect();
         Ok(Self {
             folders,
+            identity_codec: crate::mapi::identity::MapiIdentityCodec::legacy_for_tests(),
             folder_versions: calendar_identities
                 .map(|identities| identities.folder_versions.clone())
                 .unwrap_or_default(),

@@ -1,74 +1,23 @@
 # Installation
 
 These installation instructions are aligned with the current repository schema
-`0.5.1-sql`.
+`0.5.2-sql`.
 
-New LPE `0.5.1` installations initialize an empty SQL database from the
-canonical schema. Databases from releases before 0.5.0 are not upgraded in
-place. `update-lpe.sh` accepts either the current `0.5.1-sql` schema or the
-late canonical physical form of the `0.5.0-sql-v1` source schema. A read-only
-`0.5.0-sql-v1-to-0.5.1-sql-preflight.sql` check rejects earlier physical forms
-carrying the same label before the service is stopped or data is changed. For
-the supported source, the updater runs
-`crates/lpe-storage/sql/updates/0.5.0-sql-v1-outlook-cache-fidelity.sql`,
-validates the target shape, then runs
-`crates/lpe-storage/sql/updates/0.5.0-sql-v1-to-0.5.1-sql.sql`. Both updates are
-forward-only, transactional, idempotent, and version-bounded. The first update
-adds the durable MAPI local-replica range tables, keeps
-each valid compact legacy WLink ordinal projection unchanged, and maps only
-integer values ending in the reserved `0x00` or `0xFF` byte to an injective
-five-byte value (four-byte big-endian integer followed by `0x80`). This follows
-the final-byte rule in [MS-OXOCFG] section 2.2.9.7 without collapsing distinct
-legacy integers. The migrated values and subsequent client-written ordinals
-are sorted lexicographically as binary strings; no numeric BIGINT ordering is
-promised. The update also adds
-nullable canonical columns for client-written Calendar shortcut properties,
-and makes the associated-configuration class/subject index non-unique so two
-distinct FAI identities are not collapsed. It leaves the source label
-unchanged. The second update changes only the validated source label to
-`0.5.1-sql` and requires the private validation marker set by `update-lpe.sh`;
-it is not a standalone operator command. Rerunning `update-lpe.sh` against the
-target label is safe. Earlier same-label
-physical forms and every other source label, including pre-0.5 versions, are
-rejected before the service is stopped or SQL is applied. Use
-`LPE_RESET_SCHEMA=true`
-only for an intentional destructive reset. `init-schema.sh` refuses to run while
-`lpe.service` (or `SERVICE_NAME`) is active, performs its public-schema reset and
-canonical schema application in one transaction, explicitly pins
-`search_path` to `public`, then validates the installed version and MAPI-column
-shape before announcing success. A failure during reset or schema application
-rolls back that transaction. `init-schema.sh`, `update-lpe.sh`, and
-`check-lpe.sh` ignore user `psql` startup files for their contract queries and
-validate both the schema label and the
-required durable MAPI identity version columns (`mapi_change_number` and
-`predecessor_change_list`), the Calendar Event lifecycle columns
-(`lifecycle_state` and `deleted_at`), and the
-`mapi_calendar_event_identity_moves` table used to preserve old/new MAPI
-identity lineage for Calendar moves to Deleted Items. They also require
-`mapi_local_replica_id_ranges` and `mapi_local_replica_deleted_ranges`; these
-remain child metadata of `mapi_mailbox_replicas` and never become parallel
-mailbox or collaboration state. They also require the binary WLink ordinal,
-the five nullable WLink client-property columns and their bounds, and the
-non-unique associated-configuration logical lookup index. The scripts also verify that
-the canonical change log and MAPI identity constraints accept the
-`deleted_calendar_event` object kind, that SourceKey and InstanceKey remain
-22-byte GIDs, and that Event identity and move ChangeKeys accept 17- through
-24-byte XIDs. The same scripts require `mapi_special_folder_aliases` with
-non-null account-scoped alias FID, canonical FID, 22-byte SourceKey, and
-separately allocated server-CN columns; bounded `REPLID 1` FID and CN ranges;
-alias-FID, SourceKey, and CN uniqueness; the account
-foreign key; and no uniqueness constraint on the canonical FID, because several
-Outlook profiles or OST replicas may map different client aliases to one
-canonical special folder. The alias table stores protocol identity only and
-does not duplicate Calendar, Contacts, mailbox, FAI, rights, or user-visible
-state. A database tagged `0.5.1-sql` but physically incomplete is therefore
-rejected.
-Initialization also refuses relations outside
-`public`, even for an intentional public-schema reset, because leaving them in
-place could create parallel state.
-The schema initializer creates the real platform tenant row
-`00000000-0000-0000-0000-000000000001` and the default storage pool/policy
-metadata; runtime bootstrap must not create string pseudo-tenants.
+New LPE `0.5.2` installations initialize an empty SQL database from the
+canonical schema with `init-schema.sh`. There is no in-place schema upgrade
+path to this baseline. `update-lpe.sh` accepts only a database whose installed
+label exactly matches the canonical schema label, verifies the required
+canonical physical shape, and rejects every other label or incomplete
+same-label database before it stops LPE or changes the database. Use a new empty database and
+`init-schema.sh` for a rebuilt deployment. `LPE_RESET_SCHEMA=true` is only for
+an intentional destructive reset.
+
+`init-schema.sh` refuses to run while `lpe.service` (or `SERVICE_NAME`) is
+active, resets and applies the canonical `public` schema in one transaction,
+then validates the installed schema before announcing success. The installer
+scripts use `psql -X` for their contract queries. Historical `0.5.0` and
+`0.5.1` update artifacts remain preserved for release history but are not an
+upgrade path to `0.5.2`.
 
 ### Debian Trixie
 
@@ -401,13 +350,13 @@ Files:
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
 - `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, rebuilds `lpe-cli`, rebuilds the web assets, redeploys them, restarts `lpe.service`, and reloads `nginx`
-- `update-lpe.sh` accepts the exact current `0.5.1-sql` schema or migrates the late canonical physical form of `0.5.0-sql-v1`; it preflights that source without mutation, stops an active LPE service only after acceptance, applies the reviewed physical update, validates the target shape, writes the new label, rebuilds code/web assets, and refuses pre-0.5, earlier same-label, or otherwise incomplete databases
+- `update-lpe.sh` accepts only the exact current `0.5.2-sql` schema label with its required canonical physical shape and rejects every other label or incomplete same-label database before stopping LPE or changing the database; it then rebuilds code and web assets and restarts the services
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
-- `init-schema.sh` refuses to reset while `lpe.service` (or `SERVICE_NAME`) is active, rejects relations in non-system schemas other than `public`, resets or creates `public`, pins `search_path` to that canonical schema, and applies the canonical `0.5.1-sql` schema, including the platform tenant UUID row and default storage pool/policy metadata, in one transaction; after commit it validates the installed schema version, the durable MAPI identity version columns, and the complete account-scoped special-folder alias shape before reporting success, and it requires an empty public schema unless `LPE_RESET_SCHEMA=true` requests an intentional destructive reset
+- `init-schema.sh` refuses to reset while `lpe.service` (or `SERVICE_NAME`) is active, rejects relations in non-system schemas other than `public`, resets or creates `public`, pins `search_path` to that canonical schema, and applies the canonical `0.5.2-sql` schema in one transaction; it requires an empty public schema unless `LPE_RESET_SCHEMA=true` requests an intentional destructive reset
 - `check-lpe.sh` verifies the installation, PostgreSQL, the exact schema version, required durable MAPI identity version columns, complete account-scoped special-folder alias shape, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
@@ -757,7 +706,7 @@ For public client auto-configuration, the exposed front end must remain `LPE-CT`
 - Outlook mobile uses `ActiveSync`; Outlook for Windows desktop uses `MAPI over HTTP` as the primary Exchange-account path. `IMAP` remains an optional compatibility profile, and deployments may independently enable EWS autodiscovery for Exchange-style mail, contacts, calendar, and task compatibility.
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
-- `MAPI over HTTP` routes are the classic Outlook desktop Exchange-account path; new 0.5.1 installations set `LPE_AUTOCONFIG_MAPI_ENABLED=true`, and capable Outlook clients receive the authenticated `/mapi/emsmdb` and `/mapi/nspi` endpoints. SOAP Exchange `GetUserSettings`, legacy `EXCH`, and legacy `EXPR` remain separately controlled; `EXPR` still requires the RPC proxy and legacy interoperability gate
+- `MAPI over HTTP` routes are the classic Outlook desktop Exchange-account path; new 0.5.2 installations set `LPE_AUTOCONFIG_MAPI_ENABLED=true`, and capable Outlook clients receive the authenticated `/mapi/emsmdb` and `/mapi/nspi` endpoints. SOAP Exchange `GetUserSettings`, legacy `EXCH`, and legacy `EXPR` remain separately controlled; `EXPR` still requires the RPC proxy and legacy interoperability gate
 - MAPI over HTTP session context, request-id replay protection, ROP handles, and FastTransfer / ICS handles are in-process state on the core `LPE` node. Multi-node deployments must keep `/mapi/emsmdb`, `/mapi/nspi`, and `/rpc/rpcproxy.dll` traffic sticky to the same active core node for the life of the MAPI session, or expect Outlook to reconnect through fresh `Connect` / `Bind` / `Logon` probes after a restart or failover.
 - Outlook Anywhere / RPC over HTTP is required when legacy `EXPR` is published; `/rpc/rpcproxy.dll` must be routed by `LPE-CT` to the core exchange adapter and must not be replaced by a static web-server response.
 - The public `/mapi/` and `/rpc/rpcproxy.dll` routes must use streaming proxy settings: long read/send timeouts, `proxy_buffering off`, `proxy_request_buffering off`, and `client_max_body_size 0`. For MAPI `NotificationWait`, this preserves the immediate `PROCESSING` and periodic `PENDING` frames required by MS-OXCMAPIHTTP §3.2.5.2. RCA `RPC_IN_DATA` opens a long upload channel with a very large advertised request body; without the explicit body-size override, nginx can reject the mailbox-store channel with `413` before the core service can drain it.
@@ -842,23 +791,14 @@ For later updates:
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
 
-`update-lpe.sh` first checks that the installed schema is either the current
-`0.5.1-sql` baseline or the exact `0.5.0-sql-v1` source label. For the old
-label, a read-only physical preflight accepts only its late canonical form.
-Every other version and every earlier same-label physical form is rejected
-without stopping LPE or mutating the database. For the supported source, the
-script then stops an active LPE service, applies the reviewed forward-only
-Outlook cache fidelity update, enforces the complete physical schema guards,
-and only then performs the transactional `0.5.0-sql-v1` to `0.5.1-sql` label
-transition. Running the update repeatedly is safe. Physically incomplete
-databases are rejected unless an explicit reviewed SQL update covers the
-missing shape;
-for those databases, point `DATABASE_URL` at a new empty database and run
-`init-schema.sh`. For a disposable or intentionally rebuilt node, set
-`LPE_RESET_SCHEMA=true`, stop `lpe.service`, then run `init-schema.sh`. The
-initializer refuses to run while `lpe.service` (or `SERVICE_NAME`) is active.
-This is destructive; the bounded 0.5.0-to-0.5.1 transition preserves canonical
-rows.
+`update-lpe.sh` first checks that the installed schema label is exactly the
+current `0.5.2-sql` baseline and validates its canonical physical shape. Every
+other label and an incomplete same-label database are rejected without stopping
+LPE or changing the database. There is no in-place upgrade path to this release.
+Point `DATABASE_URL` at a new empty database and run `init-schema.sh`.
+For a disposable or intentionally rebuilt node, set `LPE_RESET_SCHEMA=true`,
+stop `lpe.service`, then run `init-schema.sh`. The initializer refuses to run
+while `lpe.service` (or `SERVICE_NAME`) is active. This reset is destructive.
 
 To keep routine source updates faster, `update-lpe.sh` skips unchanged rebuild
 steps when the installed outputs already exist. It rebuilds the Rust service

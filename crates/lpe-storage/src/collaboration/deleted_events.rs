@@ -4,6 +4,11 @@ use uuid::Uuid;
 
 use crate::{
     mapi_events::{mapi_change_key, mapi_store_id, merge_predecessor_change_list},
+    mapi_store_identity::{
+        allocate_mapi_store_global_counter_in_tx, ensure_mapi_mailbox_replica_in_tx,
+        ensure_mapi_store_identity_in_tx, MAPI_FIRST_GLOBAL_COUNTER,
+        MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER, MAPI_MAX_GLOBAL_COUNTER,
+    },
     CanonicalChangeCategory, Storage,
 };
 
@@ -11,10 +16,6 @@ use super::{
     AccessibleEvent, MapiEventIdentityMove, MapiEventImportedMoveIdentity,
     MoveAccessibleEventToDeletedItemsResult,
 };
-
-const MAX_MAPI_GLOBAL_COUNTER: u64 = 0x7FFF_FFFF_FFFF;
-const FIRST_RESERVED_HIGH_GLOBAL_COUNTER: u64 = 0x7FFF_FE00_0000;
-const FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER: u64 = 43;
 
 impl Storage {
     pub async fn fetch_accessible_deleted_events(
@@ -240,11 +241,32 @@ async fn rekey_active_event_identities_in_tx(
         let imported_destination_counter = principal_imported_identity
             .map(imported_move_destination_global_counter)
             .transpose()?;
-        let minimum_change_number = imported_destination_counter
-            .and_then(|counter| counter.checked_add(1))
-            .unwrap_or(FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER);
         let (replica_guid, allocated_change_number) =
-            allocate_global_counter_in_tx(tx, tenant_id, account_id, minimum_change_number).await?;
+            allocate_global_counter_in_tx(tx, tenant_id, account_id).await?;
+        if let Some(destination_counter) = imported_destination_counter {
+            let reserved = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM mapi_local_replica_id_ranges
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND replica_guid = $3
+                      AND first_global_counter <= $4
+                      AND end_global_counter_exclusive > $4
+                )
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(replica_guid)
+            .bind(destination_counter as i64)
+            .fetch_one(&mut **tx)
+            .await?;
+            if !reserved {
+                bail!("imported Event move destination SourceKey was not locally reserved");
+            }
+        }
         let (
             new_global_counter,
             new_mapi_object_id,
@@ -400,7 +422,7 @@ fn imported_move_destination_global_counter(
     let mut counter_bytes = [0u8; 8];
     counter_bytes[2..].copy_from_slice(&identity.destination_source_key[16..]);
     let global_counter = u64::from_be_bytes(counter_bytes);
-    if !(FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER..FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+    if !(MAPI_FIRST_GLOBAL_COUNTER..MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
         .contains(&global_counter)
     {
         bail!("imported Event move destination GLOBCNT is outside the dynamic local range");
@@ -412,69 +434,16 @@ async fn allocate_global_counter_in_tx(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tenant_id: &Uuid,
     account_id: Uuid,
-    minimum_global_counter: u64,
 ) -> Result<(Uuid, u64)> {
-    sqlx::query(
-        r#"
-        UPDATE mapi_mailbox_replicas replica
-        SET next_global_counter = GREATEST(
-                replica.next_global_counter,
-                $3,
-                COALESCE(
-                    (
-                        SELECT MAX(GREATEST(
-                            identity.mapi_global_counter,
-                            identity.mapi_change_number
-                        )) + 1
-                        FROM mapi_object_identities identity
-                        WHERE identity.tenant_id = replica.tenant_id
-                          AND identity.account_id = replica.account_id
-                          AND identity.mapi_global_counter < $4
-                          AND identity.mapi_change_number < $4
-                    ),
-                    $3
-                )
-            ),
-            updated_at = NOW()
-        WHERE replica.tenant_id = $1
-          AND replica.account_id = $2
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind(minimum_global_counter as i64)
-    .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
-    .execute(&mut **tx)
-    .await?;
-    let allocated = sqlx::query(
-        r#"
-        UPDATE mapi_mailbox_replicas
-        SET next_global_counter = next_global_counter + 1,
-            updated_at = NOW()
-        WHERE tenant_id = $1
-          AND account_id = $2
-          AND next_global_counter >= $3
-          AND next_global_counter < $4
-        RETURNING replica_guid, next_global_counter - 1 AS global_counter
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind(minimum_global_counter as i64)
-    .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
-    .fetch_optional(&mut **tx)
-    .await?
-    .ok_or_else(|| anyhow!("MAPI dynamic global counter space exhausted"))?;
-    let global_counter = checked_positive_u64(
-        allocated.get::<i64, _>("global_counter"),
-        "MAPI global counter",
-    )?;
-    if global_counter > MAX_MAPI_GLOBAL_COUNTER
-        || global_counter >= FIRST_RESERVED_HIGH_GLOBAL_COUNTER
+    let store_identity = ensure_mapi_store_identity_in_tx(tx).await?;
+    ensure_mapi_mailbox_replica_in_tx(tx, *tenant_id, account_id, store_identity).await?;
+    let (_, global_counter) = allocate_mapi_store_global_counter_in_tx(tx).await?;
+    if global_counter > MAPI_MAX_GLOBAL_COUNTER
+        || global_counter >= MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER
     {
         bail!("MAPI dynamic global counter space exhausted");
     }
-    Ok((allocated.get::<Uuid, _>("replica_guid"), global_counter))
+    Ok((store_identity.replica_guid, global_counter))
 }
 
 fn checked_positive_u64(value: i64, label: &str) -> Result<u64> {

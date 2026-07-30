@@ -41,23 +41,9 @@ macro_rules! store_impl_mapi_special_folder_aliases {
                 }
                 let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
                 let mut tx = self.pool().begin().await?;
-                let reserved_end = sqlx::query_scalar::<_, i64>(
-                    r#"
-                    SELECT next_global_counter
-                    FROM mapi_mailbox_replicas
-                    WHERE tenant_id = $1
-                      AND account_id = $2
-                      AND replica_guid = $3
-                    FOR UPDATE
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(account_id)
-                .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
-                .fetch_optional(&mut *tx)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("MAPI mailbox replica was not initialized"))?
-                    as u64;
+                let store_identity =
+                    mapi_store_identity_for_account_in_tx(&mut tx, tenant_id, account_id)
+                        .await?;
                 let mut change_numbers = Vec::with_capacity(aliases.len());
                 for alias in aliases {
                     let alias_counter =
@@ -70,15 +56,27 @@ macro_rules! store_impl_mapi_special_folder_aliases {
                             counter >= crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
                         })
                         || alias_counter.is_none_or(|counter| {
-                            !(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
-                                ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+                            !(lpe_storage::mapi_store_identity::MAPI_FIRST_GLOBAL_COUNTER
+                                ..lpe_storage::mapi_store_identity::MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
                                 .contains(&counter)
-                                || counter >= reserved_end
                         })
-                        || crate::mapi::identity::object_id_from_source_key(&alias.source_key)
-                            != Some(alias.alias_folder_id)
+                        || alias.source_key.get(..16)
+                            != Some(store_identity.replica_guid.as_bytes().as_slice())
+                        || mapi_xid_global_counter(&alias.source_key).ok() != alias_counter
                     {
                         anyhow::bail!("invalid MAPI special-folder alias");
+                    }
+                    let alias_counter = alias_counter.expect("validated above");
+                    if !mapi_local_replica_counter_is_reserved_in_tx(
+                        &mut tx,
+                        tenant_id,
+                        account_id,
+                        store_identity.replica_guid,
+                        alias_counter,
+                    )
+                    .await?
+                    {
+                        anyhow::bail!("MAPI special-folder alias was not locally reserved");
                     }
                     let existing_alias = sqlx::query(
                         r#"

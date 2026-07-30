@@ -3,98 +3,82 @@ const PREFLIGHT: &str = include_str!("../sql/updates/0.5.0-sql-v1-to-0.5.1-sql-p
 const TRANSITION: &str = include_str!("../sql/updates/0.5.0-sql-v1-to-0.5.1-sql.sql");
 const UPDATE_LPE: &str = include_str!("../../../installation/debian-trixie/update-lpe.sh");
 const CHECK_LPE: &str = include_str!("../../../installation/debian-trixie/check-lpe.sh");
+const INIT_LPE: &str = include_str!("../../../installation/debian-trixie/init-schema.sh");
 const INSTALL_COMMON: &str =
     include_str!("../../../installation/debian-trixie/lib/install-common.sh");
 
 #[test]
-fn canonical_schema_uses_051_release_label() {
+fn canonical_schema_uses_052_release_label() {
     assert!(
-        SCHEMA.contains("schema_version = '0.5.1-sql'")
-            && SCHEMA.contains("VALUES (TRUE, '0.5.1-sql')"),
-        "the canonical schema must use the exact 0.5.1-sql release label"
+        SCHEMA.contains("schema_version = '0.5.2-sql'")
+            && SCHEMA.contains("VALUES (TRUE, '0.5.2-sql')"),
+        "the canonical schema must use the exact 0.5.2-sql release label"
     );
     assert!(
-        !SCHEMA.contains("0.5.0-sql-v1"),
-        "the canonical 0.5.1 schema must not retain the old release label"
+        !SCHEMA.contains("0.5.1-sql"),
+        "the canonical 0.5.2 schema must not retain the old release label"
     );
 }
 
 #[test]
-fn update_script_preflights_050_then_validates_before_relabeling_051() {
+fn update_script_rejects_noncanonical_schema_before_service_stop_or_mutation() {
     assert_contains_all(
         "update-lpe.sh",
         UPDATE_LPE,
         &[
             "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE",
-            "SOURCE_SCHEMA_VERSION=\"0.5.0-sql-v1\"",
-            "SCHEMA_051_PREFLIGHT_FILE",
-            "0.5.0-sql-v1-to-0.5.1-sql-preflight.sql",
-            "OUTLOOK_CACHE_FIDELITY_UPDATE_FILE",
-            "0.5.0-sql-v1-outlook-cache-fidelity.sql",
-            "SCHEMA_051_UPDATE_FILE",
-            "0.5.0-sql-v1-to-0.5.1-sql.sql",
-            "SET lpe.schema_target_shape_validated = '0.5.1-sql'",
-            "mapi_active_source_key_index_shape_ok",
+            "EXPECTED_SCHEMA_VERSION",
+            "EXPECTED_RELEASE_VERSION",
+            "if [[ \"${INSTALLED_SCHEMA_VERSION}\" != \"${EXPECTED_SCHEMA_VERSION}\" ]]",
+            "has no in-place schema upgrade path",
+            "canonical_schema_shape_is_current()",
+            "mapi_store_identity_shape_ok",
             "Database schema ${EXPECTED_SCHEMA_VERSION} is current",
         ],
     );
     for forbidden in [
-        "CREATE TABLE",
-        "ALTER TABLE",
-        "UPDATE public.",
-        "DELETE FROM public.",
+        "SOURCE_SCHEMA_VERSION",
+        "SCHEMA_051_PREFLIGHT_FILE",
+        "OUTLOOK_CACHE_FIDELITY_UPDATE_FILE",
+        "SCHEMA_051_UPDATE_FILE",
+        "MIGRATE_SCHEMA_FROM_050",
+        "schema_target_shape_validated",
+        "0.5.0-sql-v1-to-0.5.1-sql",
+        "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f",
     ] {
         assert!(
             !UPDATE_LPE.contains(forbidden),
-            "update-lpe.sh must keep schema mutations in reviewed SQL files: {forbidden}"
+            "update-lpe.sh must not retain a 0.5.1 migration path: {forbidden}"
         );
     }
     assert_before(
         UPDATE_LPE,
-        "case \"${INSTALLED_SCHEMA_VERSION}\" in",
-        "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${SCHEMA_051_PREFLIGHT_FILE}\"",
-        "the updater must reject unsupported labels before the physical preflight",
+        "if [[ \"${INSTALLED_SCHEMA_VERSION}\" != \"${EXPECTED_SCHEMA_VERSION}\" ]]",
+        "canonical_schema_shape_is_current \"${DATABASE_URL}\"",
+        "the updater must reject unsupported labels before it checks the current schema shape",
     );
     assert_before(
         UPDATE_LPE,
-        "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${SCHEMA_051_PREFLIGHT_FILE}\"",
-        "SOURCE_LOCAL_REPLICA_TABLE_COUNT",
-        "the source preflight must precede local-replica applicability checks",
-    );
-    assert_before(
-        UPDATE_LPE,
-        "SOURCE_LOCAL_REPLICA_RANGE_SHAPE_OK",
+        "canonical_schema_shape_is_current \"${DATABASE_URL}\"",
         "systemctl stop \"${SERVICE_NAME}\"",
-        "the updater must reject unrecoverable local-replica shapes before stopping LPE",
+        "the updater must reject incomplete current schemas before it stops LPE",
     );
     assert_before(
         UPDATE_LPE,
-        "systemctl stop \"${SERVICE_NAME}\"",
-        "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${OUTLOOK_CACHE_FIDELITY_UPDATE_FILE}\"",
-        "the updater must stop LPE before applying the physical update",
+        "if [[ \"${INSTALLED_SCHEMA_VERSION}\" != \"${EXPECTED_SCHEMA_VERSION}\" ]]",
+        "write_env_value \"${ENV_FILE}\"",
+        "the updater must reject unsupported labels before it mutates deployment state",
     );
     assert_before(
         UPDATE_LPE,
-        "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f \"${OUTLOOK_CACHE_FIDELITY_UPDATE_FILE}\"",
-        "MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK",
-        "the physical update must precede target-shape validation",
-    );
-    assert_before(
-        UPDATE_LPE,
-        "MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK",
-        "-f \"${SCHEMA_051_UPDATE_FILE}\"",
-        "the updater must validate the target shape before committing the 0.5.1 label",
-    );
-    assert_before(
-        UPDATE_LPE,
-        "Schema transition finished with ${INSTALLED_SCHEMA_VERSION}",
-        "if [[ \"${MIGRATE_SCHEMA_FROM_050}\" == \"false\" ]]",
-        "a current 0.5.1 database must pass read-only guards before LPE is stopped",
+        "if [[ \"${INSTALLED_SCHEMA_VERSION}\" != \"${EXPECTED_SCHEMA_VERSION}\" ]]",
+        "\"${CARGO_BIN}\" build --release -p lpe-cli",
+        "the updater must reject unsupported labels before it builds LPE",
     );
 }
 
 #[test]
-fn active_source_key_index_guard_checks_semantics_in_update_and_validation_scripts() {
+fn active_source_key_index_guard_checks_semantics_in_validation_script() {
     assert_contains_all(
         "active SourceKey index helper",
         INSTALL_COMMON,
@@ -110,9 +94,28 @@ fn active_source_key_index_guard_checks_semantics_in_update_and_validation_scrip
         ],
     );
     assert!(
-        UPDATE_LPE.contains("mapi_active_source_key_index_shape_ok \"${DATABASE_URL}\"")
-            && CHECK_LPE.contains("mapi_active_source_key_index_shape_ok \"${DATABASE_URL}\""),
-        "update-lpe.sh and check-lpe.sh must both use the semantic active SourceKey index guard"
+        CHECK_LPE.contains("mapi_active_source_key_index_shape_ok \"${DATABASE_URL}\""),
+        "check-lpe.sh must use the semantic active SourceKey index guard"
+    );
+}
+
+#[test]
+fn installation_scripts_validate_the_mapi_store_identity_singleton() {
+    assert_contains_all(
+        "MAPI store identity helper",
+        INSTALL_COMMON,
+        &[
+            "mapi_store_identity_shape_ok()",
+            "mapi_store_identity",
+            "COUNT(*) FROM public.mapi_store_identity",
+            "UNIQUE (mapi_global_counter)",
+            "UNIQUE (mapi_object_id)",
+        ],
+    );
+    assert!(
+        INIT_LPE.contains("mapi_store_identity_shape_ok \"${DATABASE_URL}\"")
+            && CHECK_LPE.contains("mapi_store_identity_shape_ok \"$DATABASE_URL\""),
+        "init-schema.sh and check-lpe.sh must validate the MAPI store identity singleton"
     );
 }
 

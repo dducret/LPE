@@ -2,7 +2,6 @@ use super::{write_object_id, write_u32, write_u64, RopRequest};
 use crate::mapi::identity::STORE_REPLICA_ID;
 use crate::mapi::sync::{PRIVATE_LOGON_SPECIAL_FOLDER_IDS, PUBLIC_LOGON_SPECIAL_FOLDER_IDS};
 use crate::mapi::AccountPrincipal;
-use crate::mapi_mailstore;
 use std::time::{Duration, SystemTime};
 
 pub(in crate::mapi) fn private_logon_response_logon_flags(request_logon_flags: u8) -> u8 {
@@ -31,7 +30,7 @@ pub(in crate::mapi) fn rop_logon_response_body(
     response.push(0x07);
     response.extend_from_slice(&principal.account_id.to_bytes_le());
     response.extend_from_slice(&1u16.to_le_bytes());
-    response.extend_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
+    response.extend_from_slice(&crate::mapi::identity::current_store_replica_guid());
     let now = SystemTime::now();
     response.extend_from_slice(&logon_time_bytes(now));
     write_u64(&mut response, gwart_time_marker(now));
@@ -57,7 +56,7 @@ pub(in crate::mapi) fn rop_public_folder_logon_response_body(
     response.push(0x00);
     response.extend_from_slice(&principal.tenant_id.to_bytes_le());
     response.extend_from_slice(&STORE_REPLICA_ID.to_le_bytes()[..2]);
-    response.extend_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
+    response.extend_from_slice(&crate::mapi::identity::current_store_replica_guid());
     let now = SystemTime::now();
     response.extend_from_slice(&logon_time_bytes(now));
     write_u64(&mut response, gwart_time_marker(now));

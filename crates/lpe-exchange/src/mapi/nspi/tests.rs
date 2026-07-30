@@ -62,6 +62,27 @@ fn nspi_request_and_property_manifests_cover_implemented_static_values() {
 }
 
 #[test]
+fn nspi_mapping_signature_uses_the_fixed_oxoabk_value() {
+    let entry = ExchangeAddressBookEntry {
+        id: Uuid::nil(),
+        display_name: "Test".to_string(),
+        email: "test@example.test".to_string(),
+        entry_kind: ExchangeAddressBookEntryKind::Account,
+        directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        member_emails: Vec::new(),
+        details: ExchangeAddressBookEntryDetails::default(),
+    };
+
+    assert_eq!(
+        nspi_binary_value(nspi_entry_value(Uuid::nil(), &entry, 0x0FF8_0102)),
+        vec![
+            0xdc, 0xa7, 0x40, 0xc8, 0xc0, 0x42, 0x10, 0x1a, 0xb4, 0xb9, 0x08, 0x00, 0x2b, 0x2f,
+            0xe1, 0x82,
+        ]
+    );
+}
+
+#[test]
 fn nspi_available_properties_omit_embedded_tables_for_skip_objects() {
     let entry = ExchangeAddressBookEntry {
         id: Uuid::nil(),

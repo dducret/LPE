@@ -7,8 +7,8 @@ use super::identity::{
     JUNK_FOLDER_ID, LOCAL_FAILURES_FOLDER_ID, NOTES_FOLDER_ID, OUTBOX_FOLDER_ID,
     REMINDERS_FOLDER_ID, ROOT_FOLDER_ID, RSS_FEEDS_FOLDER_ID, SCHEDULE_FOLDER_ID, SEARCH_FOLDER_ID,
     SENT_FOLDER_ID, SERVER_FAILURES_FOLDER_ID, SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID,
-    STORE_REPLICA_GUID, SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID,
-    TODO_SEARCH_FOLDER_ID, TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
+    SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID,
+    TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
 };
 use super::notifications::*;
 use super::nspi::*;
@@ -440,8 +440,10 @@ pub(in crate::mapi) fn log_mapi_session_establish(
     let host = safe_header(headers, "host").unwrap_or_default();
     let content_type = safe_header(headers, "content-type").unwrap_or_default();
     let content_length = safe_header(headers, "content-length").unwrap_or_default();
-    let store_replica_guid = Uuid::from_bytes(STORE_REPLICA_GUID);
-    let store_replica_guid_hex = hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len());
+    let store_replica_guid_bytes = crate::mapi::identity::current_store_replica_guid();
+    let store_replica_guid = Uuid::from_bytes(store_replica_guid_bytes);
+    let store_replica_guid_hex =
+        hex_preview(&store_replica_guid_bytes, store_replica_guid_bytes.len());
     let outlook_smart_input_variant = configured_smart_input_variant();
 
     tracing::info!(

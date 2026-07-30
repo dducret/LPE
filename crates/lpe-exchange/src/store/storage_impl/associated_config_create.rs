@@ -7,34 +7,16 @@ async fn commit_mapi_associated_config_create_in_tx(
     let canonical_id = input.id.unwrap_or_else(Uuid::new_v4);
     input.id = Some(canonical_id);
 
-    sqlx::query(
-        r#"
-        INSERT INTO mapi_mailbox_replicas (
-            tenant_id, account_id, replica_guid, next_global_counter
-        )
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (tenant_id, account_id)
-        DO NOTHING
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
-    .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
-    .execute(&mut **tx)
-    .await?;
+    let store_identity = mapi_store_identity_for_account_in_tx(tx, tenant_id, account_id).await?;
 
     // [MS-OXCFXICS] sections 3.3.5.2.1 and 3.3.5.2.2 distinguish an
     // imported client-chosen identity from the server-assigned identity of
     // an online RopCreateMessage. Client identity properties are therefore
     // not inputs to this commit.
     let global_counter = allocate_next_mapi_global_counter(tx, tenant_id, account_id).await?;
-    let object_id = crate::mapi::identity::mapi_store_id(global_counter);
-    let source_key = crate::mapi::identity::source_key_for_object_id(object_id);
+    let (object_id, source_key, change_key, instance_key, predecessor_change_list) =
+        mapi_identity_material_for_store_replica(store_identity.replica_guid, global_counter);
     let change_number = global_counter;
-    let change_key = crate::mapi::identity::change_key_for_change_number(change_number);
-    let predecessor_change_list = crate::mapi_mailstore::predecessor_change_list(change_number);
-    let instance_key = crate::mapi::identity::instance_key_for_object_id(object_id);
 
     let special_folder_alias_collision = sqlx::query_scalar::<_, bool>(
         r#"

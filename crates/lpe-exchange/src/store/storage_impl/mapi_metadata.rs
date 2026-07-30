@@ -22,38 +22,8 @@ macro_rules! store_impl_mapi_metadata {
             let preserved_mailbox_identity_ids =
                 mapi_collaboration_folder_identity_ids_for_account(self, account_id).await?;
             let mut tx = self.pool().begin().await?;
-            sqlx::query(
-                r#"
-                INSERT INTO mapi_mailbox_replicas (
-                    tenant_id,
-                    account_id,
-                    replica_guid,
-                    next_global_counter
-                )
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (tenant_id, account_id)
-                DO UPDATE SET
-                    next_global_counter = GREATEST(
-                        mapi_mailbox_replicas.next_global_counter,
-                        $4
-                    ),
-                    updated_at = CASE
-                        WHEN mapi_mailbox_replicas.next_global_counter < $4 THEN NOW()
-                        ELSE mapi_mailbox_replicas.updated_at
-                    END
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(account_id)
-            .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
-            .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
-            .execute(&mut *tx)
-            .await?;
-            advance_mapi_replica_counter_past_allocated(&mut tx, tenant_id, account_id).await?;
-            repair_reserved_mapi_identity_counter_collisions(&mut tx, tenant_id, account_id)
-                .await?;
-            repair_reserved_mapi_mailbox_identities(&mut tx, tenant_id, account_id).await?;
-            repair_invalid_mapi_identity_material(&mut tx, tenant_id, account_id).await?;
+            let store_identity =
+                mapi_store_identity_for_account_in_tx(&mut tx, tenant_id, account_id).await?;
             repair_stale_mapi_object_identities(
                 &mut tx,
                 tenant_id,
@@ -111,31 +81,95 @@ macro_rules! store_impl_mapi_metadata {
                         ),
                     )
                 } else {
-                    let global_counter = if let Some(counter) = request.reserved_global_counter {
-                        counter
-                    } else {
+                    // Low counters are internal default-folder role markers, not
+                    // durable IDs. A high counter is valid only for SyncImport
+                    // after the singleton-owned local-replica range reserved it.
+                    let (global_counter, source_key, imported_local_identity) =
+                        match request.reserved_global_counter {
+                            Some(counter)
+                                if (1
+                                    ..lpe_storage::mapi_store_identity::MAPI_FIRST_GLOBAL_COUNTER)
+                                    .contains(&counter) =>
+                            {
+                                let counter =
+                                    allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id)
+                                        .await?;
+                                (
+                                    counter,
+                                    lpe_storage::mapi_store_identity::mapi_xid(
+                                        store_identity.replica_guid,
+                                        counter,
+                                    ),
+                                    false,
+                                )
+                            }
+                            Some(counter) => {
+                                if counter
+                                    >= lpe_storage::mapi_store_identity::MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER
+                                {
+                                    anyhow::bail!(
+                                        "MAPI imported SourceKey GLOBCNT is outside the local range"
+                                    );
+                                }
+                                let source_key = request.source_key.as_deref().ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "MAPI imported local-replica identity is missing SourceKey"
+                                    )
+                                })?;
+                                if source_key.get(..16)
+                                    != Some(store_identity.replica_guid.as_bytes().as_slice())
+                                    || mapi_xid_global_counter(source_key)? != counter
+                                {
+                                    anyhow::bail!(
+                                        "MAPI imported SourceKey does not match the database replica"
+                                    );
+                                }
+                                if !mapi_local_replica_counter_is_reserved_in_tx(
+                                    &mut tx,
+                                    tenant_id,
+                                    account_id,
+                                    store_identity.replica_guid,
+                                    counter,
+                                )
+                                .await?
+                                {
+                                    anyhow::bail!(
+                                        "MAPI imported SourceKey was not reserved for this account"
+                                    );
+                                }
+                                (counter, source_key.to_vec(), true)
+                            }
+                            None => {
+                                if request.source_key.is_some() {
+                                    anyhow::bail!(
+                                        "MAPI SourceKey requires a reserved local-replica counter"
+                                    );
+                                }
+                                let counter =
+                                    allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id)
+                                        .await?;
+                                (
+                                    counter,
+                                    lpe_storage::mapi_store_identity::mapi_xid(
+                                        store_identity.replica_guid,
+                                        counter,
+                                    ),
+                                    false,
+                                )
+                            }
+                        };
+                    let change_number = if imported_local_identity {
                         allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id).await?
-                    };
-                    let change_number = if request.reserved_global_counter.is_some() {
-                        let mut change_number =
-                            allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id)
-                                .await?;
-                        if change_number == global_counter {
-                            change_number =
-                                allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id)
-                                    .await?;
-                        }
-                        change_number
                     } else {
                         global_counter
                     };
-                    let (object_id, default_source_key, _, instance_key) =
-                        crate::mapi::identity::persisted_identity_material(global_counter);
-                    let change_key =
-                        crate::mapi::identity::change_key_for_change_number(change_number);
-                    let predecessor_change_list =
-                        crate::mapi_mailstore::predecessor_change_list(change_number);
-                    let source_key = request.source_key.clone().unwrap_or(default_source_key);
+                    let object_id = lpe_storage::mapi_store_identity::mapi_store_id(global_counter);
+                    let (_, _, change_key, _, predecessor_change_list) =
+                        mapi_identity_material_for_store_replica(
+                            store_identity.replica_guid,
+                            change_number,
+                        );
+                    let instance_key = source_key.clone();
                     let special_folder_alias_collision = sqlx::query_scalar::<_, bool>(
                         r#"
                         SELECT EXISTS (
@@ -870,6 +904,7 @@ macro_rules! store_impl_mapi_metadata {
     ) -> StoreFuture<'a, Option<MapiSyncCheckpoint>> {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let store_identity = Storage::fetch_mapi_store_identity(self).await?;
             let row = sqlx::query(
                 r#"
                 SELECT mailbox_id, checkpoint_kind, last_change_sequence, last_modseq, cursor_json
@@ -889,7 +924,7 @@ macro_rules! store_impl_mapi_metadata {
             .bind(&tenant_id)
             .bind(account_id)
             .bind(checkpoint_kind.as_str())
-            .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+            .bind(store_identity.replica_guid)
             .bind(mailbox_id)
             .fetch_optional(self.pool())
             .await?;
@@ -910,6 +945,8 @@ macro_rules! store_impl_mapi_metadata {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
             let mut tx = self.pool().begin().await?;
+            let store_identity =
+                mapi_store_identity_for_account_in_tx(&mut tx, tenant_id, account_id).await?;
             let existing = sqlx::query(
                 r#"
                 SELECT id, mailbox_id, checkpoint_kind, last_change_sequence, last_modseq, cursor_json,
@@ -929,7 +966,7 @@ macro_rules! store_impl_mapi_metadata {
             .bind(&tenant_id)
             .bind(account_id)
             .bind(checkpoint_kind.as_str())
-            .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+            .bind(store_identity.replica_guid)
             .bind(mailbox_id)
             .fetch_optional(&mut *tx)
             .await?;
@@ -985,7 +1022,7 @@ macro_rules! store_impl_mapi_metadata {
             .bind(account_id)
             .bind(mailbox_id)
             .bind(checkpoint_kind.as_str())
-            .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+            .bind(store_identity.replica_guid)
             .bind(last_change_sequence as i64)
             .bind(last_modseq as i64)
             .bind(cursor_json)

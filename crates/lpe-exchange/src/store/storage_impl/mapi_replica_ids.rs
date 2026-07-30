@@ -1,5 +1,11 @@
 macro_rules! store_impl_mapi_replica_ids {
     () => {
+        fn fetch_mapi_store_identity<'a>(
+            &'a self,
+        ) -> StoreFuture<'a, lpe_storage::MapiStoreIdentity> {
+            Box::pin(async move { lpe_storage::Storage::fetch_mapi_store_identity(self).await })
+        }
+
         fn reserve_mapi_local_replica_ids<'a>(
             &'a self,
             account_id: Uuid,
@@ -23,84 +29,25 @@ macro_rules! store_impl_mapi_replica_ids {
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("account not found"))?;
                 let mut tx = self.pool().begin().await?;
-                sqlx::query(
-                    r#"
-                    INSERT INTO mapi_mailbox_replicas (
-                        tenant_id, account_id, replica_guid, next_global_counter
-                    )
-                    VALUES ($1, $2, $3, $4)
-                    ON CONFLICT (tenant_id, account_id)
-                    DO UPDATE SET
-                        next_global_counter = GREATEST(
-                            mapi_mailbox_replicas.next_global_counter,
-                            $4
-                        )
-                    "#,
+                let store_identity =
+                    lpe_storage::mapi_store_identity::ensure_mapi_store_identity_in_tx(&mut tx)
+                        .await?;
+                lpe_storage::mapi_store_identity::ensure_mapi_mailbox_replica_in_tx(
+                    &mut tx,
+                    tenant_id,
+                    account_id,
+                    store_identity,
                 )
-                .bind(tenant_id)
-                .bind(account_id)
-                .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
-                .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
-                .execute(&mut *tx)
                 .await?;
 
                 // [MS-OXCFXICS] sections 2.2.3.2.4.7 and 3.3.5.2.1: the
                 // complete range returned to the local replica is exclusive.
-                let first_global_counter = sqlx::query_scalar::<_, i64>(
-                    r#"
-                    WITH allocated_floor AS (
-                        SELECT GREATEST(
-                            COALESCE(
-                                MAX(GREATEST(
-                                    identities.mapi_global_counter,
-                                    identities.mapi_change_number
-                                )) + 1,
-                                $4
-                            ),
-                            $4
-                        ) AS value
-                        FROM mapi_object_identities identities
-                        WHERE identities.tenant_id = $1
-                          AND identities.account_id = $2
-                          AND identities.mapi_global_counter < $5
-                          AND identities.mapi_change_number < $5
-                    ), reservation AS (
-                        UPDATE mapi_mailbox_replicas replica
-                        SET next_global_counter = GREATEST(
-                                replica.next_global_counter,
-                                allocated_floor.value,
-                                $4
-                            ) + $6,
-                            updated_at = NOW()
-                        FROM allocated_floor
-                        WHERE replica.tenant_id = $1
-                          AND replica.account_id = $2
-                          AND replica.replica_guid = $3
-                          AND GREATEST(
-                                replica.next_global_counter,
-                                allocated_floor.value,
-                                $4
-                              ) <= $5 - $6
-                        RETURNING replica.next_global_counter - $6 AS first_global_counter
-                    )
-                    SELECT first_global_counter
-                    FROM reservation
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(account_id)
-                .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
-                .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
-                .bind(crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
-                .bind(i64::from(id_count))
-                .fetch_optional(&mut *tx)
-                .await?
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "MAPI local replica ID space exhausted or replica GUID mismatch"
-                    )
-                })?;
-                let end_global_counter_exclusive = first_global_counter + i64::from(id_count);
+                let (_, first_global_counter) = lpe_storage::mapi_store_identity::
+                    reserve_mapi_store_global_counter_range_in_tx(&mut tx, id_count)
+                    .await?;
+                let end_global_counter_exclusive = first_global_counter
+                    .checked_add(u64::from(id_count))
+                    .ok_or_else(|| anyhow::anyhow!("MAPI local replica ID space exhausted"))?;
                 // [MS-OXCFXICS] sections 2.2.3.2.4.7, 3.2.5.9.4.7,
                 // and 3.3.5.2.1: retain every exact range returned to the
                 // local replica. The allocation high-water cannot prove that
@@ -116,13 +63,13 @@ macro_rules! store_impl_mapi_replica_ids {
                 )
                 .bind(tenant_id)
                 .bind(account_id)
-                .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
-                .bind(first_global_counter)
-                .bind(end_global_counter_exclusive)
+                .bind(store_identity.replica_guid)
+                .bind(first_global_counter as i64)
+                .bind(end_global_counter_exclusive as i64)
                 .execute(&mut *tx)
                 .await?;
                 tx.commit().await?;
-                Ok(first_global_counter as u64)
+                Ok(first_global_counter)
             })
         }
 
@@ -153,32 +100,26 @@ macro_rules! store_impl_mapi_replica_ids {
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("account not found"))?;
                 let mut tx = self.pool().begin().await?;
-                sqlx::query_scalar::<_, i64>(
-                    r#"
-                    SELECT next_global_counter
-                    FROM mapi_mailbox_replicas
-                    WHERE tenant_id = $1
-                      AND account_id = $2
-                      AND replica_guid = $3
-                    FOR UPDATE
-                    "#,
+                let store_identity =
+                    lpe_storage::mapi_store_identity::ensure_mapi_store_identity_in_tx(&mut tx)
+                        .await?;
+                lpe_storage::mapi_store_identity::ensure_mapi_mailbox_replica_in_tx(
+                    &mut tx,
+                    tenant_id,
+                    account_id,
+                    store_identity,
                 )
-                .bind(tenant_id)
-                .bind(account_id)
-                .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
-                .fetch_optional(&mut *tx)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("MAPI mailbox replica was not initialized"))?;
+                .await?;
 
                 for range in ranges {
                     if range.replica_guid
-                        != Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID)
+                        != store_identity.replica_guid
                         || range.min_global_counter > range.max_global_counter
-                        || !(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
-                            ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+                        || !(lpe_storage::mapi_store_identity::MAPI_FIRST_GLOBAL_COUNTER
+                            ..lpe_storage::mapi_store_identity::MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
                             .contains(&range.min_global_counter)
-                        || !(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
-                            ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+                        || !(lpe_storage::mapi_store_identity::MAPI_FIRST_GLOBAL_COUNTER
+                            ..lpe_storage::mapi_store_identity::MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
                             .contains(&range.max_global_counter)
                         || !mapi_local_replica_range_is_reserved_in_tx(
                             &mut tx,

@@ -260,11 +260,14 @@ impl CounterSet {
 
 impl ReplicaCounterSets {
     fn local(&self) -> Option<&CounterSet> {
-        self.replicas.get(&STORE_REPLICA_GUID)
+        self.replicas
+            .get(&crate::mapi::identity::current_store_replica_guid())
     }
 
     fn local_mut(&mut self) -> &mut CounterSet {
-        self.replicas.entry(STORE_REPLICA_GUID).or_default()
+        self.replicas
+            .entry(crate::mapi::identity::current_store_replica_guid())
+            .or_default()
     }
 
     fn insert(&mut self, replica_guid: [u8; 16], counter: u64) {
@@ -288,7 +291,7 @@ pub(super) fn replguid_idset_from_source_keys<'a>(
     for (source_key, fallback_object_id) in source_keys {
         let identity = source_key_replica_counter(source_key).or_else(|| {
             crate::mapi::identity::global_counter_from_store_id(fallback_object_id)
-                .map(|counter| (STORE_REPLICA_GUID, counter))
+                .map(|counter| (crate::mapi::identity::current_store_replica_guid(), counter))
         });
         if let Some((replica_guid, counter)) = identity {
             identities.insert(replica_guid, counter);

@@ -309,12 +309,19 @@ Protocol adapters store only cursor rows:
   non-null `mailbox_id`: canonical folders use the real mailbox id, and virtual
   special folders use their stable projected folder UUID. MAPI checkpoints store
   positions over canonical change rows, not mailbox or message replicas.
-- `mapi_mailbox_replicas` and `mapi_object_identities` store the durable MAPI
-  identity projection for a canonical account: replica GUID, allocated
-  48-bit global counters, FIDs, MIDs, source keys, change keys, and instance
-  keys. These rows map canonical UUIDs to protocol identifiers; they do not
-  store mailbox content, folder replicas, message bodies, attachments, `Sent`,
-  drafts, outbox, or search state.
+- `mapi_store_identity`, `mapi_mailbox_replicas`, and
+  `mapi_object_identities` store the durable MAPI identity projection.
+  `mapi_store_identity` is a singleton seeded with a fresh random REPLGUID at
+  schema initialization, as required by [MS-OXCSTOR] section 3.2.3. It owns
+  the one database-wide 48-bit GLOBCNT allocator. Mailbox rows bind accounts
+  to that store identity, while object rows map canonical UUIDs to globally
+  unique FIDs, MIDs, SourceKeys, ChangeKeys, and instance keys; none of these
+  tables stores mailbox content, folder replicas, message bodies, attachments,
+  `Sent`, drafts, outbox, or search state.
+  The internal special-folder role IDs with GLOBCNT `1..42` are never persisted
+  as object identities. For each mailbox, request-scoped MAPI conversion maps
+  those roles to their separately allocated durable IDs starting at `43` before
+  emitting or accepting wire FIDs, SourceKeys, LongTermIDs, or EntryIDs.
   Source and instance keys persist 22-byte REPLGUID-scoped GID values. Change
   keys persist XIDs from 17 through 24 bytes, including client ChangeKeys
   retained during ICS import. Per [MS-OXCFXICS] sections 2.2.1.2.7,
@@ -332,20 +339,18 @@ Protocol adapters store only cursor rows:
   server CN. Delegated identities continue to receive server-assigned rekeys.
 - `mapi_special_folder_aliases` stores the bounded account-scoped protocol
   identity that maps an Outlook client FID and its 22-byte SourceKey back to an
-  existing canonical special-folder FID. Canonical special-folder FIDs use
-  `REPLID 1` and GLOBCNT values `1..42`. Alias FIDs also use `REPLID 1`, but
-  their GLOBCNT is limited to the persisted dynamic interval
-  `43 <= GLOBCNT < 0x7FFF_FE00_0000` and must also fall below the end of a range
-  already reserved for the account by `RopGetLocalReplicaIds`. The SourceKey
-  contains the store replica GUID followed by the same six-byte GLOBCNT. The
-  primary key makes an alias FID immutable per account, the account-scoped
-  SourceKey is unique, and collisions with `mapi_object_identities` are rejected
-  by the transactional store path. Each row also retains the separately
-  allocated `mapi_change_number` used in upload `MetaTagCnsetSeen`; that CN is
-  unique per account and is never derived from either FID. `canonical_folder_id` is deliberately not
-  unique: different Outlook profiles and OST replicas can retain different
-  client aliases for the same canonical Calendar, Contacts, Deleted Items, or
-  other special folder. The table has no display name, hierarchy content,
+  internal canonical special-folder role. `canonical_folder_id` deliberately
+  remains that low logical role marker and is not a durable wire FID. Alias
+  FIDs use `REPLID 1` with a GLOBCNT in the dynamically allocated interval
+  `43 <= GLOBCNT < 0x7FFF_FE00_0000`; the counter must belong to an exact range
+  previously reserved for that account by `RopGetLocalReplicaIds`. The
+  SourceKey contains the database store REPLGUID and the same six-byte GLOBCNT.
+  The shared allocator prevents collisions with `mapi_object_identities`; each
+  row also retains a separately allocated database-wide `mapi_change_number`
+  used in upload `MetaTagCnsetSeen`. `canonical_folder_id` is not unique:
+  different Outlook profiles and OST replicas can retain different client
+  aliases for the same canonical Calendar, Contacts, Deleted Items, or other
+  special folder. The table has no display name, hierarchy content,
   membership, FAI, rights, or collaboration columns and cannot become parallel
   canonical folder state. An imported FID is object identity, not a change
   number; successful hierarchy import allocates a distinct server CN and upload
@@ -805,6 +810,7 @@ collaboration, rights, or user-visible state.
 - `activesync_devices`
 - `activesync_sync_cursors`
 - `mapi_sync_checkpoints`
+- `mapi_store_identity`
 - `mapi_mailbox_replicas`
 - `mapi_object_identities`
 - `mapi_special_folder_aliases`
@@ -868,52 +874,29 @@ compatible. They do not replace canonical mail or collaboration tables.
 
 ## Implementation Notes
 
-- `schema.sql` creates the fresh `0.5.1-sql` baseline.
+- `schema.sql` creates the fresh `0.5.2-sql` baseline.
 - `schema.sql` is the dense canonical DDL definition and is the documented
   source-size exception. Before adding another schema-contract family, split
   `schema_contract.rs` into feature-scoped checks (core ownership, mail and
   collaboration, and MAPI cache/identity) while retaining one central public
   contract runner.
-- New `0.5.1` installations start from an empty SQL database initialized by
-  `init-schema.sh`. Databases from pre-0.5 releases are not upgraded in place.
-- The only supported in-place release transition is from the late canonical
-  physical form of `0.5.0-sql-v1` to `0.5.1-sql`.
-  `update-lpe.sh` first runs the read-only, version-bounded
-  `0.5.0-sql-v1-to-0.5.1-sql-preflight.sql`; earlier physical forms carrying
-  the same label are rejected before service stop or mutation. It then applies
-  the reviewed, forward-only, transactional, idempotent
-  `0.5.0-sql-v1-outlook-cache-fidelity.sql` update. It adds
-  `mapi_local_replica_id_ranges` and `mapi_local_replica_deleted_ranges`,
-  converts each legacy `mapi_navigation_shortcuts.ordinal` integer without
-  collapsing distinct values. A compact projection whose final byte is already
-  valid remains unchanged; a value ending in the reserved `0x00` or `0xFF`
-  byte uses an injective five-byte representation containing the four-byte
-  big-endian integer followed by `0x80`, as required by [MS-OXOCFG] section
-  2.2.9.7. Migrated and client-written ordinals use lexicographic binary
-  ordering rather than historical numeric BIGINT ordering. The update also
-  lets subsequent client writes retain their full variable-length value, adds
-  nullable canonical columns for the five client-written Calendar WLink
-  properties, and replaces the stale unique associated-configuration label
-  index with a non-unique lookup index.
-  After the updater validates the complete target shape, the version-bounded,
-  transactional, idempotent `0.5.0-sql-v1-to-0.5.1-sql.sql` update changes the
-  label. That label-only file requires the private validation marker set by
-  `update-lpe.sh` and is not an operator-facing standalone migration command.
-  Databases from before 0.5 and every other source label remain
-  unsupported, and `schema.sql`
-  remains the canonical complete source for every new database.
-- `update-lpe.sh` accepts only `0.5.1-sql` or the exact supported
-  late physical form of the `0.5.0-sql-v1` source, and rejects earlier
-  same-label shapes plus every other schema version before stopping LPE or
-  applying SQL. `init-schema.sh`, `check-lpe.sh`, and
-  `update-lpe.sh` validate the alias table's required columns, bounded FID,
-  SourceKey, and server-CN checks, account foreign key, alias/SourceKey/CN
-  uniqueness, and absence
-  of a uniqueness constraint on `canonical_folder_id`. They also require both
-  MAPI local-replica range tables, the WLink binary/client-property shape, and
-  the non-unique FAI logical lookup index. Any additional 0.5.x schema change requires
-  its own explicit release-policy decision, reviewed SQL, and matching
+- New `0.5.2` installations start from an empty SQL database initialized by
+  `init-schema.sh`. There is no in-place schema upgrade path to this baseline.
+  `update-lpe.sh` accepts only the exact canonical `0.5.2-sql` label with its
+  required canonical physical shape and rejects every other label or incomplete
+  same-label database before stopping LPE or changing the database.
+- The `0.5.0` and `0.5.1` SQL update artifacts remain preserved as historical
+  release records, but `update-lpe.sh` does not invoke them for `0.5.2`.
+  `schema.sql` remains the canonical complete source for every new database.
+- `init-schema.sh` and `check-lpe.sh` validate the installed canonical schema;
+  later schema changes require an explicit release-policy decision and matching
   architecture and installation documentation.
+- The canonical schema creates exactly one `mapi_store_identity` row with a
+  random REPLGUID and an allocator starting at `43`. `init-schema.sh`,
+  `check-lpe.sh`, and runtime startup reject a missing or malformed singleton,
+  per [MS-OXCSTOR] section 3.2.3. The global allocator and the unique object
+  identity constraints apply across accounts; they must not be replaced by a
+  per-mailbox counter.
 - Fresh schema initialization inserts the real platform tenant UUID row and the
   default PostgreSQL storage pool/policy rows. Runtime bootstrap must not
   synthesize pseudo-tenants.

@@ -73,7 +73,7 @@ if [[ "${existing_non_public_objects}" != "0" ]]; then
 fi
 
 if [[ "${existing_public_objects}" != "0" && "${LPE_RESET_SCHEMA:-false}" != "true" ]]; then
-  echo "The target database is not empty. LPE 0.5.1 requires an empty SQL database." >&2
+  echo "The target database is not empty. LPE ${expected_schema_version%-sql} requires an empty SQL database." >&2
   echo "Create a new empty database, or set LPE_RESET_SCHEMA=true only for an intentional destructive reset." >&2
   exit 1
 fi
@@ -89,6 +89,9 @@ schema_version="$(
 )"
 mapi_identity_version_column_count="$(
   psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END"
+)"
+mapi_store_identity_shape_ok="$(
+  mapi_store_identity_shape_ok "${DATABASE_URL}"
 )"
 calendar_event_lifecycle_column_count="$(
   psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at') AND is_nullable = CASE column_name WHEN 'lifecycle_state' THEN 'NO' WHEN 'deleted_at' THEN 'YES' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' END"
@@ -117,6 +120,7 @@ mapi_special_folder_alias_shape_ok="$(
 
 if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${mapi_identity_version_column_count}" != "2" \
+  || "${mapi_store_identity_shape_ok}" != "1" \
   || "${calendar_event_lifecycle_column_count}" != "2" \
   || "${mapi_calendar_event_identity_moves_table}" != "mapi_calendar_event_identity_moves" \
   || "${mapi_local_replica_range_shape_ok}" != "1" \
@@ -125,8 +129,8 @@ if [[ "${schema_version}" != "${expected_schema_version}" \
   || "${mapi_identity_constraint_count}" != "3" \
   || "${mapi_calendar_event_move_change_key_constraint_count}" != "2" \
   || "${mapi_special_folder_alias_shape_ok}" != "1" ]]; then
-  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, MAPI local replica range table shape=${mapi_local_replica_range_shape_ok}, MAPI WLink/configuration FAI fidelity shape=${mapi_outlook_cache_fidelity_shape_ok}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}, MAPI special-folder alias shape=${mapi_special_folder_alias_shape_ok}." >&2
-  echo "Initialize a fresh LPE 0.5.1 database after correcting the canonical schema source." >&2
+  echo "Schema initialization validation failed: version=${schema_version}, MAPI identity version shape count=${mapi_identity_version_column_count}, MAPI store identity shape=${mapi_store_identity_shape_ok}, Calendar lifecycle shape count=${calendar_event_lifecycle_column_count}, Calendar identity-move table=${mapi_calendar_event_identity_moves_table:-missing}, MAPI local replica range table shape=${mapi_local_replica_range_shape_ok}, MAPI WLink/configuration FAI fidelity shape=${mapi_outlook_cache_fidelity_shape_ok}, deleted Calendar object-kind constraint count=${deleted_calendar_event_constraint_count}, MAPI identity key constraint count=${mapi_identity_constraint_count}, Calendar move ChangeKey constraint count=${mapi_calendar_event_move_change_key_constraint_count}, MAPI special-folder alias shape=${mapi_special_folder_alias_shape_ok}." >&2
+  echo "Initialize a fresh LPE ${expected_schema_version%-sql} database after correcting the canonical schema source." >&2
   exit 1
 fi
 

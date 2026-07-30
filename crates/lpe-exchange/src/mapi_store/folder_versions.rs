@@ -7,16 +7,22 @@ pub(super) struct MapiFolderVersions {
 }
 
 impl MapiFolderVersions {
-    pub(super) fn from_identity_records(records: &[MapiIdentityRecord]) -> Self {
+    pub(super) fn from_identity_records(
+        records: &[MapiIdentityRecord],
+        identity_codec: &crate::mapi::identity::MapiIdentityCodec,
+    ) -> Self {
         Self {
             versions: records
                 .iter()
                 .filter(|record| record.object_kind == MapiIdentityObjectKind::Mailbox)
                 .map(|record| {
+                    let folder_id = identity_codec
+                        .logical_object_id(record.object_id)
+                        .expect("MAPI folder identity mapping missing");
                     (
-                        record.object_id,
+                        folder_id,
                         MapiFolderVersion {
-                            folder_id: record.object_id,
+                            folder_id,
                             change_number: record.change_number,
                             change_key: record.change_key.clone(),
                             predecessor_change_list: record.predecessor_change_list.clone(),

@@ -441,7 +441,7 @@ pub(super) async fn append_get_per_user_guid_response<S: ExchangeStore>(
     }
     responses.extend_from_slice(&rop_get_per_user_guid_response(
         request,
-        &crate::mapi::identity::STORE_REPLICA_GUID,
+        &crate::mapi::identity::current_store_replica_guid(),
     ));
 }
 

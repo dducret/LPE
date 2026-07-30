@@ -192,16 +192,19 @@ async fn preflight_unknown_mapi_navigation_shortcut_delete_in_tx(
     if folder_id != crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
         anyhow::bail!("unknown WLink tombstone is outside Common Views");
     }
-    let object_id = crate::mapi::identity::object_id_from_source_key(source_key)
-        .ok_or_else(|| anyhow::anyhow!("invalid deleted WLink SourceKey"))?;
-    let source_counter = crate::mapi::identity::global_counter_from_store_id(object_id)
-        .filter(|counter| {
-            (crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
-                ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
-                .contains(counter)
-        })
-        .ok_or_else(|| anyhow::anyhow!("deleted WLink SourceKey is outside the dynamic range"))?;
-    let replica_guid = Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID);
+    let store_identity = mapi_store_identity_for_account_in_tx(tx, tenant_id, account_id).await?;
+    if source_key.get(..16) != Some(store_identity.replica_guid.as_bytes().as_slice()) {
+        anyhow::bail!("deleted WLink SourceKey does not use the database replica GUID");
+    }
+    let source_counter = mapi_xid_global_counter(source_key)?;
+    if !(lpe_storage::mapi_store_identity::MAPI_FIRST_GLOBAL_COUNTER
+        ..lpe_storage::mapi_store_identity::MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+        .contains(&source_counter)
+    {
+        anyhow::bail!("deleted WLink SourceKey is outside the dynamic range");
+    }
+    let object_id = lpe_storage::mapi_store_identity::mapi_store_id(source_counter);
+    let replica_guid = store_identity.replica_guid;
 
     let existing = sqlx::query(
         r#"
@@ -302,8 +305,8 @@ async fn tombstone_unknown_mapi_navigation_shortcut_in_tx(
     if change_number == source_counter {
         change_number = allocate_next_mapi_global_counter(tx, tenant_id, account_id).await?;
     }
-    let change_key = crate::mapi::identity::change_key_for_change_number(change_number);
-    let predecessor_change_list = crate::mapi_mailstore::predecessor_change_list(change_number);
+    let (_, _, change_key, _, predecessor_change_list) =
+        mapi_identity_material_for_store_replica(replica_guid, change_number);
     // [MS-OXCFXICS] section 3.2.5.9.4.5: retain a protocol tombstone
     // for an imported deletion of an object absent from this replica so
     // a later ImportMessageChange cannot restore it. This deliberately
@@ -329,7 +332,7 @@ async fn tombstone_unknown_mapi_navigation_shortcut_in_tx(
     .bind(object_id as i64)
     .bind(source_key)
     .bind(change_key)
-    .bind(crate::mapi::identity::instance_key_for_object_id(object_id))
+    .bind(source_key)
     .bind(change_number as i64)
     .bind(predecessor_change_list)
     .execute(&mut **tx)

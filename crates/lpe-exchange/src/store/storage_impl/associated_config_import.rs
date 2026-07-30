@@ -174,8 +174,10 @@ async fn commit_mapi_associated_config_update_in_tx(
     let mut predecessors = parse_mapi_predecessor_change_list(
         &current.get::<Vec<u8>, _>("predecessor_change_list"),
     )?;
+    let store_identity = mapi_store_identity_for_account_in_tx(tx, tenant_id, account_id).await?;
     let change_number = allocate_next_mapi_global_counter(tx, tenant_id, account_id).await?;
-    let change_key = crate::mapi::identity::change_key_for_change_number(change_number);
+    let change_key =
+        lpe_storage::mapi_store_identity::mapi_xid(store_identity.replica_guid, change_number);
     merge_mapi_predecessor_change_key(&mut predecessors, &change_key)?;
     let predecessor_change_list = serialize_mapi_predecessor_change_list(&predecessors)?;
     if !mapi_predecessors_contain_change_key(&predecessors, &current_change_key)? {

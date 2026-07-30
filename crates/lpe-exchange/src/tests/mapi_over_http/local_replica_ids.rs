@@ -40,19 +40,18 @@ async fn mapi_over_http_get_local_replica_ids_reserves_full_outlook_range_in_pos
     renew_mapi_request_id(&mut execute_headers);
 
     let initial_next_global_counter = 0x0000_0002_0000u64;
+    let replica_guid = sqlx::query_scalar::<_, Uuid>(
+        "SELECT replica_guid FROM mapi_store_identity WHERE singleton = TRUE",
+    )
+    .fetch_one(storage.pool())
+    .await?;
     sqlx::query(
         r#"
-        INSERT INTO mapi_mailbox_replicas (
-            tenant_id, account_id, replica_guid, next_global_counter
-        )
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (tenant_id, account_id)
-        DO UPDATE SET next_global_counter = EXCLUDED.next_global_counter
+        UPDATE mapi_store_identity
+        SET next_global_counter = $1
+        WHERE singleton = TRUE
         "#,
     )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
     .bind(initial_next_global_counter as i64)
     .execute(storage.pool())
     .await?;
@@ -77,10 +76,7 @@ async fn mapi_over_http_get_local_replica_ids_reserves_full_outlook_range_in_pos
         0,
         "RopGetLocalReplicaIds failed"
     );
-    assert_eq!(
-        &response_rops[6..22],
-        &crate::mapi::identity::STORE_REPLICA_GUID
-    );
+    assert_eq!(&response_rops[6..22], replica_guid.as_bytes());
     let first_global_counter =
         crate::mapi::identity::global_counter_from_globcnt(response_rops[22..28].try_into()?)
             .ok_or_else(|| anyhow::anyhow!("missing first local-replica global counter"))?;
@@ -88,16 +84,14 @@ async fn mapi_over_http_get_local_replica_ids_reserves_full_outlook_range_in_pos
     let persisted_next_global_counter = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT next_global_counter
-        FROM mapi_mailbox_replicas
-        WHERE tenant_id = $1 AND account_id = $2
+        FROM mapi_store_identity
+        WHERE singleton = TRUE
         "#,
     )
-    .bind(tenant_id)
-    .bind(account_id)
     .fetch_one(storage.pool())
     .await? as u64;
 
-    assert!(first_global_counter >= initial_next_global_counter);
+    assert_eq!(first_global_counter, initial_next_global_counter);
     assert_eq!(persisted_next_global_counter, expected_next_global_counter);
     let persisted_ranges = sqlx::query_as::<_, (i64, i64)>(
         r#"
@@ -161,11 +155,10 @@ async fn mapi_local_replica_id_reservations_are_atomic_in_postgresql() -> anyhow
     let persisted_next_global_counter = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT next_global_counter
-        FROM mapi_mailbox_replicas
-        WHERE account_id = $1
+        FROM mapi_store_identity
+        WHERE singleton = TRUE
         "#,
     )
-    .bind(account_id)
     .fetch_one(storage.pool())
     .await? as u64;
     assert_eq!(
@@ -185,27 +178,17 @@ async fn mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postg
     };
     let storage = fixture.storage.clone();
     let account_id = fixture.account_id;
-    let tenant_id = sqlx::query_scalar::<_, Uuid>("SELECT tenant_id FROM accounts WHERE id = $1")
-        .bind(account_id)
-        .fetch_one(storage.pool())
-        .await?;
     let id_count = crate::store::MAX_MAPI_LOCAL_REPLICA_ID_COUNT;
     let exhausted_counter = crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER;
     let first_counter = exhausted_counter - u64::from(id_count);
 
     sqlx::query(
         r#"
-        INSERT INTO mapi_mailbox_replicas (
-            tenant_id, account_id, replica_guid, next_global_counter
-        )
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (tenant_id, account_id)
-        DO UPDATE SET next_global_counter = EXCLUDED.next_global_counter
+        UPDATE mapi_store_identity
+        SET next_global_counter = $1
+        WHERE singleton = TRUE
         "#,
     )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
     .bind(first_counter as i64)
     .execute(storage.pool())
     .await?;
@@ -220,12 +203,111 @@ async fn mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postg
         .fetch_or_allocate_mapi_identities(account_id, &[])
         .await?;
     let persisted_next_global_counter = sqlx::query_scalar::<_, i64>(
-        "SELECT next_global_counter FROM mapi_mailbox_replicas WHERE account_id = $1",
+        "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE",
     )
-    .bind(account_id)
     .fetch_one(storage.pool())
     .await? as u64;
     assert_eq!(persisted_next_global_counter, exhausted_counter);
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_store_identity_is_shared_and_allocations_do_not_overlap_across_accounts(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let first_account_id = fixture.account_id;
+    let second_account_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (
+            id, tenant_id, primary_domain_id, primary_email, display_name
+        )
+        SELECT
+            $1,
+            tenant_id,
+            primary_domain_id,
+            'replica-peer-' || replace($1::text, '-', '') || '@'
+                || split_part(primary_email, '@', 2),
+            'Replica peer'
+        FROM accounts
+        WHERE id = $2
+        "#,
+    )
+    .bind(second_account_id)
+    .bind(first_account_id)
+    .execute(storage.pool())
+    .await?;
+
+    let (first_range, second_range) = tokio::join!(
+        storage.reserve_mapi_local_replica_ids(first_account_id, 32),
+        storage.reserve_mapi_local_replica_ids(second_account_id, 32),
+    );
+    let first_range = first_range?;
+    let second_range = second_range?;
+    let first_end = first_range + 32;
+    let second_end = second_range + 32;
+    assert!(first_end <= second_range || second_end <= first_range);
+
+    let store_replica_guid = sqlx::query_scalar::<_, Uuid>(
+        "SELECT replica_guid FROM mapi_store_identity WHERE singleton = TRUE",
+    )
+    .fetch_one(storage.pool())
+    .await?;
+    let replicas = sqlx::query_as::<_, (Uuid, Uuid)>(
+        r#"
+        SELECT account_id, replica_guid
+        FROM mapi_mailbox_replicas
+        WHERE account_id = ANY($1)
+        ORDER BY account_id
+        "#,
+    )
+    .bind(vec![first_account_id, second_account_id])
+    .fetch_all(storage.pool())
+    .await?;
+    assert_eq!(replicas.len(), 2);
+    assert!(replicas
+        .iter()
+        .all(|(_, replica_guid)| *replica_guid == store_replica_guid));
+
+    let first_identity = storage
+        .fetch_or_allocate_mapi_identities(
+            first_account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                canonical_id: Uuid::new_v4(),
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await?
+        .remove(0);
+    let second_identity = storage
+        .fetch_or_allocate_mapi_identities(
+            second_account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::AssociatedConfig,
+                canonical_id: Uuid::new_v4(),
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await?
+        .remove(0);
+    let first_counter =
+        crate::mapi::identity::global_counter_from_store_id(first_identity.object_id)
+            .ok_or_else(|| anyhow::anyhow!("invalid first durable MAPI object ID"))?;
+    let second_counter =
+        crate::mapi::identity::global_counter_from_store_id(second_identity.object_id)
+            .ok_or_else(|| anyhow::anyhow!("invalid second durable MAPI object ID"))?;
+    assert_ne!(first_counter, second_counter);
+    assert_ne!(first_identity.source_key, second_identity.source_key);
+    assert!(first_counter >= first_end.max(second_end));
+    assert!(second_counter >= first_end.max(second_end));
 
     fixture.cleanup().await?;
     Ok(())

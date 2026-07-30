@@ -120,207 +120,21 @@ async fn mapi_special_object_kind_for_checkpoint_mailbox(
     Ok((mailbox_role.as_deref() == Some("trash")).then_some("deleted_calendar_event"))
 }
 
-async fn advance_mapi_replica_counter_past_allocated(
+async fn mapi_store_identity_for_account_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant_id: Uuid,
     account_id: Uuid,
-) -> Result<()> {
-    let next_counter = sqlx::query_scalar::<_, i64>(
-        r#"
-        SELECT GREATEST(
-            COALESCE(MAX(mapi_global_counter), $3 - 1) + 1,
-            $3
-        )
-        FROM mapi_object_identities
-        WHERE tenant_id = $1
-          AND account_id = $2
-          AND mapi_global_counter < $4
-        "#,
+) -> Result<lpe_storage::MapiStoreIdentity> {
+    let store_identity =
+        lpe_storage::mapi_store_identity::ensure_mapi_store_identity_in_tx(tx).await?;
+    lpe_storage::mapi_store_identity::ensure_mapi_mailbox_replica_in_tx(
+        tx,
+        tenant_id,
+        account_id,
+        store_identity,
     )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
-    .bind(crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
-    .fetch_one(&mut **tx)
     .await?;
-
-    // Equality with FIRST_RESERVED_HIGH_GLOBAL_COUNTER is the exhausted
-    // high-watermark and must not recycle unmaterialized client reservations.
-    sqlx::query(
-        r#"
-        UPDATE mapi_mailbox_replicas
-        SET next_global_counter = CASE
-                WHEN next_global_counter < $3 OR next_global_counter > $4 THEN $3
-                ELSE GREATEST(next_global_counter, $3)
-            END,
-            updated_at = CASE
-                WHEN next_global_counter < $3 OR next_global_counter > $4 THEN NOW()
-                ELSE updated_at
-            END
-        WHERE tenant_id = $1
-          AND account_id = $2
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind(next_counter)
-    .bind(crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
-    .execute(&mut **tx)
-    .await?;
-
-    Ok(())
-}
-
-async fn repair_reserved_mapi_identity_counter_collisions(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    tenant_id: Uuid,
-    account_id: Uuid,
-) -> Result<()> {
-    let rows = sqlx::query(
-        r#"
-        SELECT identities.object_kind, identities.canonical_id, identities.mapi_global_counter,
-               mailboxes.role
-        FROM mapi_object_identities identities
-        LEFT JOIN mailboxes
-          ON mailboxes.tenant_id = identities.tenant_id
-         AND mailboxes.account_id = identities.account_id
-         AND mailboxes.id = identities.canonical_id
-         AND identities.object_kind = 'mailbox'
-        WHERE identities.tenant_id = $1
-          AND identities.account_id = $2
-          AND identities.mapi_global_counter >= $3
-          AND identities.mapi_global_counter < $4
-        ORDER BY identities.mapi_global_counter, identities.created_at, identities.canonical_id
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind(crate::mapi::identity::JOURNAL_FOLDER_COUNTER as i64)
-    .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
-    .fetch_all(&mut **tx)
-    .await?;
-
-    for row in rows {
-        let object_kind = row.get::<String, _>("object_kind");
-        let role = row.try_get::<String, _>("role").ok();
-        let current_counter = row.get::<i64, _>("mapi_global_counter") as u64;
-        let canonical_id = row.get::<Uuid, _>("canonical_id");
-        if object_kind == "mailbox"
-            && (role
-                .as_deref()
-                .and_then(crate::mapi_store::reserved_folder_counter_for_role)
-                == Some(current_counter)
-                || canonical_id
-                    == crate::mapi_mailstore::virtual_special_mailbox_id(
-                        crate::mapi::identity::mapi_store_id(current_counter),
-                    ))
-        {
-            continue;
-        }
-
-        let global_counter = allocate_next_mapi_global_counter(tx, tenant_id, account_id).await?;
-        let (object_id, source_key, change_key, instance_key) =
-            crate::mapi::identity::persisted_identity_material(global_counter);
-
-        sqlx::query(
-            r#"
-            UPDATE mapi_object_identities
-            SET mapi_global_counter = $5,
-                mapi_object_id = $6,
-                source_key = $7,
-                change_key = $8,
-                instance_key = $9
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND object_kind = $3
-              AND canonical_id = $4
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(account_id)
-        .bind(object_kind)
-        .bind(canonical_id)
-        .bind(global_counter as i64)
-        .bind(object_id as i64)
-        .bind(source_key)
-        .bind(change_key)
-        .bind(instance_key)
-        .execute(&mut **tx)
-        .await?;
-    }
-
-    Ok(())
-}
-
-async fn repair_reserved_mapi_mailbox_identities(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    tenant_id: Uuid,
-    account_id: Uuid,
-) -> Result<()> {
-    let rows = sqlx::query(
-        r#"
-        SELECT identities.canonical_id, identities.mapi_global_counter, mailboxes.role
-        FROM mapi_object_identities identities
-        JOIN mailboxes
-          ON mailboxes.tenant_id = identities.tenant_id
-         AND mailboxes.account_id = identities.account_id
-         AND mailboxes.id = identities.canonical_id
-        WHERE identities.tenant_id = $1
-          AND identities.account_id = $2
-          AND identities.object_kind = 'mailbox'
-          AND identities.deleted_at IS NULL
-        ORDER BY identities.created_at, identities.canonical_id
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .fetch_all(&mut **tx)
-    .await?;
-
-    for row in rows {
-        let role = row.get::<String, _>("role");
-        let Some(reserved_counter) = crate::mapi_store::reserved_folder_counter_for_role(&role)
-        else {
-            continue;
-        };
-        let current_counter = row.get::<i64, _>("mapi_global_counter") as u64;
-        if current_counter == reserved_counter {
-            continue;
-        }
-
-        let canonical_id = row.get::<Uuid, _>("canonical_id");
-        let (object_id, source_key, change_key, instance_key) =
-            crate::mapi::identity::persisted_identity_material(reserved_counter);
-
-        sqlx::query(
-            r#"
-            UPDATE mapi_object_identities
-            SET mapi_global_counter = $5,
-                mapi_object_id = $6,
-                source_key = $7,
-                change_key = $8,
-                instance_key = $9
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND object_kind = 'mailbox'
-              AND canonical_id = $3
-              AND mapi_global_counter = $4
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(account_id)
-        .bind(canonical_id)
-        .bind(current_counter as i64)
-        .bind(reserved_counter as i64)
-        .bind(object_id as i64)
-        .bind(source_key)
-        .bind(change_key)
-        .bind(instance_key)
-        .execute(&mut **tx)
-        .await?;
-    }
-
-    Ok(())
+    Ok(store_identity)
 }
 
 async fn allocate_next_mapi_global_counter(
@@ -328,26 +142,37 @@ async fn allocate_next_mapi_global_counter(
     tenant_id: Uuid,
     account_id: Uuid,
 ) -> Result<u64> {
-    let next = sqlx::query_scalar::<_, i64>(
-        r#"
-        UPDATE mapi_mailbox_replicas
-        SET next_global_counter = next_global_counter + 1,
-            updated_at = NOW()
-        WHERE tenant_id = $1
-          AND account_id = $2
-        RETURNING next_global_counter - 1
-        "#,
+    mapi_store_identity_for_account_in_tx(tx, tenant_id, account_id).await?;
+    let (_, global_counter) =
+        lpe_storage::mapi_store_identity::allocate_mapi_store_global_counter_in_tx(tx).await?;
+    Ok(global_counter)
+}
+
+fn mapi_identity_material_for_store_replica(
+    replica_guid: Uuid,
+    global_counter: u64,
+) -> (u64, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    let object_id = lpe_storage::mapi_store_identity::mapi_store_id(global_counter);
+    let source_key = lpe_storage::mapi_store_identity::mapi_xid(replica_guid, global_counter);
+    let mut predecessor_change_list = Vec::with_capacity(source_key.len() + 1);
+    predecessor_change_list.push(source_key.len() as u8);
+    predecessor_change_list.extend_from_slice(&source_key);
+    (
+        object_id,
+        source_key.clone(),
+        source_key.clone(),
+        source_key,
+        predecessor_change_list,
     )
-    .bind(tenant_id)
-    .bind(account_id)
-    .fetch_one(&mut **tx)
-    .await?;
+}
 
-    if next as u64 >= crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER {
-        anyhow::bail!("MAPI dynamic global counter space exhausted");
+fn mapi_xid_global_counter(xid: &[u8]) -> Result<u64> {
+    if xid.len() != 22 {
+        anyhow::bail!("MAPI XID must be exactly 22 bytes");
     }
-
-    Ok(next as u64)
+    let mut counter = [0u8; 8];
+    counter[2..].copy_from_slice(&xid[16..]);
+    Ok(u64::from_be_bytes(counter))
 }
 
 async fn fetch_mapi_named_property_in_tx(
@@ -665,134 +490,6 @@ async fn insert_mapi_associated_config_change(
     .execute(&mut **tx)
     .await?;
     Ok(())
-}
-
-async fn repair_invalid_mapi_identity_material(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    tenant_id: Uuid,
-    account_id: Uuid,
-) -> Result<()> {
-    let rows = sqlx::query(
-        r#"
-        SELECT object_kind, canonical_id, mapi_global_counter, mapi_change_number,
-               source_key, change_key, predecessor_change_list, instance_key
-        FROM mapi_object_identities
-        WHERE tenant_id = $1
-          AND account_id = $2
-          AND deleted_at IS NULL
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .fetch_all(&mut **tx)
-    .await?;
-
-    let mut repaired_count = 0u64;
-    for row in rows {
-        let global_counter = row.get::<i64, _>("mapi_global_counter") as u64;
-        let change_number = row.get::<i64, _>("mapi_change_number") as u64;
-        let stored_source_key = row.get::<Vec<u8>, _>("source_key");
-        let stored_change_key = row.get::<Vec<u8>, _>("change_key");
-        let stored_predecessor_change_list =
-            row.get::<Vec<u8>, _>("predecessor_change_list");
-        let stored_instance_key = row.get::<Vec<u8>, _>("instance_key");
-        let (_, source_key, object_change_key, instance_key) =
-            crate::mapi::identity::persisted_identity_material(global_counter);
-        let current_change_key =
-            crate::mapi::identity::change_key_for_change_number(change_number);
-        // [MS-OXCFXICS] 2.2.1.2.7 and 3.1.5.3: an imported ChangeKey can
-        // intentionally differ from the internal CN. Repair only the exact
-        // stale signature left by the former identity-material repair: the CK
-        // fell back to the immutable object counter while the PCL proves that
-        // the current local CN was already integrated.
-        let change_key = if change_number != global_counter
-            && stored_change_key == object_change_key
-            && predecessor_change_list_contains_exact_xid(
-                &stored_predecessor_change_list,
-                &current_change_key,
-            )
-        {
-            current_change_key
-        } else {
-            stored_change_key.clone()
-        };
-        if stored_source_key == source_key
-            && stored_change_key == change_key
-            && stored_instance_key == instance_key
-        {
-            continue;
-        }
-        let updated = sqlx::query(
-            r#"
-            UPDATE mapi_object_identities
-            SET source_key = $5,
-                change_key = $6,
-                instance_key = $7
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND object_kind = $3
-              AND canonical_id = $4
-              AND mapi_change_number = $8
-              AND source_key = $9
-              AND change_key = $10
-              AND predecessor_change_list = $11
-              AND instance_key = $12
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(account_id)
-        .bind(row.get::<String, _>("object_kind"))
-        .bind(row.get::<Uuid, _>("canonical_id"))
-        .bind(source_key)
-        .bind(change_key)
-        .bind(instance_key)
-        .bind(change_number as i64)
-        .bind(stored_source_key)
-        .bind(stored_change_key)
-        .bind(stored_predecessor_change_list)
-        .bind(stored_instance_key)
-        .execute(&mut **tx)
-        .await?;
-        repaired_count += updated.rows_affected();
-    }
-
-    if repaired_count > 0 {
-        tracing::info!(
-            rca_debug = true,
-            adapter = "mapi",
-            account_id = %account_id,
-            repaired_invalid_identity_material_count = repaired_count,
-            message = "rca debug mapi repaired invalid identity material",
-        );
-    }
-
-    Ok(())
-}
-
-fn predecessor_change_list_contains_exact_xid(
-    predecessor_change_list: &[u8],
-    expected_xid: &[u8],
-) -> bool {
-    let mut offset = 0usize;
-    let mut found = false;
-    while offset < predecessor_change_list.len() {
-        let size = usize::from(predecessor_change_list[offset]);
-        offset += 1;
-        if !(17..=24).contains(&size) {
-            return false;
-        }
-        let Some(end) = offset.checked_add(size) else {
-            return false;
-        };
-        let Some(xid) = predecessor_change_list.get(offset..end) else {
-            return false;
-        };
-        if xid == expected_xid {
-            found = true;
-        }
-        offset = end;
-    }
-    found
 }
 
 async fn mapi_collaboration_folder_identity_ids_for_account(

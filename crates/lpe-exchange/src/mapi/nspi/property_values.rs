@@ -1,5 +1,11 @@
 use super::*;
 
+// [MS-OXOABK] section 2.2.3.32: PidTagMappingSignature is the fixed
+// address-book mapping-signature value, not the mailbox-store replica GUID.
+const NSPI_MAPPING_SIGNATURE: [u8; 16] = [
+    0xdc, 0xa7, 0x40, 0xc8, 0xc0, 0x42, 0x10, 0x1a, 0xb4, 0xb9, 0x08, 0x00, 0x2b, 0x2f, 0xe1, 0x82,
+];
+
 pub(super) const NSPI_BOOTSTRAP_PROPERTY_TAGS: &[u32] = &[
     0x3001_001F, // PidTagDisplayName
     0x39FE_001F, // PidTagSmtpAddress
@@ -446,7 +452,7 @@ pub(in crate::mapi) fn nspi_entry_value_with_directory<'a>(
 ) -> NspiValue<'a> {
     match property_tag {
         0x0000_0001 => NspiValue::Null,
-        0x0FF8_0102 => NspiValue::OwnedBinary(mapi_mailstore::STORE_REPLICA_GUID.to_vec()),
+        0x0FF8_0102 => NspiValue::OwnedBinary(NSPI_MAPPING_SIGNATURE.to_vec()),
         0x3902_0102 => NspiValue::OwnedBinary(nspi_entry_permanent_entry_id(entry)),
         0x39FF_001F | 0x39FF_001E => NspiValue::String(&entry.display_name),
         0x3001_001F | 0x3001_001E => NspiValue::String(&entry.display_name),

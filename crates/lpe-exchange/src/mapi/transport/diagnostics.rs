@@ -725,6 +725,7 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
     };
+    let store_replica_guid = crate::mapi::identity::current_store_replica_guid();
     let sync_source_summaries = session
         .handles
         .iter()
@@ -1435,11 +1436,11 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         logon_response_flags = %logon_identity.response_flags,
         logon_special_folder_ids = %logon_identity.special_folder_ids,
         expected_mailbox_guid = %principal.account_id,
-        expected_replica_guid = %hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len()),
+        expected_replica_guid = %hex_preview(&store_replica_guid, store_replica_guid.len()),
         logon_identity_matches_session =
             logon_identity.mailbox_guid == principal.account_id.to_string()
                 && logon_identity.replica_guid
-                    == hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len()),
+                    == hex_preview(&store_replica_guid, store_replica_guid.len()),
         client_request_id = %client_request_id,
         client_application = %client_application,
         client_info = %client_info,
@@ -1534,7 +1535,7 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         logon_identity_matches_session =
             logon_identity.mailbox_guid == principal.account_id.to_string()
                 && logon_identity.replica_guid
-                    == hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len()),
+                    == hex_preview(&store_replica_guid, store_replica_guid.len()),
         client_application = %client_application,
         trace_id = %trace_id,
         client_request_id = %client_request_id,
@@ -1628,7 +1629,7 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
         logon_identity_matches_session =
             logon_identity.mailbox_guid == principal.account_id.to_string()
                 && logon_identity.replica_guid
-                    == hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len()),
+                    == hex_preview(&store_replica_guid, store_replica_guid.len()),
         client_flow_key = %client_flow_key,
         request_guid = %request_guid,
         request_counter = %request_counter,

@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.5.1-sql'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.5.2-sql'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -2144,11 +2144,22 @@ CREATE TABLE mapi_profile_settings (
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
+CREATE TABLE mapi_store_identity (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
+    replica_guid UUID NOT NULL,
+    next_global_counter BIGINT NOT NULL DEFAULT 43
+        CHECK (next_global_counter >= 43 AND next_global_counter <= 140737454800896),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO mapi_store_identity (singleton, replica_guid, next_global_counter)
+VALUES (TRUE, gen_random_uuid(), 43);
+
 CREATE TABLE mapi_mailbox_replicas (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
     replica_guid UUID NOT NULL,
-    next_global_counter BIGINT NOT NULL DEFAULT 43 CHECK (next_global_counter >= 43),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_id),
@@ -2165,6 +2176,9 @@ CREATE TABLE mapi_local_replica_id_ranges (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_id, replica_guid, first_global_counter),
     CHECK (first_global_counter < end_global_counter_exclusive),
+    EXCLUDE USING gist (
+        int8range(first_global_counter, end_global_counter_exclusive, '[)') WITH &&
+    ),
     FOREIGN KEY (tenant_id, account_id, replica_guid)
         REFERENCES mapi_mailbox_replicas (tenant_id, account_id, replica_guid)
         ON DELETE CASCADE
@@ -2209,19 +2223,21 @@ CREATE TABLE mapi_object_identities (
     account_id UUID NOT NULL,
     object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'deleted_calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message')),
     canonical_id UUID NOT NULL,
-    mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter > 0 AND mapi_global_counter <= 140737488355327),
+    mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter >= 43 AND mapi_global_counter < 140737454800896),
     mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),
     source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 22),
     change_key BYTEA NOT NULL CHECK (octet_length(change_key) BETWEEN 17 AND 24),
-    mapi_change_number BIGINT NOT NULL CHECK (mapi_change_number > 0 AND mapi_change_number <= 140737488355327),
+    mapi_change_number BIGINT NOT NULL CHECK (mapi_change_number >= 43 AND mapi_change_number < 140737454800896),
     predecessor_change_list BYTEA NOT NULL CHECK (octet_length(predecessor_change_list) > 0),
     instance_key BYTEA NOT NULL CHECK (octet_length(instance_key) = 22),
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id),
-    UNIQUE (tenant_id, account_id, mapi_global_counter),
-    UNIQUE (tenant_id, account_id, mapi_object_id),
+    UNIQUE (mapi_global_counter),
+    UNIQUE (mapi_object_id),
+    UNIQUE (source_key),
+    UNIQUE (mapi_change_number),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
@@ -3574,6 +3590,6 @@ SELECT
 FROM mail_search_documents msd;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.5.1-sql');
+VALUES (TRUE, '0.5.2-sql');
 
 COMMIT;

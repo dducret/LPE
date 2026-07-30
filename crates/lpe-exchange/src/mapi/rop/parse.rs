@@ -404,15 +404,7 @@ impl RopRequest {
     pub(in crate::mapi) fn import_delete_message_ids(&self) -> Vec<u64> {
         self.import_delete_source_keys()
             .iter()
-            .filter_map(|source_key| {
-                (source_key.len() == 22
-                    && source_key[..16] == crate::mapi::identity::STORE_REPLICA_GUID)
-                    .then(|| {
-                        crate::mapi::identity::global_counter_from_globcnt(&source_key[16..22])
-                            .map(crate::mapi::identity::mapi_store_id)
-                    })
-                    .flatten()
-            })
+            .filter_map(|source_key| crate::mapi::identity::object_id_from_source_key(source_key))
             .collect()
     }
 

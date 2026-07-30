@@ -32,6 +32,7 @@ use folder_versions::MapiFolderVersions;
 #[derive(Debug, Clone)]
 pub(crate) struct MapiMailStoreSnapshot {
     folders: Vec<MapiFolder>,
+    identity_codec: crate::mapi::identity::MapiIdentityCodec,
     folder_versions: MapiFolderVersions,
     mailbox_content_commit_times: HashMap<Uuid, u64>,
     contact_commit_times: HashMap<Uuid, u64>,
@@ -615,7 +616,17 @@ impl<T: ExchangeStore> MapiStore for T {
             let identity_records = self
                 .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
                 .await?;
+            let store_identity = self.fetch_mapi_store_identity().await?;
+            let identity_codec =
+                crate::mapi::identity::MapiIdentityCodec::from_special_folder_identity_records(
+                    store_identity.replica_guid,
+                    &mapi_folder_identity_requests(&mailboxes),
+                    &identity_records,
+                )?;
             for identity in &identity_records {
+                if identity_codec.is_special_canonical_id(&identity.canonical_id) {
+                    continue;
+                }
                 crate::mapi::identity::remember_mapi_identity_with_source_key(
                     identity.canonical_id,
                     identity.object_id,
@@ -659,6 +670,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 tasks,
                 folder_permissions,
                 &identity_records,
+                &identity_codec,
             )
             .and_then(|snapshot| snapshot.with_contact_identities(&identity_records))
             .map(|snapshot| snapshot.with_contact_sync_versions(contact_sync_versions))
@@ -698,6 +710,7 @@ impl<T: ExchangeStore> MapiStore for T {
             .map(|snapshot| {
                 snapshot.with_mailbox_content_commit_times(mailbox_content_commit_times)
             })
+            .map(|snapshot| snapshot.with_identity_codec(identity_codec))
         })
     }
 }

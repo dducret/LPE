@@ -39,24 +39,6 @@ pub(super) async fn acquire_execute_active_session_request(
     None
 }
 
-pub(super) fn rop_buffer_is_store_independent_logon(rop_buffer: &[u8]) -> bool {
-    let Some((requests, _handle_table)) = split_rop_buffer(rop_buffer) else {
-        return false;
-    };
-    let mut cursor = Cursor::new(requests);
-    let mut saw_request = false;
-    while cursor.remaining() > 0 {
-        let Ok(request) = read_rop_request(&mut cursor) else {
-            return false;
-        };
-        if !matches!(RopId::from_u8(request.rop_id), Some(RopId::Logon)) {
-            return false;
-        }
-        saw_request = true;
-    }
-    saw_request
-}
-
 pub(super) fn rop_buffer_is_store_independent_release_only(rop_buffer: &[u8]) -> bool {
     let Some((requests, _handle_table)) = split_rop_buffer(rop_buffer) else {
         return false;
@@ -75,6 +57,7 @@ pub(super) fn rop_buffer_is_store_independent_release_only(rop_buffer: &[u8]) ->
     saw_request
 }
 
+#[cfg(test)]
 pub(super) fn rop_buffer_is_store_independent_special_folder_getprops_probe(
     rop_buffer: &[u8],
     session: &MapiSession,
@@ -131,6 +114,7 @@ pub(super) fn rop_buffer_is_store_independent_special_folder_getprops_probe(
     saw_open_folder && saw_get_properties
 }
 
+#[cfg(test)]
 fn is_store_independent_folder_getprops_probe(folder_id: u64, property_tags: &[u32]) -> bool {
     is_store_independent_special_folder(folder_id)
         && !property_tags
@@ -138,6 +122,7 @@ fn is_store_independent_folder_getprops_probe(folder_id: u64, property_tags: &[u
             .any(|tag| strips_default_folder_identification_value_for_folder_id(folder_id, *tag))
 }
 
+#[cfg(test)]
 fn is_store_independent_special_folder(folder_id: u64) -> bool {
     matches!(
         folder_id,

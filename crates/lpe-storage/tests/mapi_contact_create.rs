@@ -178,8 +178,15 @@ async fn contact_fixture() -> Result<Option<ContactFixture>> {
     .execute(&pool)
     .await?;
     sqlx::query(
-        "INSERT INTO mapi_mailbox_replicas \
-         (tenant_id, account_id, replica_guid, next_global_counter) VALUES ($1, $2, $3, 1000)",
+        "UPDATE mapi_store_identity \
+         SET replica_guid = $1, next_global_counter = 1000 WHERE singleton = TRUE",
+    )
+    .bind(Uuid::from_bytes(REPLICA_GUID))
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO mapi_mailbox_replicas (tenant_id, account_id, replica_guid) \
+         VALUES ($1, $2, $3)",
     )
     .bind(tenant_id)
     .bind(account_id)
@@ -316,9 +323,8 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
     }
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT next_global_counter FROM mapi_mailbox_replicas WHERE account_id = $1"
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
         )
-        .bind(fixture.account_id)
         .fetch_one(fixture.storage.pool())
         .await?,
         1000
@@ -573,9 +579,8 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
     .fetch_one(fixture.storage.pool())
     .await?;
     let next_counter_before_retry = sqlx::query_scalar::<_, i64>(
-        "SELECT next_global_counter FROM mapi_mailbox_replicas WHERE account_id = $1",
+        "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE",
     )
-    .bind(fixture.account_id)
     .fetch_one(fixture.storage.pool())
     .await?;
     let replay = fixture
@@ -610,9 +615,8 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT next_global_counter FROM mapi_mailbox_replicas WHERE account_id = $1",
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE",
         )
-        .bind(fixture.account_id)
         .fetch_one(fixture.storage.pool())
         .await?,
         next_counter_before_retry

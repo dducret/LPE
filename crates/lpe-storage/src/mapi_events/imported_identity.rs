@@ -1,11 +1,15 @@
 use anyhow::{anyhow, bail, Result};
-use sqlx::{Postgres, Row};
+use sqlx::Postgres;
 use uuid::Uuid;
 
 use super::{
     mapi_change_key, mapi_store_id, merge_predecessor_change_list, EventIdentityVersion,
     MapiEventImportedIdentity, FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER,
-    FIRST_RESERVED_HIGH_GLOBAL_COUNTER, MAPI_STORE_REPLICA_GUID, MAX_MAPI_GLOBAL_COUNTER,
+    FIRST_RESERVED_HIGH_GLOBAL_COUNTER,
+};
+use crate::mapi_store_identity::{
+    allocate_mapi_store_global_counter_in_tx, ensure_mapi_mailbox_replica_in_tx,
+    ensure_mapi_store_identity_in_tx,
 };
 
 pub(super) fn validate_imported_identity(identity: &MapiEventImportedIdentity) -> Result<()> {
@@ -52,102 +56,37 @@ pub(super) async fn allocate_mapi_event_identity_in_tx(
     event_id: Uuid,
     imported_identity: Option<&MapiEventImportedIdentity>,
 ) -> Result<(u64, EventIdentityVersion)> {
-    sqlx::query(
-        r#"
-        INSERT INTO mapi_mailbox_replicas (
-            tenant_id, account_id, replica_guid, next_global_counter
-        )
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (tenant_id, account_id)
-        DO UPDATE SET
-            next_global_counter = GREATEST(
-                mapi_mailbox_replicas.next_global_counter,
-                $4
-            )
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(principal_account_id)
-    .bind(Uuid::from_bytes(MAPI_STORE_REPLICA_GUID))
-    .bind(FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER as i64)
-    .execute(&mut **tx)
-    .await?;
-    let replica_guid = sqlx::query_scalar::<_, Uuid>(
-        r#"
-        SELECT replica_guid
-        FROM mapi_mailbox_replicas
-        WHERE tenant_id = $1
-          AND account_id = $2
-        FOR UPDATE
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(principal_account_id)
-    .fetch_one(&mut **tx)
-    .await?;
+    let store_identity = ensure_mapi_store_identity_in_tx(tx).await?;
+    ensure_mapi_mailbox_replica_in_tx(tx, *tenant_id, principal_account_id, store_identity).await?;
+    let replica_guid = store_identity.replica_guid;
     let imported_source_counter = imported_identity
         .map(|identity| imported_source_global_counter(identity, replica_guid))
         .transpose()?;
-    let allocation_floor = imported_source_counter
-        .map(|counter| counter + 1)
-        .unwrap_or(FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER);
-    sqlx::query(
-        r#"
-        UPDATE mapi_mailbox_replicas replica
-        SET next_global_counter = GREATEST(
-                replica.next_global_counter,
-                COALESCE(
-                    (
-                        SELECT MAX(GREATEST(
-                                   identity.mapi_global_counter,
-                                   identity.mapi_change_number
-                               )) + 1
-                        FROM mapi_object_identities identity
-                        WHERE identity.tenant_id = replica.tenant_id
-                          AND identity.account_id = replica.account_id
-                          AND identity.mapi_global_counter < $3
-                          AND identity.mapi_change_number < $3
-                    ),
-                    $4
-                ),
-                $5
-            ),
-            updated_at = NOW()
-        WHERE replica.tenant_id = $1
-          AND replica.account_id = $2
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(principal_account_id)
-    .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
-    .bind(FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER as i64)
-    .bind(allocation_floor as i64)
-    .execute(&mut **tx)
-    .await?;
-    let allocated = sqlx::query(
-        r#"
-        UPDATE mapi_mailbox_replicas
-        SET next_global_counter = next_global_counter + 1,
-            updated_at = NOW()
-        WHERE tenant_id = $1
-          AND account_id = $2
-          AND next_global_counter >= $3
-          AND next_global_counter < $4
-        RETURNING next_global_counter - 1 AS change_number
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(principal_account_id)
-    .bind(FIRST_DYNAMIC_MAPI_GLOBAL_COUNTER as i64)
-    .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
-    .fetch_optional(&mut **tx)
-    .await?
-    .ok_or_else(|| anyhow!("MAPI dynamic global counter space exhausted"))?;
-    let change_number = allocated.get::<i64, _>("change_number");
-    if change_number <= 0 || change_number as u64 > MAX_MAPI_GLOBAL_COUNTER {
-        bail!("MAPI dynamic global counter space exhausted");
+    if let Some(source_counter) = imported_source_counter {
+        let reserved = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM mapi_local_replica_id_ranges
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND replica_guid = $3
+                  AND first_global_counter <= $4
+                  AND end_global_counter_exclusive > $4
+            )
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(principal_account_id)
+        .bind(replica_guid)
+        .bind(source_counter as i64)
+        .fetch_one(&mut **tx)
+        .await?;
+        if !reserved {
+            bail!("MAPI Event imported SourceKey was not locally reserved");
+        }
     }
-    let change_number = change_number as u64;
+    let (_, change_number) = allocate_mapi_store_global_counter_in_tx(tx).await?;
 
     // [MS-OXCFXICS] 3.1.5.3: an imported message keeps the client SourceKey,
     // ChangeKey and PCL{ChangeKey}, but receives a server-internal CN.
@@ -221,10 +160,7 @@ mod tests {
         let mut predecessor_change_list = vec![change_key.len() as u8];
         predecessor_change_list.extend_from_slice(&change_key);
         MapiEventImportedIdentity {
-            source_key: mapi_change_key(
-                Uuid::from_bytes(MAPI_STORE_REPLICA_GUID),
-                0x0df8_974b_7f66,
-            ),
+            source_key: mapi_change_key(Uuid::from_u128(2), 0x0df8_974b_7f66),
             change_key,
             predecessor_change_list,
         }
@@ -235,8 +171,7 @@ mod tests {
         let mut identity = realistic_imported_identity();
         assert!(validate_imported_identity(&identity).is_ok());
         assert_eq!(
-            imported_source_global_counter(&identity, Uuid::from_bytes(MAPI_STORE_REPLICA_GUID))
-                .unwrap(),
+            imported_source_global_counter(&identity, Uuid::from_u128(2)).unwrap(),
             0x0df8_974b_7f66
         );
 

@@ -217,8 +217,15 @@ async fn event_fixture() -> Result<Option<EventFixture>> {
     .execute(&pool)
     .await?;
     sqlx::query(
-        "INSERT INTO mapi_mailbox_replicas \
-         (tenant_id, account_id, replica_guid, next_global_counter) VALUES ($1, $2, $3, 100)",
+        "UPDATE mapi_store_identity \
+         SET replica_guid = $1, next_global_counter = 100 WHERE singleton = TRUE",
+    )
+    .bind(Uuid::from_bytes(REPLICA_GUID))
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO mapi_mailbox_replicas (tenant_id, account_id, replica_guid) \
+         VALUES ($1, $2, $3)",
     )
     .bind(tenant_id)
     .bind(account_id)
@@ -273,6 +280,43 @@ async fn event_fixture() -> Result<Option<EventFixture>> {
         event_id,
         schema_cleanup,
     }))
+}
+
+async fn reserve_imported_event_range(
+    fixture: &EventFixture,
+    first_global_counter: u64,
+    last_global_counter: u64,
+) -> Result<()> {
+    let end_global_counter_exclusive = last_global_counter
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("test MAPI local range overflow"))?;
+    sqlx::query(
+        r#"
+        UPDATE mapi_store_identity
+        SET next_global_counter = GREATEST(next_global_counter, $1)
+        WHERE singleton = TRUE
+        "#,
+    )
+    .bind(end_global_counter_exclusive as i64)
+    .execute(fixture.storage.pool())
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_local_replica_id_ranges (
+            tenant_id, account_id, replica_guid,
+            first_global_counter, end_global_counter_exclusive
+        )
+        VALUES ($1, $2, $3, $4, $5)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(Uuid::from_bytes(REPLICA_GUID))
+    .bind(first_global_counter as i64)
+    .bind(end_global_counter_exclusive as i64)
+    .execute(fixture.storage.pool())
+    .await?;
+    Ok(())
 }
 
 fn updated_event(fixture: &EventFixture, title: &str) -> UpsertClientEventInput {
@@ -785,9 +829,8 @@ async fn mapi_event_commit_rejects_stale_version_unless_force_save() -> Result<(
     assert_eq!(unchanged.get::<String, _>("title"), "First writer");
     assert_eq!(unchanged.get::<i64, _>("modseq"), 8);
     let counter = sqlx::query_scalar::<_, i64>(
-        "SELECT next_global_counter FROM mapi_mailbox_replicas WHERE account_id = $1",
+        "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE",
     )
-    .bind(fixture.account_id)
     .fetch_one(fixture.storage.pool())
     .await?;
     assert_eq!(counter, 101);
@@ -814,8 +857,7 @@ async fn mapi_event_commit_rolls_back_when_change_number_allocation_fails() -> R
     let Some(fixture) = event_fixture().await? else {
         return Ok(());
     };
-    sqlx::query("UPDATE mapi_mailbox_replicas SET next_global_counter = $2 WHERE account_id = $1")
-        .bind(fixture.account_id)
+    sqlx::query("UPDATE mapi_store_identity SET next_global_counter = $1 WHERE singleton = TRUE")
         .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
         .execute(fixture.storage.pool())
         .await?;
@@ -871,8 +913,7 @@ async fn mapi_event_create_rolls_back_every_artifact_and_retry_creates_one_event
         created_event_id,
         "Création atomique puis retry",
     );
-    sqlx::query("UPDATE mapi_mailbox_replicas SET next_global_counter = $2 WHERE account_id = $1")
-        .bind(fixture.account_id)
+    sqlx::query("UPDATE mapi_store_identity SET next_global_counter = $1 WHERE singleton = TRUE")
         .bind(FIRST_RESERVED_HIGH_GLOBAL_COUNTER as i64)
         .execute(fixture.storage.pool())
         .await?;
@@ -903,8 +944,7 @@ async fn mapi_event_create_rolls_back_every_artifact_and_retry_creates_one_event
         7
     );
 
-    sqlx::query("UPDATE mapi_mailbox_replicas SET next_global_counter = 150 WHERE account_id = $1")
-        .bind(fixture.account_id)
+    sqlx::query("UPDATE mapi_store_identity SET next_global_counter = 150 WHERE singleton = TRUE")
         .execute(fixture.storage.pool())
         .await?;
     let created = fixture.storage.create_mapi_event(input).await?;
@@ -956,6 +996,7 @@ async fn microsoft_oxcfxics_imported_event_keeps_client_xids_and_allocates_serve
     };
     let event_id = Uuid::new_v4();
     let source_counter = 0x0df8_974b_7f66;
+    reserve_imported_event_range(&fixture, source_counter, source_counter).await?;
     let source_key = change_key(source_counter);
     let client_change_key = vec![
         0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
@@ -1030,6 +1071,7 @@ async fn microsoft_oxcfxics_imported_calendar_move_is_atomic_and_keeps_destinati
     let event_id = Uuid::new_v4();
     let source_counter = 0x0df8_974b_7f66;
     let destination_counter = 0x0df8_974b_776d;
+    reserve_imported_event_range(&fixture, source_counter, destination_counter).await?;
     let source_key = change_key(source_counter);
     let destination_source_key = change_key(destination_counter);
     let client_change_key = vec![
@@ -1212,6 +1254,7 @@ async fn microsoft_oxcfxics_imported_deleted_event_update_keeps_identity_and_is_
     let event_id = Uuid::new_v4();
     let source_counter = 0x0df8_974b_7f66;
     let destination_counter = 0x0df8_974b_776d;
+    reserve_imported_event_range(&fixture, source_counter, destination_counter).await?;
     let source_key = change_key(source_counter);
     let destination_source_key = change_key(destination_counter);
     let move_change_key = vec![
@@ -1272,9 +1315,8 @@ async fn microsoft_oxcfxics_imported_deleted_event_update_keeps_identity_and_is_
     .fetch_one(fixture.storage.pool())
     .await?;
     let before_replica_counter = sqlx::query_scalar::<_, i64>(
-        "SELECT next_global_counter FROM mapi_mailbox_replicas WHERE account_id = $1",
+        "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE",
     )
-    .bind(fixture.account_id)
     .fetch_one(fixture.storage.pool())
     .await?;
     let before_account_modseq = sqlx::query_scalar::<_, i64>(
@@ -1388,9 +1430,8 @@ async fn microsoft_oxcfxics_imported_deleted_event_update_keeps_identity_and_is_
     }
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT next_global_counter FROM mapi_mailbox_replicas WHERE account_id = $1"
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
         )
-        .bind(fixture.account_id)
         .fetch_one(fixture.storage.pool())
         .await?,
         before_replica_counter
@@ -1577,15 +1618,9 @@ async fn delegated_mapi_event_create_uses_owner_scope_for_event_and_custom_prope
     .bind(delegate_account_id)
     .execute(fixture.storage.pool())
     .await?;
-    sqlx::query(
-        "INSERT INTO mapi_mailbox_replicas \
-         (tenant_id, account_id, replica_guid, next_global_counter) VALUES ($1, $2, $3, 200)",
-    )
-    .bind(fixture.tenant_id)
-    .bind(delegate_account_id)
-    .bind(Uuid::from_bytes(REPLICA_GUID))
-    .execute(fixture.storage.pool())
-    .await?;
+    sqlx::query("UPDATE mapi_store_identity SET next_global_counter = 200 WHERE singleton = TRUE")
+        .execute(fixture.storage.pool())
+        .await?;
     let created_event_id = Uuid::new_v4();
 
     let created = fixture
@@ -1672,16 +1707,6 @@ async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_re
     .bind(fixture.calendar_id)
     .bind(fixture.account_id)
     .bind(delegate_account_id)
-    .execute(fixture.storage.pool())
-    .await?;
-    sqlx::query(
-        "INSERT INTO mapi_mailbox_replicas \
-         (tenant_id, account_id, replica_guid, next_global_counter) \
-         VALUES ($1, $2, $3, 200)",
-    )
-    .bind(fixture.tenant_id)
-    .bind(delegate_account_id)
-    .bind(Uuid::from_bytes(REPLICA_GUID))
     .execute(fixture.storage.pool())
     .await?;
     let delegate_source_key = change_key(60);

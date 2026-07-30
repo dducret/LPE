@@ -37,15 +37,18 @@ async fn commit_mapi_imported_fai_identity_in_tx(
     imported: &MapiFaiImportedIdentity,
     fail_on_conflict: bool,
 ) -> Result<MapiImportedFaiIdentityCommit> {
-    let object_id = crate::mapi::identity::object_id_from_source_key(&imported.source_key)
-        .ok_or_else(|| anyhow::anyhow!("invalid imported FAI SourceKey"))?;
-    let source_counter = crate::mapi::identity::global_counter_from_store_id(object_id)
-        .filter(|counter| {
-            (crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
-                ..crate::mapi::identity::FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
-                .contains(counter)
-        })
-        .ok_or_else(|| anyhow::anyhow!("imported FAI SourceKey is outside the dynamic range"))?;
+    let store_identity = mapi_store_identity_for_account_in_tx(tx, tenant_id, account_id).await?;
+    if imported.source_key.get(..16) != Some(store_identity.replica_guid.as_bytes().as_slice()) {
+        anyhow::bail!("imported FAI SourceKey does not use the database replica GUID");
+    }
+    let source_counter = mapi_xid_global_counter(&imported.source_key)?;
+    if !(lpe_storage::mapi_store_identity::MAPI_FIRST_GLOBAL_COUNTER
+        ..lpe_storage::mapi_store_identity::MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+        .contains(&source_counter)
+    {
+        anyhow::bail!("imported FAI SourceKey is outside the dynamic range");
+    }
+    let object_id = lpe_storage::mapi_store_identity::mapi_store_id(source_counter);
     if !(17..=24).contains(&imported.change_key.len()) {
         anyhow::bail!("invalid imported FAI ChangeKey XID length");
     }
@@ -214,7 +217,7 @@ async fn commit_mapi_imported_fai_identity_in_tx(
         tenant_id,
         account_id,
         folder_id,
-        Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID),
+        store_identity.replica_guid,
         source_counter,
     )
     .await?
@@ -277,7 +280,7 @@ async fn commit_mapi_imported_fai_identity_in_tx(
         tx,
         tenant_id,
         account_id,
-        Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID),
+        store_identity.replica_guid,
         source_counter,
     )
     .await?
@@ -312,7 +315,7 @@ async fn commit_mapi_imported_fai_identity_in_tx(
     .bind(object_id as i64)
     .bind(&imported.source_key)
     .bind(&imported.change_key)
-    .bind(crate::mapi::identity::instance_key_for_object_id(object_id))
+    .bind(&imported.source_key)
     .bind(change_number as i64)
     .bind(&imported.predecessor_change_list)
     .bind(last_modification_time_i64)

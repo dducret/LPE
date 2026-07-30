@@ -57,6 +57,7 @@ pub(super) fn allocate_logon_response_context(
     handle_slots: &mut Vec<u32>,
     principal: &AccountPrincipal,
     request: &RopRequest,
+    identity_codec: &crate::mapi::identity::MapiIdentityCodec,
 ) -> LogonResponseContext {
     let is_private_logon = request.payload.first().copied().unwrap_or(0) & 0x01 != 0;
     let logon_object = if is_private_logon {
@@ -72,13 +73,18 @@ pub(super) fn allocate_logon_response_context(
         PUBLIC_LOGON_SPECIAL_FOLDER_IDS.as_slice()
     }
     .iter()
-    .map(|folder_id| format!("{folder_id:#018x}"))
+    .map(|folder_id| {
+        identity_codec
+            .actual_object_id(*folder_id)
+            .map(|folder_id| format!("{folder_id:#018x}"))
+            .unwrap_or_else(|| format!("{folder_id:#018x}"))
+    })
     .collect::<Vec<_>>()
     .join(",");
     session.record_logon_identity(MapiLogonIdentityDebug {
         mailbox_guid: principal.account_id.to_string(),
         replid: STORE_REPLICA_ID.to_string(),
-        replica_guid: bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID),
+        replica_guid: bytes_to_hex(&identity_codec.replica_guid()),
         response_flags: if is_private_logon { "0x07" } else { "0x00" }.to_string(),
         special_folder_ids: special_folder_ids.clone(),
     });
@@ -105,7 +111,13 @@ pub(super) fn append_logon_response(
     if let TypedRopRequest::Logon(logon_request) = typed_request {
         log_rop_logon_request_identity(principal, request_id, logon_request);
     }
-    let logon_context = allocate_logon_response_context(session, handle_slots, principal, request);
+    let logon_context = allocate_logon_response_context(
+        session,
+        handle_slots,
+        principal,
+        request,
+        snapshot.identity_codec(),
+    );
     if logon_context.is_private_logon {
         responses.extend_from_slice(&rop_logon_response_body(principal, request));
         log_default_folder_discovery_contract(

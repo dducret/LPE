@@ -360,12 +360,7 @@ where
     }
 
     if rop_buffer_has_no_requests(&execute.rop_buffer)
-        || rop_buffer_is_store_independent_logon(&execute.rop_buffer)
         || rop_buffer_is_store_independent_release_only(&execute.rop_buffer)
-        || rop_buffer_is_store_independent_special_folder_getprops_probe(
-            &execute.rop_buffer,
-            &session,
-        )
     {
         let mut snapshot = MapiMailStoreSnapshot::empty();
         let mailboxes = snapshot.mailboxes();
@@ -471,6 +466,18 @@ where
         );
     }
 
+    let identity_scope = match load_mapi_identity_scope(store, principal.account_id).await {
+        Ok(identity_scope) => identity_scope,
+        Err(error) => {
+            store_session(session_id.clone(), session);
+            return execute_transport_failure_response(
+                request_id,
+                1,
+                &format!("failed to load durable MAPI identity scope: {error:#}"),
+                session_context_cookies(endpoint, &session_id, false),
+            );
+        }
+    };
     if let Err(error) =
         refresh_persisted_special_folder_aliases(store, principal, &mut session).await
     {
@@ -482,11 +489,16 @@ where
             session_context_cookies(endpoint, &session_id, false),
         );
     }
-    let access_plan = plan_mapi_store_access(&session, &execute.rop_buffer);
+    let access_plan = crate::mapi::identity::with_current_mapi_identity_codec(
+        identity_scope.codec.clone(),
+        async { plan_mapi_store_access(&session, &execute.rop_buffer) },
+    )
+    .await;
     log_execute_store_access_debug(endpoint, principal, headers, request_id, &access_plan);
     let mut snapshot = match load_mapi_store_for_access_plan(
         store,
         principal.account_id,
+        &identity_scope,
         &access_plan,
         500,
     )
@@ -512,6 +524,7 @@ where
                 match load_mapi_store_for_access_plan(
                     store,
                     principal.account_id,
+                    &identity_scope,
                     &fallback_plan,
                     500,
                 )
@@ -551,23 +564,26 @@ where
         mailboxes.len(),
         emails.len(),
     );
-    let rop_buffer = execute_rops(
-        store,
-        principal,
-        request_id,
-        &mut session,
-        &mailboxes,
-        &emails,
-        &mut snapshot,
-        validator,
-        &execute.rop_buffer,
-        execute.max_rop_out,
-        request_debug.all_release,
-        request_debug.handle_count,
-        &request_debug.handle_table_summary,
-        &request_debug.ids_csv,
-        &request_debug.names_csv,
-        &request_debug.non_release_rops,
+    let rop_buffer = crate::mapi::identity::with_current_mapi_identity_codec(
+        snapshot.identity_codec().clone(),
+        execute_rops(
+            store,
+            principal,
+            request_id,
+            &mut session,
+            &mailboxes,
+            &emails,
+            &mut snapshot,
+            validator,
+            &execute.rop_buffer,
+            execute.max_rop_out,
+            request_debug.all_release,
+            request_debug.handle_count,
+            &request_debug.handle_table_summary,
+            &request_debug.ids_csv,
+            &request_debug.names_csv,
+            &request_debug.non_release_rops,
+        ),
     )
     .await;
     let post_hierarchy_observation = if endpoint == MapiEndpoint::Emsmdb

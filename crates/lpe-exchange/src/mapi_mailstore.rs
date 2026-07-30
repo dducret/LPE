@@ -60,6 +60,9 @@ pub(crate) use diagnostics::{
     replguid_globset_counters, replguid_globset_debug_summary,
 };
 
+// Kept solely for legacy unit-test fixtures that intentionally exercise the
+// unscoped codec fallback. Production identity material is task-scoped.
+#[cfg(test)]
 pub(crate) use crate::mapi::identity::STORE_REPLICA_GUID;
 use crate::mapi::properties::canonical_property_storage_tag;
 use crate::mapi::wire::{FastTransferMarker, MapiSyncType};
@@ -1396,7 +1399,7 @@ fn replguid_idset_from_counters(counters: &[u64]) -> Vec<u8> {
     if counters.is_empty() {
         return Vec::new();
     }
-    let mut idset = STORE_REPLICA_GUID.to_vec();
+    let mut idset = crate::mapi::identity::current_store_replica_guid().to_vec();
     let mut counters = counters.to_vec();
     counters.sort_unstable();
     counters.dedup();

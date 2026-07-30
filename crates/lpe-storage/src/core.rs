@@ -62,6 +62,7 @@ impl Storage {
         }
 
         self.assert_required_schema_objects("public").await?;
+        self.fetch_mapi_store_identity().await?;
 
         Ok(())
     }
@@ -71,6 +72,7 @@ impl Storage {
             "accounts",
             "calendar_events",
             "mapi_calendar_event_identity_moves",
+            "mapi_store_identity",
             "mapi_mailbox_replicas",
             "mapi_local_replica_id_ranges",
             "mapi_local_replica_deleted_ranges",
@@ -102,7 +104,7 @@ impl Storage {
 
             if !present {
                 bail!(
-                    "required table {schema_name}.{table} is missing; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                    "required table {schema_name}.{table} is missing; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
                 );
             }
         }
@@ -143,8 +145,48 @@ impl Storage {
 
         if !invalid_columns.is_empty() {
             bail!(
-                "required column shapes {} are missing or incompatible in {schema_name}.mapi_object_identities; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+                "required column shapes {} are missing or incompatible in {schema_name}.mapi_object_identities; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
                 invalid_columns.join(", ")
+            );
+        }
+
+        let mut invalid_store_identity_columns = Vec::new();
+        for (column, data_type) in [
+            ("singleton", "boolean"),
+            ("replica_guid", "uuid"),
+            ("next_global_counter", "bigint"),
+        ] {
+            let present = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = $1
+                      AND table_name = 'mapi_store_identity'
+                      AND column_name = $2
+                      AND data_type = $3
+                      AND is_nullable = 'NO'
+                )
+                "#,
+            )
+            .bind(&schema_name)
+            .bind(column)
+            .bind(data_type)
+            .fetch_one(&self.pool)
+            .await
+            .with_context(|| {
+                format!(
+                    "unable to inspect required column {schema_name}.mapi_store_identity.{column}"
+                )
+            })?;
+            if !present {
+                invalid_store_identity_columns.push(format!("{column} {data_type} NOT NULL"));
+            }
+        }
+        if !invalid_store_identity_columns.is_empty() {
+            bail!(
+                "required column shapes {} are missing or incompatible in {schema_name}.mapi_store_identity; initialize a fresh database from crates/lpe-storage/sql/schema.sql",
+                invalid_store_identity_columns.join(", ")
             );
         }
 
@@ -186,7 +228,7 @@ impl Storage {
         }
         if !invalid_alias_columns.is_empty() {
             bail!(
-                "required column shapes {} are missing or incompatible in {schema_name}.mapi_special_folder_aliases; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+                "required column shapes {} are missing or incompatible in {schema_name}.mapi_special_folder_aliases; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
                 invalid_alias_columns.join(", ")
             );
         }
@@ -247,7 +289,7 @@ impl Storage {
                 && has_alias_constraint("c", &["alias_folder_id <> canonical_folder_id"]);
         if !mapi_alias_checks_are_current {
             bail!(
-                "required MAPI special-folder alias CHECK constraints are missing or incompatible in {schema_name}; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required MAPI special-folder alias CHECK constraints are missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -262,7 +304,7 @@ impl Storage {
                 });
         if !mapi_alias_unique_constraints_are_current {
             bail!(
-                "required MAPI special-folder alias UNIQUE constraints are missing or incompatible in {schema_name}; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required MAPI special-folder alias UNIQUE constraints are missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -279,7 +321,82 @@ impl Storage {
         );
         if !mapi_alias_scope_constraints_are_current {
             bail!(
-                "required MAPI special-folder alias primary key or account foreign key is missing or incompatible in {schema_name}; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required MAPI special-folder alias primary key or account foreign key is missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
+        }
+
+        let mapi_global_identity_constraints = sqlx::query_as::<_, (String, String, String)>(
+            r#"
+            SELECT table_row.relname, constraint_row.contype::text,
+                   pg_get_constraintdef(constraint_row.oid)
+            FROM pg_constraint constraint_row
+            JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid
+            JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+            WHERE namespace_row.nspname = $1
+              AND table_row.relname IN (
+                    'mapi_store_identity',
+                    'mapi_object_identities',
+                    'mapi_local_replica_id_ranges'
+              )
+            "#,
+        )
+        .bind(schema_name)
+        .fetch_all(&self.pool)
+        .await
+        .with_context(|| {
+            format!("unable to inspect global MAPI identity constraints in schema {schema_name}")
+        })?;
+        let has_global_identity_constraint = |table: &str, kind: &str, fragments: &[&str]| {
+            mapi_global_identity_constraints.iter().any(
+                |(actual_table, actual_kind, definition)| {
+                    actual_table == table
+                        && actual_kind == kind
+                        && fragments
+                            .iter()
+                            .all(|fragment| definition.contains(fragment))
+                },
+            )
+        };
+        let global_identity_constraints_are_current = has_global_identity_constraint(
+            "mapi_store_identity",
+            "p",
+            &["PRIMARY KEY (singleton)"],
+        ) && has_global_identity_constraint(
+            "mapi_store_identity",
+            "c",
+            &["singleton = true"],
+        ) && [
+            "mapi_global_counter",
+            "mapi_object_id",
+            "source_key",
+            "mapi_change_number",
+        ]
+        .into_iter()
+        .all(|column| {
+            has_global_identity_constraint(
+                "mapi_object_identities",
+                "u",
+                &[&format!("UNIQUE ({column})")],
+            )
+        }) && has_global_identity_constraint(
+            "mapi_local_replica_id_ranges",
+            "x",
+            &[
+                "EXCLUDE USING gist",
+                "int8range(first_global_counter, end_global_counter_exclusive",
+                "WITH &&",
+            ],
+        ) && !mapi_global_identity_constraints
+            .iter()
+            .any(|(table, kind, definition)| {
+                table == "mapi_local_replica_id_ranges"
+                    && kind == "x"
+                    && (definition.contains("tenant_id WITH =")
+                        || definition.contains("account_id WITH ="))
+            });
+        if !global_identity_constraints_are_current {
+            bail!(
+                "required global MAPI identity constraints are missing or incompatible in {schema_name}; initialize a fresh database from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -367,7 +484,7 @@ impl Storage {
         })?;
         if !mapi_outlook_cache_fidelity_shape_is_current {
             bail!(
-                "required MAPI WLink/configuration FAI fidelity shape is missing or incompatible in {schema_name}; initialize an empty LPE 0.5.1 database from crates/lpe-storage/sql/schema.sql"
+                "required MAPI WLink/configuration FAI fidelity shape is missing or incompatible in {schema_name}; initialize an empty LPE 0.5.2 database from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -412,7 +529,7 @@ impl Storage {
         })?;
         if mapi_change_key_constraint_count != 3 {
             bail!(
-                "required 17-24-byte MAPI ChangeKey XID constraints are missing or incompatible in {schema_name}; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required 17-24-byte MAPI ChangeKey XID constraints are missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -450,7 +567,7 @@ impl Storage {
         }
         if !invalid_calendar_lifecycle_columns.is_empty() {
             bail!(
-                "required column shapes {} are missing or incompatible in {schema_name}.calendar_events; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+                "required column shapes {} are missing or incompatible in {schema_name}.calendar_events; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
                 invalid_calendar_lifecycle_columns.join(", ")
             );
         }
@@ -475,7 +592,7 @@ impl Storage {
         })?;
         if deleted_object_kind_tables != 2 {
             bail!(
-                "required deleted_calendar_event object-kind constraints are missing or incompatible in {schema_name}; LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                "required deleted_calendar_event object-kind constraints are missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -735,7 +852,7 @@ mod tests {
             let error = Storage::new(pool.clone())
                 .assert_required_schema_objects(&schema_name)
                 .await
-                .expect_err("startup must reject an incomplete tagged 0.5.1 schema");
+                .expect_err("startup must reject an incomplete tagged 0.5.2 schema");
             let message = format!("{error:#}");
             anyhow::ensure!(
                 message.contains("mapi_object_identities")

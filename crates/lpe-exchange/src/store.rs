@@ -10,13 +10,14 @@ use lpe_storage::{
     JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
     MailboxFolderDelegationGrantInput, MailboxRule, ManagedRetentionFolderCreateInput,
     MapiContactCreateInput, MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
-    MapiEventImportedMoveIdentity, MapiEventVersion, MoveAccessibleEventToDeletedItemsResult,
-    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
-    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    MapiEventImportedMoveIdentity, MapiEventVersion, MapiStoreIdentity,
+    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
+    SenderDelegationRight, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
     UpsertSearchFolderInput,
 };
@@ -61,6 +62,14 @@ mod types;
 pub(crate) use types::*;
 
 pub trait ExchangeStore: AccountAuthStore {
+    fn fetch_mapi_store_identity<'a>(&'a self) -> StoreFuture<'a, MapiStoreIdentity> {
+        Box::pin(async {
+            Ok(MapiStoreIdentity {
+                replica_guid: Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID),
+            })
+        })
+    }
+
     fn reserve_mapi_local_replica_ids<'a>(
         &'a self,
         account_id: Uuid,

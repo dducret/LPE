@@ -182,6 +182,76 @@ WHERE n.nspname = 'public'
 SQL
 }
 
+mapi_store_identity_shape_ok() {
+  local database_url="$1"
+  local table_name
+
+  table_name="$(
+    psql "${database_url}" -X -v ON_ERROR_STOP=1 -Atc "SELECT to_regclass('public.mapi_store_identity')"
+  )" || return
+  if [[ "${table_name}" != "mapi_store_identity" ]]; then
+    echo "0"
+    return 0
+  fi
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT CASE WHEN
+  (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'mapi_store_identity'
+      AND (
+            (column_name = 'singleton' AND data_type = 'boolean' AND is_nullable = 'NO')
+            OR (column_name = 'replica_guid' AND data_type = 'uuid' AND is_nullable = 'NO')
+            OR (column_name = 'next_global_counter' AND data_type = 'bigint' AND is_nullable = 'NO')
+      )
+  ) = 3
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.mapi_store_identity'::regclass
+      AND contype = 'p'
+      AND pg_get_constraintdef(oid) = 'PRIMARY KEY (singleton)'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.mapi_store_identity'::regclass
+      AND contype = 'c'
+      AND lower(pg_get_constraintdef(oid)) LIKE '%singleton = true%'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.mapi_store_identity'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%next_global_counter >= 43%'
+  )
+  AND (SELECT COUNT(*) FROM public.mapi_store_identity) = 1
+  AND EXISTS (
+    SELECT 1
+    FROM public.mapi_store_identity
+    WHERE singleton IS TRUE
+      AND replica_guid IS NOT NULL
+      AND next_global_counter >= 43
+  )
+  AND (
+    SELECT COUNT(*)
+    FROM pg_constraint
+    WHERE conrelid = 'public.mapi_object_identities'::regclass
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) IN (
+        'UNIQUE (mapi_global_counter)',
+        'UNIQUE (mapi_object_id)',
+        'UNIQUE (source_key)',
+        'UNIQUE (mapi_change_number)'
+      )
+  ) = 4
+THEN 1 ELSE 0 END;
+SQL
+}
+
 mapi_active_source_key_index_shape_ok() {
   local database_url="$1"
 
@@ -390,12 +460,23 @@ expected_indexes(table_name, index_name, definition) AS (
     ('mapi_local_replica_deleted_ranges', 'mapi_local_replica_deleted_ranges_pkey', 'CREATE UNIQUE INDEX mapi_local_replica_deleted_ranges_pkey ON mapi_local_replica_deleted_ranges USING btree (tenant_id, account_id, folder_id, replica_guid, min_global_counter, max_global_counter)')
 ),
 actual_indexes AS (
-  SELECT tablename::text AS table_name,
-         indexname::text AS index_name,
-         replace(indexdef, 'public.', '') AS definition
-  FROM pg_indexes
-  WHERE schemaname = 'public'
-    AND tablename IN ('mapi_local_replica_id_ranges', 'mapi_local_replica_deleted_ranges')
+  SELECT index_view.tablename::text AS table_name,
+         index_view.indexname::text AS index_name,
+         replace(index_view.indexdef, 'public.', '') AS definition
+  FROM pg_indexes index_view
+  JOIN pg_class index_class
+    ON index_class.relname = index_view.indexname
+  JOIN pg_namespace index_namespace
+    ON index_namespace.oid = index_class.relnamespace
+   AND index_namespace.nspname = index_view.schemaname
+  WHERE index_view.schemaname = 'public'
+    AND index_view.tablename IN ('mapi_local_replica_id_ranges', 'mapi_local_replica_deleted_ranges')
+    AND NOT EXISTS (
+      SELECT 1
+      FROM pg_constraint constraint_row
+      WHERE constraint_row.conindid = index_class.oid
+        AND constraint_row.contype = 'x'
+    )
 )
 SELECT CASE WHEN
   NOT EXISTS (
@@ -412,6 +493,15 @@ SELECT CASE WHEN
     (SELECT * FROM expected_indexes EXCEPT SELECT * FROM actual_indexes)
     UNION ALL
     (SELECT * FROM actual_indexes EXCEPT SELECT * FROM expected_indexes)
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint constraint_row
+    WHERE constraint_row.conrelid = 'public.mapi_local_replica_id_ranges'::regclass
+      AND constraint_row.contype = 'x'
+      AND pg_get_constraintdef(constraint_row.oid)
+          LIKE 'EXCLUDE USING gist (int8range(first_global_counter, end_global_counter_exclusive%'
+      AND pg_get_constraintdef(constraint_row.oid) LIKE '%WITH &&%'
   )
 THEN 1 ELSE 0 END;
 SQL

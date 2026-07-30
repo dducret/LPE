@@ -700,16 +700,32 @@ fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
 
 #[test]
 fn mapi_identity_mapping_is_store_backed() {
+    let store_identity = table_definition("mapi_store_identity");
+    for required in [
+        "singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE)",
+        "replica_guid UUID NOT NULL",
+        "next_global_counter BIGINT NOT NULL DEFAULT 43",
+        "CHECK (next_global_counter >= 43 AND next_global_counter <= 140737454800896)",
+    ] {
+        assert!(
+            store_identity.contains(required),
+            "mapi_store_identity must persist the database-wide replica identity: {required}"
+        );
+    }
+    assert_schema_contains_all(&[
+        "INSERT INTO mapi_store_identity (singleton, replica_guid, next_global_counter)",
+        "VALUES (TRUE, gen_random_uuid(), 43)",
+    ]);
+
     let replicas = table_definition("mapi_mailbox_replicas");
     for required in [
         "replica_guid UUID NOT NULL",
-        "next_global_counter BIGINT NOT NULL DEFAULT 43 CHECK (next_global_counter >= 43)",
         "PRIMARY KEY (tenant_id, account_id)",
         "UNIQUE (tenant_id, account_id, replica_guid)",
     ] {
         assert!(
             replicas.contains(required),
-            "mapi_mailbox_replicas must persist replica allocation state: {required}"
+            "mapi_mailbox_replicas must bind each account to the database replica: {required}"
         );
     }
 
@@ -717,16 +733,18 @@ fn mapi_identity_mapping_is_store_backed() {
     for required in [
         "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'deleted_calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message'))",
         "canonical_id UUID NOT NULL",
-        "mapi_global_counter BIGINT NOT NULL",
+        "mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter >= 43 AND mapi_global_counter < 140737454800896)",
         "mapi_object_id BIGINT NOT NULL",
         "source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 22)",
         "change_key BYTEA NOT NULL CHECK (octet_length(change_key) BETWEEN 17 AND 24)",
-        "mapi_change_number BIGINT NOT NULL CHECK (mapi_change_number > 0 AND mapi_change_number <= 140737488355327)",
+        "mapi_change_number BIGINT NOT NULL CHECK (mapi_change_number >= 43 AND mapi_change_number < 140737454800896)",
         "predecessor_change_list BYTEA NOT NULL CHECK (octet_length(predecessor_change_list) > 0)",
         "instance_key BYTEA NOT NULL CHECK (octet_length(instance_key) = 22)",
         "PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id)",
-        "UNIQUE (tenant_id, account_id, mapi_global_counter)",
-        "UNIQUE (tenant_id, account_id, mapi_object_id)",
+        "UNIQUE (mapi_global_counter)",
+        "UNIQUE (mapi_object_id)",
+        "UNIQUE (source_key)",
+        "UNIQUE (mapi_change_number)",
     ] {
         assert!(
             identities.contains(required),
@@ -768,6 +786,7 @@ fn mapi_local_replica_ranges_and_deleted_item_list_are_durable() {
         "first_global_counter BIGINT NOT NULL CHECK (first_global_counter >= 43 AND first_global_counter < 140737454800896)",
         "end_global_counter_exclusive BIGINT NOT NULL CHECK (end_global_counter_exclusive > 43 AND end_global_counter_exclusive <= 140737454800896)",
         "CHECK (first_global_counter < end_global_counter_exclusive)",
+        "EXCLUDE USING gist (\n        int8range(first_global_counter, end_global_counter_exclusive, '[)') WITH &&\n    )",
         "PRIMARY KEY (tenant_id, account_id, replica_guid, first_global_counter)",
         "FOREIGN KEY (tenant_id, account_id, replica_guid)\n        REFERENCES mapi_mailbox_replicas (tenant_id, account_id, replica_guid)\n        ON DELETE CASCADE",
     ] {
@@ -1252,6 +1271,7 @@ fn local_replica_range_update_rejects_preexisting_incomplete_tables() {
             "information_schema.columns",
             "pg_constraint",
             "pg_index",
+            "EXCLUDE USING gist",
             "mapi_local_replica_id_ranges_membership_idx",
             "mapi_local_replica_deleted_ranges_folder_idx",
         ],
@@ -1283,7 +1303,6 @@ fn local_replica_range_update_rejects_preexisting_incomplete_tables() {
     for (label, source) in [
         ("init-schema.sh", INIT_LPE_SCRIPT),
         ("check-lpe.sh", CHECK_LPE_SCRIPT),
-        ("update-lpe.sh", UPDATE_LPE_SCRIPT),
     ] {
         assert_source_contains_all(
             label,
@@ -1291,7 +1310,6 @@ fn local_replica_range_update_rejects_preexisting_incomplete_tables() {
             &[
                 "mapi_local_replica_range_shape_ok",
                 "MAPI local replica range table shape",
-                "Initialize a fresh LPE 0.5.1 database",
             ],
         );
     }
@@ -1325,13 +1343,18 @@ fn local_replica_range_update_matches_the_canonical_fresh_schema_ddl() {
         "mapi_local_replica_id_ranges",
         "mapi_local_replica_deleted_ranges",
     ] {
+        let fresh_definition = normalized(statement(SCHEMA, &format!("CREATE TABLE {table}")));
+        let fresh_definition = fresh_definition.replace(
+            " EXCLUDE USING gist ( int8range(first_global_counter, end_global_counter_exclusive, '[)') WITH && )",
+            "",
+        ).replace(",,", ",");
         assert_eq!(
-            normalized(statement(SCHEMA, &format!("CREATE TABLE {table}"))),
+            fresh_definition,
             normalized(statement(
                 OUTLOOK_CACHE_FIDELITY_UPDATE,
                 &format!("CREATE TABLE IF NOT EXISTS public.{table}"),
             )),
-            "the additive definition for {table} must match schema.sql exactly",
+            "the historical additive definition for {table} must match schema.sql apart from the fresh-only global range exclusion",
         );
     }
 
@@ -1351,54 +1374,51 @@ fn local_replica_range_update_matches_the_canonical_fresh_schema_ddl() {
 }
 
 #[test]
-fn deployment_scripts_reject_tagged_schema_without_mapi_identity_version_columns() {
-    for (label, source, count_variable) in [
-        (
-            "check-lpe.sh",
-            CHECK_LPE_SCRIPT,
+fn check_script_rejects_tagged_schema_without_mapi_identity_version_columns() {
+    assert_source_contains_all(
+        "check-lpe.sh",
+        CHECK_LPE_SCRIPT,
+        &[
             "mapi_identity_version_column_count",
-        ),
-        (
-            "update-lpe.sh",
-            UPDATE_LPE_SCRIPT,
-            "MAPI_IDENTITY_VERSION_COLUMN_COUNT",
-        ),
-    ] {
-        assert_source_contains_all(
-            label,
-            source,
-            &[
-                count_variable,
-                "FROM information_schema.columns",
-                "table_schema = 'public'",
-                "table_name = 'mapi_object_identities'",
-                "column_name IN ('mapi_change_number', 'predecessor_change_list')",
-                "is_nullable = 'NO'",
-                "WHEN 'mapi_change_number' THEN 'bigint'",
-                "WHEN 'predecessor_change_list' THEN 'bytea'",
-                "bigint/bytea NOT NULL",
-                "Initialize a fresh LPE 0.5.1 database",
-            ],
-        );
-    }
-
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "MAPI_IDENTITY_VERSION_COLUMN_COUNT",
-        "\"${CARGO_BIN}\" build --release -p lpe-cli",
-        "update-lpe.sh must reject missing MAPI identity version columns before building LPE",
-    );
-    assert!(
-        UPDATE_LPE_SCRIPT
-            .matches("psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1")
-            .count()
-            >= 2,
-        "update-lpe.sh must ignore .psqlrc for both schema-contract queries"
+            "FROM information_schema.columns",
+            "table_schema = 'public'",
+            "table_name = 'mapi_object_identities'",
+            "column_name IN ('mapi_change_number', 'predecessor_change_list')",
+            "is_nullable = 'NO'",
+            "WHEN 'mapi_change_number' THEN 'bigint'",
+            "WHEN 'predecessor_change_list' THEN 'bytea'",
+            "bigint/bytea NOT NULL",
+        ],
     );
     assert_source_contains_all(
         "check-lpe.sh deterministic psql wrapper",
         CHECK_LPE_SCRIPT,
         &["psql() {", "command psql -X \"$@\""],
+    );
+}
+
+#[test]
+fn updater_rejects_an_incomplete_current_schema_before_stopping_lpe() {
+    assert_source_contains_all(
+        "update-lpe.sh",
+        UPDATE_LPE_SCRIPT,
+        &[
+            "canonical_schema_shape_is_current()",
+            "mapi_local_replica_range_shape_ok",
+            "mapi_outlook_cache_fidelity_shape_ok",
+            "mapi_identity_key_constraint_count",
+            "mapi_calendar_event_move_change_key_constraint_count",
+            "mapi_active_source_key_index_shape_ok",
+            "mapi_special_folder_alias_shape_ok",
+            "mapi_store_identity_shape_ok",
+            "Installed schema ${EXPECTED_SCHEMA_VERSION} is incomplete",
+        ],
+    );
+    assert_contains_before(
+        UPDATE_LPE_SCRIPT,
+        "canonical_schema_shape_is_current \"${DATABASE_URL}\"",
+        "systemctl stop \"${SERVICE_NAME}\"",
+        "update-lpe.sh must reject an incomplete current schema before it stops LPE",
     );
 }
 
@@ -1415,11 +1435,6 @@ fn deployment_scripts_require_local_replica_range_table_shape() {
             CHECK_LPE_SCRIPT,
             "mapi_local_replica_range_shape_status",
         ),
-        (
-            "update-lpe.sh",
-            UPDATE_LPE_SCRIPT,
-            "MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK",
-        ),
     ] {
         assert_source_contains_all(
             label,
@@ -1428,17 +1443,9 @@ fn deployment_scripts_require_local_replica_range_table_shape() {
                 shape_variable,
                 "mapi_local_replica_range_shape_ok",
                 "MAPI local replica range table shape",
-                "Initialize a fresh LPE 0.5.1 database",
             ],
         );
     }
-
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "MAPI_LOCAL_REPLICA_RANGE_SHAPE_OK",
-        "\"${CARGO_BIN}\" build --release -p lpe-cli",
-        "update-lpe.sh must reject an invalid local replica range shape before building LPE",
-    );
 }
 
 #[test]
@@ -1470,11 +1477,6 @@ fn deployment_and_runtime_guards_require_outlook_cache_fidelity_shape() {
             CHECK_LPE_SCRIPT,
             "mapi_outlook_cache_fidelity_shape_status",
         ),
-        (
-            "update-lpe.sh",
-            UPDATE_LPE_SCRIPT,
-            "MAPI_OUTLOOK_CACHE_FIDELITY_SHAPE_OK",
-        ),
     ] {
         assert_source_contains_all(
             label,
@@ -1486,13 +1488,6 @@ fn deployment_and_runtime_guards_require_outlook_cache_fidelity_shape() {
             ],
         );
     }
-
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "MAPI_OUTLOOK_CACHE_FIDELITY_SHAPE_OK",
-        "\"${CARGO_BIN}\" build --release -p lpe-cli",
-        "update-lpe.sh must reject an invalid WLink/configuration FAI shape before building LPE",
-    );
 
     assert_source_contains_all(
         "storage runtime Outlook cache fidelity guard",
@@ -1531,23 +1526,9 @@ fn deployment_scripts_reject_tagged_schema_without_special_folder_alias_shape() 
     for (label, source) in [
         ("init-schema.sh", INIT_LPE_SCRIPT),
         ("check-lpe.sh", CHECK_LPE_SCRIPT),
-        ("update-lpe.sh", UPDATE_LPE_SCRIPT),
     ] {
-        assert_source_contains_all(
-            label,
-            source,
-            &[
-                "mapi_special_folder_alias_shape_ok",
-                "Initialize a fresh LPE 0.5.1 database",
-            ],
-        );
+        assert_source_contains_all(label, source, &["mapi_special_folder_alias_shape_ok"]);
     }
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "MAPI_SPECIAL_FOLDER_ALIAS_SHAPE_OK",
-        "\"${CARGO_BIN}\" build --release -p lpe-cli",
-        "update-lpe.sh must reject a missing alias table before building LPE",
-    );
 }
 
 #[test]
@@ -1569,7 +1550,6 @@ fn deployment_and_startup_reject_stale_mapi_change_key_constraints() {
     for (label, source) in [
         ("init-schema.sh", INIT_LPE_SCRIPT),
         ("check-lpe.sh", CHECK_LPE_SCRIPT),
-        ("update-lpe.sh", UPDATE_LPE_SCRIPT),
     ] {
         assert_source_contains_all(
             label,
@@ -1577,16 +1557,9 @@ fn deployment_and_startup_reject_stale_mapi_change_key_constraints() {
             &[
                 "mapi_identity_key_constraint_count",
                 "mapi_calendar_event_move_change_key_constraint_count",
-                "Initialize a fresh LPE 0.5.1 database",
             ],
         );
     }
-    assert_contains_before(
-        UPDATE_LPE_SCRIPT,
-        "MAPI_IDENTITY_KEY_CONSTRAINT_COUNT",
-        "\"${CARGO_BIN}\" build --release -p lpe-cli",
-        "update-lpe.sh must reject stale MAPI ChangeKey constraints before building LPE",
-    );
     assert_source_contains_all(
         "storage startup MAPI ChangeKey constraint guard",
         CORE_STORAGE,
@@ -1599,6 +1572,34 @@ fn deployment_and_startup_reject_stale_mapi_change_key_constraints() {
             "required 17-24-byte MAPI ChangeKey XID constraints",
         ],
     );
+}
+
+#[test]
+fn installation_scripts_require_the_mapi_store_identity_singleton() {
+    assert_source_contains_all(
+        "shared MAPI store identity validation",
+        INSTALL_COMMON_SCRIPT,
+        &[
+            "mapi_store_identity_shape_ok()",
+            "mapi_store_identity",
+            "COUNT(*) FROM public.mapi_store_identity",
+            "PRIMARY KEY (singleton)",
+            "UNIQUE (mapi_global_counter)",
+            "UNIQUE (mapi_object_id)",
+            "UNIQUE (source_key)",
+            "UNIQUE (mapi_change_number)",
+        ],
+    );
+    for (label, source) in [
+        ("init-schema.sh", INIT_LPE_SCRIPT),
+        ("check-lpe.sh", CHECK_LPE_SCRIPT),
+    ] {
+        assert_source_contains_all(
+            label,
+            source,
+            &["mapi_store_identity_shape_ok", "MAPI store identity"],
+        );
+    }
 }
 
 #[test]
@@ -1620,6 +1621,7 @@ fn schema_initializer_resets_atomically_and_validates_durable_mapi_shape() {
             "SET search_path TO public;",
             "expected_schema_version",
             "mapi_identity_version_column_count",
+            "mapi_store_identity_shape_ok",
             "mapi_identity_key_constraint_count",
             "mapi_calendar_event_move_change_key_constraint_count",
             "FROM information_schema.columns",
@@ -1697,6 +1699,7 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "FROM public.schema_metadata",
             "\"calendar_events\"",
             "\"mapi_calendar_event_identity_moves\"",
+            "\"mapi_store_identity\"",
             "\"mapi_mailbox_replicas\"",
             "\"mapi_local_replica_id_ranges\"",
             "\"mapi_local_replica_deleted_ranges\"",
@@ -1712,16 +1715,20 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
             "\"predecessor_change_list\"",
             "(\"mapi_change_number\", \"bigint\")",
             "(\"predecessor_change_list\", \"bytea\")",
+            "(\"singleton\", \"boolean\")",
+            "(\"replica_guid\", \"uuid\")",
+            "(\"next_global_counter\", \"bigint\")",
             "AND is_nullable = 'NO'",
             "required table {schema_name}.{table} is missing",
             "required column shapes {} are missing or incompatible in {schema_name}.mapi_object_identities",
+            "required global MAPI identity constraints are missing or incompatible",
             "required column shapes {} are missing or incompatible in {schema_name}.calendar_events",
             "(\"lifecycle_state\", \"text\", \"NO\")",
             "(\"deleted_at\", \"timestamp with time zone\", \"YES\")",
             "pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%'",
             "required deleted_calendar_event object-kind constraints are missing or incompatible",
             "required 17-24-byte MAPI ChangeKey XID constraints are missing or incompatible",
-            "LPE 0.5.1 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
+            "LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
         ],
     );
     let core_runtime = CORE_STORAGE

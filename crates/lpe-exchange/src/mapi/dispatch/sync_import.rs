@@ -705,8 +705,9 @@ pub(super) fn imported_message_source_key(properties: &HashMap<u32, MapiValue>) 
         MapiValue::Binary(bytes) => bytes,
         _ => return None,
     };
-    (source_key.len() == 22 && source_key[..16] == crate::mapi::identity::STORE_REPLICA_GUID)
-        .then(|| source_key.clone())
+    (source_key.len() == 22
+        && source_key[..16] == crate::mapi::identity::current_store_replica_guid())
+    .then(|| source_key.clone())
 }
 
 pub(super) fn import_message_change_conflicts_with_current_pcl(
@@ -766,7 +767,9 @@ pub(super) fn persistable_import_source_key_global_counter(source_key: &[u8]) ->
 }
 
 pub(super) fn source_key_global_counter(source_key: &[u8]) -> Option<u64> {
-    if source_key.len() != 22 || source_key[..16] != crate::mapi::identity::STORE_REPLICA_GUID {
+    if source_key.len() != 22
+        || source_key[..16] != crate::mapi::identity::current_store_replica_guid()
+    {
         return None;
     }
     crate::mapi::identity::global_counter_from_globcnt(source_key.get(16..22)?)

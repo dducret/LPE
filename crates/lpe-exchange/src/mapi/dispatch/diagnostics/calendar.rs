@@ -219,7 +219,7 @@ pub(in crate::mapi::dispatch) fn log_calendar_identity_chain(
         parent_source_key = %bytes_to_hex(&parent_source_key),
         parent_source_key_decoded_folder_id =
             %format_optional_folder_id(parent_source_key_decoded),
-        replica_guid = %bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID),
+        replica_guid = %bytes_to_hex(&crate::mapi::identity::current_store_replica_guid()),
         replid = 1u16,
         sync_type = %sync_type.map(|value| format!("0x{value:02x}")).unwrap_or_default(),
         checkpoint_mailbox_id = %checkpoint_mailbox_id

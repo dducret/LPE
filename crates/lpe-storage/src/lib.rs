@@ -17,6 +17,7 @@ pub mod mail_items;
 pub mod mailboxes;
 pub mod mapi_contacts;
 pub mod mapi_events;
+pub mod mapi_store_identity;
 mod message_ops;
 pub mod models;
 pub mod notes_journal;
@@ -88,6 +89,7 @@ pub use crate::mapi_events::{
     MapiEventCreateResult, MapiEventCustomPropertyValue, MapiEventImportedIdentity,
     MapiEventReminderPatch, MapiEventReminderState, MapiEventVersion,
 };
+pub use crate::mapi_store_identity::MapiStoreIdentity;
 pub use crate::notes_journal::{
     ClientNote, ClientReminder, JournalEntry, ReminderQuery, UpsertClientNoteInput,
     UpsertJournalEntryInput,

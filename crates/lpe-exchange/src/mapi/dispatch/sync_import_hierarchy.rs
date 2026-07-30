@@ -1,4 +1,5 @@
 use super::*;
+use crate::store::MapiFolderVersion;
 
 pub(super) async fn append_synchronization_import_hierarchy_change_response<S: ExchangeStore>(
     store: &S,
@@ -64,6 +65,15 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         ));
         return;
     };
+    let Some(source_folder_id) = crate::mapi::identity::object_id_from_source_key(&source_key)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x73,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    };
     let Some(source_global_counter) = source_key_global_counter(&source_key) else {
         responses.extend_from_slice(&rop_error_response(
             0x73,
@@ -72,7 +82,6 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         ));
         return;
     };
-    let source_folder_id = crate::mapi::identity::mapi_store_id(source_global_counter);
     let parent_folder_id = hierarchy_values
         .iter()
         .find_map(|(tag, value)| match (tag, value) {
@@ -92,10 +101,21 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
         // imported folder. Under LPE's fixed-special-folder policy, a resolved
         // stale alias only locates its target; it is not a tuple update.
         if source_folder_id == canonical_folder_id {
+            let Some(durable_folder_id) = snapshot
+                .identity_codec()
+                .actual_object_id(canonical_folder_id)
+            else {
+                responses.extend_from_slice(&rop_error_response(
+                    0x73,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                ));
+                return;
+            };
             match store
                 .commit_mapi_folder_hierarchy_change(
                     principal.account_id,
-                    canonical_folder_id,
+                    durable_folder_id,
                     imported_version.last_modification_time,
                     imported_version.change_key,
                     imported_version.predecessor_change_list,
@@ -103,6 +123,7 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 .await
             {
                 Ok(MapiFolderHierarchyCommitOutcome::Applied(version)) => {
+                    let version = folder_version_for_snapshot(snapshot, version);
                     let change_number = version.change_number;
                     snapshot.upsert_folder_version(version);
                     record_sync_upload_hierarchy_change_with_change_number(
@@ -116,6 +137,7 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                     );
                 }
                 Ok(MapiFolderHierarchyCommitOutcome::Duplicate(version)) => {
+                    let version = folder_version_for_snapshot(snapshot, version);
                     snapshot.upsert_folder_version(version);
                     responses.extend_from_slice(&rop_error_response(
                         0x73,
@@ -124,6 +146,7 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                     ));
                 }
                 Ok(MapiFolderHierarchyCommitOutcome::Conflict(version)) => {
+                    let version = folder_version_for_snapshot(snapshot, version);
                     snapshot.upsert_folder_version(version);
                     // [MS-OXCFXICS] section 3.2.5.9.4.3: a hierarchy conflict
                     // returns Success without adding its CN to MetaTagCnsetSeen.
@@ -338,6 +361,17 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
             0x8004_0102,
         )),
     }
+}
+
+fn folder_version_for_snapshot(
+    snapshot: &MapiMailStoreSnapshot,
+    mut version: MapiFolderVersion,
+) -> MapiFolderVersion {
+    version.folder_id = snapshot
+        .identity_codec()
+        .logical_object_id(version.folder_id)
+        .unwrap_or(version.folder_id);
+    version
 }
 
 struct ImportedHierarchyVersion<'a> {
