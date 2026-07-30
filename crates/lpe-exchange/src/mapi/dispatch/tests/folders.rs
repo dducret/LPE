@@ -1865,13 +1865,14 @@ fn default_folder_entry_id_values_debug_decodes_freebusy_data_index() {
 }
 
 #[test]
-fn default_folder_identification_values_preserve_additional_ren_client_state() {
+fn default_folder_identification_values_canonicalize_additional_ren_reserved_slots() {
+    let principal = test_principal();
     let inbox = MapiObject::Folder {
         folder_id: INBOX_FOLDER_ID,
         properties: std::collections::HashMap::new(),
     };
     let retained = default_folder_identification_safe_property_values(
-        &test_principal(),
+        &principal,
         Some(&inbox),
         vec![
             (
@@ -1900,8 +1901,19 @@ fn default_folder_identification_values_preserve_additional_ren_client_state() {
     else {
         panic!("expected AdditionalRenEntryIds");
     };
+    let canonical_values = [
+        CONFLICTS_FOLDER_ID,
+        SYNC_ISSUES_FOLDER_ID,
+        LOCAL_FAILURES_FOLDER_ID,
+        SERVER_FAILURES_FOLDER_ID,
+        JUNK_FOLDER_ID,
+    ]
+    .map(|folder_id| {
+        crate::mapi::identity::folder_entry_id_from_object_id(principal.account_id, folder_id)
+            .unwrap()
+    });
     assert_eq!(values.len(), 6);
-    assert_eq!(values[0], vec![0xAA]);
+    assert_eq!(&values[..5], &canonical_values);
     assert_eq!(values[5], vec![0xFA, 0xCE]);
     assert_eq!(
         retained
@@ -1915,24 +1927,31 @@ fn default_folder_identification_values_preserve_additional_ren_client_state() {
 }
 
 #[test]
-fn root_default_folder_properties_complete_additional_ren_client_prefix() {
+fn root_default_folder_properties_canonicalize_additional_ren_client_prefix() {
+    let principal = test_principal();
     let root = MapiObject::Folder {
         folder_id: ROOT_FOLDER_ID,
         properties: std::collections::HashMap::new(),
     };
     let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        test_principal().account_id,
+        principal.account_id,
         CALENDAR_FOLDER_ID,
     )
     .unwrap();
-    let junk_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        test_principal().account_id,
+    let canonical_values = [
+        CONFLICTS_FOLDER_ID,
+        SYNC_ISSUES_FOLDER_ID,
+        LOCAL_FAILURES_FOLDER_ID,
+        SERVER_FAILURES_FOLDER_ID,
         JUNK_FOLDER_ID,
-    )
-    .unwrap();
+    ]
+    .map(|folder_id| {
+        crate::mapi::identity::folder_entry_id_from_object_id(principal.account_id, folder_id)
+            .unwrap()
+    });
 
     let retained = default_folder_identification_safe_property_values(
-        &test_principal(),
+        &principal,
         Some(&root),
         vec![
             (
@@ -1957,8 +1976,7 @@ fn root_default_folder_properties_complete_additional_ren_client_prefix() {
         panic!("expected AdditionalRenEntryIds");
     };
     assert_eq!(values.len(), 5);
-    assert!(values[0].is_empty());
-    assert_eq!(values[4], junk_entry_id);
+    assert_eq!(values, &canonical_values);
 }
 
 #[test]

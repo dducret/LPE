@@ -496,11 +496,11 @@ before it is advertised.
   initially projected five entries, but persisted the four-entry prefix and
   later returned it unchanged. The comparable Exchange Inbox probe retained the
   five documented folder EntryIDs plus its existing opaque sixth value. Under
-  `[MS-OXOSFLD]` section 2.2.4, LPE now merges a profile write into the prior
-  vector or canonical five entries, preserving omitted entries and every later
-  opaque value. Existing four-entry profile rows are normalized on read, so the
-  repair requires no database migration. The regression exercises Outlook's
-  exact four-entry write, persistence, and reconnect. This corrects a
+  `[MS-OXOSFLD]` section 2.2.4, LPE now projects the documented five entries
+  canonically and merges only later opaque profile values. Existing four-entry
+  and stale-alias profile rows are normalized on read, so the repair requires
+  no database migration. The regression exercises Outlook's exact four-entry
+  write, persistence, and reconnect. This corrects a
   documented state-corruption divergence; a fresh Outlook run must still prove
   whether it eliminates the local view/form report.
 - The clean `202607291330` run still held `N0=N1=0` and produced `N2=1`.
@@ -667,13 +667,14 @@ non-canonical LPE state.
 - `PidTagAdditionalRenEntryIds` is canonically an Inbox special-folder
   identification property under `[MS-OXOSFLD]` section 2.2.4. Outlook 2016/2019
   cached-mode startup can write a partial indexed value to the Inbox or the same
-  indexed values to the Root handle after hierarchy sync. Inbox writes merge
-  supplied positions into the existing profile value (or the canonical five
-  entries): omitted documented positions and opaque later positions remain
-  intact. The resulting Inbox value is bounded durable compatibility metadata,
-  not canonical folder or user-visible state. A Root-handle write is normalized
-  into that same Inbox compatibility value; Root has no independent persisted
-  ownership or advertised value.
+  indexed values to the Root handle after hierarchy sync. LPE always projects
+  indexes 0 through 4 as the canonical special-folder EntryIDs, and merges only
+  opaque later positions into the existing profile value. Omitted documented
+  positions and opaque later positions remain intact. The resulting Inbox value
+  is bounded durable compatibility metadata, not canonical folder or
+  user-visible state. A Root-handle write is normalized into that same Inbox
+  compatibility value; Root has no independent persisted ownership or
+  advertised value.
 - `RopIdFromLongTermId` advertises the canonical store replica GUID in
   `PidTagSerializedReplidGuidMap`, but it also accepts the authenticated
   mailbox account GUID byte layouts as legacy replica aliases so stale Outlook
@@ -1034,26 +1035,29 @@ not by itself authorize broad client publication.
 - Outlook's `PidTagAdditionalRenEntryIds` multi-binary special-folder cache is
   accepted as Inbox metadata during cached-mode bootstrap. `[MS-OXOSFLD]`
   section 2.2.4 defines the five documented positions and requires opaque later
-  positions to be preserved; the Exchange reference shows Outlook can write an
-  abbreviated prefix. LPE therefore begins an Inbox write with its previous
-  profile value (or the canonical five documented entries), overwrites only
-  supplied positions, and preserves omitted documented and opaque later
-  positions. This lets Outlook's four-entry prefix retain Junk E-mail at index
-  4 and an existing client Junk move stamp at index 5. The bounded merged value
-  persists in `mapi_folder_profile_property_values`; it does not create canonical
-  folder truth. A recognized alternate FID learned from a documented index,
-  including index 4 for Junk E-mail, is persisted as bounded account-scoped
-  protocol identity metadata in
-  `mapi_special_folder_aliases`. It therefore resolves to the canonical special
-  folder after a new EMSMDB session or server restart, not only later in the
-  session that learned it. Multiple profiles or OST replicas may contribute
-  different aliases for one canonical FID; an alias FID or SourceKey can map to
-  only one canonical FID. An alias remains an LPE-only redirect for cached
-  requests; it never overrides computed canonical default-folder properties or
-  becomes a second visible hierarchy identity when that canonical folder is in
-  the configured full hierarchy projection. An alias is not an LPE hierarchy
-  replica folder object. Unlearned client-local folder identifiers remain
-  unmapped and fail through the normal `ecNotFound` folder-open path.
+  positions to be preserved. The Exchange 2016 reference has a successful
+  `RopGetPropertiesSpecific` read with five canonical folder EntryIDs and an
+  opaque sixth value; it does not capture an `AdditionalRenEntryIds` write. The
+  LPE Outlook trace shows the abbreviated client write. LPE therefore begins an
+  Inbox write with its previous profile value (or the canonical five documented
+  entries), rewrites documented
+  positions 0 through 4 to the canonical values, and preserves only omitted or
+  supplied opaque later positions. This lets Outlook's four-entry prefix retain
+  canonical Junk E-mail at index 4 and an existing client Junk move stamp at
+  index 5. The bounded merged value persists in
+  `mapi_folder_profile_property_values`; it does not create canonical folder
+  truth. A recognized alternate FID submitted in a documented index is retained
+  separately as bounded account-scoped protocol identity metadata in
+  `mapi_special_folder_aliases`, but it is never re-advertised through that
+  property. It remains an LPE-only open redirect for a stale cached request
+  after a new EMSMDB session or server restart. Multiple profiles or OST replicas
+  may contribute different aliases for one canonical FID; an alias FID or
+  SourceKey can map to only one canonical FID. An alias never overrides computed
+  canonical default-folder properties or becomes a second visible hierarchy
+  identity when that canonical folder is in the configured full hierarchy
+  projection. An alias is not an LPE hierarchy replica folder object. Unlearned
+  client-local folder identifiers remain unmapped and fail through the normal
+  `ecNotFound` folder-open path.
 - Outlook scalar default-folder EntryID writebacks on Root or Inbox are validated
   against the canonical special-folder map and acknowledged for interoperability.
   A valid alternate FID and matching SourceKey are recorded through the same
@@ -1336,7 +1340,7 @@ this plan explicitly documents that compatibility behavior.
 | Opaque item custom properties | `mapi_custom_property_values` | Stored only for canonical item/attachment objects where the value is not a canonical built-in property. |
 | Navigation shortcuts | `mapi_navigation_shortcuts` | Common Views shortcut and group-header FAI rows are durable canonical profile-visible state for cached-mode profile creation and reopen. |
 | Folder display flags | `mapi_folder_profile_property_values` | Outlook-written `PidTagExtendedFolderFlags` folder UI streams are persisted per account and MAPI folder id, then overlaid on folder open so display-option writes survive reconnect. This store is bounded to Outlook profile folder flags, not arbitrary Exchange folder truth. |
-| Additional Ren Entry IDs | `mapi_folder_profile_property_values` plus `mapi_special_folder_aliases` | Inbox `PidTagAdditionalRenEntryIds` is merged as a partial profile update: the required five positions and previously stored opaque later values survive an abbreviated client write, while recognized alternate folder identities are retained only as aliases to canonical folders. |
+| Additional Ren Entry IDs | `mapi_folder_profile_property_values` plus `mapi_special_folder_aliases` | Inbox `PidTagAdditionalRenEntryIds` always returns canonical values at the five documented positions and preserves opaque later values across abbreviated writes. A recognized stale alternate is retained only as an unadvertised alias redirect to its canonical folder. |
 | Associated configuration FAI | `mapi_associated_config_messages` | Outlook-created folder associated/config messages are durable MAPI-only compatibility state for view/form/client configuration sync replay. Direct associated-message deletes are supported and folder-scoped incremental content sync exports associated-config delete idsets. |
 | Sync checkpoints | `mapi_sync_checkpoints` | Durable operational EMSMDB/ICS completion cursors for hierarchy/content/read-state diagnostics; they neither store mailbox content nor select a client download delta. |
 | IPM subtree OST identity | `mapi_profile_settings.ipm_subtree_ost_id` | Outlook-written cached-mode profile identity is persisted account-wide and reloaded on IPM subtree open after reconnect. |

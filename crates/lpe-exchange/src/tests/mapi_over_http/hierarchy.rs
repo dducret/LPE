@@ -2211,13 +2211,12 @@ async fn mapi_over_http_folder_extended_flags_survive_reconnect() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_additional_ren_entry_ids_round_trip_client_state_across_reconnect() {
-    // Outlook trace 202607211111 creates this sixth value after reading the
-    // documented five folder EntryIDs. Keep the dynamic Junk alias and move
-    // stamp fixture-independent: [MS-OXOSFLD] section 2.2.4 requires opaque
-    // indexes to survive, [MS-OXCSPAM] sections 2.2.3.1 and 3.2.4.1.2 require
-    // Outlook's index 5 move stamp to persist on Inbox, and [MS-OXCPRPT]
-    // section 3.2.5.4 defines the successful RopSetProperties transition.
+async fn mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_across_reconnect() {
+    // Outlook sends a stale dynamic Junk EntryID in documented index 4 after
+    // accepting its hierarchy deletion. [MS-OXOSFLD] section 2.2.4 reserves
+    // indexes 0 through 4 for special folders and requires opaque later
+    // indexes to survive. Keep the stale ID as an open-only alias while the
+    // persisted and returned profile value uses the canonical five entries.
     let account = FakeStore::account();
     let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     let store = FakeStore {
@@ -2226,6 +2225,7 @@ async fn mapi_over_http_additional_ren_entry_ids_round_trip_client_state_across_
         ..Default::default()
     };
     let stored_folder_profile_values = store.mapi_folder_profile_property_values.clone();
+    let special_folder_aliases = store.mapi_special_folder_aliases.clone();
     let first_reserved_counter = store
         .reserve_mapi_local_replica_ids(account.account_id, 0x1_0000)
         .await
@@ -2241,7 +2241,7 @@ async fn mapi_over_http_additional_ren_entry_ids_round_trip_client_state_across_
         HeaderValue::from_str(&mapi_cookie_header(&first_connect)).unwrap(),
     );
 
-    let mut entries = [
+    let canonical_entries = [
         crate::mapi::identity::CONFLICTS_FOLDER_ID,
         crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
         crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
@@ -2252,6 +2252,7 @@ async fn mapi_over_http_additional_ren_entry_ids_round_trip_client_state_across_
         crate::mapi::identity::folder_entry_id_from_object_id(account.account_id, folder_id)
             .unwrap()
     });
+    let mut entries = canonical_entries.clone();
     let client_junk_alias_id = crate::mapi::identity::mapi_store_id(first_reserved_counter + 0x5e);
     entries[4] = crate::mapi::identity::folder_entry_id_from_object_id(
         account.account_id,
@@ -2273,7 +2274,7 @@ async fn mapi_over_http_additional_ren_entry_ids_round_trip_client_state_across_
         ],
     );
     let mut expected_profile_value = 6u32.to_le_bytes().to_vec();
-    for entry in &entries {
+    for entry in &canonical_entries {
         expected_profile_value.extend_from_slice(&(entry.len() as u16).to_le_bytes());
         expected_profile_value.extend_from_slice(entry);
     }
@@ -2299,6 +2300,50 @@ async fn mapi_over_http_additional_ren_entry_ids_round_trip_client_state_across_
     let set_response_rops = response_rops_from_execute_response(set_response).await;
     assert!(contains_bytes(
         &set_response_rops,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(stored_folder_profile_values
+        .lock()
+        .unwrap()
+        .values()
+        .any(|value| value == &expected_profile_value));
+    assert_eq!(
+        special_folder_aliases
+            .lock()
+            .unwrap()
+            .get(&client_junk_alias_id)
+            .map(|alias| alias.canonical_folder_id),
+        Some(crate::mapi::identity::JUNK_FOLDER_ID),
+        "the stale EntryID remains an open-only redirect"
+    );
+
+    // Outlook repeats the same cached vector through the Root handle. Root
+    // has no independent profile value, so this must retain the canonical
+    // Inbox representation and the opaque move stamp.
+    let mut root_set_rops = Vec::new();
+    append_rop_open_folder(
+        &mut root_set_rops,
+        0,
+        1,
+        crate::mapi::identity::ROOT_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut root_set_rops, 1, 1, &property_values);
+    let root_set_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &truncated_set_headers,
+            &execute_body(&rop_buffer(&root_set_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    let mut truncated_set_headers = mapi_headers("Execute");
+    truncated_set_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&root_set_response)).unwrap(),
+    );
+    let root_set_response_rops = response_rops_from_execute_response(root_set_response).await;
+    assert!(contains_bytes(
+        &root_set_response_rops,
         &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
     ));
     assert!(stored_folder_profile_values
@@ -2367,6 +2412,10 @@ async fn mapi_over_http_additional_ren_entry_ids_round_trip_client_state_across_
 
     let get_response_rops = response_rops_from_execute_response(get_response).await;
     assert!(contains_bytes(&get_response_rops, &expected_profile_value));
+    assert!(
+        !contains_bytes(&get_response_rops, &entries[4]),
+        "the stale Junk EntryID must not be readvertised from the profile"
+    );
 }
 
 #[tokio::test]

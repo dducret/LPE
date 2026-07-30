@@ -220,7 +220,8 @@ fn merge_indexed_special_folder_entry_ids(
 // [MS-OXOSFLD] section 2.2.4 defines the special-folder entries at indexes
 // 0 through 4 and requires every other index to be preserved. Outlook can
 // submit a prefix that omits Junk at index 4, so retain the prior profile
-// values that were not supplied by the write.
+// values that were not supplied by the write. The defined entries remain the
+// canonical LPE folder identities; a client cache must not replace them.
 pub(super) fn merge_additional_ren_entry_ids(
     principal: &AccountPrincipal,
     existing: Option<&MapiValue>,
@@ -245,7 +246,14 @@ pub(super) fn merge_additional_ren_entry_ids(
     if existing_len < canonical_values.len() {
         merged_values.extend(canonical_values[existing_len..].iter().cloned());
     }
-    for (index, value) in incoming_values.into_iter().enumerate() {
+    for (index, value) in canonical_values.iter().cloned().enumerate() {
+        merged_values[index] = value;
+    }
+    for (index, value) in incoming_values
+        .into_iter()
+        .enumerate()
+        .skip(canonical_values.len())
+    {
         if let Some(existing_value) = merged_values.get_mut(index) {
             *existing_value = value;
         } else {
@@ -290,6 +298,9 @@ pub(super) fn default_folder_entry_id_aliases(
     for (tag, value) in values {
         let storage_tag = canonical_property_storage_tag(*tag);
         if storage_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS {
+            // The profile value normalizes defined indexes 0 through 4 back
+            // to their canonical EntryIDs. Retain a valid raw alternate only
+            // as a redirect for a stale cache that still opens that FID.
             aliases.extend(indexed_special_folder_aliases(
                 value,
                 &[
