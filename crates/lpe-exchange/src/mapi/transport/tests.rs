@@ -282,7 +282,7 @@ async fn mapi_response_start_time_uses_current_http_date_not_sentinel() {
 }
 
 #[tokio::test]
-async fn execute_response_uses_exchange_chunked_processing_and_done_frames() {
+async fn execute_response_uses_one_exchange_chunked_processing_and_done_frame() {
     let response = mapi_response("Execute", "request:1", 0, vec![0x01, 0x02, 0x03], None);
 
     assert_eq!(response.status(), StatusCode::OK);
@@ -293,12 +293,8 @@ async fn execute_response_uses_exchange_chunked_processing_and_done_frames() {
     assert!(response.headers().get("content-length").is_none());
 
     let mut frames = response.into_body().into_data_stream();
-    assert_eq!(
-        frames.next().await.unwrap().unwrap().as_ref(),
-        b"PROCESSING\r\n"
-    );
     let completed = frames.next().await.unwrap().unwrap();
-    assert!(completed.starts_with(b"DONE\r\nX-StartTime: "));
+    assert!(completed.starts_with(b"PROCESSING\r\nDONE\r\nX-StartTime: "));
     assert!(!completed
         .windows(b"X-ResponseCode: 0".len())
         .any(|window| window == b"X-ResponseCode: 0"));

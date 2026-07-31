@@ -695,17 +695,16 @@ pub(in crate::mapi) fn mapi_response_with_cookies(
     completed_frame.extend_from_slice(b"\r\n");
     completed_frame.extend_from_slice(&body);
 
-    // Exchange sends Execute responses as a chunked MAPI-over-HTTP exchange:
-    // PROCESSING is its own initial frame and DONE precedes the ROP payload in
-    // the final frame. Keep finite request types as Content-Length responses.
-    // [MS-OXCMAPIHTTP] section 3.2.5.2; Exchange 2016 trace raw/501_s.txt.
+    // Exchange sends ordinary Execute responses as one chunked MAPI-over-HTTP
+    // frame containing PROCESSING, DONE, and the ROP payload. Keep finite
+    // request types as Content-Length responses. [MS-OXCMAPIHTTP] section
+    // 3.2.5.2; Exchange 2016 trace raw/501_s.txt.
     let (mut response, framed_body_len) = if request_type == "Execute" {
-        let frames = [
-            Ok::<axum::body::Bytes, std::io::Error>(axum::body::Bytes::from_static(
-                b"PROCESSING\r\n",
-            )),
-            Ok(axum::body::Bytes::from(completed_frame)),
-        ];
+        let mut framed_body = b"PROCESSING\r\n".to_vec();
+        framed_body.extend_from_slice(&completed_frame);
+        let frames = [Ok::<axum::body::Bytes, std::io::Error>(
+            axum::body::Bytes::from(framed_body),
+        )];
         (
             Response::new(axum::body::Body::from_stream(tokio_stream::iter(frames))),
             None,
