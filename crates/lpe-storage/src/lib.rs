@@ -89,7 +89,10 @@ pub use crate::mapi_events::{
     MapiEventCreateResult, MapiEventCustomPropertyValue, MapiEventImportedIdentity,
     MapiEventReminderPatch, MapiEventReminderState, MapiEventVersion,
 };
-pub use crate::mapi_store_identity::MapiStoreIdentity;
+pub use crate::mapi_store_identity::{
+    MapiMessageIdentityMove, MapiMessageImportedMoveIdentity, MapiMessageMoveResult,
+    MapiStoreIdentity,
+};
 pub use crate::notes_journal::{
     ClientNote, ClientReminder, JournalEntry, ReminderQuery, UpsertClientNoteInput,
     UpsertJournalEntryInput,

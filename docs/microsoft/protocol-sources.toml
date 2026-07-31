@@ -1121,6 +1121,7 @@ used_for = [
   "Account-scoped PidTagEntryId consistency across configuration FAI, navigation shortcut, and named-view GetProps, ICS, and filtered direct Message CopyTo or CopyProperties projections",
   "Message and FAI FastTransfer surfaces from which unsupported Message PidTagRecordKey is omitted",
   "ICS upload Message saves advance the normal or FAI seen set without advancing CnsetRead",
+  "Optimized Outlook send using PidTagTargetEntryId: canonical Sent submission, transient same-message Outbox membership, and ImportMessageMove destination-identity rekey",
 ]
 sections = [
   "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",
@@ -1218,6 +1219,7 @@ sections = [
   "3.2.5.11 Properties to Ignore on Upload",
   "3.2.5.12 Properties to Ignore on Download",
   "3.3.4.3.3.2.1.1 Moves and Modifications",
+  "3.3.4.3.3.2.1.2 Avoiding Duplicate Uploads",
   "3.3.4.3.3 Uploading Changes Using ICS",
   "3.3.4.3.3.1 Hierarchy Upload",
   "3.3.4.3.3.1.1 Uploading Hierarchy Changes",
@@ -1756,6 +1758,7 @@ used_for = [
   "Bounded Outlook mail item property projection, message create/open/save/sync behavior, recipient visibility, and follow-up field boundaries",
   "PidTagReplyRecipientEntries relationship to PidTagReplyRecipientNames",
   "PidTagMessageDeliveryTime primary key for OrderByDeliveryTime content synchronization",
+  "PidTagTargetEntryId optimizing send: server Outbox copy/mirror and later Sent Items move without a second content upload",
 ]
 sections = [
   "2.2.1 E-Mail Object Properties",
@@ -1776,7 +1779,10 @@ sections = [
   "2.2.1.70 Flags",
   "2.2.1.71 Reminders",
   "2.2.1.72 Recipients",
+  "2.2.1.76 PidTagTargetEntryId Property",
   "2.2.3.9 PidTagMessageDeliveryTime Property",
+  "3.2.4.4 Optimizing Send",
+  "3.3.5.1.3 Properties Read and/or Set Upon Submission",
 ]
 
 [[protocol]]

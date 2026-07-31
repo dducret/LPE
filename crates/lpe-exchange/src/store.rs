@@ -10,14 +10,14 @@ use lpe_storage::{
     JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
     MailboxFolderDelegationGrantInput, MailboxRule, ManagedRetentionFolderCreateInput,
     MapiContactCreateInput, MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
-    MapiEventImportedMoveIdentity, MapiEventVersion, MapiStoreIdentity,
-    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
-    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
-    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
-    SenderDelegationRight, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    MapiEventImportedMoveIdentity, MapiEventVersion, MapiMessageImportedMoveIdentity,
+    MapiMessageMoveResult, MapiStoreIdentity, MoveAccessibleEventToDeletedItemsResult,
+    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
+    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
     UpsertSearchFolderInput,
 };
@@ -1175,7 +1175,25 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail>;
 
+    fn move_jmap_email_from_mailbox_with_mapi_identity<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        imported_identity: MapiMessageImportedMoveIdentity,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, MapiMessageMoveResult>;
+
     fn copy_jmap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
+
+    fn mirror_jmap_email_into_mailbox<'a>(
         &'a self,
         account_id: Uuid,
         message_id: Uuid,

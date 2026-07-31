@@ -204,6 +204,7 @@ pub(in crate::mapi) const PID_TAG_RECORD_KEY: u32 = 0x0FF9_0102;
 pub(in crate::mapi) const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 pub(in crate::mapi) const PID_TAG_DEPTH: u32 = 0x3005_0003;
 pub(in crate::mapi) const PID_TAG_SEARCH_KEY: u32 = 0x300B_0102;
+pub(in crate::mapi) const PID_TAG_TARGET_ENTRY_ID: u32 = 0x3010_0102;
 pub(in crate::mapi) const PID_TAG_START_DATE_ETC: u32 = 0x301B_0102;
 pub(in crate::mapi) const PID_TAG_CREATOR_NAME_W: u32 = 0x3FF8_001F;
 pub(in crate::mapi) const PID_TAG_CREATOR_ENTRY_ID: u32 = 0x3FF9_0102;

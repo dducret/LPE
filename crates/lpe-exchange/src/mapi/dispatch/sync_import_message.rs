@@ -397,6 +397,22 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             ));
             return;
         }
+        // [MS-OXCFXICS] section 3.2.5.11: ImportMessageChange can repeat
+        // identity headers immediately after ImportMessageMove. The move/import
+        // identity already owns durable state, so this ICS path ignores them
+        // without changing ordinary property-staging behavior.
+        let property_values = property_values
+            .into_iter()
+            .filter(|(tag, _)| {
+                !matches!(
+                    *tag,
+                    PID_TAG_SOURCE_KEY
+                        | PID_TAG_CHANGE_KEY
+                        | PID_TAG_PREDECESSOR_CHANGE_LIST
+                        | PID_TAG_LAST_MODIFICATION_TIME
+                )
+            })
+            .collect();
         if apply_canonical_message_property_values(
             store,
             principal,

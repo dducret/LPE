@@ -1067,6 +1067,421 @@ async fn mapi_over_http_transport_send_uses_canonical_submission() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_transport_send_target_entry_id_uses_outbox_mirror_and_import_move() {
+    const PID_TAG_TARGET_ENTRY_ID: u32 = 0x3010_0102;
+    const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
+    const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
+    const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
+    const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
+
+    let account = FakeStore::account();
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let outbox_id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
+    let sent_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox"),
+            FakeStore::mailbox(&outbox_id.to_string(), "outbox", "Outbox"),
+            FakeStore::mailbox(&sent_id.to_string(), "sent", "Sent"),
+        ])),
+        ..Default::default()
+    };
+    let mailboxes = store
+        .ensure_jmap_system_mailboxes(account.account_id)
+        .await
+        .unwrap();
+    let folder_identities = store
+        .fetch_or_allocate_mapi_identities(
+            account.account_id,
+            &crate::mapi_store::mapi_folder_identity_requests(&mailboxes),
+        )
+        .await
+        .unwrap();
+    let durable_folder_id = |mailbox_id| {
+        folder_identities
+            .iter()
+            .find(|identity| identity.canonical_id == mailbox_id)
+            .expect("durable MAPI mailbox identity")
+            .object_id
+    };
+    let durable_inbox_id = durable_folder_id(inbox_id);
+    let durable_outbox_id = durable_folder_id(outbox_id);
+    let durable_sent_id = durable_folder_id(sent_id);
+    assert_ne!(
+        durable_outbox_id,
+        crate::mapi::identity::OUTBOX_FOLDER_ID,
+        "the wire TargetEntryId must use the durable physical Outbox FID"
+    );
+    assert!(
+        crate::mapi::identity::global_counter_from_store_id(durable_outbox_id).unwrap()
+            >= crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER
+    );
+
+    let reservation_count = 0x0001_0000;
+    let reservation_start = store
+        .reserve_mapi_local_replica_ids(account.account_id, reservation_count)
+        .await
+        .unwrap();
+    let reservation_end = reservation_start + u64::from(reservation_count);
+    let source_global_counter = reservation_start + 0x0A5A;
+    let destination_global_counter = reservation_start + 0x0C5A;
+    assert!(destination_global_counter < reservation_end);
+    let source_message_id = crate::mapi::identity::mapi_store_id(source_global_counter);
+    let destination_message_id = crate::mapi::identity::mapi_store_id(destination_global_counter);
+    let source_message_gid = crate::mapi::identity::source_key_for_object_id(source_message_id);
+    let destination_message_gid =
+        crate::mapi::identity::source_key_for_object_id(destination_message_id);
+    let source_folder_gid = crate::mapi::identity::source_key_for_object_id(durable_outbox_id);
+    let imported_change_key =
+        mapi_mailstore::change_key_for_change_number(destination_global_counter);
+    let imported_predecessor_change_list =
+        mapi_mailstore::predecessor_change_list(destination_global_counter);
+    assert!(test_mapi_pcl_includes_change_key(
+        &imported_predecessor_change_list,
+        &imported_change_key,
+    ));
+    let target_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        account.account_id,
+        durable_outbox_id,
+        source_message_id,
+    )
+    .expect("private MAPI TargetEntryId");
+    assert_eq!(
+        crate::mapi::identity::object_ids_from_message_entry_id(
+            account.account_id,
+            &target_entry_id,
+        ),
+        Some((durable_outbox_id, source_message_id)),
+        "the raw TargetEntryId must retain Outlook's durable Outbox FID"
+    );
+
+    let submitted_messages = store.submitted_messages.clone();
+    let imported_emails = store.imported_emails.clone();
+    let moved_emails = store.moved_emails.clone();
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x0037_001F,
+        "Optimized send source message",
+    );
+    append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Outbox mirror body");
+    append_mapi_binary_property(
+        &mut property_values,
+        PID_TAG_TARGET_ENTRY_ID,
+        &target_entry_id,
+    );
+    let recipient = mapi_recipient_row("Bob", "bob@example.test", 0x01);
+    let mut send_rops = Vec::new();
+    append_rop_open_folder(&mut send_rops, 0, 1, durable_inbox_id);
+    append_rop_create_message(&mut send_rops, 1, 2, durable_inbox_id);
+    append_rop_set_properties(&mut send_rops, 2, 3, &property_values);
+    append_rop_modify_recipients(&mut send_rops, 2, &[(1, 0x01, recipient.as_slice())]);
+    append_rop_transport_send(&mut send_rops, 2);
+    let send_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&send_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(send_response.status(), StatusCode::OK);
+    assert_eq!(send_response.headers().get("x-responsecode").unwrap(), "0");
+    let send_response_rops = response_rops_from_execute_response(send_response).await;
+    assert!(contains_bytes(
+        &send_response_rops,
+        &[0x4A, 0x02, 0, 0, 0, 0, 1]
+    ));
+    assert_eq!(submitted_messages.lock().unwrap().len(), 1);
+
+    // A retransmitted optimized send uses a new Execute request and session,
+    // so it must find the durable Outbox mirror instead of creating another
+    // canonical Sent message or submission.
+    let retry_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    renew_mapi_request_id(&mut execute_headers);
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&retry_connect)).unwrap(),
+    );
+    let retry_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&send_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retry_response.status(), StatusCode::OK);
+    assert_eq!(retry_response.headers().get("x-responsecode").unwrap(), "0");
+    let retry_response_rops = response_rops_from_execute_response(retry_response).await;
+    assert!(contains_bytes(
+        &retry_response_rops,
+        &[0x4A, 0x02, 0, 0, 0, 0, 1]
+    ));
+    assert_eq!(submitted_messages.lock().unwrap().len(), 1);
+
+    let canonical_id = Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap();
+    {
+        let emails = store.emails.lock().unwrap();
+        assert_eq!(
+            emails.len(),
+            1,
+            "optimized send must create one canonical email"
+        );
+        let email = emails
+            .iter()
+            .find(|email| email.id == canonical_id)
+            .unwrap();
+        assert_eq!(email.mailbox_id, sent_id);
+        assert!(email.mailbox_ids.contains(&sent_id));
+        assert!(email.mailbox_ids.contains(&outbox_id));
+        assert_eq!(
+            email
+                .mailbox_states
+                .iter()
+                .filter(|state| state.mailbox_id == sent_id)
+                .count(),
+            1,
+            "the retry must not create a second Sent membership"
+        );
+        assert_eq!(
+            email
+                .mailbox_states
+                .iter()
+                .filter(|state| state.mailbox_id == outbox_id)
+                .count(),
+            1,
+            "the durable optimized-send Outbox mirror must be unique"
+        );
+    }
+    assert_eq!(
+        store.mapi_identities.lock().unwrap()[&canonical_id],
+        source_message_id
+    );
+    assert_eq!(
+        store.mapi_identity_source_keys.lock().unwrap()[&canonical_id],
+        source_message_gid
+    );
+
+    // Exchange captured the ImportMessageMove in a later MAPI session. A
+    // fresh session proves the temporary Outbox identity is durable.
+    let move_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    renew_mapi_request_id(&mut execute_headers);
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&move_connect)).unwrap(),
+    );
+    let mut identity_values = Vec::new();
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_SOURCE_KEY,
+        &destination_message_gid,
+    );
+    append_mapi_i64_property(
+        &mut identity_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        test_filetime("2026-07-31", "16:04"),
+    );
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_CHANGE_KEY,
+        &imported_change_key,
+    );
+    append_mapi_binary_property(
+        &mut identity_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &imported_predecessor_change_list,
+    );
+    let mut final_properties = Vec::new();
+    append_mapi_utf16_property(
+        &mut final_properties,
+        0x0037_001F,
+        "Optimized send final Sent item",
+    );
+    let mut move_rops = Vec::new();
+    append_rop_open_folder(&mut move_rops, 0, 1, durable_sent_id);
+    move_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+        0x78, 0x00, 0x02, // RopSynchronizationImportMessageMove.
+    ]);
+    // [MS-OXCFXICS] section 2.2.3.2.4.4.1: SourceFolderId,
+    // SourceMessageId, PCL, DestinationMessageId, and ChangeKey/XID are
+    // non-empty length-prefixed fields. The folder GID is the physical
+    // Outbox FID from the TargetEntryId, as captured from Exchange 2016.
+    for field in [
+        source_folder_gid.as_slice(),
+        source_message_gid.as_slice(),
+        imported_predecessor_change_list.as_slice(),
+        destination_message_gid.as_slice(),
+        imported_change_key.as_slice(),
+    ] {
+        move_rops.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        move_rops.extend_from_slice(field);
+    }
+    move_rops.extend_from_slice(&[
+        0x72, 0x00, 0x02, 0x03, 0x00, // RopSynchronizationImportMessageChange.
+    ]);
+    move_rops.extend_from_slice(&4u16.to_le_bytes());
+    move_rops.extend_from_slice(&identity_values);
+    append_rop_set_properties(&mut move_rops, 3, 1, &final_properties);
+    append_rop_save_changes_message_with_flags(&mut move_rops, 3, 3, 0x08);
+    let move_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&move_rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(move_response.status(), StatusCode::OK);
+    assert_eq!(move_response.headers().get("x-responsecode").unwrap(), "0");
+    let move_response_rops = response_rops_from_execute_response(move_response).await;
+    assert!(contains_bytes(
+        &move_response_rops,
+        &[0x78, 0x02, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &move_response_rops,
+        &[0x72, 0x03, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &move_response_rops,
+        &[0x0A, 0x03, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &move_response_rops,
+        &[0x0C, 0x03, 0, 0, 0, 0]
+    ));
+
+    // The server must also acknowledge a later retry of the exact move: its
+    // source Outbox membership is gone, while the destination identity is
+    // already durable in Sent.
+    let move_replay_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    renew_mapi_request_id(&mut execute_headers);
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&move_replay_connect)).unwrap(),
+    );
+    let mut move_replay_rops = Vec::new();
+    append_rop_open_folder(&mut move_replay_rops, 0, 1, durable_sent_id);
+    move_replay_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+        0x78, 0x00, 0x02, // RopSynchronizationImportMessageMove.
+    ]);
+    for field in [
+        source_folder_gid.as_slice(),
+        source_message_gid.as_slice(),
+        imported_predecessor_change_list.as_slice(),
+        destination_message_gid.as_slice(),
+        imported_change_key.as_slice(),
+    ] {
+        move_replay_rops.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        move_replay_rops.extend_from_slice(field);
+    }
+    let move_replay_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&move_replay_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(move_replay_response.status(), StatusCode::OK);
+    assert_eq!(
+        move_replay_response
+            .headers()
+            .get("x-responsecode")
+            .unwrap(),
+        "0"
+    );
+    let move_replay_response_rops = response_rops_from_execute_response(move_replay_response).await;
+    assert!(contains_bytes(
+        &move_replay_response_rops,
+        &[0x78, 0x02, 0, 0, 0, 0]
+    ));
+    assert_eq!(submitted_messages.lock().unwrap().len(), 1);
+    let replayed_email = {
+        let emails = store.emails.lock().unwrap();
+        assert_eq!(emails.len(), 1, "move replay must not clone the message");
+        emails
+            .iter()
+            .find(|email| email.id == canonical_id)
+            .cloned()
+            .unwrap()
+    };
+    assert_eq!(replayed_email.mailbox_ids, vec![sent_id]);
+    assert_eq!(replayed_email.mailbox_states.len(), 1);
+    assert_eq!(replayed_email.mailbox_states[0].mailbox_id, sent_id);
+    assert_eq!(
+        store.mapi_identities.lock().unwrap()[&canonical_id],
+        destination_message_id
+    );
+
+    let email = store
+        .emails
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|email| email.id == canonical_id)
+        .cloned()
+        .unwrap();
+    assert_eq!(email.subject, "Optimized send final Sent item");
+    assert_eq!(email.mailbox_id, sent_id);
+    assert_eq!(email.mailbox_ids, vec![sent_id]);
+    assert_eq!(email.mailbox_states.len(), 1);
+    assert_eq!(email.mailbox_states[0].mailbox_id, sent_id);
+    assert_eq!(
+        moved_emails.lock().unwrap().as_slice(),
+        &[(canonical_id, sent_id)]
+    );
+    assert!(
+        imported_emails.lock().unwrap().is_empty(),
+        "ImportMessageChange must update the moved canonical email, not create a duplicate"
+    );
+    assert_eq!(
+        store.mapi_identities.lock().unwrap()[&canonical_id],
+        destination_message_id
+    );
+    assert_eq!(
+        store.mapi_identity_source_keys.lock().unwrap()[&canonical_id],
+        destination_message_gid
+    );
+    assert_eq!(
+        store.mapi_identity_change_keys.lock().unwrap()[&canonical_id],
+        imported_change_key
+    );
+    assert_eq!(
+        store.mapi_identity_predecessor_change_lists.lock().unwrap()[&canonical_id],
+        imported_predecessor_change_list
+    );
+    assert!(
+        store.mapi_identity_change_numbers.lock().unwrap()[&canonical_id] >= reservation_end,
+        "the imported Sent move must use a server CN outside Outlook's local replica range"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_transport_send_opened_draft_preserves_canonical_attachment_and_bcc_guards()
 {
     let draft_id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();

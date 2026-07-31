@@ -16,6 +16,7 @@ use lpe_storage::{
     MapiContactCreateInput, MapiContactCreateResult, MapiContactVersion, MapiEventCommitInput,
     MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput, MapiEventCreateResult,
     MapiEventIdentityMove, MapiEventImportedMoveIdentity, MapiEventReminderState, MapiEventVersion,
+    MapiMessageIdentityMove, MapiMessageImportedMoveIdentity, MapiMessageMoveResult,
     MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
     PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
     PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights, PublicFolderTree,
@@ -11219,6 +11220,152 @@ impl ExchangeStore for FakeStore {
         self.move_jmap_email(account_id, message_id, target_mailbox_id, audit)
     }
 
+    fn move_jmap_email_from_mailbox_with_mapi_identity<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        imported_identity: MapiMessageImportedMoveIdentity,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, MapiMessageMoveResult> {
+        let target = self
+            .mailboxes
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|mailbox| mailbox.id == target_mailbox_id)
+            .cloned();
+        let result = (|| -> anyhow::Result<MapiMessageMoveResult> {
+            let target = target.ok_or_else(|| anyhow::anyhow!("target mailbox not found"))?;
+            let mut emails = self.emails.lock().unwrap();
+            let email = emails
+                .iter_mut()
+                .find(|email| email.id == message_id)
+                .ok_or_else(|| anyhow::anyhow!("message not found"))?;
+            if !email.mailbox_ids.contains(&source_mailbox_id) {
+                anyhow::bail!("source mailbox does not contain message");
+            }
+            if !email.mailbox_ids.contains(&target_mailbox_id) {
+                anyhow::bail!("target mailbox does not contain mirrored message");
+            }
+
+            let mut identities = self.mapi_identities.lock().unwrap();
+            let old_mapi_object_id = *identities
+                .get(&message_id)
+                .ok_or_else(|| anyhow::anyhow!("message MAPI identity is missing"))?;
+            let old_change_number = self
+                .mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .get(&message_id)
+                .copied()
+                .unwrap_or_else(|| {
+                    crate::mapi::identity::global_counter_from_store_id(old_mapi_object_id)
+                        .unwrap_or(1)
+                });
+            let mut source_keys = self.mapi_identity_source_keys.lock().unwrap();
+            let old_source_key = source_keys.get(&message_id).cloned().unwrap_or_else(|| {
+                crate::mapi::identity::source_key_for_object_id(old_mapi_object_id)
+            });
+            if old_source_key != imported_identity.expected_source_key {
+                anyhow::bail!("active MAPI SourceKey changed before the imported move");
+            }
+            let new_mapi_object_id = crate::mapi::identity::object_id_from_source_key(
+                &imported_identity.destination_source_key,
+            )
+            .ok_or_else(|| anyhow::anyhow!("invalid imported destination SourceKey"))?;
+            let destination_global_counter =
+                crate::mapi::identity::global_counter_from_store_id(new_mapi_object_id)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("invalid imported destination MAPI object id")
+                    })?;
+            if !self.mapi_local_replica_ranges.lock().unwrap().iter().any(
+                |(reserved_account_id, first_global_counter, end_global_counter)| {
+                    *reserved_account_id == account_id
+                        && *first_global_counter <= destination_global_counter
+                        && destination_global_counter < *end_global_counter
+                },
+            ) {
+                anyhow::bail!("imported destination SourceKey was not locally reserved");
+            }
+            if !test_mapi_pcl_includes_change_key(
+                &imported_identity.predecessor_change_list,
+                &imported_identity.change_key,
+            ) {
+                anyhow::bail!("invalid imported message move ChangeKey or PCL");
+            }
+            let new_change_number = {
+                let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+                if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+                    *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
+                }
+                let change_number = *next_counter;
+                *next_counter = next_counter.saturating_add(1);
+                change_number
+            };
+            let old_change_key = self
+                .mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .get(&message_id)
+                .cloned()
+                .unwrap_or_else(|| mapi_mailstore::change_key_for_change_number(old_change_number));
+
+            identities.insert(message_id, new_mapi_object_id);
+            source_keys.insert(message_id, imported_identity.destination_source_key.clone());
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(message_id, new_change_number);
+            self.mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .insert(message_id, imported_identity.change_key.clone());
+            self.mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .insert(
+                    message_id,
+                    imported_identity.predecessor_change_list.clone(),
+                );
+            self.mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .insert(message_id, new_change_number);
+
+            email
+                .mailbox_ids
+                .retain(|mailbox_id| *mailbox_id != source_mailbox_id);
+            email
+                .mailbox_states
+                .retain(|state| state.mailbox_id != source_mailbox_id);
+            email.mailbox_id = target.id;
+            email.mailbox_role = target.role;
+            email.mailbox_name = target.name;
+            let email = email.clone();
+            self.moved_emails
+                .lock()
+                .unwrap()
+                .push((message_id, target_mailbox_id));
+
+            Ok(MapiMessageMoveResult {
+                email,
+                identity: MapiMessageIdentityMove {
+                    old_mapi_object_id,
+                    new_mapi_object_id,
+                    old_source_key,
+                    new_source_key: imported_identity.destination_source_key,
+                    old_change_number,
+                    new_change_number,
+                    old_change_key,
+                    new_change_key: imported_identity.change_key,
+                },
+            })
+        })();
+        Box::pin(async move { result })
+    }
+
     fn copy_jmap_email<'a>(
         &'a self,
         _account_id: Uuid,
@@ -11255,6 +11402,51 @@ impl ExchangeStore for FakeStore {
         }
         self.emails.lock().unwrap().push(copied.clone());
         Box::pin(async move { Ok(copied) })
+    }
+
+    fn mirror_jmap_email_into_mailbox<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        let target = self
+            .mailboxes
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|mailbox| mailbox.id == target_mailbox_id)
+            .cloned();
+        let result = (|| -> anyhow::Result<JmapEmail> {
+            let target = target.ok_or_else(|| anyhow::anyhow!("target mailbox not found"))?;
+            let mut emails = self.emails.lock().unwrap();
+            let email = emails
+                .iter_mut()
+                .find(|email| email.id == message_id)
+                .ok_or_else(|| anyhow::anyhow!("message not found"))?;
+            if !email.mailbox_ids.contains(&target.id) {
+                email.mailbox_ids.push(target.id);
+            }
+            if !email
+                .mailbox_states
+                .iter()
+                .any(|state| state.mailbox_id == target.id)
+            {
+                let mut state = email
+                    .mailbox_states
+                    .first()
+                    .cloned()
+                    .expect("fake email must have a primary mailbox state");
+                state.mailbox_id = target.id;
+                state.role = target.role.clone();
+                state.name = target.name;
+                state.draft = state.role == "drafts";
+                email.mailbox_states.push(state);
+            }
+            Ok(email.clone())
+        })();
+        Box::pin(async move { result })
     }
 
     fn update_jmap_email_flags<'a>(

@@ -91,6 +91,7 @@ pub(in crate::mapi) fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_ENTRY_ID => "PidTagEntryId",
         PID_TAG_RECORD_KEY => "PidTagRecordKey",
         PID_TAG_SEARCH_KEY => "PidTagSearchKey",
+        PID_TAG_TARGET_ENTRY_ID => "PidTagTargetEntryId",
         PID_TAG_CREATOR_NAME_W => "PidTagCreatorName",
         PID_TAG_CREATOR_ENTRY_ID => "PidTagCreatorEntryId",
         PID_TAG_LAST_MODIFIER_NAME_W => "PidTagLastModifierName",

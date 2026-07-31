@@ -315,7 +315,42 @@ macro_rules! store_impl_messages {
         })
     }
 
+    fn move_jmap_email_from_mailbox_with_mapi_identity<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        imported_identity: MapiMessageImportedMoveIdentity,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, MapiMessageMoveResult> {
+        Box::pin(async move {
+            self.move_jmap_email_from_mailbox_with_mapi_identity(
+                account_id,
+                source_mailbox_id,
+                message_id,
+                target_mailbox_id,
+                imported_identity,
+                audit,
+            )
+            .await
+        })
+    }
+
     fn copy_jmap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move {
+            self.copy_jmap_email(account_id, message_id, target_mailbox_id, audit)
+                .await
+        })
+    }
+
+    fn mirror_jmap_email_into_mailbox<'a>(
         &'a self,
         account_id: Uuid,
         message_id: Uuid,

@@ -32,8 +32,8 @@ use lpe_storage::{
     MapiEventAttachmentChanges, MapiEventAttachmentUpsert, MapiEventCommitInput,
     MapiEventCommitOutcome, MapiEventCreateInput, MapiEventCustomPropertyValue,
     MapiEventImportedIdentity, MapiEventImportedMoveIdentity, MapiEventReminderPatch,
-    PublicFolderPermissionInput, SearchFolderDefinition, SubmittedRecipientInput,
-    UpdatePublicFolderInput, UpsertPublicFolderItemInput,
+    MapiMessageImportedMoveIdentity, PublicFolderPermissionInput, SearchFolderDefinition,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertPublicFolderItemInput,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};

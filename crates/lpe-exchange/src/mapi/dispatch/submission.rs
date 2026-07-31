@@ -1,5 +1,71 @@
 use super::*;
 use lpe_storage::CancelSubmissionResult;
+use std::collections::HashMap;
+use uuid::Uuid;
+
+use crate::mapi::{
+    identity::{
+        global_counter_from_store_id, object_ids_from_message_entry_id, source_key_for_object_id,
+        FIRST_DYNAMIC_GLOBAL_COUNTER, OUTBOX_FOLDER_ID, SENT_FOLDER_ID,
+    },
+    properties::{MapiValue, PID_TAG_TARGET_ENTRY_ID},
+};
+
+#[derive(Clone, Debug)]
+struct OptimizedSendTarget {
+    message_id: u64,
+    source_key: Vec<u8>,
+}
+
+fn optimized_send_target(
+    properties: &HashMap<u32, MapiValue>,
+    account_id: Uuid,
+) -> Option<OptimizedSendTarget> {
+    let MapiValue::Binary(entry_id) = properties.get(&PID_TAG_TARGET_ENTRY_ID)? else {
+        return None;
+    };
+    let (folder_id, message_id) = object_ids_from_message_entry_id(account_id, entry_id)?;
+    let global_counter = global_counter_from_store_id(message_id)?;
+    if folder_id != OUTBOX_FOLDER_ID || global_counter < FIRST_DYNAMIC_GLOBAL_COUNTER {
+        return None;
+    }
+    Some(OptimizedSendTarget {
+        message_id,
+        source_key: source_key_for_object_id(message_id),
+    })
+}
+
+async fn optimized_send_replay_email<S>(
+    store: &S,
+    account_id: Uuid,
+    outbox_mailbox_id: Uuid,
+    target: &OptimizedSendTarget,
+) -> Result<Option<JmapEmail>>
+where
+    S: ExchangeStore,
+{
+    let identities = store
+        .fetch_mapi_identities_by_object_ids(account_id, &[target.message_id])
+        .await?;
+    let Some(identity) = identities.into_iter().find(|identity| {
+        identity.object_kind == MapiIdentityObjectKind::Message
+            && identity.object_id == target.message_id
+            && identity.source_key == target.source_key
+    }) else {
+        return Ok(None);
+    };
+    let emails = store
+        .fetch_jmap_emails(account_id, &[identity.canonical_id])
+        .await?;
+    Ok(emails.into_iter().find(|email| {
+        email.id == identity.canonical_id
+            && email.mailbox_ids.contains(&outbox_mailbox_id)
+            && email
+                .mailbox_states
+                .iter()
+                .any(|state| state.role == "sent")
+    }))
+}
 
 pub(super) async fn mapi_submit_from_existing_email<S>(
     store: &S,
@@ -342,6 +408,61 @@ pub(super) async fn append_submit_message_response<S>(
         ));
         return;
     };
+    let optimized_send_target = match &object {
+        MapiObject::PendingMessage { properties, .. } => {
+            optimized_send_target(properties, principal.account_id)
+        }
+        MapiObject::Message {
+            pending_properties, ..
+        } => optimized_send_target(pending_properties, principal.account_id),
+        _ => None,
+    };
+    if let (Some(target), Some(outbox_mailbox_id)) = (
+        optimized_send_target.as_ref(),
+        folder_row_for_id(OUTBOX_FOLDER_ID, mailboxes).map(|mailbox| mailbox.id),
+    ) {
+        match optimized_send_replay_email(store, principal.account_id, outbox_mailbox_id, target)
+            .await
+        {
+            Ok(Some(email)) => {
+                let folder_id = mailboxes
+                    .iter()
+                    .find(|mailbox| mailbox.id == email.mailbox_id)
+                    .map(mapi_folder_id)
+                    .unwrap_or(SENT_FOLDER_ID);
+                session.record_post_hierarchy_submit_attempt_context(format!(
+                    "request_id={mapi_request_id};rop={submit_rop_name};result=optimized_send_replay_success;input_handle={handle};message_id=0x{:016x};canonical_message_id={};send_attempt=true",
+                    target.message_id,
+                    email.id
+                ));
+                session.handles.insert(
+                    handle,
+                    MapiObject::Message {
+                        folder_id,
+                        message_id: target.message_id,
+                        saved_email: None,
+                        pending_properties: HashMap::new(),
+                    },
+                );
+                created_emails.push(email);
+                responses.extend_from_slice(&submit_success_response(request));
+                return;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                session.record_post_hierarchy_submit_attempt_context(format!(
+                    "request_id={mapi_request_id};rop={submit_rop_name};result=error;failure_reason=optimized_send_replay_lookup_failed;input_handle={handle};message_id=0x{:016x};lookup_error={error};send_attempt=true",
+                    target.message_id
+                ));
+                responses.extend_from_slice(&rop_error_response(
+                    request.rop_id,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                ));
+                return;
+            }
+        }
+    }
     let input = match object {
         MapiObject::PendingMessage {
             properties,
@@ -500,24 +621,118 @@ pub(super) async fn append_submit_message_response<S>(
                 "{submit_attempt_context};result=canonical_submit_success;submitted_message_id={}",
                 submitted.message_id
             ));
-            let message_id = match remember_created_mapi_identity(
-                store,
-                principal,
-                MapiIdentityObjectKind::Message,
-                submitted.message_id,
-                None,
-                None,
-            )
-            .await
-            {
-                Ok(message_id) => message_id,
-                Err(_) => {
+            let message_id = if let Some(target) = optimized_send_target {
+                let Some(outbox_mailbox_id) =
+                    folder_row_for_id(OUTBOX_FOLDER_ID, mailboxes).map(|mailbox| mailbox.id)
+                else {
+                    session.record_post_hierarchy_submit_attempt_context(format!(
+                        "{submit_attempt_context};result=error;failure_reason=optimized_send_outbox_missing;submitted_message_id={}",
+                        submitted.message_id
+                    ));
                     responses.extend_from_slice(&rop_error_response(
                         request.rop_id,
                         request.response_handle_index(),
                         0x8004_010F,
                     ));
                     return;
+                };
+                let Some(global_counter) = global_counter_from_store_id(target.message_id) else {
+                    session.record_post_hierarchy_submit_attempt_context(format!(
+                        "{submit_attempt_context};result=error;failure_reason=optimized_send_target_global_counter_invalid;submitted_message_id={}",
+                        submitted.message_id
+                    ));
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    return;
+                };
+                let message_id = match remember_created_mapi_identity(
+                    store,
+                    principal,
+                    MapiIdentityObjectKind::Message,
+                    submitted.message_id,
+                    Some(global_counter),
+                    Some(target.source_key),
+                )
+                .await
+                {
+                    Ok(message_id) if message_id == target.message_id => message_id,
+                    Ok(message_id) => {
+                        session.record_post_hierarchy_submit_attempt_context(format!(
+                            "{submit_attempt_context};result=error;failure_reason=optimized_send_target_identity_mismatch;submitted_message_id={};expected_message_id=0x{:016x};actual_message_id=0x{message_id:016x}",
+                            submitted.message_id,
+                            target.message_id
+                        ));
+                        responses.extend_from_slice(&rop_error_response(
+                            request.rop_id,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                        return;
+                    }
+                    Err(error) => {
+                        session.record_post_hierarchy_submit_attempt_context(format!(
+                            "{submit_attempt_context};result=error;failure_reason=optimized_send_target_identity_reservation_failed;submitted_message_id={};identity_error={error}",
+                            submitted.message_id
+                        ));
+                        responses.extend_from_slice(&rop_error_response(
+                            request.rop_id,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                        return;
+                    }
+                };
+                if let Err(error) = store
+                    .mirror_jmap_email_into_mailbox(
+                        principal.account_id,
+                        submitted.message_id,
+                        outbox_mailbox_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "mapi-optimized-send-outbox-mirror".to_string(),
+                            subject: format!(
+                                "message:{};outbox_message_id:{message_id:#018x}",
+                                submitted.message_id
+                            ),
+                        },
+                    )
+                    .await
+                {
+                    session.record_post_hierarchy_submit_attempt_context(format!(
+                        "{submit_attempt_context};result=error;failure_reason=optimized_send_outbox_mirror_failed;submitted_message_id={};mirror_error={error}",
+                        submitted.message_id
+                    ));
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    return;
+                }
+                message_id
+            } else {
+                match remember_created_mapi_identity(
+                    store,
+                    principal,
+                    MapiIdentityObjectKind::Message,
+                    submitted.message_id,
+                    None,
+                    None,
+                )
+                .await
+                {
+                    Ok(message_id) => message_id,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            request.rop_id,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                        return;
+                    }
                 }
             };
             session.handles.insert(

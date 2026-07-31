@@ -3,6 +3,13 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
+    mapi_events::merge_predecessor_change_list,
+    mapi_store_identity::{
+        allocate_mapi_store_global_counter_in_tx, ensure_mapi_mailbox_replica_in_tx,
+        ensure_mapi_store_identity_in_tx, mapi_store_id, MapiMessageIdentityMove,
+        MapiMessageImportedMoveIdentity, MapiMessageMoveResult, MAPI_FIRST_GLOBAL_COUNTER,
+        MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER, MAPI_MAX_GLOBAL_COUNTER,
+    },
     sha256_hex, submission, ActiveSyncSyncState, ActiveSyncSyncStateRow, AuditEntryInput,
     CanonicalChangeCategory, JmapEmail, JmapImportedEmailInput, Storage,
 };
@@ -115,7 +122,7 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow::anyhow!("message not found"))?;
-        if sqlx::query_scalar::<_, bool>(
+        let target_contains_message = sqlx::query_scalar::<_, bool>(
             r#"
             SELECT EXISTS (
                 SELECT 1
@@ -133,8 +140,8 @@ impl Storage {
         .bind(target_mailbox_id)
         .bind(message_id)
         .fetch_one(&mut *tx)
-        .await?
-        {
+        .await?;
+        if target_contains_message {
             bail!("message already exists in target mailbox");
         }
 
@@ -191,8 +198,16 @@ impl Storage {
         target_mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
-        self.move_jmap_email_membership(account_id, None, message_id, target_mailbox_id, audit)
-            .await
+        self.move_jmap_email_membership(
+            account_id,
+            None,
+            message_id,
+            target_mailbox_id,
+            None,
+            audit,
+        )
+        .await
+        .map(|(email, _)| email)
     }
 
     pub async fn move_jmap_email_from_mailbox(
@@ -208,9 +223,35 @@ impl Storage {
             Some(source_mailbox_id),
             message_id,
             target_mailbox_id,
+            None,
             audit,
         )
         .await
+        .map(|(email, _)| email)
+    }
+
+    pub async fn move_jmap_email_from_mailbox_with_mapi_identity(
+        &self,
+        account_id: Uuid,
+        source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        imported_identity: MapiMessageImportedMoveIdentity,
+        audit: AuditEntryInput,
+    ) -> Result<MapiMessageMoveResult> {
+        let (email, identity) = self
+            .move_jmap_email_membership(
+                account_id,
+                Some(source_mailbox_id),
+                message_id,
+                target_mailbox_id,
+                Some(&imported_identity),
+                audit,
+            )
+            .await?;
+        let identity =
+            identity.ok_or_else(|| anyhow::anyhow!("MAPI message move did not rekey identity"))?;
+        Ok(MapiMessageMoveResult { email, identity })
     }
 
     async fn move_jmap_email_membership(
@@ -219,8 +260,9 @@ impl Storage {
         source_mailbox_id: Option<Uuid>,
         message_id: Uuid,
         target_mailbox_id: Uuid,
+        imported_identity: Option<&MapiMessageImportedMoveIdentity>,
         audit: AuditEntryInput,
-    ) -> Result<JmapEmail> {
+    ) -> Result<(JmapEmail, Option<MapiMessageIdentityMove>)> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
         let modseq = self
@@ -250,12 +292,13 @@ impl Storage {
         let source_mailbox_id: Uuid = source.try_get("mailbox_id")?;
         if source_mailbox_id == target_mailbox_id {
             tx.rollback().await?;
-            return self
+            let email = self
                 .fetch_jmap_emails(account_id, &[message_id])
                 .await?
                 .into_iter()
                 .next()
-                .ok_or_else(|| anyhow::anyhow!("moved message not found"));
+                .ok_or_else(|| anyhow::anyhow!("moved message not found"))?;
+            return Ok((email, None));
         }
         let target_role = sqlx::query_scalar::<_, String>(
             r#"
@@ -271,7 +314,7 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow::anyhow!("target mailbox not found"))?;
-        if sqlx::query_scalar::<_, bool>(
+        let target_contains_message = sqlx::query_scalar::<_, bool>(
             r#"
             SELECT EXISTS (
                 SELECT 1
@@ -289,9 +332,131 @@ impl Storage {
         .bind(target_mailbox_id)
         .bind(message_id)
         .fetch_one(&mut *tx)
-        .await?
-        {
+        .await?;
+        if target_contains_message && imported_identity.is_none() {
             bail!("message already exists in target mailbox");
+        }
+        if target_contains_message {
+            let imported_identity = imported_identity
+                .ok_or_else(|| anyhow::anyhow!("MAPI move identity is required"))?;
+            let source_membership_id: Uuid = source.try_get("id")?;
+            let source_imap_uid: i64 = source.try_get("imap_uid")?;
+            let thread_id: Uuid = source.try_get("thread_id")?;
+            let identity = rekey_mapi_message_identity_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                message_id,
+                imported_identity,
+            )
+            .await?;
+            sqlx::query(
+                r#"
+                UPDATE mailbox_messages
+                SET visibility = 'expunged',
+                    expunged_at = NOW(),
+                    modseq = $4,
+                    updated_at = NOW()
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(source_membership_id)
+            .bind(modseq)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                r#"
+                UPDATE mailboxes
+                SET total_messages = GREATEST(0, total_messages - 1),
+                    unread_messages = GREATEST(0, unread_messages - CASE WHEN $4 THEN 0 ELSE 1 END),
+                    modseq = GREATEST(modseq + 1, $5),
+                    updated_at = NOW()
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(source_mailbox_id)
+            .bind(source.try_get::<bool, _>("is_seen")?)
+            .bind(modseq)
+            .execute(&mut *tx)
+            .await?;
+            Self::recalculate_mailbox_counts_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                source_mailbox_id,
+                modseq,
+            )
+            .await?;
+            sqlx::query(
+                r#"
+                DELETE FROM mail_search_documents
+                WHERE tenant_id = $1 AND account_id = $2 AND mailbox_message_id = $3
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(source_membership_id)
+            .execute(&mut *tx)
+            .await?;
+
+            self.insert_audit(&mut tx, &tenant_id, audit).await?;
+            let principals =
+                Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+            let source_cursor = Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(account_id),
+                Some(source_mailbox_id),
+                "mailbox_message",
+                source_membership_id,
+                "updated",
+                modseq,
+                &principals,
+                serde_json::json!({
+                    "messageId": message_id,
+                    "threadId": thread_id,
+                    "imapUid": source_imap_uid,
+                    "targetMailboxId": target_mailbox_id,
+                    "sourceMailboxMessageId": source_membership_id,
+                    "sourceImapUid": source_imap_uid,
+                }),
+            )
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO tombstones (
+                    id, tenant_id, account_id, mailbox_id, object_kind, object_id,
+                    message_id, mailbox_message_id, imap_uid, deleted_modseq,
+                    change_cursor, reason
+                )
+                VALUES ($1, $2, $3, $4, 'mailbox_message', $5, $6, $5, $7, $8, $9, 'move')
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(source_mailbox_id)
+            .bind(source_membership_id)
+            .bind(message_id)
+            .bind(source_imap_uid)
+            .bind(modseq)
+            .bind(source_cursor)
+            .execute(&mut *tx)
+            .await?;
+            Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+            tx.commit().await?;
+
+            let email = self
+                .fetch_jmap_emails(account_id, &[message_id])
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("moved message not found"))?;
+            return Ok((email, Some(identity)));
         }
         let target_uid: i64 = sqlx::query_scalar(
             r#"
@@ -493,14 +658,29 @@ impl Storage {
         .bind(source_cursor)
         .execute(&mut *tx)
         .await?;
+        let identity = match imported_identity {
+            Some(imported_identity) => Some(
+                rekey_mapi_message_identity_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    account_id,
+                    message_id,
+                    imported_identity,
+                )
+                .await?,
+            ),
+            None => None,
+        };
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
 
-        self.fetch_jmap_emails(account_id, &[message_id])
+        let email = self
+            .fetch_jmap_emails(account_id, &[message_id])
             .await?
             .into_iter()
             .next()
-            .ok_or_else(|| anyhow::anyhow!("moved message not found"))
+            .ok_or_else(|| anyhow::anyhow!("moved message not found"))?;
+        Ok((email, identity))
     }
 
     pub async fn update_jmap_email_flags(
@@ -1081,6 +1261,165 @@ impl Storage {
             snapshot_json: row.snapshot_json,
         }))
     }
+}
+
+async fn rekey_mapi_message_identity_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: &Uuid,
+    account_id: Uuid,
+    message_id: Uuid,
+    imported_identity: &MapiMessageImportedMoveIdentity,
+) -> Result<MapiMessageIdentityMove> {
+    let destination_global_counter =
+        imported_message_move_destination_global_counter(imported_identity)?;
+    let store_identity = ensure_mapi_store_identity_in_tx(tx).await?;
+    ensure_mapi_mailbox_replica_in_tx(tx, *tenant_id, account_id, store_identity).await?;
+    if imported_identity.destination_source_key.get(..16)
+        != Some(store_identity.replica_guid.as_bytes().as_slice())
+    {
+        bail!("imported message move destination must use the local mailbox replica GUID");
+    }
+    let destination_reserved = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM mapi_local_replica_id_ranges
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND replica_guid = $3
+              AND first_global_counter <= $4
+              AND end_global_counter_exclusive > $4
+        )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(store_identity.replica_guid)
+    .bind(destination_global_counter as i64)
+    .fetch_one(&mut **tx)
+    .await?;
+    if !destination_reserved {
+        bail!("imported message move destination SourceKey was not locally reserved");
+    }
+    let normalized_predecessors = merge_predecessor_change_list(
+        &imported_identity.predecessor_change_list,
+        &imported_identity.change_key,
+    )?;
+    if normalized_predecessors != imported_identity.predecessor_change_list {
+        bail!("imported message move PCL must canonically contain its ChangeKey");
+    }
+
+    let identity = sqlx::query(
+        r#"
+        SELECT
+            mapi_object_id,
+            source_key,
+            mapi_change_number,
+            change_key
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'message'
+          AND canonical_id = $3
+          AND deleted_at IS NULL
+        FOR UPDATE
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(message_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("active MAPI message identity was not found"))?;
+    let old_mapi_object_id = u64::try_from(identity.try_get::<i64, _>("mapi_object_id")?)
+        .map_err(|_| anyhow::anyhow!("stored MAPI message object id is invalid"))?;
+    let old_source_key = identity.try_get::<Vec<u8>, _>("source_key")?;
+    let old_change_number = u64::try_from(identity.try_get::<i64, _>("mapi_change_number")?)
+        .map_err(|_| anyhow::anyhow!("stored MAPI message change number is invalid"))?;
+    let old_change_key = identity.try_get::<Vec<u8>, _>("change_key")?;
+    if old_source_key != imported_identity.expected_source_key {
+        bail!("active MAPI message SourceKey changed before the imported move");
+    }
+    let new_mapi_object_id = mapi_store_id(destination_global_counter);
+    if old_mapi_object_id == new_mapi_object_id {
+        bail!("imported message move destination must differ from the source object");
+    }
+    let (_, new_change_number) = allocate_mapi_store_global_counter_in_tx(tx).await?;
+    if new_change_number > MAPI_MAX_GLOBAL_COUNTER
+        || new_change_number >= MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER
+    {
+        bail!("MAPI dynamic global counter space exhausted");
+    }
+    let updated = sqlx::query(
+        r#"
+        UPDATE mapi_object_identities
+        SET mapi_global_counter = $5,
+            mapi_object_id = $6,
+            source_key = $7,
+            change_key = $8,
+            instance_key = $7,
+            mapi_change_number = $9,
+            predecessor_change_list = $10,
+            updated_at = NOW()
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'message'
+          AND canonical_id = $3
+          AND source_key = $4
+          AND mapi_object_id = $11
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(message_id)
+    .bind(&old_source_key)
+    .bind(destination_global_counter as i64)
+    .bind(new_mapi_object_id as i64)
+    .bind(&imported_identity.destination_source_key)
+    .bind(&imported_identity.change_key)
+    .bind(new_change_number as i64)
+    .bind(&imported_identity.predecessor_change_list)
+    .bind(old_mapi_object_id as i64)
+    .execute(&mut **tx)
+    .await?;
+    if updated.rows_affected() != 1 {
+        bail!("active MAPI message identity disappeared during imported move");
+    }
+
+    Ok(MapiMessageIdentityMove {
+        old_mapi_object_id,
+        new_mapi_object_id,
+        old_source_key,
+        new_source_key: imported_identity.destination_source_key.clone(),
+        old_change_number,
+        new_change_number,
+        old_change_key,
+        new_change_key: imported_identity.change_key.clone(),
+    })
+}
+
+fn imported_message_move_destination_global_counter(
+    identity: &MapiMessageImportedMoveIdentity,
+) -> Result<u64> {
+    if identity.expected_source_key.len() != 22 {
+        bail!("imported message move source GID must be exactly 22 bytes");
+    }
+    if identity.destination_source_key.len() != 22 {
+        bail!("imported message move destination GID must be exactly 22 bytes");
+    }
+    if !(17..=24).contains(&identity.change_key.len()) {
+        bail!("imported message move ChangeKey has an invalid length");
+    }
+    let mut counter_bytes = [0u8; 8];
+    counter_bytes[2..].copy_from_slice(&identity.destination_source_key[16..]);
+    let global_counter = u64::from_be_bytes(counter_bytes);
+    if !(MAPI_FIRST_GLOBAL_COUNTER..MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER)
+        .contains(&global_counter)
+    {
+        bail!("imported message move destination GLOBCNT is outside the dynamic local range");
+    }
+    Ok(global_counter)
 }
 
 fn normalize_mail_categories(categories: Vec<String>) -> Vec<String> {

@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
-use crate::Storage;
+use crate::{JmapEmail, Storage};
 
 // [MS-OXCSTOR] section 2.2.1.8.2: a MAPI object ID combines a nonzero
 // REPLID with a 48-bit GLOBCNT. LPE uses REPLID 1 for its local store.
@@ -15,6 +15,32 @@ pub const MAPI_MAX_GLOBAL_COUNTER: u64 = 0x7FFF_FFFF_FFFF;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MapiStoreIdentity {
     pub replica_guid: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapiMessageImportedMoveIdentity {
+    pub expected_source_key: Vec<u8>,
+    pub destination_source_key: Vec<u8>,
+    pub change_key: Vec<u8>,
+    pub predecessor_change_list: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapiMessageIdentityMove {
+    pub old_mapi_object_id: u64,
+    pub new_mapi_object_id: u64,
+    pub old_source_key: Vec<u8>,
+    pub new_source_key: Vec<u8>,
+    pub old_change_number: u64,
+    pub new_change_number: u64,
+    pub old_change_key: Vec<u8>,
+    pub new_change_key: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MapiMessageMoveResult {
+    pub email: JmapEmail,
+    pub identity: MapiMessageIdentityMove,
 }
 
 impl Storage {

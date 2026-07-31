@@ -320,6 +320,32 @@ impl MapiIdentityCodec {
         Some(entry_id)
     }
 
+    pub(crate) fn object_ids_from_message_entry_id(
+        &self,
+        mailbox_guid: Uuid,
+        entry_id: &[u8],
+    ) -> Option<(u64, u64)> {
+        if entry_id.len() != 70
+            || entry_id[0..4] != [0, 0, 0, 0]
+            || entry_id[4..20] != mailbox_guid.to_bytes_le()
+            || entry_id[20..22] != 0x0007u16.to_le_bytes()
+            || entry_id[22..38] != self.replica_guid
+            || entry_id[44..46] != [0, 0]
+            || entry_id[46..62] != self.replica_guid
+            || entry_id[68..70] != [0, 0]
+        {
+            return None;
+        }
+        let folder_id = global_counter_from_globcnt(&entry_id[38..44])
+            .filter(|counter| *counter <= MAX_PERSISTED_GLOBAL_COUNTER)
+            .map(mapi_store_id)
+            .and_then(|object_id| self.logical_object_id(object_id))?;
+        let message_id = global_counter_from_globcnt(&entry_id[62..68])
+            .filter(|counter| *counter <= MAX_PERSISTED_GLOBAL_COUNTER)
+            .map(mapi_store_id)?;
+        Some((folder_id, message_id))
+    }
+
     pub(crate) fn change_key_for_change_number(&self, change_number: u64) -> Vec<u8> {
         let mut key = self.replica_guid.to_vec();
         key.extend_from_slice(&globcnt_bytes(change_number.max(1)));
@@ -755,6 +781,27 @@ fn raw_message_entry_id_from_object_ids(
     Some(entry_id)
 }
 
+fn raw_object_ids_from_message_entry_id(mailbox_guid: Uuid, entry_id: &[u8]) -> Option<(u64, u64)> {
+    if entry_id.len() != 70
+        || entry_id[0..4] != [0, 0, 0, 0]
+        || entry_id[4..20] != mailbox_guid.to_bytes_le()
+        || entry_id[20..22] != 0x0007u16.to_le_bytes()
+        || entry_id[22..38] != STORE_REPLICA_GUID
+        || entry_id[44..46] != [0, 0]
+        || entry_id[46..62] != STORE_REPLICA_GUID
+        || entry_id[68..70] != [0, 0]
+    {
+        return None;
+    }
+    let folder_id = global_counter_from_globcnt(&entry_id[38..44])
+        .filter(|counter| *counter <= MAX_PERSISTED_GLOBAL_COUNTER)
+        .map(mapi_store_id)?;
+    let message_id = global_counter_from_globcnt(&entry_id[62..68])
+        .filter(|counter| *counter <= MAX_PERSISTED_GLOBAL_COUNTER)
+        .map(mapi_store_id)?;
+    Some((folder_id, message_id))
+}
+
 fn raw_source_key_for_object_id(object_id: u64) -> Vec<u8> {
     let mut key = STORE_REPLICA_GUID.to_vec();
     let global_counter = global_counter_from_store_id(object_id)
@@ -846,6 +893,16 @@ pub(crate) fn message_entry_id_from_object_ids(
         codec.message_entry_id_from_object_ids(mailbox_guid, folder_id, message_id)
     })
     .unwrap_or_else(|| raw_message_entry_id_from_object_ids(mailbox_guid, folder_id, message_id))
+}
+
+pub(crate) fn object_ids_from_message_entry_id(
+    mailbox_guid: Uuid,
+    entry_id: &[u8],
+) -> Option<(u64, u64)> {
+    current_mapi_identity_codec(|codec| {
+        codec.object_ids_from_message_entry_id(mailbox_guid, entry_id)
+    })
+    .unwrap_or_else(|| raw_object_ids_from_message_entry_id(mailbox_guid, entry_id))
 }
 
 pub(crate) fn source_key_for_object_id(object_id: u64) -> Vec<u8> {
