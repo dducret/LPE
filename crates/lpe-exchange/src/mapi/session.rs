@@ -18,7 +18,10 @@ const MAX_POST_HIERARCHY_ROP_IDS: usize = 64;
 const MAX_POST_HIERARCHY_REQUEST_CONTRACTS: usize = 8;
 const MAX_OUTLOOK_VIEW_FAILURE_TRACE_EVENTS: usize = 32;
 const MAX_OUTLOOK_STREAM_BATCH_EVENTS: usize = 8;
-const RELEASED_HANDLE_RESPONSE_SENTINEL: u32 = 0;
+// [MS-OXCROPS] section 3.2.5.2 preserves the response handle-table slot for
+// a released object. Exchange 2016 writes this invalid-handle sentinel for
+// that slot, including a release-only Execute response.
+const RELEASED_HANDLE_RESPONSE_SENTINEL: u32 = 0x01FF_FFFE;
 
 fn session_debug_context_or_none(context: &str) -> &str {
     if context.is_empty() {

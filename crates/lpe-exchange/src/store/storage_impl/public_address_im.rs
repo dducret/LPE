@@ -269,6 +269,9 @@ macro_rules! store_impl_public_address_im {
                         AS navigation_shortcut_mapi_object_id,
                     associated_config_identity.mapi_object_id
                         AS associated_config_mapi_object_id,
+                    notification_message.is_seen AS message_is_seen,
+                    notification_message.is_draft AS message_is_draft,
+                    message.has_attachments AS message_has_attachments,
                     COALESCE(
                         calendar_event_identity.mapi_object_id,
                         CASE
@@ -304,6 +307,11 @@ macro_rules! store_impl_public_address_im {
                 LEFT JOIN messages message
                   ON message.tenant_id = log.tenant_id
                  AND message.id = (log.summary_json->>'messageId')::uuid
+                LEFT JOIN mailbox_messages notification_message
+                  ON notification_message.tenant_id = log.tenant_id
+                 AND notification_message.account_id = log.account_id
+                 AND notification_message.id = log.object_id
+                 AND log.object_kind = 'mailbox_message'
                 LEFT JOIN tombstones calendar_tombstone
                   ON calendar_tombstone.tenant_id = log.tenant_id
                  AND calendar_tombstone.change_cursor = log.cursor

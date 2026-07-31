@@ -1015,21 +1015,32 @@ fn fast_transfer_email_matches_folder(
 }
 
 pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {
+    canonical_message_flags_for_state(
+        email.unread,
+        email
+            .mailbox_states
+            .iter()
+            .find(|state| state.mailbox_id == email.mailbox_id)
+            .is_some_and(|state| state.draft),
+        email.has_attachments,
+    )
+}
+
+pub(crate) fn canonical_message_flags_for_state(
+    unread: bool,
+    draft: bool,
+    has_attachments: bool,
+) -> u32 {
     let mut flags = MSGFLAG_UNMODIFIED;
-    if !email.unread {
+    if !unread {
         flags |= MSGFLAG_READ;
     }
-    if email
-        .mailbox_states
-        .iter()
-        .find(|state| state.mailbox_id == email.mailbox_id)
-        .is_some_and(|state| state.draft)
-    {
+    if draft {
         // [MS-OXCMSG] 2.2.1.6: mfUnsent identifies a message that is still
         // being composed and is treated as a Draft Message object.
         flags |= MSGFLAG_UNSENT;
     }
-    if email.has_attachments {
+    if has_attachments {
         flags |= MSGFLAG_HASATTACH;
     }
     flags

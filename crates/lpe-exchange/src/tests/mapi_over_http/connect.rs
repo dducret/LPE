@@ -38,7 +38,7 @@ async fn mapi_over_http_execute_accepts_release_rop() {
     assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 6);
     assert_eq!(&body[16..18], &[0, 0]);
-    assert_eq!(&body[18..22], &u32::MAX.to_le_bytes());
+    assert_eq!(&body[18..22], &0x01FF_FFFEu32.to_le_bytes());
 }
 
 #[tokio::test]

@@ -1,6 +1,8 @@
 use super::super::*;
 use super::*;
 
+const EXCHANGE_RELEASED_HANDLE_SENTINEL: u32 = 0x01FF_FFFE;
+
 #[test]
 fn execute_max_rop_out_returns_buffer_too_small_response() {
     let request = [
@@ -173,10 +175,18 @@ fn release_only_execute_batch_is_store_independent() {
 }
 
 #[test]
-fn release_only_execute_response_echoes_input_handle_table() {
+fn release_only_execute_response_uses_exchange_released_handle_sentinel() {
     let response_handles = execute_response_handle_table(&[], &[u32::MAX], &[], &[], true, &[0]);
 
-    assert_eq!(response_handles, vec![u32::MAX]);
+    assert_eq!(response_handles, vec![EXCHANGE_RELEASED_HANDLE_SENTINEL]);
+}
+
+#[test]
+fn release_with_appended_notification_uses_exchange_released_handle_sentinel() {
+    let response_handles =
+        execute_response_handle_table(&[0x2A], &[u32::MAX], &[], &[], true, &[0]);
+
+    assert_eq!(response_handles, vec![EXCHANGE_RELEASED_HANDLE_SENTINEL]);
 }
 
 #[test]
@@ -190,7 +200,10 @@ fn mixed_release_execute_response_preserves_sparse_output_handle_index() {
         &[0],
     );
 
-    assert_eq!(response_handles, vec![0, 77]);
+    assert_eq!(
+        response_handles,
+        vec![EXCHANGE_RELEASED_HANDLE_SENTINEL, 77]
+    );
 }
 
 #[test]
@@ -206,7 +219,10 @@ fn mixed_create_save_batch_preserves_save_response_folder_handle_slot() {
         &[0],
     );
 
-    assert_eq!(response_handles, vec![0, 6, 28, 29]);
+    assert_eq!(
+        response_handles,
+        vec![EXCHANGE_RELEASED_HANDLE_SENTINEL, 6, 28, 29]
+    );
 }
 
 #[test]
@@ -220,7 +236,7 @@ fn mixed_setcolumns_release_response_omits_release_only_handle_slots() {
         &[0],
     );
 
-    assert_eq!(response_handles, vec![0]);
+    assert_eq!(response_handles, vec![EXCHANGE_RELEASED_HANDLE_SENTINEL]);
 }
 
 #[test]
@@ -248,7 +264,7 @@ fn mixed_setcolumns_trailing_release_returns_invalid_released_handle() {
         &[0],
     );
 
-    assert_eq!(response_handles, vec![0]);
+    assert_eq!(response_handles, vec![EXCHANGE_RELEASED_HANDLE_SENTINEL]);
 }
 
 #[test]
@@ -262,7 +278,7 @@ fn outlook_setcolumns_then_release_same_slot_returns_post_release_handle_table()
         &[0],
     );
 
-    assert_eq!(response_handles, vec![0]);
+    assert_eq!(response_handles, vec![EXCHANGE_RELEASED_HANDLE_SENTINEL]);
 }
 
 #[test]
@@ -290,7 +306,10 @@ fn mixed_release_response_keeps_unreleased_sparse_output_holes() {
         &[0],
     );
 
-    assert_eq!(response_handles, vec![0, 77, u32::MAX]);
+    assert_eq!(
+        response_handles,
+        vec![EXCHANGE_RELEASED_HANDLE_SENTINEL, 77, u32::MAX]
+    );
 }
 
 #[test]

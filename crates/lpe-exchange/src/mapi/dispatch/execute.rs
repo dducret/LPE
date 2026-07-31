@@ -218,7 +218,7 @@ pub(super) fn execute_response_handle_table(
         handle_slots,
         output_handles,
         echo_input_handle_table,
-        if echo_input_handle_table && !responses.is_empty() {
+        if echo_input_handle_table {
             released_handle_indexes
         } else {
             &[]

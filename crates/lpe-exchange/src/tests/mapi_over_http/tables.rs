@@ -32,7 +32,7 @@ async fn mapi_over_http_extended_execute_release_keeps_handle_table() {
     assert_eq!(rop_buffer_size, 14);
     assert_eq!(&body[16..24], &[0, 0, 4, 0, 6, 0, 6, 0]);
     assert_eq!(&body[24..26], &[2, 0]);
-    assert_eq!(&body[26..30], &u32::MAX.to_le_bytes());
+    assert_eq!(&body[26..30], &0x01FF_FFFEu32.to_le_bytes());
 }
 
 #[tokio::test]

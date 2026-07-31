@@ -36,6 +36,7 @@ pub(crate) struct MapiNotificationEvent {
     pub(in crate::mapi) display_name: Option<String>,
     pub(in crate::mapi) parent_display_name: Option<String>,
     pub(in crate::mapi) message_subject: Option<String>,
+    pub(in crate::mapi) new_mail_message_flags: Option<u32>,
 }
 
 impl MapiNotificationEvent {
@@ -59,6 +60,7 @@ impl MapiNotificationEvent {
             display_name: None,
             parent_display_name: None,
             message_subject: None,
+            new_mail_message_flags: None,
         }
     }
 
@@ -82,6 +84,7 @@ impl MapiNotificationEvent {
             display_name: None,
             parent_display_name: None,
             message_subject: None,
+            new_mail_message_flags: None,
         }
     }
 
@@ -122,6 +125,7 @@ impl MapiNotificationEvent {
             display_name,
             parent_display_name,
             message_subject,
+            new_mail_message_flags: None,
         }
     }
 
@@ -137,6 +141,11 @@ impl MapiNotificationEvent {
 
     pub(crate) fn with_parent_folder_id(mut self, parent_folder_id: Option<u64>) -> Self {
         self.parent_folder_id = parent_folder_id;
+        self
+    }
+
+    pub(crate) fn with_new_mail_message_flags(mut self, message_flags: u32) -> Self {
+        self.new_mail_message_flags = Some(message_flags);
         self
     }
 
@@ -164,6 +173,11 @@ impl MapiNotificationEvent {
 
     pub(crate) fn change_kind(&self) -> Option<&str> {
         self.change_kind.as_deref()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_mail_message_flags(&self) -> Option<u32> {
+        self.new_mail_message_flags
     }
 
     #[cfg(test)]
@@ -231,7 +245,8 @@ mod tests {
             None,
             None,
             None,
-        );
+        )
+        .with_new_mail_message_flags(0x12);
 
         let response = rop_notify_response(3, 0, &event);
 
@@ -246,6 +261,7 @@ mod tests {
             &response[16..24],
             &wire_id_bytes_from_object_id(message_id).unwrap()
         );
+        assert_eq!(&response[24..28], &0x12u32.to_le_bytes());
         assert_ne!(&response[6..8], &0x0100u16.to_le_bytes());
     }
 }
@@ -346,7 +362,9 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
         0x0002 if message_event => {
             write_u16(response, 0x8002);
             append_event_object_ids(response, event, true);
-            write_u32(response, 0);
+            // [MS-OXCNOTIF] section 2.2.1.4.1.2 carries PidTagMessageFlags
+            // in every NewMail notification.
+            write_u32(response, event.new_mail_message_flags.unwrap_or_default());
             response.push(0);
             response.extend_from_slice(b"IPM.Note\0");
         }

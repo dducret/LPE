@@ -236,6 +236,22 @@ async fn mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_ide
             postgres_mapi_audit("import-inbound-reply", owner_account_id),
         )
         .await?;
+    // import_jmap_email is a generic import path and marks the membership as
+    // read. Inbound SMTP delivery creates an unread Inbox membership.
+    sqlx::query(
+        r#"
+        UPDATE mailbox_messages
+        SET is_seen = FALSE
+        WHERE account_id = $1
+          AND mailbox_id = $2
+          AND message_id = $3
+        "#,
+    )
+    .bind(owner_account_id)
+    .bind(inbox_id)
+    .bind(imported.id)
+    .execute(storage.pool())
+    .await?;
     let created_cursor = sqlx::query_scalar::<_, i64>(
         r#"
         SELECT cursor
@@ -343,6 +359,7 @@ async fn mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_ide
     );
     assert_eq!(poll.events[0].canonical_folder_id(), Some(inbox_id));
     assert_eq!(poll.events[0].canonical_message_id(), Some(imported.id));
+    assert_eq!(poll.events[0].new_mail_message_flags(), Some(0x0000_0002));
 
     fixture.cleanup().await?;
     Ok(())
