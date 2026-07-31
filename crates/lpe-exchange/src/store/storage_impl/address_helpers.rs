@@ -145,6 +145,7 @@ fn mapi_notification_event_from_change_row(
     row: sqlx::postgres::PgRow,
     calendar_folder_ids: &std::collections::HashMap<Uuid, u64>,
     calendar_event_ids: &std::collections::HashMap<Uuid, u64>,
+    mailbox_message_ids: &std::collections::HashMap<Uuid, u64>,
 ) -> Option<MapiNotificationEvent> {
     let object_kind = row.get::<String, _>("object_kind");
     let change_kind = row.get::<String, _>("change_kind");
@@ -429,13 +430,19 @@ fn mapi_notification_event_from_change_row(
                 row.try_get::<i64, _>("scope_parent_mapi_object_id").ok(),
             )
             .or(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID));
+            let canonical_message_id = row.try_get::<Uuid, _>("message_id").ok();
+            let message_id = mapi_notification_message_object_id(
+                row.try_get::<Option<i64>, _>("message_mapi_object_id")
+                    .ok()
+                    .flatten(),
+                canonical_message_id,
+                mailbox_message_ids,
+            );
             Some(MapiNotificationEvent::canonical(
                 MapiNotificationKind::Content,
                 event_mask,
                 folder_id,
-                row.try_get::<i64, _>("message_mapi_object_id")
-                    .ok()
-                    .map(|value| value as u64),
+                message_id,
                 row.try_get::<i64, _>("source_mapi_object_id")
                     .ok()
                     .map(|value| value as u64),
@@ -451,13 +458,23 @@ fn mapi_notification_event_from_change_row(
             .map(|event| {
                 event.with_canonical_ids(
                     row.try_get::<Uuid, _>("mailbox_id").ok(),
-                    row.try_get::<Uuid, _>("message_id").ok(),
+                    canonical_message_id,
                 )
             })
             .map(|event| event.with_parent_folder_id(parent_folder_id))
         }
         _ => None,
     }
+}
+
+fn mapi_notification_message_object_id(
+    durable_object_id: Option<i64>,
+    message_id: Option<Uuid>,
+    scoped_message_ids: &std::collections::HashMap<Uuid, u64>,
+) -> Option<u64> {
+    durable_object_id
+        .map(|value| value as u64)
+        .or_else(|| message_id.and_then(|message_id| scoped_message_ids.get(&message_id).copied()))
 }
 
 fn mapi_calendar_event_object_id(

@@ -854,6 +854,7 @@ mod tests {
     fn associated_config_cleanup_keeps_virtual_parent_folders() {
         let allowed = MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS;
 
+        assert!(allowed.contains(&(crate::mapi::identity::INBOX_FOLDER_ID as i64)));
         assert!(allowed.contains(&(crate::mapi::identity::CONTACTS_FOLDER_ID as i64)));
         assert!(allowed.contains(&(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID as i64)));
         assert!(allowed.contains(&(crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID as i64)));

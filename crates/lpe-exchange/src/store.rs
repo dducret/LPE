@@ -47,7 +47,8 @@ use crate::mapi::properties::{
     MapiNamedPropertyKind,
 };
 
-const MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS: [i64; 6] = [
+const MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS: [i64; 7] = [
+    crate::mapi::identity::INBOX_FOLDER_ID as i64,
     crate::mapi::identity::CONTACTS_FOLDER_ID as i64,
     crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID as i64,
     crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID as i64,

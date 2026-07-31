@@ -211,6 +211,43 @@ mod tests {
 
         assert_eq!(response, vec![0x29, 0x03, 0, 0, 0, 0]);
     }
+
+    #[test]
+    fn new_mail_notification_with_message_id_encodes_message_notification_data() {
+        // [MS-OXCNOTIF] section 4 shows NewMail with both FolderId and MessageId.
+        let folder_id = 0x0000_0000_0005_0001;
+        let message_id = 0x0000_0001_009a_0001;
+        let event = MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            MapiNotificationEventMask::NewMail.as_u16(),
+            folder_id,
+            Some(message_id),
+            None,
+            1,
+            1,
+            None,
+            None,
+            "created".to_string(),
+            None,
+            None,
+            None,
+        );
+
+        let response = rop_notify_response(3, 0, &event);
+
+        assert_eq!(response[0], 0x2A);
+        assert_eq!(&response[1..5], &3u32.to_le_bytes());
+        assert_eq!(&response[6..8], &0x8002u16.to_le_bytes());
+        assert_eq!(
+            &response[8..16],
+            &wire_id_bytes_from_object_id(folder_id).unwrap()
+        );
+        assert_eq!(
+            &response[16..24],
+            &wire_id_bytes_from_object_id(message_id).unwrap()
+        );
+        assert_ne!(&response[6..8], &0x0100u16.to_le_bytes());
+    }
 }
 
 /// [MS-OXCMAPIHTTP] section 2.2.4.4.2: NotificationWait only signals that an

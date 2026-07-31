@@ -179,6 +179,176 @@ async fn assert_outsider_has_no_notifications(
 }
 
 #[tokio::test]
+async fn mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXCNOTIF] sections 2.2.1.1 and 4 require NewMail to carry the
+    // recipient's receive-folder ID and durable Message ID.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let owner_account_id = fixture.account_id;
+    let account_id = Uuid::parse_str("10000000-0000-0000-0000-000000000012")?;
+    insert_notification_account(
+        &storage,
+        owner_account_id,
+        account_id,
+        "notification-recipient@example.test",
+        "Notification Recipient",
+    )
+    .await?;
+    let inbox_id = storage
+        .ensure_jmap_system_mailboxes(owner_account_id)
+        .await?
+        .into_iter()
+        .find(|mailbox| mailbox.role == "inbox")
+        .map(|mailbox| mailbox.id)
+        .expect("canonical Inbox mailbox");
+    let baseline_cursor = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    let imported = storage
+        .import_jmap_email(
+            JmapImportedEmailInput {
+                account_id: owner_account_id,
+                submitted_by_account_id: owner_account_id,
+                mailbox_id: inbox_id,
+                source: "inbound-smtp".to_string(),
+                raw_message: None,
+                from_display: Some("Reply Sender".to_string()),
+                from_address: "reply@example.test".to_string(),
+                sender_display: None,
+                sender_address: None,
+                to: Vec::new(),
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Reply visible through NewMail".to_string(),
+                body_text: "Inbound reply identity regression".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: Some(format!("<{}@example.test>", Uuid::new_v4())),
+                mime_blob_ref: String::new(),
+                size_octets: 64,
+                received_at: None,
+                thread_id: None,
+                attachments: Vec::new(),
+            },
+            postgres_mapi_audit("import-inbound-reply", owner_account_id),
+        )
+        .await?;
+    let created_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT cursor
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND mailbox_id = $2
+          AND object_kind = 'mailbox_message'
+          AND change_kind = 'created'
+          AND summary_json->>'messageId' = $3
+          AND cursor > $4
+        ORDER BY cursor DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(owner_account_id)
+    .bind(inbox_id)
+    .bind(imported.id.to_string())
+    .bind(baseline_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    // mail_change_log is append-only. Record the recipient's delivery scope
+    // as the access layer would, without rewriting the owner's original row.
+    let recipient_created_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        INSERT INTO mail_change_log (
+            tenant_id, account_id, mailbox_id, object_kind, object_id, change_kind,
+            modseq, affected_principal_ids, summary_json
+        )
+        SELECT
+            tenant_id, account_id, mailbox_id, object_kind, object_id, change_kind,
+            modseq, ARRAY[account_id, $1]::uuid[], summary_json
+        FROM mail_change_log
+        WHERE cursor = $2
+        RETURNING cursor
+        "#,
+    )
+    .bind(account_id)
+    .bind(created_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    let owner_message_id = storage
+        .fetch_or_allocate_mapi_identities(
+            owner_account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::Message,
+                canonical_id: imported.id,
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await?
+        .remove(0)
+        .object_id;
+    let identity_before_poll = sqlx::query_scalar::<_, Option<i64>>(
+        r#"
+        SELECT mapi_object_id
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'message'
+          AND canonical_id = $2
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(account_id)
+    .bind(imported.id)
+    .fetch_optional(storage.pool())
+    .await?
+    .flatten();
+    assert!(identity_before_poll.is_none());
+
+    let poll = storage
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+    let message_id = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT mapi_object_id
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'message'
+          AND canonical_id = $2
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(account_id)
+    .bind(imported.id)
+    .fetch_one(storage.pool())
+    .await? as u64;
+
+    assert_ne!(message_id, owner_message_id);
+
+    assert!(poll.event_pending);
+    assert_eq!(poll.cursor, Some(recipient_created_cursor));
+    assert_eq!(poll.events.len(), 1);
+    assert_eq!(
+        poll.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0002,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            Some(message_id),
+            None,
+            None,
+            Some("mailbox_message"),
+        )
+    );
+    assert_eq!(poll.events[0].canonical_folder_id(), Some(inbox_id));
+    assert_eq!(poll.events[0].canonical_message_id(), Some(imported.id));
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql(
 ) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {

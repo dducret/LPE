@@ -359,7 +359,7 @@ macro_rules! store_impl_public_address_im {
                  AND parent_identity.deleted_at IS NULL
                 LEFT JOIN mapi_object_identities message_identity
                   ON message_identity.tenant_id = log.tenant_id
-                 AND message_identity.account_id = log.account_id
+                 AND message_identity.account_id = $3
                  AND message_identity.object_kind = 'message'
                  AND message_identity.canonical_id = (log.summary_json->>'messageId')::uuid
                  AND message_identity.deleted_at IS NULL
@@ -415,6 +415,44 @@ macro_rules! store_impl_public_address_im {
             let mut notification_identity_requests = Vec::new();
             for row in &rows {
                 let object_kind = row.get::<String, _>("object_kind");
+                // [MS-OXCNOTIF] sections 2.2.1.1 and 4 require a NewMail
+                // message notification to carry both the receive-folder ID
+                // and the delivered Message ID.
+                let is_new_mail_without_identity = object_kind == "mailbox_message"
+                    && row.get::<String, _>("change_kind") == "created"
+                    && row
+                        .try_get::<Option<String>, _>("scope_role")
+                        .ok()
+                        .flatten()
+                        .as_deref()
+                        == Some("inbox")
+                    && row
+                        .try_get::<Option<i64>, _>("message_mapi_object_id")
+                        .ok()
+                        .flatten()
+                        .is_none();
+                if is_new_mail_without_identity {
+                    if let Some(canonical_id) = row
+                        .try_get::<Option<Uuid>, _>("message_id")
+                        .ok()
+                        .flatten()
+                        .filter(|canonical_id| {
+                            !notification_identity_requests.iter().any(
+                                |request: &MapiIdentityRequest| {
+                                    request.object_kind == MapiIdentityObjectKind::Message
+                                        && request.canonical_id == *canonical_id
+                                },
+                            )
+                        })
+                    {
+                        notification_identity_requests.push(MapiIdentityRequest {
+                            object_kind: MapiIdentityObjectKind::Message,
+                            canonical_id,
+                            reserved_global_counter: None,
+                            source_key: None,
+                        });
+                    }
+                }
                 if object_kind != "calendar_event" && object_kind != "deleted_calendar_event" {
                     continue;
                 }
@@ -467,6 +505,7 @@ macro_rules! store_impl_public_address_im {
             }
             let mut calendar_folder_ids = std::collections::HashMap::new();
             let mut calendar_event_ids = std::collections::HashMap::new();
+            let mut mailbox_message_ids = std::collections::HashMap::new();
             if !notification_identity_requests.is_empty() {
                 let identities = ExchangeStore::fetch_or_allocate_mapi_identities(
                     self,
@@ -481,6 +520,8 @@ macro_rules! store_impl_public_address_im {
                         calendar_folder_ids.insert(identity.canonical_id, identity.object_id);
                     } else if request.object_kind == MapiIdentityObjectKind::CalendarEvent {
                         calendar_event_ids.insert(identity.canonical_id, identity.object_id);
+                    } else if request.object_kind == MapiIdentityObjectKind::Message {
+                        mailbox_message_ids.insert(identity.canonical_id, identity.object_id);
                     }
                     crate::mapi::identity::remember_mapi_identity_with_source_key(
                         identity.canonical_id,
@@ -498,6 +539,7 @@ macro_rules! store_impl_public_address_im {
                     row,
                     &calendar_folder_ids,
                     &calendar_event_ids,
+                    &mailbox_message_ids,
                 ) {
                     events.push(event);
                 }

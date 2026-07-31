@@ -4905,10 +4905,9 @@ async fn mapi_over_http_online_associated_config_create_is_atomic_in_postgresql(
     .bind(rollback_id)
     .fetch_one(storage.pool())
     .await?;
-    fixture.cleanup().await?;
 
     assert!(save_succeeded, "{response_rops:02x?}");
-    let (_config_id, object_id, source_key, change_key, predecessor_change_list, properties_json) =
+    let (config_id, object_id, source_key, change_key, predecessor_change_list, properties_json) =
         saved.expect("online AssociatedConfig content and identity commit atomically");
     assert_ne!(object_id as u64, client_object_id);
     assert_ne!(source_key, client_source_key);
@@ -4926,6 +4925,49 @@ async fn mapi_over_http_online_associated_config_create_is_atomic_in_postgresql(
     assert_eq!(saved_changes, 1);
     assert!(rejected.is_err());
     assert_eq!(rollback_rows, (0, 0, 0));
+
+    // The next Execute reloads the MAPI snapshot and runs stale-identity
+    // cleanup. Outlook performs this exact reopen after saving Inbox FAIs.
+    let mut reopen_rops = Vec::new();
+    append_rop_open_folder(
+        &mut reopen_rops,
+        0,
+        1,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    );
+    append_rop_open_message(
+        &mut reopen_rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        object_id as u64,
+    );
+    renew_mapi_request_id(&mut execute_headers);
+    let reopen_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&reopen_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await?;
+    let reopen_response_rops = response_rops_from_execute_response(reopen_response).await;
+    assert!(
+        contains_bytes(&reopen_response_rops, &[0x03, 0x02, 0, 0, 0, 0]),
+        "{reopen_response_rops:02x?}"
+    );
+    let reloaded_snapshot = storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await?;
+    assert_eq!(
+        reloaded_snapshot
+            .associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID)
+            .into_iter()
+            .find(|message| message.canonical_id == config_id)
+            .map(|message| message.id),
+        Some(object_id as u64)
+    );
+
+    fixture.cleanup().await?;
     Ok(())
 }
 
