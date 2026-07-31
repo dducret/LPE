@@ -993,6 +993,7 @@ pub(super) async fn hard_delete_mailbox_tree_contents<S: ExchangeStore>(
     Ok((changed_folder_ids, partial_completion))
 }
 
+#[cfg(test)]
 pub(super) fn collaboration_folder_handle_properties(
     folder: &crate::mapi_store::MapiCollaborationFolder,
 ) -> HashMap<u32, MapiValue> {
@@ -1305,6 +1306,7 @@ where
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn folder_properties_for_open_from_mailboxes(
     principal: &AccountPrincipal,
     folder_id: u64,
@@ -1461,6 +1463,7 @@ pub(super) fn folder_local_default_named_view_is_supported(
         })
 }
 
+#[cfg(test)]
 pub(super) fn snapshot_message_counts_for_folder(
     snapshot: &MapiMailStoreSnapshot,
     folder_id: u64,
@@ -1474,6 +1477,7 @@ pub(super) fn snapshot_message_counts_for_folder(
     (count, unread.min(u32::MAX as usize) as u32)
 }
 
+#[cfg(test)]
 fn snapshot_email_belongs_to_folder(email: &JmapEmail, folder_id: u64) -> bool {
     email_role_folder_id(&email.mailbox_role) == Some(folder_id)
         || email
@@ -1482,6 +1486,7 @@ fn snapshot_email_belongs_to_folder(email: &JmapEmail, folder_id: u64) -> bool {
             .any(|state| email_role_folder_id(&state.role) == Some(folder_id))
 }
 
+#[cfg(test)]
 fn email_role_folder_id(role: &str) -> Option<u64> {
     crate::mapi_store::reserved_folder_counter_for_role(role)
         .map(crate::mapi::identity::mapi_store_id)

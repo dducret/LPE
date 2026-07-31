@@ -157,8 +157,11 @@ pub(super) fn append_open_folder_response(
             .public_folder_replica_server_names(folder_id)
             .is_empty();
     session.record_opened_folder(folder_id);
-    let debug_properties =
-        folder_properties_for_open_from_mailboxes(principal, folder_id, mailboxes, snapshot);
+    // [MS-OXCROPS] section 2.2.4.1.2 defines RopOpenFolder's success
+    // response without folder properties. Keep property projection on the
+    // explicit property ROP path so opening a folder cannot
+    // block its handle response on unrelated property work.
+    let debug_properties: HashMap<u32, MapiValue> = HashMap::new();
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -177,6 +180,7 @@ pub(super) fn append_open_folder_response(
         role = debug_role_for_folder_id(folder_id),
         property_count = debug_properties.len(),
         property_shapes = %debug_open_folder_property_shapes(&debug_properties),
+        property_projection = "deferred_to_property_rop",
         message = "rca debug mapi open folder properties"
     );
     let inbox_contract_display_name =

@@ -99,6 +99,12 @@ before it is advertised.
   logons are supported only for the bounded canonical public-folder projection
   documented below; unmodeled public-folder behavior returns parseable protocol
   errors and must not create protocol-local public-folder state.
+- `RopOpenFolder` validates and opens the requested Folder object, then returns
+  only its documented handle/status/rules/replica response fields. It must not
+  pre-project a broad folder-property map; later property ROPs perform the
+  requested projection. This keeps Inbox opening independent of unrelated
+  property work, as specified by `[MS-OXCROPS]` section 2.2.4.1.2 and
+  `[MS-OXCFOLD]` section 3.2.5.1.
 - ROP folder and message identifiers use the MAPI wire layout at the protocol
   boundary: two-byte little-endian `REPLID` followed by a six-byte big-endian
   `GLOBCNT`. LPE's internal store id remains `GLOBCNT << 16 | REPLID`, and

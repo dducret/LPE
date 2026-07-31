@@ -2111,7 +2111,7 @@ async fn mapi_over_http_ipm_subtree_ost_identity_survives_reconnect() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_open_folder_defers_profile_reads_until_getprops() {
+async fn mapi_over_http_open_folder_defers_property_projection_until_getprops() {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -2154,7 +2154,7 @@ async fn mapi_over_http_open_folder_defers_profile_reads_until_getprops() {
     assert_eq!(
         profile_reads.load(std::sync::atomic::Ordering::SeqCst),
         0,
-        "[MS-OXCFOLD] section 3.2.5.1: bare RopOpenFolder must not load properties"
+        "[MS-OXCROPS] section 2.2.4.1.2: bare RopOpenFolder must defer property projection"
     );
 
     let mut get_rops = Vec::new();
@@ -2179,6 +2179,61 @@ async fn mapi_over_http_open_folder_defers_profile_reads_until_getprops() {
         1,
         "the requested persisted ExtendedFolderFlags value must still be loaded"
     );
+}
+
+#[tokio::test]
+async fn mapi_over_http_root_ipm_and_inbox_open_batch_returns_all_handles() {
+    let account = FakeStore::account();
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let inbox_folder_id = store.mapi_identities.lock().unwrap()[&inbox_id];
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, crate::mapi::identity::ROOT_FOLDER_ID);
+    append_rop_open_folder(
+        &mut open_rops,
+        0,
+        2,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    append_rop_open_folder(&mut open_rops, 0, 3, inbox_folder_id);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    for output_handle_index in [1, 2, 3] {
+        assert!(contains_bytes(
+            &response_rops,
+            &[0x02, output_handle_index, 0, 0, 0, 0, 0, 0],
+        ));
+    }
 }
 
 #[tokio::test]
