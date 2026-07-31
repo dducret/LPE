@@ -2960,6 +2960,7 @@ fn test_mapi_session() -> MapiSession {
         first_request_id: String::new(),
         last_request_type: String::new(),
         last_request_id: String::new(),
+        request_sequence_token: "test-sequence".to_string(),
         request_count: 0,
         execute_request_count: 0,
         next_handle: 1,

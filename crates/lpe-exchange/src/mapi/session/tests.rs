@@ -1,3 +1,5 @@
+use std::time::{Duration, SystemTime};
+
 use super::*;
 use crate::mapi::wire::MapiNotificationEventMask;
 
@@ -42,6 +44,147 @@ fn reconnect_session_rejects_active_context() {
         "{11111111-2222-3333-4444-555555555555}:1"
     );
     assert_eq!(response_header(&response, "x-responsecode").unwrap(), "15");
+    remove_session(&session_id);
+}
+
+#[test]
+fn connect_rejects_a_stale_session_context() {
+    let principal = principal();
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "cookie",
+        HeaderValue::from_static("MapiContext=stale-session; MapiSequence=ignored"),
+    );
+
+    let response = connect_response(
+        MapiEndpoint::Emsmdb,
+        &principal,
+        &headers,
+        "{11111111-2222-3333-4444-555555555555}:2",
+    );
+
+    assert_eq!(
+        response_header(&response, "x-requesttype").as_deref(),
+        Some("Connect")
+    );
+    assert_eq!(
+        response_header(&response, "x-responsecode").as_deref(),
+        Some("10")
+    );
+}
+
+#[test]
+fn connect_rejects_an_expired_session_context() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    {
+        let mut session_table = sessions()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let expired_session = session_table
+            .get_mut(&session_id)
+            .expect("fresh session should exist");
+        expired_session.last_seen_at =
+            SystemTime::now() - Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS) + 1);
+    }
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!("MapiContext={session_id}")).unwrap(),
+    );
+
+    let response = connect_response(
+        MapiEndpoint::Emsmdb,
+        &principal,
+        &headers,
+        "{11111111-2222-3333-4444-555555555555}:3",
+    );
+
+    assert_eq!(
+        response_header(&response, "x-responsecode").as_deref(),
+        Some("10")
+    );
+}
+
+#[test]
+fn connect_rejects_a_session_context_for_another_endpoint_or_principal() {
+    let principal = principal();
+    let endpoint_session_id = create_session(MapiEndpoint::Nspi, &principal, "Bind", "test:1");
+    let mut endpoint_headers = HeaderMap::new();
+    endpoint_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!("MapiContext={endpoint_session_id}")).unwrap(),
+    );
+
+    let endpoint_response = connect_response(
+        MapiEndpoint::Emsmdb,
+        &principal,
+        &endpoint_headers,
+        "{11111111-2222-3333-4444-555555555555}:4",
+    );
+
+    assert_eq!(
+        response_header(&endpoint_response, "x-responsecode").as_deref(),
+        Some("10")
+    );
+    assert!(get_session(&endpoint_session_id).is_some());
+    remove_session(&endpoint_session_id);
+
+    let principal_session_id =
+        create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let other_principal = AccountPrincipal {
+        account_id: Uuid::from_u128(0xcccccccc_cccc_cccc_cccc_cccccccccccc),
+        email: "other@example.test".to_string(),
+        ..principal.clone()
+    };
+    let mut principal_headers = HeaderMap::new();
+    principal_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!("MapiContext={principal_session_id}")).unwrap(),
+    );
+
+    let principal_response = connect_response(
+        MapiEndpoint::Emsmdb,
+        &other_principal,
+        &principal_headers,
+        "{11111111-2222-3333-4444-555555555555}:5",
+    );
+
+    assert_eq!(
+        response_header(&principal_response, "x-responsecode").as_deref(),
+        Some("10")
+    );
+    assert!(get_session(&principal_session_id).is_some());
+    remove_session(&principal_session_id);
+}
+
+#[test]
+fn reconnect_session_replaces_the_prior_emsmdb_context() {
+    let principal = principal();
+    let previous_session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!(
+            "MapiContext={previous_session_id}; MapiSequence=ignored-by-reconnect"
+        ))
+        .unwrap(),
+    );
+
+    let session_id = reconnect_session(
+        MapiEndpoint::Emsmdb,
+        &principal,
+        &headers,
+        "Connect",
+        "{11111111-2222-3333-4444-555555555555}:6",
+    )
+    .unwrap()
+    .expect("valid context should reconnect");
+
+    assert_ne!(session_id, previous_session_id);
+    assert!(get_session(&previous_session_id).is_none());
+    assert!(get_session(&session_id).is_some());
     remove_session(&session_id);
 }
 

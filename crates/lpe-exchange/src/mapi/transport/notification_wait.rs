@@ -47,14 +47,6 @@ where
             "missing MAPI session cookie",
         );
     };
-    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
-        return mapi_diagnostic_response(
-            "NotificationWait",
-            request_id,
-            6,
-            "invalid MAPI request sequence cookie",
-        );
-    }
     let Some(active_request) = acquire_notification_wait_active_session_request(&session_id).await
     else {
         info!(
@@ -269,11 +261,15 @@ fn notification_wait_final_frame(
 ) -> Bytes {
     let mut frame = Vec::new();
     frame.extend_from_slice(b"DONE\r\n");
-    frame.extend_from_slice(format!("X-ResponseCode: {response_code}\r\n").as_bytes());
+    // [MS-OXCMAPIHTTP] section 3.2.5.2 uses this inner header only when the
+    // request fails after the initial PROCESSING response.
+    if response_code != 0 {
+        frame.extend_from_slice(format!("X-ResponseCode: {response_code}\r\n").as_bytes());
+    }
+    frame.extend_from_slice(format!("X-StartTime: {}\r\n", mapi_http_date(start_time)).as_bytes());
     frame.extend_from_slice(
         format!("X-ElapsedTime: {}\r\n", started_at.elapsed().as_millis()).as_bytes(),
     );
-    frame.extend_from_slice(format!("X-StartTime: {}\r\n", mapi_http_date(start_time)).as_bytes());
     frame.extend_from_slice(b"\r\n");
     frame.extend_from_slice(body);
     Bytes::from(frame)
@@ -337,10 +333,9 @@ fn decorate_notification_wait_response(
     insert_header(response, "x-responsecode", &response_code.to_string());
     insert_header(response, "x-requestid", request_id);
     insert_header(response, "x-serverapplication", MAPI_SERVER_APPLICATION);
-    for cookie in session_context_cookies(endpoint, session_id, false) {
-        if let Ok(value) = HeaderValue::from_str(&cookie) {
-            response.headers_mut().append(SET_COOKIE, value);
-        }
+    let cookie = session_cookie(endpoint, session_id, false);
+    if let Ok(value) = HeaderValue::from_str(&cookie) {
+        response.headers_mut().append(SET_COOKIE, value);
     }
 }
 
@@ -354,7 +349,7 @@ pub(in crate::mapi) fn notification_wait_empty_response(
         request_id,
         0,
         notification_wait_body(false),
-        session_context_cookies(endpoint, session_id, false),
+        vec![session_cookie(endpoint, session_id, false)],
     )
 }
 

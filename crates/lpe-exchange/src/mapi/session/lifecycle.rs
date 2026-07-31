@@ -64,26 +64,37 @@ pub(in crate::mapi) fn reconnect_session(
         return Ok(None);
     };
     if session_request_is_active(&previous_session_id) {
-        return Err(mapi_diagnostic_response(
+        return Err(mapi_diagnostic_response_with_cookies(
             request_type,
             request_id,
             15,
             "MAPI session already has an active request",
+            session_context_cookies(endpoint, &previous_session_id, false),
         ));
     }
     let Some(mut session) = remove_session(&previous_session_id) else {
-        return Ok(None);
+        // MS-OXCMAPIHTTP section 3.2.5.6 requires a reconnect with an
+        // expired or invalid Session Context to fail with Context Not Found.
+        return Err(mapi_diagnostic_response(
+            request_type,
+            request_id,
+            10,
+            "MAPI session context not found",
+        ));
     };
     if !session_matches(&session, endpoint, principal) {
         store_session(previous_session_id, session);
-        return Ok(None);
+        return Err(mapi_diagnostic_response(
+            request_type,
+            request_id,
+            10,
+            "MAPI authentication context changed",
+        ));
     }
 
     session.record_transport_request(request_type, request_id);
+    session.request_sequence_token = Uuid::new_v4().to_string();
     let session_id = Uuid::new_v4().to_string();
-    if endpoint == MapiEndpoint::Emsmdb {
-        store_session(previous_session_id, session.clone());
-    }
     store_session(session_id.clone(), session);
     Ok(Some(session_id))
 }
@@ -107,6 +118,7 @@ pub(in crate::mapi) fn create_session(
         first_request_id: String::new(),
         last_request_type: String::new(),
         last_request_id: String::new(),
+        request_sequence_token: Uuid::new_v4().to_string(),
         request_count: 0,
         execute_request_count: 0,
         next_handle: 1,
@@ -283,6 +295,21 @@ pub(in crate::mapi) fn store_session(session_id: String, mut session: MapiSessio
     guard.insert(session_id, session);
 }
 
+/// [MS-OXCMAPIHTTP] sections 3.1.5.1 and 3.2.5.2 associate the current
+/// returned cookies with the next request for a Session Context.
+pub(in crate::mapi) fn rotate_session_request_sequence_token(session_id: &str) -> bool {
+    let now = SystemTime::now();
+    let mut guard = sessions()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_expired_sessions_locked(&mut guard, now);
+    let Some(session) = guard.get_mut(session_id) else {
+        return false;
+    };
+    session.request_sequence_token = Uuid::new_v4().to_string();
+    true
+}
+
 pub(in crate::mapi) fn get_session(session_id: &str) -> Option<MapiSession> {
     let now = SystemTime::now();
     let mut guard = sessions()
@@ -332,20 +359,13 @@ pub(in crate::mapi) fn established_session_request(
             "missing MAPI session cookie",
         ));
     };
-    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
-        return Err(mapi_diagnostic_response(
-            request_type,
-            request_id,
-            6,
-            "invalid MAPI request sequence cookie",
-        ));
-    }
     let Some(active_request) = begin_active_session_request(&session_id) else {
-        return Err(mapi_diagnostic_response(
+        return Err(mapi_diagnostic_response_with_cookies(
             request_type,
             request_id,
             15,
             "MAPI session already has an active request",
+            session_context_cookies(endpoint, &session_id, false),
         ));
     };
     let Some(session) = get_session(&session_id) else {

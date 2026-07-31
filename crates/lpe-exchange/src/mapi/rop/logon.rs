@@ -4,6 +4,9 @@ use crate::mapi::sync::{PRIVATE_LOGON_SPECIAL_FOLDER_IDS, PUBLIC_LOGON_SPECIAL_F
 use crate::mapi::AccountPrincipal;
 use std::time::{Duration, SystemTime};
 
+// MS-OXCROPS section 2.2.3.1.2: GWART changes when its configuration changes.
+const STATIC_GWART_TIME_MARKER: u64 = 1;
+
 pub(in crate::mapi) fn private_logon_response_logon_flags(request_logon_flags: u8) -> u8 {
     request_logon_flags & 0x07 | 0x01
 }
@@ -33,7 +36,7 @@ pub(in crate::mapi) fn rop_logon_response_body(
     response.extend_from_slice(&crate::mapi::identity::current_store_replica_guid());
     let now = SystemTime::now();
     response.extend_from_slice(&logon_time_bytes(now));
-    write_u64(&mut response, gwart_time_marker(now));
+    write_u64(&mut response, gwart_time_marker());
     write_u32(&mut response, 0);
     response
 }
@@ -59,16 +62,13 @@ pub(in crate::mapi) fn rop_public_folder_logon_response_body(
     response.extend_from_slice(&crate::mapi::identity::current_store_replica_guid());
     let now = SystemTime::now();
     response.extend_from_slice(&logon_time_bytes(now));
-    write_u64(&mut response, gwart_time_marker(now));
+    write_u64(&mut response, gwart_time_marker());
     write_u32(&mut response, 0);
     response
 }
 
-pub(in crate::mapi) fn gwart_time_marker(now: SystemTime) -> u64 {
-    now.duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_secs()
-        .max(1)
+pub(in crate::mapi) fn gwart_time_marker() -> u64 {
+    STATIC_GWART_TIME_MARKER
 }
 
 pub(in crate::mapi) fn logon_time_bytes(now: SystemTime) -> [u8; 8] {

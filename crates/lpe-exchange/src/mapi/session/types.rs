@@ -12,6 +12,7 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) first_request_id: String,
     pub(in crate::mapi) last_request_type: String,
     pub(in crate::mapi) last_request_id: String,
+    pub(in crate::mapi) request_sequence_token: String,
     pub(in crate::mapi) request_count: usize,
     pub(in crate::mapi) execute_request_count: usize,
     pub(in crate::mapi) next_handle: u32,

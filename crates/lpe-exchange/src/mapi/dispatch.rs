@@ -221,20 +221,12 @@ where
             Vec::new(),
         );
     };
-    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
-        return execute_transport_failure_response(
-            request_id,
-            6,
-            "invalid MAPI request sequence cookie",
-            Vec::new(),
-        );
-    }
     let Some(_active_request) = acquire_execute_active_session_request(&session_id).await else {
         return execute_transport_failure_response(
             request_id,
             15,
             "MAPI session already has an active request",
-            Vec::new(),
+            session_context_cookies(endpoint, &session_id, false),
         );
     };
     let Some(mut session) = get_session(&session_id) else {

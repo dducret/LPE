@@ -73,7 +73,7 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
         .unwrap()
         .to_vec();
     assert_eq!(content_length, raw_body.len());
-    assert!(raw_body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
+    assert!(raw_body.starts_with(b"PROCESSING\r\nDONE\r\nX-StartTime: "));
     let body = strip_mapi_http_envelope(raw_body);
     assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
     assert_eq!(&body[8..12], &60_000u32.to_le_bytes());
@@ -145,7 +145,7 @@ async fn mapi_over_http_microsoft_oxcmapihttp_connect_execute_reconnect_disconne
         .any(|cookie| cookie.starts_with("MapiSequence=")));
     let connect_cookie = mapi_cookie_header(&connect);
     let connect_raw = raw_response_bytes(connect).await;
-    assert!(connect_raw.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
+    assert!(connect_raw.starts_with(b"PROCESSING\r\nDONE\r\nX-StartTime: "));
 
     let legacy_dn = b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice\0";
     let mut logon_rops = vec![0xFE, 0x00, 0x00, 0x01];
@@ -214,7 +214,7 @@ async fn mapi_over_http_microsoft_oxcmapihttp_connect_execute_reconnect_disconne
     assert_ne!(reconnect_cookie, execute_cookie);
     assert!(raw_response_bytes(reconnect)
         .await
-        .starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
+        .starts_with(b"PROCESSING\r\nDONE\r\nX-StartTime: "));
 
     let disconnect_request_id = "{11111111-2222-3333-4444-555555555555}:4105";
     let mut disconnect_headers = mapi_headers("Disconnect");
@@ -479,7 +479,7 @@ async fn mapi_over_http_connect_ignores_mismatched_sequence_cookie_on_reconnect(
 }
 
 #[tokio::test]
-async fn mapi_over_http_connect_preserves_previous_cookie_for_follow_up_execute() {
+async fn mapi_over_http_reconnect_invalidates_previous_context() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -518,7 +518,7 @@ async fn mapi_over_http_connect_preserves_previous_cookie_for_follow_up_execute(
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "10");
 }
 
 #[tokio::test]
@@ -807,7 +807,7 @@ async fn mapi_over_http_response_content_length_covers_full_mapi_envelope() {
         .unwrap();
     let raw_body = raw_response_bytes(response).await;
     assert_eq!(content_length, raw_body.len());
-    assert!(raw_body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
+    assert!(raw_body.starts_with(b"PROCESSING\r\nDONE\r\nX-StartTime: "));
 }
 
 #[tokio::test]
@@ -1058,7 +1058,7 @@ async fn mapi_over_http_disconnect_rejects_stale_session_cookie() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_notification_wait_refreshes_emsmdb_session_cookie() {
+async fn mapi_over_http_notification_wait_accepts_prior_sequence_and_does_not_block_execute() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -1068,19 +1068,21 @@ async fn mapi_over_http_notification_wait_refreshes_emsmdb_session_cookie() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let prior_cookie = mapi_cookie_header(&connect);
 
+    let mut ping_headers = mapi_headers("PING");
+    ping_headers.insert("cookie", HeaderValue::from_str(&prior_cookie).unwrap());
+    let ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "0");
+    let current_cookie = mapi_cookie_header(&ping);
+
+    // Exchange accepts a NotificationWait with an earlier sequence while
+    // Execute continues on the same Session Context. [MS-OXCMAPIHTTP] 3.2.5.5.
     let mut wait_headers = mapi_headers("NotificationWait");
-    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    wait_headers.insert("cookie", HeaderValue::from_str(&prior_cookie).unwrap());
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
         .await
@@ -1098,13 +1100,26 @@ async fn mapi_over_http_notification_wait_refreshes_emsmdb_session_cookie() {
         .iter()
         .map(|value| value.to_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(set_cookies.len(), 2);
+    assert_eq!(set_cookies.len(), 1);
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiContext=") && cookie.contains("Max-Age=1800")));
     assert!(set_cookies
         .iter()
-        .any(|cookie| cookie.starts_with("MapiSequence=") && cookie.contains("Max-Age=1800")));
+        .all(|cookie| !cookie.starts_with("MapiSequence=")));
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&current_cookie).unwrap());
+    let execute = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(execute.status(), StatusCode::OK);
+    assert_eq!(execute.headers().get("x-responsecode").unwrap(), "0");
     // [MS-OXCMAPIHTTP] section 3.2.5.5 keeps an idle NotificationWait open
     // for up to five minutes, so this test deliberately does not await its
     // final response body.
@@ -1217,7 +1232,7 @@ async fn mapi_over_http_microsoft_oxcmapihttp_ping_refreshes_idle_session_contex
 }
 
 #[tokio::test]
-async fn mapi_over_http_ping_rejects_mismatched_sequence_cookie() {
+async fn mapi_over_http_ping_accepts_an_earlier_sequence_cookie() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -1238,9 +1253,8 @@ async fn mapi_over_http_ping_rejects_mismatched_sequence_cookie() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "PING");
-    assert_eq!(response.headers().get("x-responsecode").unwrap(), "6");
-    let body = String::from_utf8(response_bytes(response).await).unwrap();
-    assert!(body.contains("invalid MAPI request sequence cookie"));
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert!(response_bytes(response).await.is_empty());
 }
 
 #[tokio::test]

@@ -1250,6 +1250,7 @@ pub(in crate::mapi) fn session_idle_expiry_follows_cookie_max_age() {
         first_request_id: "test:1".to_string(),
         last_request_type: "Connect".to_string(),
         last_request_id: "test:1".to_string(),
+        request_sequence_token: "test-sequence".to_string(),
         request_count: 1,
         execute_request_count: 0,
         next_handle: 1,
@@ -1586,12 +1587,9 @@ fn modify_recipients_accepts_microsoft_message_example_columns() {
 }
 
 #[test]
-pub(in crate::mapi) fn gwart_time_marker_uses_real_timestamp_and_stays_nonzero() {
-    assert_eq!(
-        gwart_time_marker(SystemTime::UNIX_EPOCH + Duration::from_secs(1_778_046_495)),
-        1_778_046_495
-    );
-    assert_eq!(gwart_time_marker(SystemTime::UNIX_EPOCH), 1);
+pub(in crate::mapi) fn gwart_time_marker_stays_stable_for_static_address_types() {
+    assert_eq!(gwart_time_marker(), 1);
+    assert_eq!(gwart_time_marker(), 1);
 }
 
 #[test]
@@ -5546,7 +5544,10 @@ pub(in crate::mapi) fn get_address_types_success_response_uses_input_handle_inde
 
     assert_eq!(
         rop_get_address_types_response(&request),
-        vec![0x49, 0x03, 0, 0, 0, 0, 2, 0, 8, 0, b'E', b'X', 0, b'S', b'M', b'T', b'P', 0,]
+        vec![
+            0x49, 0x03, 0, 0, 0, 0, 3, 0, 13, 0, b'E', b'X', 0, b'S', b'M', b'T', b'P', 0, b'X',
+            b'4', b'0', b'0', 0,
+        ]
     );
 }
 

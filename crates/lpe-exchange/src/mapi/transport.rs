@@ -301,7 +301,7 @@ where
             None
         };
 
-    let response = match (endpoint, request_type) {
+    let mut response = match (endpoint, request_type) {
         (MapiEndpoint::Emsmdb, MapiRequestType::Connect) => {
             connect_response(endpoint, &principal, headers, &request_id)
         }
@@ -350,6 +350,12 @@ where
         ),
     };
 
+    refresh_accepted_session_response_cookies(
+        &mut response,
+        endpoint,
+        &request_type_label,
+        headers,
+    );
     let response = finalize_mapi_response(response, headers);
     log_mapi_connection(
         endpoint,
@@ -510,20 +516,13 @@ pub(in crate::mapi) fn disconnect_response(
             "missing MAPI session cookie",
         );
     };
-    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
-        return mapi_diagnostic_response(
-            response_request_type,
-            request_id,
-            6,
-            "invalid MAPI request sequence cookie",
-        );
-    }
     let Some(_active_request) = begin_active_session_request(&session_id) else {
-        return mapi_diagnostic_response(
+        return mapi_diagnostic_response_with_cookies(
             response_request_type,
             request_id,
             15,
             "MAPI session already has an active request",
+            session_context_cookies(endpoint, &session_id, false),
         );
     };
     let Some(mut session) = remove_session(&session_id) else {
@@ -604,20 +603,13 @@ pub(in crate::mapi) fn ping_response(
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return mapi_diagnostic_response("PING", request_id, 13, "missing MAPI session cookie");
     };
-    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
-        return mapi_diagnostic_response(
-            "PING",
-            request_id,
-            6,
-            "invalid MAPI request sequence cookie",
-        );
-    }
     let Some(_active_request) = begin_active_session_request(&session_id) else {
-        return mapi_diagnostic_response(
+        return mapi_diagnostic_response_with_cookies(
             "PING",
             request_id,
             15,
             "MAPI session already has an active request",
+            session_context_cookies(endpoint, &session_id, false),
         );
     };
     let Some(session) = remove_session(&session_id) else {
@@ -651,7 +643,7 @@ pub(in crate::mapi) fn mapi_diagnostic_response(
     )
 }
 
-fn mapi_diagnostic_response_with_cookies(
+pub(in crate::mapi) fn mapi_diagnostic_response_with_cookies(
     request_type: &str,
     request_id: &str,
     response_code: u16,
@@ -690,17 +682,43 @@ pub(in crate::mapi) fn mapi_response_with_cookies(
     cookies: Vec<String>,
 ) -> Response {
     let start_time = mapi_http_date(SystemTime::now());
-    let mut framed_body = Vec::new();
-    framed_body.extend_from_slice(b"PROCESSING\r\n");
-    framed_body.extend_from_slice(b"DONE\r\n");
-    framed_body.extend_from_slice(format!("X-ResponseCode: {response_code}\r\n").as_bytes());
-    framed_body.extend_from_slice(b"X-ElapsedTime: 0\r\n");
-    framed_body.extend_from_slice(format!("X-StartTime: {start_time}\r\n").as_bytes());
-    framed_body.extend_from_slice(b"\r\n");
-    framed_body.extend_from_slice(&body);
+    let mut completed_frame = Vec::new();
+    completed_frame.extend_from_slice(b"DONE\r\n");
+    // An inner response code communicates a failure after PROCESSING; success
+    // remains in the outer HTTP response headers. [MS-OXCMAPIHTTP] 3.2.5.2.
+    if response_code != 0 {
+        completed_frame
+            .extend_from_slice(format!("X-ResponseCode: {response_code}\r\n").as_bytes());
+    }
+    completed_frame.extend_from_slice(format!("X-StartTime: {start_time}\r\n").as_bytes());
+    completed_frame.extend_from_slice(b"X-ElapsedTime: 0\r\n");
+    completed_frame.extend_from_slice(b"\r\n");
+    completed_frame.extend_from_slice(&body);
 
-    let framed_body_len = framed_body.len();
-    let mut response = (StatusCode::OK, framed_body).into_response();
+    // Exchange sends Execute responses as a chunked MAPI-over-HTTP exchange:
+    // PROCESSING is its own initial frame and DONE precedes the ROP payload in
+    // the final frame. Keep finite request types as Content-Length responses.
+    // [MS-OXCMAPIHTTP] section 3.2.5.2; Exchange 2016 trace raw/501_s.txt.
+    let (mut response, framed_body_len) = if request_type == "Execute" {
+        let frames = [
+            Ok::<axum::body::Bytes, std::io::Error>(axum::body::Bytes::from_static(
+                b"PROCESSING\r\n",
+            )),
+            Ok(axum::body::Bytes::from(completed_frame)),
+        ];
+        (
+            Response::new(axum::body::Body::from_stream(tokio_stream::iter(frames))),
+            None,
+        )
+    } else {
+        let mut framed_body = b"PROCESSING\r\n".to_vec();
+        framed_body.extend_from_slice(&completed_frame);
+        let framed_body_len = framed_body.len();
+        (
+            (StatusCode::OK, framed_body).into_response(),
+            Some(framed_body_len),
+        )
+    };
     response.extensions_mut().insert(MapiResponseDebug {
         payload_bytes: body.len(),
         payload: body,
@@ -708,11 +726,18 @@ pub(in crate::mapi) fn mapi_response_with_cookies(
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static(MAPI_CONTENT_TYPE));
-    insert_header(
-        &mut response,
-        "content-length",
-        &framed_body_len.to_string(),
-    );
+    if let Some(framed_body_len) = framed_body_len {
+        insert_header(
+            &mut response,
+            "content-length",
+            &framed_body_len.to_string(),
+        );
+    } else {
+        response.headers_mut().insert(
+            axum::http::header::TRANSFER_ENCODING,
+            HeaderValue::from_static("chunked"),
+        );
+    }
     insert_header(&mut response, "x-requesttype", request_type);
     insert_header(&mut response, "x-responsecode", &response_code.to_string());
     insert_header(&mut response, "x-requestid", request_id);

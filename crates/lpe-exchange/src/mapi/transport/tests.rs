@@ -7,6 +7,7 @@ use crate::mapi::transport::diagnostics::{
     advertised_default_view_pending_open_is_primary, post_hierarchy_close_kind,
 };
 use crate::mapi::wire::RopId;
+use tokio_stream::StreamExt;
 
 fn test_session(handles: HashMap<u32, MapiObject>) -> MapiSession {
     MapiSession {
@@ -20,6 +21,7 @@ fn test_session(handles: HashMap<u32, MapiObject>) -> MapiSession {
         first_request_id: "test:1".to_string(),
         last_request_type: "Connect".to_string(),
         last_request_id: "test:1".to_string(),
+        request_sequence_token: "test-sequence".to_string(),
         request_count: 1,
         execute_request_count: 0,
         next_handle: 1,
@@ -280,6 +282,31 @@ async fn mapi_response_start_time_uses_current_http_date_not_sentinel() {
 }
 
 #[tokio::test]
+async fn execute_response_uses_exchange_chunked_processing_and_done_frames() {
+    let response = mapi_response("Execute", "request:1", 0, vec![0x01, 0x02, 0x03], None);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("transfer-encoding").unwrap(),
+        "chunked"
+    );
+    assert!(response.headers().get("content-length").is_none());
+
+    let mut frames = response.into_body().into_data_stream();
+    assert_eq!(
+        frames.next().await.unwrap().unwrap().as_ref(),
+        b"PROCESSING\r\n"
+    );
+    let completed = frames.next().await.unwrap().unwrap();
+    assert!(completed.starts_with(b"DONE\r\nX-StartTime: "));
+    assert!(!completed
+        .windows(b"X-ResponseCode: 0".len())
+        .any(|window| window == b"X-ResponseCode: 0"));
+    assert!(completed.ends_with(&[0x01, 0x02, 0x03]));
+    assert!(frames.next().await.is_none());
+}
+
+#[tokio::test]
 async fn notification_wait_empty_response_reports_success_with_empty_body() {
     let response = notification_wait_empty_response(MapiEndpoint::Emsmdb, "request:43", "abc");
 
@@ -295,19 +322,173 @@ async fn notification_wait_empty_response_reports_success_with_empty_body() {
         .iter()
         .map(|value| value.to_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(set_cookies.len(), 2);
+    assert_eq!(set_cookies.len(), 1);
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiContext=abc")));
     assert!(set_cookies
         .iter()
-        .any(|cookie| cookie.starts_with("MapiSequence=abc")));
+        .all(|cookie| !cookie.starts_with("MapiSequence=")));
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    assert!(body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
+    assert!(body.starts_with(b"PROCESSING\r\nDONE\r\nX-StartTime: "));
     assert!(body.ends_with(&[0; 16]));
+}
+
+#[test]
+fn accepted_response_rotates_the_mapi_sequence_cookie() {
+    let principal = test_principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let initial_sequence = get_session(&session_id)
+        .expect("fresh session should exist")
+        .request_sequence_token;
+    let mut request_headers = HeaderMap::new();
+    request_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!(
+            "MapiContext={session_id}; MapiSequence={initial_sequence}"
+        ))
+        .unwrap(),
+    );
+    let mut response = mapi_response_with_cookies(
+        "PING",
+        "request:44",
+        0,
+        Vec::new(),
+        session_context_cookies(MapiEndpoint::Emsmdb, &session_id, false),
+    );
+
+    refresh_accepted_session_response_cookies(
+        &mut response,
+        MapiEndpoint::Emsmdb,
+        "PING",
+        &request_headers,
+    );
+
+    let rotated_sequence = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .find_map(|cookie| {
+            cookie
+                .to_str()
+                .ok()
+                .and_then(|cookie| cookie.strip_prefix("MapiSequence="))
+                .and_then(|cookie| cookie.split(';').next())
+                .map(str::to_string)
+        })
+        .expect("accepted response should return MapiSequence");
+    assert_ne!(rotated_sequence, initial_sequence);
+    assert_eq!(
+        get_session(&session_id)
+            .expect("session should remain available")
+            .request_sequence_token,
+        rotated_sequence
+    );
+    assert!(!request_sequence_cookie_matches(
+        MapiEndpoint::Emsmdb,
+        &request_headers,
+        &session_id,
+    ));
+
+    request_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!(
+            "MapiContext={session_id}; MapiSequence={rotated_sequence}"
+        ))
+        .unwrap(),
+    );
+    assert!(request_sequence_cookie_matches(
+        MapiEndpoint::Emsmdb,
+        &request_headers,
+        &session_id,
+    ));
+    remove_session(&session_id);
+}
+
+#[test]
+fn ping_accepts_missing_or_prior_mapi_sequence_cookie() {
+    let principal = test_principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut missing_sequence_headers = HeaderMap::new();
+    missing_sequence_headers.insert("content-length", HeaderValue::from_static("0"));
+    missing_sequence_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!("MapiContext={session_id}")).unwrap(),
+    );
+
+    let missing_response = ping_response(
+        MapiEndpoint::Emsmdb,
+        &principal,
+        &missing_sequence_headers,
+        &[],
+        "request:45",
+    );
+    assert_eq!(
+        response_header(&missing_response, "x-responsecode").as_deref(),
+        Some("0")
+    );
+
+    let mut stale_sequence_headers = missing_sequence_headers;
+    stale_sequence_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!("MapiContext={session_id}; MapiSequence=stale")).unwrap(),
+    );
+    let prior_response = ping_response(
+        MapiEndpoint::Emsmdb,
+        &principal,
+        &stale_sequence_headers,
+        &[],
+        "request:46",
+    );
+    assert_eq!(
+        response_header(&prior_response, "x-responsecode").as_deref(),
+        Some("0")
+    );
+    remove_session(&session_id);
+}
+
+#[test]
+fn active_session_ping_failure_returns_current_session_cookies() {
+    let principal = test_principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut headers = HeaderMap::new();
+    headers.insert("content-length", HeaderValue::from_static("0"));
+    headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!("MapiContext={session_id}")).unwrap(),
+    );
+    let active_request = begin_active_session_request(&session_id).unwrap();
+
+    let response = ping_response(
+        MapiEndpoint::Emsmdb,
+        &principal,
+        &headers,
+        &[],
+        "request:47",
+    );
+
+    assert_eq!(
+        response_header(&response, "x-responsecode").as_deref(),
+        Some("15")
+    );
+    let cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|cookie| cookie.to_str().ok())
+        .collect::<Vec<_>>();
+    assert!(cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiContext=")));
+    assert!(cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiSequence=")));
+
+    drop(active_request);
+    remove_session(&session_id);
 }
 
 #[test]

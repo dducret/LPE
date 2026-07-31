@@ -15,6 +15,7 @@ fn empty_session() -> MapiSession {
         first_request_id: "test:1".to_string(),
         last_request_type: "Connect".to_string(),
         last_request_id: "test:1".to_string(),
+        request_sequence_token: "test-sequence".to_string(),
         request_count: 1,
         execute_request_count: 0,
         next_handle: 1,

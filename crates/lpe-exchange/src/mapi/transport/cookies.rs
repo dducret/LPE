@@ -1,9 +1,12 @@
-use axum::http::HeaderMap;
+use axum::{
+    http::{header::SET_COOKIE, HeaderMap, HeaderValue},
+    response::Response,
+};
 
 use super::{
-    get_session, mapi_payload_fingerprint, AccountPrincipal, MapiEndpoint, EMSMDB_COOKIE,
-    EMSMDB_COOKIE_PATH, EMSMDB_SEQUENCE_COOKIE, MAPI_SESSION_MAX_AGE_SECONDS, NSPI_COOKIE,
-    NSPI_COOKIE_PATH, NSPI_SEQUENCE_COOKIE,
+    get_session, mapi_payload_fingerprint, rotate_session_request_sequence_token, AccountPrincipal,
+    MapiEndpoint, EMSMDB_COOKIE, EMSMDB_COOKIE_PATH, EMSMDB_SEQUENCE_COOKIE,
+    MAPI_SESSION_MAX_AGE_SECONDS, NSPI_COOKIE, NSPI_COOKIE_PATH, NSPI_SEQUENCE_COOKIE,
 };
 
 pub(in crate::mapi) fn request_cookie(
@@ -25,10 +28,11 @@ pub(in crate::mapi) fn request_sequence_cookie_matches(
     headers: &HeaderMap,
     session_id: &str,
 ) -> bool {
-    match request_sequence_cookie(endpoint, headers) {
-        Some(sequence_id) => sequence_id == session_id,
-        None => true,
-    }
+    let Some(session) = get_session(session_id) else {
+        return false;
+    };
+    request_sequence_cookie(endpoint, headers)
+        .is_some_and(|sequence_id| sequence_id == session.request_sequence_token)
 }
 
 pub(in crate::mapi) fn request_named_cookie(name: &str, headers: &HeaderMap) -> Option<String> {
@@ -202,10 +206,15 @@ pub(in crate::mapi) fn sequence_cookie(
     session_id: &str,
     expired: bool,
 ) -> String {
+    let sequence_token = (!expired)
+        .then(|| get_session(session_id))
+        .flatten()
+        .map(|session| session.request_sequence_token)
+        .unwrap_or_else(|| session_id.to_string());
     context_cookie(
         endpoint,
         sequence_cookie_name(endpoint),
-        session_id,
+        &sequence_token,
         expired,
     )
 }
@@ -219,6 +228,54 @@ pub(in crate::mapi) fn session_context_cookies(
         session_cookie(endpoint, session_id, expired),
         sequence_cookie(endpoint, session_id, expired),
     ]
+}
+
+/// [MS-OXCMAPIHTTP] sections 3.1.5.1 and 3.2.5.2 require the client to use
+/// cookies returned for the current Session Context on its next request.
+pub(in crate::mapi) fn refresh_accepted_session_response_cookies(
+    response: &mut Response,
+    endpoint: MapiEndpoint,
+    request_type: &str,
+    request_headers: &HeaderMap,
+) {
+    if request_type == "NotificationWait"
+        || response
+            .headers()
+            .get("x-responsecode")
+            .and_then(|value| value.to_str().ok())
+            != Some("0")
+    {
+        return;
+    }
+    let Some(session_id) = request_cookie(endpoint, request_headers) else {
+        return;
+    };
+    if !rotate_session_request_sequence_token(&session_id) {
+        return;
+    }
+
+    let context_prefix = format!("{}=", cookie_name(endpoint));
+    let sequence_prefix = format!("{}=", sequence_cookie_name(endpoint));
+    let retained = response
+        .headers()
+        .get_all(SET_COOKIE)
+        .iter()
+        .filter(|value| {
+            value.to_str().is_ok_and(|value| {
+                !value.starts_with(&context_prefix) && !value.starts_with(&sequence_prefix)
+            })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    response.headers_mut().remove(SET_COOKIE);
+    for value in retained {
+        response.headers_mut().append(SET_COOKIE, value);
+    }
+    for cookie in session_context_cookies(endpoint, &session_id, false) {
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            response.headers_mut().append(SET_COOKIE, value);
+        }
+    }
 }
 
 pub(in crate::mapi) fn context_cookie(
