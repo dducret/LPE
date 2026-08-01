@@ -25,7 +25,9 @@ mod associated_config;
 mod responses;
 mod scope;
 
-use associated_config::associated_config_sync_object;
+use associated_config::{
+    associated_config_direct_fast_transfer_object, associated_config_sync_object,
+};
 pub(in crate::mapi) use responses::*;
 pub(in crate::mapi) use scope::*;
 
@@ -1186,7 +1188,10 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                     )
                     .as_deref(),
                     &special_message_with_named_property_definitions(
-                        associated_config_sync_object(&message),
+                        associated_config_direct_fast_transfer_object(
+                            &message,
+                            principal.account_id,
+                        ),
                         snapshot,
                     ),
                     send_options,

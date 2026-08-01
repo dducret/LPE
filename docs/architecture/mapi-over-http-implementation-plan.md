@@ -484,6 +484,24 @@ before it is advertised.
   direct FastTransfer stream remains unchanged. The next clean Outlook rerun
   must determine whether correcting the earlier post-save GetProps response
   prevents the later CopyTo recovery path and synchronization report.
+- The `202607312152` LPE trace shows that recovery path directly: Outlook opens
+  the persisted Inbox `IPM.Configuration.MessageListSettings` FAI, sends
+  `RopFastTransferSourceCopyTo` with an empty exclusion list, and immediately
+  asks `RopGetPropertiesSpecific` for `0x0E0B0102`. LPE returned the
+  account-scoped 46-byte value to GetProps but omitted it from the preceding
+  direct `messageContent`; all ROP return values were successful, so Outlook
+  wrote its own `Synchronization Log:` report to Deleted Items while merging
+  the inconsistent payload. LPE now uses the same scoped projection for this
+  property in direct associated-configuration CopyTo as in GetProps, while
+  retaining the normal CopyTo exclusion and CopyProperties inclusion rules.
+  This is a bounded cross-surface consistency repair inferred from the LPE
+  trace and Exchange GetProps reference, not a claim that the Exchange capture
+  contained an equivalent CopyTo request. It follows the direct message-content
+  and property-filter rules in `[MS-OXCFXICS]` sections 2.2.3.1.1.1.1,
+  2.2.4.3.16, and 3.2.5.8.1.1. The raw `CnsetSeenFAI` state was also checked:
+  the earlier diagnostic range summary was truncated, but the wire blob already
+  acknowledged every imported FAI change number, so no state-handling change is
+  justified from this trace.
 - The `202607281300` rerun confirms the `0x0E0B0102` correction on wire:
   Outlook's direct post-CopyTo probe receives a successful 46-byte value with
   no problem cells, yet `N2=1` remains and both direct CopyTo payloads are

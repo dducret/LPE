@@ -67,13 +67,88 @@ fn normalized_subject_tag(sync_flags: u16) -> u32 {
     }
 }
 
-fn email_delivery_sort_time(email: &JmapEmail, attachments: &[AttachmentSyncFact]) -> u64 {
+fn email_delivery_time(email: &JmapEmail, attachments: &[AttachmentSyncFact]) -> u64 {
     parse_rfc3339_utc_filetime(&email.received_at).unwrap_or_else(|| {
         filetime_from_change_number(canonical_message_change_number_with_attachments(
             email,
             attachments,
         ))
     })
+}
+
+fn fast_transfer_sender_name(email: &JmapEmail) -> &str {
+    email
+        .sender_display
+        .as_deref()
+        .or(email.sender_address.as_deref())
+        .or(email.from_display.as_deref())
+        .unwrap_or(&email.from_address)
+}
+
+fn fast_transfer_sender_address(email: &JmapEmail) -> &str {
+    email
+        .sender_address
+        .as_deref()
+        .unwrap_or(&email.from_address)
+}
+
+fn fast_transfer_sent_representing_name(email: &JmapEmail) -> &str {
+    email.from_display.as_deref().unwrap_or(&email.from_address)
+}
+
+pub(super) fn write_fast_transfer_message_content(
+    buffer: &mut Vec<u8>,
+    email: &JmapEmail,
+    attachments: &[AttachmentSyncFact],
+    property_filter: FastTransferDirectPropertyFilter<'_>,
+    message_children: FastTransferMessageChildren,
+) {
+    let delivery_time = email_delivery_time(email, attachments);
+    if property_filter.includes(PID_TAG_MESSAGE_DELIVERY_TIME) {
+        write_u32(buffer, PID_TAG_MESSAGE_DELIVERY_TIME);
+        write_i64(buffer, delivery_time as i64);
+    }
+    if property_filter.includes(PID_TAG_SENDER_NAME_W) {
+        write_utf16_property(
+            buffer,
+            PID_TAG_SENDER_NAME_W,
+            fast_transfer_sender_name(email),
+        );
+    }
+    if property_filter.includes(PID_TAG_SENDER_ADDRESS_TYPE_W) {
+        write_utf16_property(buffer, PID_TAG_SENDER_ADDRESS_TYPE_W, "SMTP");
+    }
+    if property_filter.includes(PID_TAG_SENDER_EMAIL_ADDRESS_W) {
+        write_utf16_property(
+            buffer,
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            fast_transfer_sender_address(email),
+        );
+    }
+    if property_filter.includes(PID_TAG_SENT_REPRESENTING_NAME_W) {
+        write_utf16_property(
+            buffer,
+            PID_TAG_SENT_REPRESENTING_NAME_W,
+            fast_transfer_sent_representing_name(email),
+        );
+    }
+    if property_filter.includes(PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W) {
+        write_utf16_property(buffer, PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W, "SMTP");
+    }
+    if property_filter.includes(PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W) {
+        write_utf16_property(
+            buffer,
+            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+            &email.from_address,
+        );
+    }
+    if property_filter.includes(PID_TAG_SUBJECT_W) {
+        write_utf16_property(buffer, PID_TAG_SUBJECT_W, &email.subject);
+    }
+    if property_filter.includes(PID_TAG_BODY_W) {
+        write_utf16_property(buffer, PID_TAG_BODY_W, &email.body_text);
+    }
+    write_fast_transfer_message_children(buffer, message_children, Some(email), attachments);
 }
 
 fn special_message_delivery_sort_time(object: &SpecialMessageSyncFact) -> u64 {
@@ -842,7 +917,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
     let mut message_changes = Vec::with_capacity(messages.len() + special_objects.len());
     for email in messages {
         let attachments = attachments_for_message(email.id, attachment_facts);
-        let delivery_sort_time = email_delivery_sort_time(email, attachments);
+        let delivery_time = email_delivery_time(email, attachments);
         let mut buffer = Vec::new();
         let change_number = canonical_message_change_number_with_attachments(email, attachments);
         let message_size = email.size_octets.min(i32::MAX as i64) as i32;
@@ -915,6 +990,86 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             write_u32(&mut buffer, PID_TAG_FLAG_STATUS);
             write_i32(&mut buffer, canonical_flag_status(email) as i32);
         }
+        // [MS-OXCFXICS] section 3.2.5.9.1.1: PropertyTags are exclusions
+        // unless OnlySpecifiedProperties is set, so the normal messageChange
+        // must retain the sender and delivery fields Outlook uses for its list.
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+        ) {
+            write_u32(&mut buffer, PID_TAG_MESSAGE_DELIVERY_TIME);
+            write_i64(&mut buffer, delivery_time as i64);
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_SENDER_NAME_W,
+        ) {
+            write_utf16_property(
+                &mut buffer,
+                PID_TAG_SENDER_NAME_W,
+                fast_transfer_sender_name(email),
+            );
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_SENDER_ADDRESS_TYPE_W,
+        ) {
+            write_utf16_property(&mut buffer, PID_TAG_SENDER_ADDRESS_TYPE_W, "SMTP");
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        ) {
+            write_utf16_property(
+                &mut buffer,
+                PID_TAG_SENDER_EMAIL_ADDRESS_W,
+                fast_transfer_sender_address(email),
+            );
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_SENT_REPRESENTING_NAME_W,
+        ) {
+            write_utf16_property(
+                &mut buffer,
+                PID_TAG_SENT_REPRESENTING_NAME_W,
+                fast_transfer_sent_representing_name(email),
+            );
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
+        ) {
+            write_utf16_property(
+                &mut buffer,
+                PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
+                "SMTP",
+            );
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+        ) {
+            write_utf16_property(
+                &mut buffer,
+                PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+                &email.from_address,
+            );
+        }
         let subject_in_scope =
             content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SUBJECT_W);
         if subject_in_scope {
@@ -939,7 +1094,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             attachments,
         );
         let original_order = message_changes.len();
-        message_changes.push((delivery_sort_time, original_order, buffer));
+        message_changes.push((delivery_time, original_order, buffer));
     }
 
     for object in &special_objects {

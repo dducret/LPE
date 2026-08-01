@@ -1101,6 +1101,7 @@ used_for = [
   "Existing canonical-folder hierarchy uploads, duplicate detection, and conflict responses without advancing CnsetSeen",
   "Upload state ignores MetaTagIdsetGiven and returns only applicable CN sets",
   "RopFastTransferSourceCopyTo and CopyProperties Message-object messageContent root without StartMessage or StartFAIMsg wrappers",
+  "CopyTo property-exclusion semantics: an empty exclusion list retains all eligible direct message properties",
   "Direct Message CopyTo messageContent omits the folder-only PidTagParentSourceKey property",
   "FAI content synchronization excludes unpersisted folder-local views and Contacts helper messages",
   "Authoritative cached-mode download selection from the client-uploaded IdsetGiven, CnsetSeen, CnsetSeenFAI, and CnsetRead, including valid zero-length state streams",

@@ -550,6 +550,79 @@ fn sync_manifest_serializes_content_message_header_in_fixed_order() {
 }
 
 #[test]
+fn microsoft_oxcfxics_content_sync_emits_sender_and_delivery_identity_properties() {
+    let mut email = test_email();
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(50),
+    );
+    email.sender_display = Some("Relay Sender".to_string());
+    email.sender_address = Some("relay@example.test".to_string());
+    let expected_delivery_time = filetime_from_rfc3339_utc(&email.received_at);
+    let buffer = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL | SYNC_FLAG_UNICODE,
+        0,
+        &[],
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        std::slice::from_ref(&email),
+        &[],
+        &[],
+        1,
+    );
+
+    assert_i64_property(
+        &buffer,
+        PID_TAG_MESSAGE_DELIVERY_TIME,
+        expected_delivery_time as i64,
+    );
+    assert_variable_property(&buffer, PID_TAG_SENDER_NAME_W, &utf16z("Relay Sender"));
+    assert_variable_property(&buffer, PID_TAG_SENDER_ADDRESS_TYPE_W, &utf16z("SMTP"));
+    assert_variable_property(
+        &buffer,
+        PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        &utf16z("relay@example.test"),
+    );
+    assert_variable_property(&buffer, PID_TAG_SENT_REPRESENTING_NAME_W, &utf16z("Alice"));
+    assert_variable_property(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
+        &utf16z("SMTP"),
+    );
+    assert_variable_property(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+        &utf16z("alice@example.test"),
+    );
+
+    let excluded_property_tags = [
+        PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_SENDER_NAME_W,
+        PID_TAG_SENDER_ADDRESS_TYPE_W,
+        PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        PID_TAG_SENT_REPRESENTING_NAME_W,
+        PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
+        PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+    ];
+    let excluded = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL | SYNC_FLAG_UNICODE,
+        0,
+        &excluded_property_tags,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        std::slice::from_ref(&email),
+        &[],
+        &[],
+        1,
+    );
+    for property_tag in excluded_property_tags {
+        assert_absent_property(&excluded, property_tag);
+    }
+}
+
+#[test]
 fn microsoft_oxcfxics_order_by_delivery_time_sorts_newest_message_changes_first() {
     let mut oldest = test_email();
     oldest.id = Uuid::parse_str("11111111-1111-1111-1111-111111111151").unwrap();
@@ -1000,14 +1073,72 @@ fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
         &buffer,
         &[
             START_MESSAGE,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+            PID_TAG_SENDER_NAME_W,
+            PID_TAG_SENDER_ADDRESS_TYPE_W,
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            PID_TAG_SENT_REPRESENTING_NAME_W,
+            PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
+            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_BODY_W,
             END_MESSAGE,
         ],
     );
     assert!(!buffer.starts_with(b"LPE-MAPI-FASTTRANSFER\0"));
+    assert_i64_property(
+        &buffer,
+        PID_TAG_MESSAGE_DELIVERY_TIME,
+        filetime_from_rfc3339_utc("2026-05-06T12:00:00Z") as i64,
+    );
+    assert_variable_property_present(&buffer, PID_TAG_SENDER_NAME_W, &utf16z("Alice"));
+    assert_variable_property_present(&buffer, PID_TAG_SENDER_ADDRESS_TYPE_W, &utf16z("SMTP"));
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        &utf16z("alice@example.test"),
+    );
+    assert_variable_property_present(&buffer, PID_TAG_SENT_REPRESENTING_NAME_W, &utf16z("Alice"));
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
+        &utf16z("SMTP"),
+    );
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+        &utf16z("alice@example.test"),
+    );
     assert_variable_property_present(&buffer, PID_TAG_SUBJECT_W, &utf16z("Hello"));
     assert_variable_property_present(&buffer, PID_TAG_BODY_W, &utf16z("Hello body"));
+}
+
+#[test]
+fn fast_transfer_copy_properties_filters_message_identity_properties() {
+    let email = test_email();
+    let buffer = fast_transfer_message_content_buffer_with_attachments(
+        &email,
+        &[],
+        FastTransferDirectPropertyFilter::CopyPropertiesIncluding(&[
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+            PID_TAG_SENDER_NAME_W,
+        ]),
+        FastTransferMessageChildren::new(false, false),
+    );
+
+    assert_i64_property(
+        &buffer,
+        PID_TAG_MESSAGE_DELIVERY_TIME,
+        filetime_from_rfc3339_utc(&email.received_at) as i64,
+    );
+    assert_variable_property(&buffer, PID_TAG_SENDER_NAME_W, &utf16z("Alice"));
+    assert_absent_property(&buffer, PID_TAG_SENDER_ADDRESS_TYPE_W);
+    assert_absent_property(&buffer, PID_TAG_SENDER_EMAIL_ADDRESS_W);
+    assert_absent_property(&buffer, PID_TAG_SENT_REPRESENTING_NAME_W);
+    assert_absent_property(&buffer, PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W);
+    assert_absent_property(&buffer, PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W);
+    assert_absent_property(&buffer, PID_TAG_SUBJECT_W);
+    assert_absent_property(&buffer, PID_TAG_BODY_W);
 }
 
 #[test]
@@ -3702,6 +3833,18 @@ fn assert_i32_property(buffer: &[u8], property_tag: u32, value: i32) {
         .expect("property tag is present");
     assert_eq!(
         i32::from_le_bytes(buffer[offset + 4..offset + 8].try_into().unwrap()),
+        value
+    );
+}
+
+fn assert_i64_property(buffer: &[u8], property_tag: u32, value: i64) {
+    let tag = property_tag.to_le_bytes();
+    let offset = buffer
+        .windows(tag.len())
+        .position(|window| window == tag)
+        .expect("property tag is present");
+    assert_eq!(
+        i64::from_le_bytes(buffer[offset + 4..offset + 12].try_into().unwrap()),
         value
     );
 }

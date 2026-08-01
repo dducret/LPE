@@ -102,6 +102,12 @@ const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_DELIVERY_TIME: u32 = 0x0E06_0040;
+const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
+const PID_TAG_SENDER_ADDRESS_TYPE_W: u32 = 0x0C1E_001F;
+const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
+const PID_TAG_SENT_REPRESENTING_NAME_W: u32 = 0x0042_001F;
+const PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W: u32 = 0x0064_001F;
+const PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W: u32 = 0x0065_001F;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_MESSAGE_RECIPIENTS: u32 = 0x0E12_000D;
 const PID_TAG_MESSAGE_ATTACHMENTS: u32 = 0x0E13_000D;
@@ -763,7 +769,7 @@ pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
     for email in messages {
         let attachments = attachments_for_message(email.id, attachment_facts);
         write_u32(&mut buffer, START_MESSAGE);
-        write_fast_transfer_message_content(
+        manifest::write_fast_transfer_message_content(
             &mut buffer,
             email,
             attachments,
@@ -782,7 +788,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_attachments(
     message_children: FastTransferMessageChildren,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
-    write_fast_transfer_message_content(
+    manifest::write_fast_transfer_message_content(
         &mut buffer,
         email,
         attachments_for_message(email.id, attachment_facts),
@@ -790,22 +796,6 @@ pub(crate) fn fast_transfer_message_content_buffer_with_attachments(
         message_children,
     );
     buffer
-}
-
-fn write_fast_transfer_message_content(
-    buffer: &mut Vec<u8>,
-    email: &JmapEmail,
-    attachments: &[AttachmentSyncFact],
-    property_filter: FastTransferDirectPropertyFilter<'_>,
-    message_children: FastTransferMessageChildren,
-) {
-    if property_filter.includes(PID_TAG_SUBJECT_W) {
-        write_utf16_property(buffer, PID_TAG_SUBJECT_W, &email.subject);
-    }
-    if property_filter.includes(PID_TAG_BODY_W) {
-        write_utf16_property(buffer, PID_TAG_BODY_W, &email.body_text);
-    }
-    write_fast_transfer_message_children(buffer, message_children, Some(email), attachments);
 }
 
 fn write_fast_transfer_message_children(
