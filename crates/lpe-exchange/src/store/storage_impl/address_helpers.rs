@@ -466,6 +466,16 @@ fn mapi_notification_event_from_change_row(
                 canonical_message_id,
                 mailbox_message_ids,
             );
+            let old_message_id = mapi_notification_old_message_id(
+                event_mask,
+                row.try_get::<Option<i64>, _>("old_message_mapi_object_id")
+                    .ok()
+                    .flatten(),
+                row.try_get::<Option<bool>, _>("message_move_identity_snapshot_complete")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(false),
+            );
             Some(MapiNotificationEvent::canonical(
                 MapiNotificationKind::Content,
                 event_mask,
@@ -491,6 +501,7 @@ fn mapi_notification_event_from_change_row(
                 )
             })
             .map(|event| event.with_parent_folder_id(parent_folder_id))
+            .map(|event| event.with_old_message_id(old_message_id))
             .map(|event| match new_mail_message_flags {
                 Some(message_flags) => event.with_new_mail_message_flags(message_flags),
                 None => event,
@@ -508,6 +519,20 @@ fn mapi_notification_message_object_id(
     durable_object_id
         .map(|value| value as u64)
         .or_else(|| message_id.and_then(|message_id| scoped_message_ids.get(&message_id).copied()))
+}
+
+/// [MS-OXCNOTIF] section 2.2.1.4.1.2 requires OldMessageId for message
+/// move/copy data. The durable row captures the historical MID pair before a
+/// later move can rekey the active identity.
+fn mapi_notification_old_message_id(
+    event_mask: u16,
+    captured_old_message_id: Option<i64>,
+    move_identity_snapshot_complete: bool,
+) -> Option<u64> {
+    if !matches!(event_mask, 0x0020 | 0x0040) || !move_identity_snapshot_complete {
+        return None;
+    }
+    captured_old_message_id.map(|value| value as u64)
 }
 
 fn mapi_calendar_event_object_id(
@@ -691,6 +716,7 @@ fn mapi_notification_event_mask_for_change(change_kind: &str, is_new_mail: bool)
         "created" => 0x0004,
         "destroyed" | "deleted" | "expunged" => 0x0008,
         "moved" => 0x0020,
+        "copied" => 0x0040,
         _ => 0x0010,
     }
 }
@@ -699,7 +725,8 @@ fn mapi_notification_event_mask_for_change(change_kind: &str, is_new_mail: bool)
 mod notification_tests {
     use super::{
         mapi_calendar_event_object_id, mapi_calendar_notification_event,
-        mapi_notification_event_mask_for_change, MapiCalendarNotificationData,
+        mapi_notification_event_mask_for_change, mapi_notification_message_object_id,
+        mapi_notification_old_message_id, MapiCalendarNotificationData,
     };
     use crate::mapi::notifications::MapiNotificationKind;
     use std::collections::HashMap;
@@ -714,6 +741,54 @@ mod notification_tests {
         assert_eq!(
             mapi_notification_event_mask_for_change("created", false),
             0x0004
+        );
+        assert_eq!(
+            mapi_notification_event_mask_for_change("copied", false),
+            0x0040
+        );
+    }
+
+    #[test]
+    fn mailbox_move_notification_requires_durable_message_identity_snapshot() {
+        let destination_message_id = 0x0000_0001_009a_0001;
+        let source_message_id = 0x0000_0001_0089_0001;
+
+        assert_eq!(
+            mapi_notification_old_message_id(
+                0x0020,
+                Some(source_message_id as i64),
+                true,
+            ),
+            Some(source_message_id)
+        );
+        assert_eq!(
+            mapi_notification_old_message_id(0x0020, Some(destination_message_id as i64), true),
+            Some(destination_message_id)
+        );
+        assert_eq!(
+            mapi_notification_old_message_id(0x0020, None, true),
+            None
+        );
+        assert_eq!(
+            mapi_notification_old_message_id(0x0020, Some(destination_message_id as i64), false),
+            None
+        );
+    }
+
+    #[test]
+    fn mailbox_move_notification_uses_historical_destination_message_id() {
+        let message_id = Uuid::from_u128(0x1122);
+        let historical_message_id = 0x0000_0001_0089_0001;
+        let later_rekeyed_message_id = 0x0000_0001_009a_0001;
+        let scoped_message_ids = HashMap::from([(message_id, later_rekeyed_message_id)]);
+
+        assert_eq!(
+            mapi_notification_message_object_id(
+                Some(historical_message_id as i64),
+                Some(message_id),
+                &scoped_message_ids,
+            ),
+            Some(historical_message_id)
         );
     }
 

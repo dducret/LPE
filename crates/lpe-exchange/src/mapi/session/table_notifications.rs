@@ -91,7 +91,9 @@ impl MapiSession {
             for (handle, object) in &self.handles {
                 match object {
                     MapiObject::NotificationSubscription { registration } => {
-                        if registration_matches_event(registration, &event) {
+                        if event.is_complete_for_wire()
+                            && registration_matches_event(registration, &event)
+                        {
                             event_deliveries.push((*handle, event.clone(), false));
                         }
                         if let Some(folder_event) = &folder_event {
@@ -161,7 +163,7 @@ impl MapiSession {
             .and_then(folder_counts_hierarchy_table_event);
         self.handles.iter().any(|(handle, object)| match object {
             MapiObject::NotificationSubscription { registration } => {
-                registration_matches_event(registration, event)
+                (event.is_complete_for_wire() && registration_matches_event(registration, event))
                     || registration_matches_event(registration, &table_event)
                     || folder_event
                         .as_ref()

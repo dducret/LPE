@@ -824,6 +824,7 @@ pub(in crate::mapi) enum MapiNotificationEventMask {
     ObjectDeleted = 0x0008,
     ObjectModified = 0x0010,
     ObjectMoved = 0x0020,
+    ObjectCopied = 0x0040,
     TableModified = 0x0100,
     Extended = 0x0400,
 }
@@ -840,6 +841,7 @@ pub(in crate::mapi) const MAPI_CONTENT_NOTIFICATION_MASK: u16 = MapiNotification
     | MapiNotificationEventMask::ObjectDeleted.as_u16()
     | MapiNotificationEventMask::ObjectModified.as_u16()
     | MapiNotificationEventMask::ObjectMoved.as_u16()
+    | MapiNotificationEventMask::ObjectCopied.as_u16()
     | MapiNotificationEventMask::TableModified.as_u16();
 
 pub(in crate::mapi) const MAPI_HIERARCHY_NOTIFICATION_MASK: u16 =
@@ -847,6 +849,7 @@ pub(in crate::mapi) const MAPI_HIERARCHY_NOTIFICATION_MASK: u16 =
         | MapiNotificationEventMask::ObjectDeleted.as_u16()
         | MapiNotificationEventMask::ObjectModified.as_u16()
         | MapiNotificationEventMask::ObjectMoved.as_u16()
+        | MapiNotificationEventMask::ObjectCopied.as_u16()
         | MapiNotificationEventMask::TableModified.as_u16();
 
 #[allow(dead_code)]
@@ -857,6 +860,7 @@ pub(in crate::mapi) const MAPI_SUPPORTED_NOTIFICATION_MASK: u16 =
         | MapiNotificationEventMask::ObjectDeleted.as_u16()
         | MapiNotificationEventMask::ObjectModified.as_u16()
         | MapiNotificationEventMask::ObjectMoved.as_u16()
+        | MapiNotificationEventMask::ObjectCopied.as_u16()
         | MapiNotificationEventMask::TableModified.as_u16()
         | MapiNotificationEventMask::Extended.as_u16();
 

@@ -302,6 +302,57 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
 }
 
 #[test]
+fn session_delivers_only_complete_message_moves_and_copies_to_subscriptions() {
+    for (event_mask, change_kind) in [
+        (MapiNotificationEventMask::ObjectMoved, "moved"),
+        (MapiNotificationEventMask::ObjectCopied, "copied"),
+    ] {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+        let notification_handle = 77;
+        session.handles.insert(
+            notification_handle,
+            MapiObject::NotificationSubscription {
+                registration: crate::mapi::notifications::MapiNotificationRegistration {
+                    notification_types: event_mask.as_u16(),
+                    folder_id: None,
+                },
+            },
+        );
+
+        let movement_event = || {
+            MapiNotificationEvent::canonical(
+                MapiNotificationKind::Content,
+                event_mask.as_u16(),
+                crate::mapi::identity::SENT_FOLDER_ID,
+                Some(0x0000_0001_009a_0001),
+                Some(crate::mapi::identity::OUTBOX_FOLDER_ID),
+                1,
+                1,
+                None,
+                None,
+                change_kind.to_string(),
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+
+        session.record_notification(movement_event());
+        assert_eq!(session.pending_notification_count(), 0);
+
+        session
+            .record_notification(movement_event().with_old_message_id(Some(0x0000_0001_0089_0001)));
+        let deliveries = session.take_pending_notification_deliveries();
+        assert_eq!(deliveries.len(), 1);
+        assert_eq!(deliveries[0].0, notification_handle);
+        assert_eq!(deliveries[0].1.old_message_id, Some(0x0000_0001_0089_0001));
+    }
+}
+
+#[test]
 fn session_detects_abandon_after_inbox_fai_query_rows_release() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");

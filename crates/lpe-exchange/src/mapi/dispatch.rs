@@ -1452,7 +1452,9 @@ where
             "mapi execute appended RopNotify responses"
         );
         for (notification_handle, event) in notification_deliveries {
-            responses.extend_from_slice(&rop_notify_response(notification_handle, 0, &event));
+            if let Some(response) = rop_notify_response(notification_handle, 0, &event) {
+                responses.extend_from_slice(&response);
+            }
         }
     }
     log_post_hierarchy_release_events(

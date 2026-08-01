@@ -589,6 +589,37 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
+        // [MS-OXCNOTIF] section 2.2.1.4.1.2 requires the historical source
+        // and destination MID pair. Snapshot a stable pair or imported rekey
+        // before the durable move row is written.
+        let identity = match imported_identity {
+            Some(imported_identity) => Some(
+                rekey_mapi_message_identity_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    account_id,
+                    message_id,
+                    imported_identity,
+                )
+                .await?,
+            ),
+            None => None,
+        };
+        let (old_mapi_object_id, new_mapi_object_id, move_identity_snapshot_complete) =
+            if let Some(identity) = identity.as_ref() {
+                (
+                    Some(identity.old_mapi_object_id),
+                    Some(identity.new_mapi_object_id),
+                    true,
+                )
+            } else if let Some(mapi_object_id) =
+                active_mapi_message_object_id_in_tx(&mut tx, &tenant_id, account_id, message_id)
+                    .await?
+            {
+                (Some(mapi_object_id), Some(mapi_object_id), true)
+            } else {
+                (None, None, false)
+            };
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
             Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
@@ -611,7 +642,10 @@ impl Storage {
                 "threadId": thread_id,
                 "imapUid": target_uid,
                 "sourceImapUid": source_imap_uid,
-                "targetImapUid": target_uid
+                "targetImapUid": target_uid,
+                "mapiMoveIdentitySnapshotComplete": move_identity_snapshot_complete,
+                "oldMapiObjectId": old_mapi_object_id,
+                "newMapiObjectId": new_mapi_object_id
             }),
         )
         .await?;
@@ -658,19 +692,6 @@ impl Storage {
         .bind(source_cursor)
         .execute(&mut *tx)
         .await?;
-        let identity = match imported_identity {
-            Some(imported_identity) => Some(
-                rekey_mapi_message_identity_in_tx(
-                    &mut tx,
-                    &tenant_id,
-                    account_id,
-                    message_id,
-                    imported_identity,
-                )
-                .await?,
-            ),
-            None => None,
-        };
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
 
@@ -1261,6 +1282,37 @@ impl Storage {
             snapshot_json: row.snapshot_json,
         }))
     }
+}
+
+async fn active_mapi_message_object_id_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: &Uuid,
+    account_id: Uuid,
+    message_id: Uuid,
+) -> Result<Option<u64>> {
+    let mapi_object_id = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT mapi_object_id
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'message'
+          AND canonical_id = $3
+          AND deleted_at IS NULL
+        FOR UPDATE
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(message_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    mapi_object_id
+        .map(|value| {
+            u64::try_from(value)
+                .map_err(|_| anyhow::anyhow!("stored MAPI message object id is invalid"))
+        })
+        .transpose()
 }
 
 async fn rekey_mapi_message_identity_in_tx(

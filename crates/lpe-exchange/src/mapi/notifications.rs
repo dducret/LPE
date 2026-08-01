@@ -180,6 +180,18 @@ impl MapiNotificationEvent {
         self.change_kind.as_deref()
     }
 
+    /// [MS-OXCNOTIF] section 2.2.1.4.1.2 gives a message move/copy its
+    /// destination and source FolderId/MessageId pair. The encoder must not
+    /// infer source values from destination values.
+    pub(crate) fn is_complete_for_wire(&self) -> bool {
+        if !matches!(self.event_mask & 0x0FFF, 0x0020 | 0x0040) {
+            return true;
+        }
+        self.old_folder_id.is_some()
+            && (self.kind != MapiNotificationKind::Content
+                || (self.message_id.is_some() && self.old_message_id.is_some()))
+    }
+
     #[cfg(test)]
     pub(crate) fn new_mail_message_flags(&self) -> Option<u32> {
         self.new_mail_message_flags
@@ -254,7 +266,8 @@ mod tests {
         )
         .with_new_mail_message_flags(0x12);
 
-        let response = rop_notify_response(3, 0, &event);
+        let response =
+            rop_notify_response(3, 0, &event).expect("complete NewMail notification serializes");
 
         assert_eq!(response[0], 0x2A);
         assert_eq!(&response[1..5], &3u32.to_le_bytes());
@@ -291,9 +304,104 @@ mod tests {
             None,
         );
 
-        let response = rop_notify_response(3, 0, &event);
+        let response =
+            rop_notify_response(3, 0, &event).expect("complete NewMail notification serializes");
 
         assert_eq!(&response[28..], b"\0IPM.Note\0");
+    }
+
+    #[test]
+    fn object_moved_and_copied_notifications_preserve_source_message_id() {
+        let folder_id = 0x0000_0000_0006_0001;
+        let message_id = 0x0000_0001_009a_0001;
+        let old_folder_id = 0x0000_0000_0005_0001;
+        let old_message_id = 0x0000_0001_0089_0001;
+
+        for (event_mask, expected_flags) in [
+            (MapiNotificationEventMask::ObjectMoved.as_u16(), 0x8020u16),
+            (MapiNotificationEventMask::ObjectCopied.as_u16(), 0x8040u16),
+        ] {
+            let event = MapiNotificationEvent::canonical(
+                MapiNotificationKind::Content,
+                event_mask,
+                folder_id,
+                Some(message_id),
+                Some(old_folder_id),
+                1,
+                1,
+                None,
+                None,
+                "moved".to_string(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .with_old_message_id(Some(old_message_id));
+
+            let response = rop_notify_response(3, 0, &event)
+                .expect("complete movement notification serializes");
+
+            assert_eq!(&response[6..8], &expected_flags.to_le_bytes());
+            assert_eq!(
+                &response[8..16],
+                &wire_id_bytes_from_object_id(folder_id).unwrap()
+            );
+            assert_eq!(
+                &response[16..24],
+                &wire_id_bytes_from_object_id(message_id).unwrap()
+            );
+            assert_eq!(
+                &response[24..32],
+                &wire_id_bytes_from_object_id(old_folder_id).unwrap()
+            );
+            assert_eq!(
+                &response[32..40],
+                &wire_id_bytes_from_object_id(old_message_id).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn incomplete_message_move_notifications_are_not_serialized() {
+        let event = MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            MapiNotificationEventMask::ObjectMoved.as_u16(),
+            0x0000_0000_0006_0001,
+            Some(0x0000_0001_009a_0001),
+            Some(0x0000_0000_0005_0001),
+            1,
+            1,
+            None,
+            None,
+            "moved".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        assert!(rop_notify_response(3, 0, &event).is_none());
+
+        let event_without_old_folder = MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            MapiNotificationEventMask::ObjectMoved.as_u16(),
+            0x0000_0000_0006_0001,
+            Some(0x0000_0001_009a_0001),
+            None,
+            1,
+            1,
+            None,
+            None,
+            "moved".to_string(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .with_old_message_id(Some(0x0000_0001_0089_0001));
+
+        assert!(rop_notify_response(3, 0, &event_without_old_folder).is_none());
     }
 }
 
@@ -315,12 +423,15 @@ pub(in crate::mapi) fn rop_notify_response(
     notification_handle: u32,
     logon_id: u8,
     event: &MapiNotificationEvent,
-) -> Vec<u8> {
+) -> Option<Vec<u8>> {
+    if !event.is_complete_for_wire() {
+        return None;
+    }
     let mut response = vec![0x2A];
     write_u32(&mut response, notification_handle);
     response.push(logon_id);
     append_notification_data(&mut response, event);
-    response
+    Some(response)
 }
 
 fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEvent) {
@@ -377,17 +488,26 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
             } else {
                 append_wire_id(response, event.folder_id);
             }
-            append_wire_id(response, event.old_folder_id.unwrap_or(object_id));
+            append_wire_id(
+                response,
+                event
+                    .old_folder_id
+                    .expect("movement notification was validated before encoding"),
+            );
             if message_event {
                 append_wire_id(
                     response,
                     event
                         .old_message_id
-                        .or(event.message_id)
-                        .unwrap_or_default(),
+                        .expect("movement notification was validated before encoding"),
                 );
             } else {
-                append_wire_id(response, event.old_folder_id.unwrap_or(event.folder_id));
+                append_wire_id(
+                    response,
+                    event
+                        .old_folder_id
+                        .expect("movement notification was validated before encoding"),
+                );
             }
         }
         0x0002 if message_event => {

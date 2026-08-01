@@ -1281,12 +1281,21 @@ not by itself authorize broad client publication.
   available from canonical `mail_change_log` replay. NewMail payloads carry the
   event's MessageClass after the Unicode flag, with `IPM.Note` only as the
   compatibility fallback for a class-less legacy event, as specified by
-  `[MS-OXCNOTIF]` section 2.2.1.4.1.2. Registrations and pending
+  `[MS-OXCNOTIF]` section 2.2.1.4.1.2. Message `ObjectMoved` and
+  `ObjectCopied` data is emitted only when replay resolves both destination
+  `FolderId`/`MessageId` and source `OldFolderId`/`OldMessageId`: a stable-ID
+  move snapshots its equal MID pair, while an imported rekey snapshots both
+  IDs before replacing the active identity. An incomplete
+  movement notification is suppressed rather than guessing a source ID or
+  substituting a `TableModified` notification; a separately subscribed table event and
+  ordinary ICS remain independent convergence paths. Registrations and pending
   event delivery remain session-local; after process restart or movement to a
   different worker, the session must re-register and resume from canonical
   sync/checkpoint behavior rather than relying on cross-process notification
-  delivery. Full notification registration, all table row values, and Exchange
-  delivery parity remain deferred.
+  delivery. The generic mailbox-copy path does not yet produce a durable
+  `copied` change, so it cannot emit `ObjectCopied` until the canonical copy
+  identity lifecycle is implemented. Full notification registration, all table
+  row values, and Exchange delivery parity remain deferred.
 
 ## Deferred Surfaces
 

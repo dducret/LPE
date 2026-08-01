@@ -263,7 +263,16 @@ macro_rules! store_impl_public_address_im {
                     scope_parent_identity.mapi_object_id AS scope_parent_mapi_object_id,
                     object_identity.mapi_object_id AS object_mapi_object_id,
                     parent_identity.mapi_object_id AS parent_mapi_object_id,
-                    message_identity.mapi_object_id AS message_mapi_object_id,
+                    COALESCE(
+                        NULLIF(log.summary_json->>'newMapiObjectId', '')::bigint,
+                        message_identity.mapi_object_id
+                    ) AS message_mapi_object_id,
+                    NULLIF(log.summary_json->>'oldMapiObjectId', '')::bigint
+                        AS old_message_mapi_object_id,
+                    COALESCE(
+                        (log.summary_json->>'mapiMoveIdentitySnapshotComplete')::boolean,
+                        FALSE
+                    ) AS message_move_identity_snapshot_complete,
                     source_identity.mapi_object_id AS source_mapi_object_id,
                     navigation_shortcut_identity.mapi_object_id
                         AS navigation_shortcut_mapi_object_id,
