@@ -3831,6 +3831,7 @@ async fn mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify() {
                         Some("Inbox".to_string()),
                         None,
                         Some("quarterly report".to_string()),
+                        None,
                     ),
                 ],
             },
@@ -3942,6 +3943,7 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
                         Some("Inbox".to_string()),
                         None,
                         Some("quarterly report".to_string()),
+                        None,
                     )
                     .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
                 ],

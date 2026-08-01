@@ -3486,6 +3486,7 @@ async fn pull_subscription_get_events_replays_canonical_changes_after_restart() 
             Some("Inbox".to_string()),
             None,
             Some("RCA pull create".to_string()),
+            None,
         )
         .with_canonical_ids(Some(mailbox_uuid), Some(message_id))],
     }]));
@@ -3563,6 +3564,7 @@ async fn pull_subscription_get_events_replays_canonical_delete() {
             Some("Inbox".to_string()),
             None,
             Some("RCA pull delete".to_string()),
+            None,
         )
         .with_canonical_ids(Some(mailbox_uuid), Some(message_id))],
     }]));
@@ -4622,6 +4624,7 @@ async fn pull_and_streaming_notifications_replay_canonical_sql_change_cursor() {
                 Some("Inbox".to_string()),
                 None,
                 Some("Hello".to_string()),
+                None,
             )
             .with_canonical_ids(Some(mailbox_id), Some(message_id))],
         },
@@ -4642,6 +4645,7 @@ async fn pull_and_streaming_notifications_replay_canonical_sql_change_cursor() {
                 Some("Inbox".to_string()),
                 None,
                 Some("Hello again".to_string()),
+                None,
             )
             .with_canonical_ids(Some(mailbox_id), Some(message_id))],
         },

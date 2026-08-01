@@ -36,6 +36,7 @@ pub(crate) struct MapiNotificationEvent {
     pub(in crate::mapi) display_name: Option<String>,
     pub(in crate::mapi) parent_display_name: Option<String>,
     pub(in crate::mapi) message_subject: Option<String>,
+    pub(in crate::mapi) message_class: Option<String>,
     pub(in crate::mapi) new_mail_message_flags: Option<u32>,
 }
 
@@ -60,6 +61,7 @@ impl MapiNotificationEvent {
             display_name: None,
             parent_display_name: None,
             message_subject: None,
+            message_class: None,
             new_mail_message_flags: None,
         }
     }
@@ -84,6 +86,7 @@ impl MapiNotificationEvent {
             display_name: None,
             parent_display_name: None,
             message_subject: None,
+            message_class: None,
             new_mail_message_flags: None,
         }
     }
@@ -102,6 +105,7 @@ impl MapiNotificationEvent {
         display_name: Option<String>,
         parent_display_name: Option<String>,
         message_subject: Option<String>,
+        message_class: Option<String>,
     ) -> Self {
         Self {
             folder_id,
@@ -125,6 +129,7 @@ impl MapiNotificationEvent {
             display_name,
             parent_display_name,
             message_subject,
+            message_class,
             new_mail_message_flags: None,
         }
     }
@@ -245,6 +250,7 @@ mod tests {
             None,
             None,
             None,
+            Some("IPM.Appointment".to_string()),
         )
         .with_new_mail_message_flags(0x12);
 
@@ -262,7 +268,32 @@ mod tests {
             &wire_id_bytes_from_object_id(message_id).unwrap()
         );
         assert_eq!(&response[24..28], &0x12u32.to_le_bytes());
+        assert_eq!(&response[28..], b"\0IPM.Appointment\0");
         assert_ne!(&response[6..8], &0x0100u16.to_le_bytes());
+    }
+
+    #[test]
+    fn new_mail_notification_without_message_class_defaults_to_ipm_note() {
+        let event = MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            MapiNotificationEventMask::NewMail.as_u16(),
+            0x0000_0000_0005_0001,
+            Some(0x0000_0001_009a_0001),
+            None,
+            1,
+            1,
+            None,
+            None,
+            "created".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let response = rop_notify_response(3, 0, &event);
+
+        assert_eq!(&response[28..], b"\0IPM.Note\0");
     }
 }
 
@@ -365,8 +396,18 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
             // [MS-OXCNOTIF] section 2.2.1.4.1.2 carries PidTagMessageFlags
             // in every NewMail notification.
             write_u32(response, event.new_mail_message_flags.unwrap_or_default());
+            // [MS-OXCNOTIF] section 2.2.1.4.1.2 carries the MessageClass
+            // after UnicodeFlag. The compatibility default matches the
+            // canonical class of ordinary LPE Inbox mail.
             response.push(0);
-            response.extend_from_slice(b"IPM.Note\0");
+            response.extend_from_slice(
+                event
+                    .message_class
+                    .as_deref()
+                    .unwrap_or("IPM.Note")
+                    .as_bytes(),
+            );
+            response.push(0);
         }
         0x0080 => {
             write_u16(response, 0x0080);

@@ -2928,6 +2928,7 @@ async fn mapi_over_http_notification_wait_serializes_canonical_hierarchy_details
                         Some("Moved Projects".to_string()),
                         Some("Clients".to_string()),
                         None,
+                        None,
                     ),
                 ],
             },

@@ -9071,6 +9071,7 @@ impl ExchangeStore for FakeStore {
                             None,
                             None,
                             Some(event.title.clone()),
+                            None,
                         )
                         .with_canonical_ids(None, Some(event_id))
                         .with_object_kind("calendar_event"),
@@ -9088,6 +9089,7 @@ impl ExchangeStore for FakeStore {
                             None,
                             None,
                             Some(event.title.clone()),
+                            None,
                         )
                         .with_old_message_id(Some(old_mapi_object_id))
                         .with_canonical_ids(None, Some(event_id))

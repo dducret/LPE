@@ -1278,7 +1278,10 @@ not by itself authorize broad client publication.
   pending, include bounded TableModified-style payloads with the changed folder
   ID, changed message/object ID, canonical change cursor, modseq, folder counts,
   object/change kind, display names, and message subject when those values are
-  available from canonical `mail_change_log` replay. Registrations and pending
+  available from canonical `mail_change_log` replay. NewMail payloads carry the
+  event's MessageClass after the Unicode flag, with `IPM.Note` only as the
+  compatibility fallback for a class-less legacy event, as specified by
+  `[MS-OXCNOTIF]` section 2.2.1.4.1.2. Registrations and pending
   event delivery remain session-local; after process restart or movement to a
   different worker, the session must re-register and resume from canonical
   sync/checkpoint behavior rather than relying on cross-process notification

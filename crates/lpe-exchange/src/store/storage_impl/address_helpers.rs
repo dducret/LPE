@@ -196,6 +196,7 @@ fn mapi_notification_event_from_change_row(
                 display_name,
                 parent_display_name,
                 None,
+                None,
             ))
             .map(|event| {
                 event.with_canonical_ids(
@@ -339,6 +340,7 @@ fn mapi_notification_event_from_change_row(
                     row.try_get::<Option<String>, _>("calendar_event_subject")
                         .ok()
                         .flatten(),
+                    None,
                 )
                 .with_old_message_id(Some(old_message_id))
                 .with_canonical_ids(None, Some(event_id))
@@ -367,6 +369,7 @@ fn mapi_notification_event_from_change_row(
                     None,
                     None,
                     change_kind,
+                    None,
                     None,
                     None,
                     None,
@@ -406,6 +409,7 @@ fn mapi_notification_event_from_change_row(
                     None,
                     None,
                     None,
+                    None,
                 )
                 .with_canonical_ids(None, Some(config_id))
                 .with_object_kind("associated_config"),
@@ -418,6 +422,7 @@ fn mapi_notification_event_from_change_row(
             let is_new_mail = object_kind == "mailbox_message"
                 && change_kind == "created"
                 && scope_role.as_deref() == Some("inbox");
+            let new_mail_message_class = is_new_mail.then(|| "IPM.Note".to_string());
             let new_mail_message_flags = if is_new_mail {
                 // A NewMail event can only name a live Inbox membership. Do
                 // not serialize a stale row with fabricated message flags.
@@ -477,6 +482,7 @@ fn mapi_notification_event_from_change_row(
                 row.try_get("scope_display_name").ok(),
                 row.try_get("source_display_name").ok(),
                 row.try_get("message_subject").ok(),
+                new_mail_message_class,
             ))
             .map(|event| {
                 event.with_canonical_ids(
@@ -578,6 +584,7 @@ fn mapi_calendar_notification_event(
             None,
             None,
             data.subject,
+            None,
         )
         .with_canonical_ids(Some(data.calendar_id), Some(data.event_id))
         .with_object_kind("calendar_event"),

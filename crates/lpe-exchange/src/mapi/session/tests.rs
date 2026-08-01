@@ -281,6 +281,7 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
             None,
             None,
             Some("Test".to_string()),
+            None,
         )
         .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
     );
