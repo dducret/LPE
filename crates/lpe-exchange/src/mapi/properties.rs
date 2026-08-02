@@ -44,6 +44,7 @@ pub(in crate::mapi) use attachments::*;
 pub(in crate::mapi) use calendar::*;
 pub(in crate::mapi) use contact::*;
 pub(crate) use folder::*;
+pub(crate) use message::message_class_for_email;
 pub(in crate::mapi) use message::*;
 pub(crate) use named::*;
 pub(in crate::mapi) use navigation_shortcut::*;

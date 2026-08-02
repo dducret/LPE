@@ -463,7 +463,9 @@ pub(crate) fn final_sync_state_stream(
     change_numbers: &[u64],
 ) -> Vec<u8> {
     if sync_type == SYNC_TYPE_CONTENTS {
-        return final_content_sync_state_stream(object_ids, change_numbers, &[], change_numbers);
+        // [MS-OXCFXICS] sections 2.2.1.1.4 and 3.2.5.6: ordinary
+        // message changes advance CnsetSeen, not CnsetRead.
+        return final_content_sync_state_stream(object_ids, change_numbers, &[], &[]);
     }
     final_sync_state_stream_with_cnsets(sync_type, object_ids, change_numbers, &[], &[])
 }

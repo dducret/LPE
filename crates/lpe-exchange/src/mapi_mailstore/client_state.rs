@@ -79,7 +79,7 @@ pub(crate) fn download_change_facts(
                         attachments_for_message(email.id, attachment_facts),
                     ),
                     associated: false,
-                    source_key: source_key_for_uuid(&email.id),
+                    source_key: manifest::normal_message_sync_source_key(email, sync_flags),
                 })
             })
             .collect::<Vec<_>>()

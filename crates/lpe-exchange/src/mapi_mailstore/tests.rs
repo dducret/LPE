@@ -595,6 +595,12 @@ fn microsoft_oxcfxics_content_sync_emits_sender_and_delivery_identity_properties
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
         &utf16z("alice@example.test"),
     );
+    assert_variable_property(&buffer, PID_TAG_MESSAGE_CLASS_W, &utf16z("IPM.Note"));
+    assert_variable_property(
+        &buffer,
+        META_TAG_CNSET_READ,
+        &replguid_idset_from_counters(&[]),
+    );
 
     let excluded_property_tags = [
         PID_TAG_MESSAGE_DELIVERY_TIME,
@@ -604,6 +610,7 @@ fn microsoft_oxcfxics_content_sync_emits_sender_and_delivery_identity_properties
         PID_TAG_SENT_REPRESENTING_NAME_W,
         PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+        PID_TAG_MESSAGE_CLASS_W,
     ];
     let excluded = sync_manifest_buffer_with_attachments(
         SYNC_TYPE_CONTENTS,
@@ -1080,6 +1087,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
             PID_TAG_SENT_REPRESENTING_NAME_W,
             PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W,
             PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+            PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_SUBJECT_W,
             PID_TAG_BODY_W,
             END_MESSAGE,
@@ -1109,6 +1117,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_messages_uses_message_markers() {
         PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
         &utf16z("alice@example.test"),
     );
+    assert_variable_property_present(&buffer, PID_TAG_MESSAGE_CLASS_W, &utf16z("IPM.Note"));
     assert_variable_property_present(&buffer, PID_TAG_SUBJECT_W, &utf16z("Hello"));
     assert_variable_property_present(&buffer, PID_TAG_BODY_W, &utf16z("Hello body"));
 }
@@ -1137,6 +1146,7 @@ fn fast_transfer_copy_properties_filters_message_identity_properties() {
     assert_absent_property(&buffer, PID_TAG_SENT_REPRESENTING_NAME_W);
     assert_absent_property(&buffer, PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W);
     assert_absent_property(&buffer, PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W);
+    assert_absent_property(&buffer, PID_TAG_MESSAGE_CLASS_W);
     assert_absent_property(&buffer, PID_TAG_SUBJECT_W);
     assert_absent_property(&buffer, PID_TAG_BODY_W);
 }
@@ -2919,6 +2929,87 @@ fn fai_foreign_source_key_identity_is_used_by_selected_and_full_idset_given() {
 }
 
 #[test]
+fn normal_message_no_foreign_identifiers_uses_local_source_key_for_selection() {
+    let canonical_id = Uuid::parse_str("99999999-9999-4999-8999-999999999398").unwrap();
+    let object_id = crate::mapi::identity::mapi_store_id(398);
+    let foreign_guid = [0x31; 16];
+    let foreign_counter = 0x0000_1020_3040_5061;
+    let mut foreign_source_key = foreign_guid.to_vec();
+    foreign_source_key.extend_from_slice(&globcnt_bytes(foreign_counter));
+    crate::mapi::identity::remember_mapi_identity_with_source_key(
+        canonical_id,
+        object_id,
+        Some(foreign_source_key.clone()),
+    );
+    let mut email = test_email();
+    email.id = canonical_id;
+    let local_source_key = source_key_for_store_id(object_id);
+    let local_counter = crate::mapi::identity::global_counter_from_store_id(object_id).unwrap();
+    let replguid_singleton = |replica_guid: [u8; 16], counter: u64| {
+        let mut value = replica_guid.to_vec();
+        value.push(GLOBSET_RANGE_COMMAND);
+        value.extend_from_slice(&globcnt_bytes(counter));
+        value.extend_from_slice(&globcnt_bytes(counter));
+        value.push(GLOBSET_END_COMMAND);
+        value
+    };
+    let local_idset = replguid_singleton(STORE_REPLICA_GUID, local_counter);
+    let foreign_idset = replguid_singleton(foreign_guid, foreign_counter);
+    let no_foreign_flags = SYNC_FLAG_NORMAL | SYNC_FLAG_NO_FOREIGN_IDENTIFIERS;
+    let manifest = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_CONTENTS,
+        no_foreign_flags,
+        0,
+        &[],
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        std::slice::from_ref(&email),
+        &[],
+        &[],
+        1,
+    );
+    let facts = download_change_facts(
+        SYNC_TYPE_CONTENTS,
+        no_foreign_flags,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        std::slice::from_ref(&email),
+        &[],
+        &[],
+        &[],
+    );
+    let (_, selected_state) = select_download_manifest_for_client_state(
+        SYNC_TYPE_CONTENTS,
+        no_foreign_flags,
+        &manifest,
+        &initial_sync_state_stream(SYNC_TYPE_CONTENTS),
+        &facts,
+        &[],
+    )
+    .expect("select normal message with a local NoForeignIdentifiers SourceKey");
+
+    assert_ne!(local_source_key, foreign_source_key);
+    assert_variable_property(&manifest, PID_TAG_SOURCE_KEY, &local_source_key);
+    assert_variable_property(&manifest, META_TAG_IDSET_GIVEN, &local_idset);
+    assert_variable_property(&selected_state, META_TAG_IDSET_GIVEN, &local_idset);
+
+    let preserved_manifest = sync_manifest_buffer_with_attachments(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        0,
+        &[],
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        std::slice::from_ref(&email),
+        &[],
+        &[],
+        1,
+    );
+    assert_variable_property(&preserved_manifest, PID_TAG_SOURCE_KEY, &foreign_source_key);
+    assert_variable_property(&preserved_manifest, META_TAG_IDSET_GIVEN, &foreign_idset);
+}
+
+#[test]
 fn microsoft_oxcfxics_fai_content_sync_delimits_empty_child_collections_before_next_marker() {
     let first_canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999395").unwrap();
     let second_canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999396").unwrap();
@@ -3596,7 +3687,7 @@ fn replguid_globset_parser_decodes_common_stack_range_and_bitmask() {
 }
 
 #[test]
-fn hierarchy_and_content_cnsets_replay_in_globcnt_order() {
+fn hierarchy_and_content_cnsets_replay_in_globcnt_order_without_read_state_changes() {
     let hierarchy = final_sync_state_stream(
         0x02,
         &[crate::mapi::identity::mapi_store_id(7)],
@@ -3614,7 +3705,7 @@ fn hierarchy_and_content_cnsets_replay_in_globcnt_order() {
     assert_variable_property(&hierarchy, META_TAG_CNSET_SEEN, &expected_hierarchy_cnset);
     assert_variable_property(&content, META_TAG_CNSET_SEEN, &expected_content_cnset);
     assert_variable_property(&content, META_TAG_CNSET_SEEN_FAI, &empty_cnset);
-    assert_variable_property(&content, META_TAG_CNSET_READ, &expected_content_cnset);
+    assert_variable_property(&content, META_TAG_CNSET_READ, &empty_cnset);
 }
 
 #[test]

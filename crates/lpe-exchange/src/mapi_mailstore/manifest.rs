@@ -7,6 +7,7 @@ use super::special_message::{
     write_special_message_property, PID_TAG_HAS_ATTACHMENTS, PID_TAG_MESSAGE_STATUS,
 };
 use super::*;
+use crate::mapi::properties::message_class_for_email;
 
 const OWNER_INBOX_SPECIAL_FOLDER_ENTRY_IDS: [(u32, u64); 7] = [
     (0x36D0_0102, crate::mapi::identity::CALENDAR_FOLDER_ID),
@@ -142,6 +143,13 @@ pub(super) fn write_fast_transfer_message_content(
             &email.from_address,
         );
     }
+    if property_filter.includes(PID_TAG_MESSAGE_CLASS_W) {
+        write_utf16_property(
+            buffer,
+            PID_TAG_MESSAGE_CLASS_W,
+            message_class_for_email(email),
+        );
+    }
     if property_filter.includes(PID_TAG_SUBJECT_W) {
         write_utf16_property(buffer, PID_TAG_SUBJECT_W, &email.subject);
     }
@@ -208,6 +216,16 @@ pub(crate) fn source_key_for_uuid(id: &Uuid) -> Vec<u8> {
     let object_id =
         crate::mapi::identity::mapped_mapi_object_id(id).expect("MAPI identity mapping missing");
     crate::mapi::identity::source_key_for_object_id(object_id)
+}
+
+pub(super) fn normal_message_sync_source_key(email: &JmapEmail, sync_flags: u16) -> Vec<u8> {
+    if sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0 {
+        let object_id = crate::mapi::identity::mapped_mapi_object_id(&email.id)
+            .expect("MAPI message identity mapping missing");
+        source_key_for_store_id(object_id)
+    } else {
+        source_key_for_uuid(&email.id)
+    }
 }
 
 pub(crate) fn source_key_for_store_id(store_id: u64) -> Vec<u8> {
@@ -400,7 +418,7 @@ pub(crate) fn sync_state_token_with_special_objects(
         .iter()
         .filter_map(|email| {
             let object_id = crate::mapi::identity::mapped_mapi_object_id(&email.id)?;
-            Some((source_key_for_uuid(&email.id), object_id))
+            Some((normal_message_sync_source_key(email, sync_flags), object_id))
         })
         .collect::<Vec<_>>();
     let normal_change_numbers = sync_state_change_numbers(
@@ -457,7 +475,9 @@ pub(crate) fn sync_state_token_with_special_objects(
         ),
         &replguid_idset_from_counters(&normal_change_numbers),
         &replguid_idset_from_counters(&fai_change_numbers),
-        &replguid_idset_from_counters(&normal_change_numbers),
+        // [MS-OXCFXICS] sections 2.2.1.1.4 and 3.2.5.6: this manifest
+        // emits no read-state-change elements, so CnsetRead remains empty.
+        &replguid_idset_from_counters(&[]),
     )
 }
 
@@ -921,7 +941,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         let mut buffer = Vec::new();
         let change_number = canonical_message_change_number_with_attachments(email, attachments);
         let message_size = email.size_octets.min(i32::MAX as i64) as i32;
-        let source_key = source_key_for_uuid(&email.id);
+        // [MS-OXCFXICS] section 3.2.5.9.1.1: NoForeignIdentifiers requires
+        // a SourceKey generated from the local MAPI identifier.
+        let source_key = normal_message_sync_source_key(email, sync_flags);
         if sync_type == SYNC_TYPE_CONTENTS && sync_flags & SYNC_FLAG_PROGRESS != 0 {
             write_content_sync_progress_per_message(&mut buffer, message_size, false);
         }
@@ -1083,6 +1105,20 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             normalized_subject_tag,
         ) {
             write_normalized_subject_property(&mut buffer, normalized_subject_tag, &email.subject);
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_MESSAGE_CLASS_W,
+        ) {
+            // [MS-OXCMSG] section 2.2.1.3: ordinary JMAP-backed mail is a
+            // standard Message object and therefore carries its canonical class.
+            write_utf16_property(
+                &mut buffer,
+                PID_TAG_MESSAGE_CLASS_W,
+                message_class_for_email(email),
+            );
         }
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_BODY_W) {
             write_utf16_property(&mut buffer, PID_TAG_BODY_W, &email.body_text);

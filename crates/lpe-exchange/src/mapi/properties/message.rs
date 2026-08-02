@@ -242,7 +242,7 @@ pub(in crate::mapi) fn conversation_index_for_uuid(conversation_id: Uuid) -> Vec
     value
 }
 
-pub(in crate::mapi) fn message_class_for_email(email: &JmapEmail) -> &'static str {
+pub(crate) fn message_class_for_email(email: &JmapEmail) -> &'static str {
     if email.mailbox_role == "rss_feeds" {
         "IPM.Post.RSS"
     } else {
