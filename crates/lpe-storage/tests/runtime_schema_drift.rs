@@ -3,6 +3,7 @@ use std::{env, str::FromStr};
 use anyhow::{Context, Result};
 use lpe_domain::InboundDeliveryRequest;
 use lpe_storage::{
+    mapi_store_identity::{mapi_store_id, mapi_xid},
     AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult, CollaborationGrantInput,
     CollaborationResourceKind, CreatePublicFolderTreeInput, JmapImportedEmailInput,
     JmapMailboxCreateInput, JmapMailboxUpdateInput, ManagedRetentionFolderCreateInput, NewAccount,
@@ -3138,6 +3139,65 @@ async fn exercise_mailbox_move_path(
     .context("load source membership before move")?;
     let source_membership_id: Uuid = source.try_get("id")?;
     let source_uid: i64 = source.try_get("imap_uid")?;
+
+    let store_identity = sqlx::query(
+        r#"
+        SELECT replica_guid, next_global_counter
+        FROM mapi_store_identity
+        WHERE singleton = TRUE
+        "#,
+    )
+    .fetch_one(pool)
+    .await
+    .context("load MAPI store identity before server move")?;
+    let replica_guid: Uuid = store_identity.try_get("replica_guid")?;
+    let source_global_counter =
+        u64::try_from(store_identity.try_get::<i64, _>("next_global_counter")?)
+            .context("convert next MAPI global counter before server move")?;
+    let source_mapi_object_id = mapi_store_id(source_global_counter) as i64;
+    let source_key = mapi_xid(replica_guid, source_global_counter);
+    let mut predecessor_change_list = Vec::with_capacity(source_key.len() + 1);
+    predecessor_change_list.push(source_key.len() as u8);
+    predecessor_change_list.extend_from_slice(&source_key);
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_mailbox_replicas (tenant_id, account_id, replica_guid)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (tenant_id, account_id) DO NOTHING
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(replica_guid)
+    .execute(pool)
+    .await
+    .context("seed local MAPI mailbox replica before server move")?;
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id,
+            mapi_global_counter, mapi_object_id, source_key, change_key,
+            instance_key, mapi_change_number, predecessor_change_list
+        )
+        VALUES ($1, $2, 'message', $3, $4, $5, $6, $6, $6, $4, $7)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.message_id)
+    .bind(source_global_counter as i64)
+    .bind(source_mapi_object_id)
+    .bind(&source_key)
+    .bind(&predecessor_change_list)
+    .execute(pool)
+    .await
+    .context("seed active normal-message MAPI identity before server move")?;
+    sqlx::query("UPDATE mapi_store_identity SET next_global_counter = $1 WHERE singleton = TRUE")
+        .bind((source_global_counter + 1) as i64)
+        .execute(pool)
+        .await
+        .context("advance MAPI global counter after seeded message identity")?;
+
     let before_cursor = storage
         .fetch_jmap_mail_change_cursor(fixture.account_id)
         .await?
@@ -3233,6 +3293,31 @@ async fn exercise_mailbox_move_path(
         target.try_get::<i64, _>("imap_uid")? == 42,
         "target move membership must allocate from target mailbox uid_next"
     );
+
+    let active_identity = sqlx::query(
+        r#"
+        SELECT mapi_object_id, source_key
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'message'
+          AND canonical_id = $3
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load active MAPI message identity after server move")?;
+    let target_mapi_object_id = active_identity.try_get::<i64, _>("mapi_object_id")?;
+    let target_source_key = active_identity.try_get::<Vec<u8>, _>("source_key")?;
+    anyhow::ensure!(
+        target_mapi_object_id != source_mapi_object_id && target_source_key != source_key,
+        "server move must create a distinct active MAPI message MID and SourceKey"
+    );
+
     anyhow::ensure!(
         storage
             .fetch_imap_mailbox_state(fixture.account_id, target_mailbox_id)
@@ -3265,7 +3350,7 @@ async fn exercise_mailbox_move_path(
 
     let tombstone = sqlx::query(
         r#"
-        SELECT imap_uid, reason
+        SELECT imap_uid, mapi_object_id, reason
         FROM tombstones
         WHERE tenant_id = $1
           AND account_id = $2
@@ -3283,8 +3368,9 @@ async fn exercise_mailbox_move_path(
     .context("load move tombstone")?;
     anyhow::ensure!(
         tombstone.try_get::<i64, _>("imap_uid")? == source_uid
+            && tombstone.try_get::<i64, _>("mapi_object_id")? == source_mapi_object_id
             && tombstone.try_get::<String, _>("reason")? == "move",
-        "move tombstone must preserve the original source UID and reason"
+        "move tombstone must preserve the original source UID, MAPI MID, and reason"
     );
 
     let email_changes = storage
@@ -3350,6 +3436,40 @@ async fn exercise_mailbox_move_path(
     anyhow::ensure!(
         mapi_replay_count == 1,
         "MAPI checkpoint replay must see exactly one moved membership change after its checkpoint"
+    );
+
+    let moved_identity = sqlx::query(
+        r#"
+        SELECT
+            (summary_json ->> 'oldMapiObjectId')::BIGINT AS old_mapi_object_id,
+            (summary_json ->> 'newMapiObjectId')::BIGINT AS new_mapi_object_id
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND cursor > $3
+          AND modseq > $4
+          AND object_kind = 'mailbox_message'
+          AND change_kind = 'moved'
+          AND summary_json ->> 'sourceMailboxMessageId' = $5
+          AND summary_json ->> 'targetMailboxMessageId' = $6
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(before_cursor)
+    .bind(before_modseq)
+    .bind(source_membership_id.to_string())
+    .bind(target_membership_id.to_string())
+    .fetch_one(pool)
+    .await
+    .context("load MAPI move identity snapshot from change log")?;
+    anyhow::ensure!(
+        moved_identity.try_get::<i64, _>("old_mapi_object_id")? == source_mapi_object_id
+            && moved_identity.try_get::<i64, _>("new_mapi_object_id")? == target_mapi_object_id
+            && moved_identity.try_get::<i64, _>("old_mapi_object_id")?
+                != moved_identity.try_get::<i64, _>("new_mapi_object_id")?,
+        "MAPI move replay must retain distinct old and new message MIDs"
     );
 
     let copied_mailbox_id = Uuid::new_v4();

@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::{
     blob_store::{DurableBlobKind, PostgresBlobStore, PutBlobRequest, StoredBlobRef},
     mapi_events::MapiEventCustomPropertyValue,
+    mapi_message_identity::rotate_active_mapi_message_identity_in_tx,
     submission::AttachmentUploadInput,
     ActiveSyncAttachment, ActiveSyncAttachmentContent, AuditEntryInput, CanonicalChangeCategory,
     JmapEmail, JmapUploadBlob, Storage,
@@ -858,6 +859,9 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
+        rotate_active_mapi_message_identity_in_tx(&mut tx, &tenant_id, account_id, message_id)
+            .await?;
+
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
@@ -975,6 +979,9 @@ impl Storage {
         .bind(account_id)
         .execute(&mut *tx)
         .await?;
+
+        rotate_active_mapi_message_identity_in_tx(&mut tx, &tenant_id, account_id, message_id)
+            .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;

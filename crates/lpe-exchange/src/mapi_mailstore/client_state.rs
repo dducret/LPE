@@ -36,6 +36,7 @@ pub(crate) struct DownloadChangeFact {
     pub(crate) source_key: Vec<u8>,
 }
 
+#[cfg(test)]
 pub(crate) fn download_change_facts(
     sync_type: u8,
     sync_flags: u16,
@@ -43,6 +44,30 @@ pub(crate) fn download_change_facts(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
+    special_objects: &[SpecialMessageSyncFact],
+    folder_versions: &[crate::mapi_store::MapiFolderVersion],
+) -> Vec<DownloadChangeFact> {
+    download_change_facts_with_normal_message_sync_facts(
+        sync_type,
+        sync_flags,
+        folder_id,
+        mailboxes,
+        emails,
+        attachment_facts,
+        &[],
+        special_objects,
+        folder_versions,
+    )
+}
+
+pub(crate) fn download_change_facts_with_normal_message_sync_facts(
+    sync_type: u8,
+    sync_flags: u16,
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+    normal_message_facts: &[NormalMessageSyncFact],
     special_objects: &[SpecialMessageSyncFact],
     folder_versions: &[crate::mapi_store::MapiFolderVersion],
 ) -> Vec<DownloadChangeFact> {
@@ -71,16 +96,20 @@ pub(crate) fn download_change_facts(
     let mut facts = if content_sync_includes_normal(sync_type, sync_flags) {
         emails
             .iter()
-            .filter_map(|email| {
-                Some(DownloadChangeFact {
-                    object_id: crate::mapi::identity::mapped_mapi_object_id(&email.id)?,
-                    change_number: manifest::canonical_message_change_number_with_attachments(
-                        email,
-                        attachments_for_message(email.id, attachment_facts),
-                    ),
+            .map(|email| {
+                let fact = manifest::normal_message_sync_fact_for(
+                    email,
+                    attachments_for_message(email.id, attachment_facts),
+                    normal_message_facts,
+                );
+                DownloadChangeFact {
+                    object_id: fact.object_id,
+                    change_number: fact.change_number,
                     associated: false,
-                    source_key: manifest::normal_message_sync_source_key(email, sync_flags),
-                })
+                    source_key: manifest::normal_message_sync_source_key_for_fact(
+                        &fact, sync_flags,
+                    ),
+                }
             })
             .collect::<Vec<_>>()
     } else {

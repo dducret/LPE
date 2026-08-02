@@ -1,5 +1,24 @@
 use super::*;
 
+const FAST_TRANSFER_SOURCE_GET_BUFFER_RESULT_OVERHEAD: usize = 15;
+
+pub(super) fn fast_transfer_source_get_buffer_transfer_size(
+    request: &RopRequest,
+    residual_rop_out_size: usize,
+) -> usize {
+    let requested = request.fast_transfer_buffer_size();
+    if request.fast_transfer_uses_server_determined_buffer_size() {
+        // [MS-OXCFXICS] section 3.2.5.8.1.5: BufferSize 0xBABE selects the
+        // smaller of MaximumBufferSize and the residual output buffer after
+        // the RopFastTransferSourceGetBuffer response structure.
+        requested.min(
+            residual_rop_out_size.saturating_sub(FAST_TRANSFER_SOURCE_GET_BUFFER_RESULT_OVERHEAD),
+        )
+    } else {
+        requested.clamp(1, u16::MAX as usize)
+    }
+}
+
 pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeStore>(
     store: &S,
     principal: &AccountPrincipal,
@@ -7,6 +26,7 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
     session: &mut MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
+    residual_rop_out_size: usize,
     responses: &mut Vec<u8>,
 ) -> Option<(u64, String, String)> {
     let mut completed_hierarchy_sync = None;
@@ -95,7 +115,8 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
                     }
                 }
             }
-            let requested_buffer_bytes = request.fast_transfer_buffer_size();
+            let requested_buffer_bytes =
+                fast_transfer_source_get_buffer_transfer_size(request, residual_rop_out_size);
             let previous_transfer_position = *transfer_position;
             let empty_content_sync_state_only =
                 *sync_type == 0x01 && transfer_buffer.len() == state.len().saturating_add(4);
@@ -112,6 +133,7 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
                 &request,
                 transfer_buffer,
                 transfer_position,
+                requested_buffer_bytes,
             );
             let completed = *transfer_position >= transfer_buffer.len();
             let response_debug = summarize_fast_transfer_get_buffer_response(&response, completed);

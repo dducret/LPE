@@ -991,12 +991,32 @@ mod tests {
             long_term_id,
             decoded_long_term_id,
             folder_entry_id,
+            new_mail_folder_id,
         ) = with_current_mapi_identity_codec(codec.clone(), async {
             let wire_id = wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap();
             let source_key = source_key_for_object_id(INBOX_FOLDER_ID);
             let long_term_id = long_term_id_from_object_id(INBOX_FOLDER_ID).unwrap();
             let folder_entry_id =
                 folder_entry_id_from_object_id(Uuid::nil(), INBOX_FOLDER_ID).unwrap();
+            let new_mail = crate::mapi::notifications::MapiNotificationEvent::canonical(
+                crate::mapi::notifications::MapiNotificationKind::Content,
+                crate::mapi::wire::MapiNotificationEventMask::NewMail.as_u16(),
+                INBOX_FOLDER_ID,
+                Some(mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER + 0x100)),
+                None,
+                1,
+                1,
+                None,
+                None,
+                "created".to_string(),
+                None,
+                None,
+                None,
+                Some("IPM.Note".to_string()),
+            );
+            let new_mail_response =
+                crate::mapi::notifications::rop_notify_response(&codec, 0x1a, 0, &new_mail)
+                    .expect("complete NewMail notification serializes");
             (
                 wire_id,
                 object_id_from_wire_id(&wire_id),
@@ -1005,12 +1025,17 @@ mod tests {
                 long_term_id,
                 object_id_from_long_term_id(&long_term_id),
                 folder_entry_id,
+                new_mail_response[8..16].to_vec(),
             )
         })
         .await;
 
         assert_eq!(
             wire_id,
+            raw_wire_id_bytes_from_object_id(inbox_actual).unwrap()
+        );
+        assert_eq!(
+            new_mail_folder_id,
             raw_wire_id_bytes_from_object_id(inbox_actual).unwrap()
         );
         assert_eq!(decoded_wire_id, Some(INBOX_FOLDER_ID));

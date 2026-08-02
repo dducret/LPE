@@ -351,9 +351,7 @@ where
         );
     }
 
-    if rop_buffer_has_no_requests(&execute.rop_buffer)
-        || rop_buffer_is_store_independent_release_only(&execute.rop_buffer)
-    {
+    if execute_can_skip_identity_scope(&execute.rop_buffer, &session) {
         let mut snapshot = MapiMailStoreSnapshot::empty();
         let mailboxes = snapshot.mailboxes();
         let emails = snapshot.emails();
@@ -1216,6 +1214,8 @@ where
                     mailboxes,
                     emails,
                     snapshot,
+                    max_rop_out,
+                    extended,
                     &mut responses,
                     &mut output_handles,
                     &mut completed_hierarchy_sync,
@@ -1455,7 +1455,12 @@ where
             "mapi execute appended RopNotify responses"
         );
         for (notification_handle, logon_id, event) in notification_deliveries {
-            if let Some(response) = rop_notify_response(notification_handle, logon_id, &event) {
+            if let Some(response) = rop_notify_response(
+                snapshot.identity_codec(),
+                notification_handle,
+                logon_id,
+                &event,
+            ) {
                 responses.extend_from_slice(&response);
             }
         }

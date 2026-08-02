@@ -150,6 +150,33 @@ impl Storage {
             );
         }
 
+        let mapi_message_move_tombstone_column_is_current = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = $1
+                  AND table_name = 'tombstones'
+                  AND column_name = 'mapi_object_id'
+                  AND data_type = 'bigint'
+                  AND is_nullable = 'YES'
+            )
+            "#,
+        )
+        .bind(&schema_name)
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| {
+            format!(
+                "unable to inspect required MAPI move tombstone column {schema_name}.tombstones.mapi_object_id"
+            )
+        })?;
+        if !mapi_message_move_tombstone_column_is_current {
+            bail!(
+                "required MAPI move tombstone shape is missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
+        }
+
         let mut invalid_store_identity_columns = Vec::new();
         for (column, data_type) in [
             ("singleton", "boolean"),
@@ -838,6 +865,36 @@ mod tests {
             .await
             .context("restore the special-folder alias uniqueness constraints")?;
 
+            sqlx::query("ALTER TABLE tombstones DROP COLUMN mapi_object_id")
+                .execute(&pool)
+                .await
+                .context("remove the retained MAPI move tombstone ID")?;
+            let error = Storage::new(pool.clone())
+                .assert_required_schema_objects(&schema_name)
+                .await
+                .expect_err("startup must reject a missing MAPI move tombstone ID");
+            let message = format!("{error:#}");
+            anyhow::ensure!(
+                message.contains("MAPI move tombstone shape"),
+                "startup rejection must identify the missing MAPI move tombstone ID: {message}"
+            );
+            sqlx::raw_sql(
+                r#"
+                ALTER TABLE tombstones
+                    ADD COLUMN mapi_object_id BIGINT CHECK (
+                        mapi_object_id IS NULL
+                        OR (
+                            object_kind = 'mailbox_message'
+                            AND mapi_object_id > 0
+                            AND (mapi_object_id & 65535) = 1
+                        )
+                    )
+                "#,
+            )
+            .execute(&pool)
+            .await
+            .context("restore the retained MAPI move tombstone ID")?;
+
             sqlx::raw_sql(
                 r#"
                 ALTER TABLE mapi_object_identities
@@ -887,7 +944,8 @@ mod tests {
                 ALTER TABLE mapi_object_identities
                     ALTER COLUMN mapi_change_number TYPE BIGINT,
                     ALTER COLUMN mapi_change_number SET NOT NULL,
-                    ALTER COLUMN predecessor_change_list SET NOT NULL;
+                    ALTER COLUMN predecessor_change_list SET NOT NULL,
+                    ADD UNIQUE (mapi_change_number);
                 ALTER TABLE mapi_object_identities
                     DROP CONSTRAINT mapi_object_identities_change_key_check,
                     ADD CHECK (octet_length(change_key) = 22);

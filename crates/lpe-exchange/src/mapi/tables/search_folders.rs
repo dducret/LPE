@@ -131,7 +131,7 @@ pub(super) fn serialize_search_content_row(
     reminder_projection: bool,
 ) -> Vec<u8> {
     match row {
-        SearchContentRow::Message(message) => serialize_message_row(&message.email, columns),
+        SearchContentRow::Message(message) => serialize_mapi_message_row(message, columns),
         SearchContentRow::Task(task) if reminder_projection => serialize_reminder_task_row(
             task,
             snapshot.reminder_for_source("task", task.canonical_id),

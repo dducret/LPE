@@ -165,6 +165,13 @@ replay uses the move change row plus tombstone to report JMAP `Email/changes`,
 mailbox count changes, IMAP QRESYNC-style expunge state, and MAPI checkpoint
 replay without rewriting historical UIDs.
 
+At the MAPI boundary, a server-side inter-folder move is also an identity
+transition: the destination receives a new MID and SourceKey, while the source
+mailbox-message tombstone retains the retired source MID so source ICS emits
+that exact deletion identity. A moved-object notification carries the distinct
+destination and old message identifiers. This follows `[MS-OXCFXICS]` section
+3.1.5.3 and `[MS-OXCNOTIF]` section 2.2.1.4.1.2.
+
 JMAP `Email/get` must expose all visible mailbox memberships for an email.
 `mailboxIds` is derived from all visible `mailbox_messages` rows for the
 requesting account. The storage projection also returns per-mailbox membership
@@ -331,6 +338,11 @@ Protocol adapters store only cursor rows:
   multi-replica PCL required by [MS-OXCFXICS] sections 3.1.5.6.1 and
   3.1.5.6.2. The 24-byte `LongTermID` form with its two-byte pad remains a
   protocol conversion value and is not stored as a SourceKey.
+  In-place normal-mail content, recipient, attachment, non-read flag, and
+  existing-draft mutations retain their MID and SourceKey while atomically
+  advancing the durable CN, ChangeKey, and PCL. This is distinct from the
+  inter-folder move transition above. These normal-message identity rules
+  follow [MS-OXCFXICS] section 3.1.5.3.
   An ICS Calendar move to Deleted Items updates the canonical Event lifecycle,
   its active `mapi_object_identities` row, and the corresponding
   `mapi_calendar_event_identity_moves` audit row in one transaction. The

@@ -2,10 +2,11 @@ use std::{env, str::FromStr, sync::OnceLock, time::Duration};
 
 use anyhow::{Context, Result};
 use lpe_storage::{
-    AttachmentUploadInput, MapiEventAttachmentChanges, MapiEventAttachmentUpsert,
-    MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
+    AttachmentUploadInput, AuditEntryInput, JmapEmailFollowupUpdate, MapiEventAttachmentChanges,
+    MapiEventAttachmentUpsert, MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
     MapiEventCustomPropertyValue, MapiEventImportedIdentity, MapiEventImportedMoveIdentity,
-    MapiEventReminderPatch, Storage, UpsertClientEventInput,
+    MapiEventReminderPatch, Storage, SubmitMessageInput, SubmittedRecipientInput,
+    UpsertClientEventInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -545,6 +546,733 @@ async fn mapi_event_commit_persists_one_atomic_version() -> Result<()> {
         .fetch_mapi_event_versions(fixture.account_id, &[fixture.event_id])
         .await?;
     assert_eq!(fetched_versions, vec![version]);
+
+    fixture.cleanup().await
+}
+
+#[tokio::test]
+async fn mapi_message_mutations_rotate_durable_mapi_version_without_rekeying_identity() -> Result<()>
+{
+    let _guard = database_test_lock().lock().await;
+    let Some(fixture) = event_fixture().await? else {
+        return Ok(());
+    };
+    let domain_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT primary_domain_id FROM accounts WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    let mailbox_id = Uuid::new_v4();
+    let message_id = Uuid::new_v4();
+    let membership_id = Uuid::new_v4();
+    let blob_id = Uuid::new_v4();
+    let thread_id = Uuid::new_v4();
+    let blob_hash = "0".repeat(64);
+    sqlx::query(
+        "INSERT INTO account_sync_state (tenant_id, account_id, category, current_modseq) \
+         VALUES ($1, $2, 'mail', 7)",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .execute(fixture.storage.pool())
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO mailboxes (
+            id, tenant_id, account_id, role, display_name, hierarchy_path,
+            hierarchy_depth, uid_validity, uid_next, total_messages, unread_messages
+        )
+        VALUES ($1, $2, $3, 'drafts', 'Drafts', '/Drafts', 0, 1, 2, 1, 1)
+        "#,
+    )
+    .bind(mailbox_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .execute(fixture.storage.pool())
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO blobs (
+            id, tenant_id, domain_id, blob_kind, content_sha256,
+            media_type, size_octets, blob_bytes
+        )
+        VALUES ($1, $2, $3, 'raw_message', $4, 'message/rfc822', 0, ''::bytea)
+        "#,
+    )
+    .bind(blob_id)
+    .bind(fixture.tenant_id)
+    .bind(domain_id)
+    .bind(&blob_hash)
+    .execute(fixture.storage.pool())
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO messages (
+            id, tenant_id, domain_id, blob_id, message_hash,
+            normalized_subject, received_at, size_octets
+        )
+        VALUES ($1, $2, $3, $4, $5, 'Before', NOW(), 0)
+        "#,
+    )
+    .bind(message_id)
+    .bind(fixture.tenant_id)
+    .bind(domain_id)
+    .bind(blob_id)
+    .bind(&blob_hash)
+    .execute(fixture.storage.pool())
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO mailbox_messages (
+            id, tenant_id, account_id, mailbox_id, message_id, thread_id,
+            imap_uid, modseq, is_seen, is_draft, received_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, 1, 7, FALSE, TRUE, NOW())
+        "#,
+    )
+    .bind(membership_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(mailbox_id)
+    .bind(message_id)
+    .bind(thread_id)
+    .execute(fixture.storage.pool())
+    .await?;
+    let source_key = change_key(60);
+    let old_change_key = change_key(70);
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_object_identities (
+            tenant_id, account_id, object_kind, canonical_id,
+            mapi_global_counter, mapi_object_id, source_key, change_key,
+            instance_key, mapi_change_number, predecessor_change_list
+        )
+        VALUES ($1, $2, 'message', $3, 60, $4, $5, $6, $5, 70, $7)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .bind(mapi_store_id(60) as i64)
+    .bind(&source_key)
+    .bind(&old_change_key)
+    .bind(predecessor_change_list(&old_change_key))
+    .execute(fixture.storage.pool())
+    .await?;
+
+    fixture
+        .storage
+        .update_jmap_email_content(
+            fixture.account_id,
+            message_id,
+            Some("After subject".to_string()),
+            Some("After".to_string()),
+            AuditEntryInput {
+                actor: "test".to_string(),
+                action: "update".to_string(),
+                subject: "message".to_string(),
+            },
+        )
+        .await?;
+
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT normalized_subject FROM messages WHERE tenant_id = $1 AND id = $2"
+        )
+        .bind(fixture.tenant_id)
+        .bind(message_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        "After subject"
+    );
+
+    let identity = sqlx::query(
+        r#"
+        SELECT mapi_global_counter, mapi_object_id, source_key, instance_key,
+               mapi_change_number, change_key, predecessor_change_list
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'message'
+          AND canonical_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(identity.get::<i64, _>("mapi_global_counter"), 60);
+    assert_eq!(
+        identity.get::<i64, _>("mapi_object_id"),
+        mapi_store_id(60) as i64
+    );
+    assert_eq!(identity.get::<Vec<u8>, _>("source_key"), source_key);
+    assert_eq!(identity.get::<Vec<u8>, _>("instance_key"), change_key(60));
+    assert_eq!(identity.get::<i64, _>("mapi_change_number"), 100);
+    assert_eq!(identity.get::<Vec<u8>, _>("change_key"), change_key(100));
+    assert_eq!(
+        identity.get::<Vec<u8>, _>("predecessor_change_list"),
+        predecessor_change_list(&change_key(100))
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        101
+    );
+
+    fixture
+        .storage
+        .update_jmap_email_followup_flags(
+            fixture.account_id,
+            message_id,
+            JmapEmailFollowupUpdate {
+                flagged: Some(true),
+                followup_flag_status: Some("flagged".to_string()),
+                ..Default::default()
+            },
+            AuditEntryInput {
+                actor: "test".to_string(),
+                action: "flag".to_string(),
+                subject: "message".to_string(),
+            },
+        )
+        .await?;
+    let followup_identity = sqlx::query(
+        r#"
+        SELECT mapi_global_counter, mapi_object_id, source_key, instance_key,
+               mapi_change_number, change_key, predecessor_change_list
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'message'
+          AND canonical_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(followup_identity.get::<i64, _>("mapi_global_counter"), 60);
+    assert_eq!(
+        followup_identity.get::<i64, _>("mapi_object_id"),
+        mapi_store_id(60) as i64
+    );
+    assert_eq!(
+        followup_identity.get::<Vec<u8>, _>("source_key"),
+        source_key
+    );
+    assert_eq!(
+        followup_identity.get::<Vec<u8>, _>("instance_key"),
+        change_key(60)
+    );
+    assert_eq!(followup_identity.get::<i64, _>("mapi_change_number"), 101);
+    assert_eq!(
+        followup_identity.get::<Vec<u8>, _>("change_key"),
+        change_key(101)
+    );
+    assert_eq!(
+        followup_identity.get::<Vec<u8>, _>("predecessor_change_list"),
+        predecessor_change_list(&change_key(101))
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        102
+    );
+
+    fixture
+        .storage
+        .update_jmap_email_followup_flags(
+            fixture.account_id,
+            message_id,
+            JmapEmailFollowupUpdate {
+                unread: Some(true),
+                ..Default::default()
+            },
+            AuditEntryInput {
+                actor: "test".to_string(),
+                action: "read".to_string(),
+                subject: "message".to_string(),
+            },
+        )
+        .await?;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT mapi_change_number FROM mapi_object_identities \
+             WHERE tenant_id = $1 AND account_id = $2 AND object_kind = 'message' AND canonical_id = $3",
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(message_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        101
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        102
+    );
+
+    fixture
+        .storage
+        .replace_message_recipients(
+            fixture.account_id,
+            message_id,
+            &[SubmittedRecipientInput {
+                address: "recipient@example.test".to_string(),
+                display_name: Some("Recipient".to_string()),
+            }],
+            &[],
+            &[],
+            AuditEntryInput {
+                actor: "test".to_string(),
+                action: "recipients".to_string(),
+                subject: "message".to_string(),
+            },
+        )
+        .await?;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT address FROM message_recipients \
+             WHERE tenant_id = $1 AND message_id = $2 AND role = 'to'",
+        )
+        .bind(fixture.tenant_id)
+        .bind(message_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        "recipient@example.test"
+    );
+    let recipient_identity = sqlx::query(
+        r#"
+        SELECT mapi_global_counter, mapi_object_id, source_key, instance_key,
+               mapi_change_number, change_key, predecessor_change_list
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'message'
+          AND canonical_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(recipient_identity.get::<i64, _>("mapi_global_counter"), 60);
+    assert_eq!(
+        recipient_identity.get::<i64, _>("mapi_object_id"),
+        mapi_store_id(60) as i64
+    );
+    assert_eq!(
+        recipient_identity.get::<Vec<u8>, _>("source_key"),
+        source_key
+    );
+    assert_eq!(
+        recipient_identity.get::<Vec<u8>, _>("instance_key"),
+        change_key(60)
+    );
+    assert_eq!(recipient_identity.get::<i64, _>("mapi_change_number"), 102);
+    assert_eq!(
+        recipient_identity.get::<Vec<u8>, _>("change_key"),
+        change_key(102)
+    );
+    assert_eq!(
+        recipient_identity.get::<Vec<u8>, _>("predecessor_change_list"),
+        predecessor_change_list(&change_key(102))
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        103
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mail_change_log \
+             WHERE object_kind = 'mailbox_message' \
+               AND object_id = $1 \
+               AND summary_json ->> 'recipientsChanged' = 'true'",
+        )
+        .bind(membership_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        1
+    );
+
+    let (_email, attachment) = fixture
+        .storage
+        .add_message_attachment(
+            fixture.account_id,
+            message_id,
+            AttachmentUploadInput {
+                file_name: "message.txt".to_string(),
+                media_type: "text/plain".to_string(),
+                disposition: Some("attachment".to_string()),
+                content_id: None,
+                blob_bytes: b"message attachment".to_vec(),
+            },
+            AuditEntryInput {
+                actor: "test".to_string(),
+                action: "attachment-add".to_string(),
+                subject: "message".to_string(),
+            },
+        )
+        .await?
+        .expect("message attachment must be added");
+    let attachment_identity = sqlx::query(
+        r#"
+        SELECT mapi_global_counter, mapi_object_id, source_key, instance_key,
+               mapi_change_number, change_key, predecessor_change_list
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'message'
+          AND canonical_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(attachment_identity.get::<i64, _>("mapi_global_counter"), 60);
+    assert_eq!(
+        attachment_identity.get::<i64, _>("mapi_object_id"),
+        mapi_store_id(60) as i64
+    );
+    assert_eq!(
+        attachment_identity.get::<Vec<u8>, _>("source_key"),
+        source_key
+    );
+    assert_eq!(
+        attachment_identity.get::<Vec<u8>, _>("instance_key"),
+        change_key(60)
+    );
+    assert_eq!(attachment_identity.get::<i64, _>("mapi_change_number"), 103);
+    assert_eq!(
+        attachment_identity.get::<Vec<u8>, _>("change_key"),
+        change_key(103)
+    );
+    assert_eq!(
+        attachment_identity.get::<Vec<u8>, _>("predecessor_change_list"),
+        predecessor_change_list(&change_key(103))
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        104
+    );
+
+    assert!(fixture
+        .storage
+        .delete_message_attachment(
+            fixture.account_id,
+            &attachment.file_reference,
+            AuditEntryInput {
+                actor: "test".to_string(),
+                action: "attachment-delete".to_string(),
+                subject: "message".to_string(),
+            },
+        )
+        .await?
+        .is_some());
+    assert!(
+        !sqlx::query_scalar::<_, bool>(
+            "SELECT has_attachments FROM messages WHERE tenant_id = $1 AND id = $2",
+        )
+        .bind(fixture.tenant_id)
+        .bind(message_id)
+        .fetch_one(fixture.storage.pool())
+        .await?
+    );
+    let deleted_attachment_identity = sqlx::query(
+        r#"
+        SELECT mapi_global_counter, mapi_object_id, source_key, instance_key,
+               mapi_change_number, change_key, predecessor_change_list
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'message'
+          AND canonical_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(
+        deleted_attachment_identity.get::<i64, _>("mapi_global_counter"),
+        60
+    );
+    assert_eq!(
+        deleted_attachment_identity.get::<i64, _>("mapi_object_id"),
+        mapi_store_id(60) as i64
+    );
+    assert_eq!(
+        deleted_attachment_identity.get::<Vec<u8>, _>("source_key"),
+        source_key
+    );
+    assert_eq!(
+        deleted_attachment_identity.get::<Vec<u8>, _>("instance_key"),
+        change_key(60)
+    );
+    assert_eq!(
+        deleted_attachment_identity.get::<i64, _>("mapi_change_number"),
+        104
+    );
+    assert_eq!(
+        deleted_attachment_identity.get::<Vec<u8>, _>("change_key"),
+        change_key(104)
+    );
+    assert_eq!(
+        deleted_attachment_identity.get::<Vec<u8>, _>("predecessor_change_list"),
+        predecessor_change_list(&change_key(104))
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        105
+    );
+
+    let imap_flag_change_number = sqlx::query_scalar::<_, i64>(
+        "SELECT mapi_change_number FROM mapi_object_identities \
+         WHERE tenant_id = $1 AND account_id = $2 AND object_kind = 'message' AND canonical_id = $3",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    let imap_flag_next_global_counter = sqlx::query_scalar::<_, i64>(
+        "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE",
+    )
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    fixture
+        .storage
+        .update_imap_flags(
+            fixture.account_id,
+            mailbox_id,
+            &[message_id],
+            None,
+            Some(false),
+            None,
+            None,
+        )
+        .await?;
+    assert!(
+        !sqlx::query_scalar::<_, bool>(
+            "SELECT is_flagged FROM mailbox_messages \
+             WHERE tenant_id = $1 AND account_id = $2 AND mailbox_id = $3 AND message_id = $4",
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(mailbox_id)
+        .bind(message_id)
+        .fetch_one(fixture.storage.pool())
+        .await?
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT mapi_change_number FROM mapi_object_identities \
+             WHERE tenant_id = $1 AND account_id = $2 AND object_kind = 'message' AND canonical_id = $3",
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(message_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        imap_flag_change_number + 1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        imap_flag_next_global_counter + 1
+    );
+
+    fixture
+        .storage
+        .update_imap_flags(
+            fixture.account_id,
+            mailbox_id,
+            &[message_id],
+            Some(false),
+            None,
+            None,
+            None,
+        )
+        .await?;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT mapi_change_number FROM mapi_object_identities \
+             WHERE tenant_id = $1 AND account_id = $2 AND object_kind = 'message' AND canonical_id = $3",
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(message_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        imap_flag_change_number + 1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        imap_flag_next_global_counter + 1
+    );
+
+    let draft_from_address = sqlx::query_scalar::<_, String>(
+        "SELECT primary_email FROM accounts WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    let draft_save_change_number = sqlx::query_scalar::<_, i64>(
+        "SELECT mapi_change_number FROM mapi_object_identities \
+         WHERE tenant_id = $1 AND account_id = $2 AND object_kind = 'message' AND canonical_id = $3",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    let draft_save_next_global_counter = sqlx::query_scalar::<_, i64>(
+        "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE",
+    )
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    let saved_draft = fixture
+        .storage
+        .save_draft_message(
+            SubmitMessageInput {
+                draft_message_id: Some(message_id),
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "test".to_string(),
+                from_display: Some("Alice".to_string()),
+                from_address: draft_from_address,
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "recipient@example.test".to_string(),
+                    display_name: Some("Recipient".to_string()),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Draft rewrite".to_string(),
+                body_text: "Draft body rewrite".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: None,
+                mime_blob_ref: None,
+                size_octets: 0,
+                unread: Some(false),
+                flagged: Some(false),
+                attachments: Vec::new(),
+            },
+            AuditEntryInput {
+                actor: "test".to_string(),
+                action: "draft-save".to_string(),
+                subject: "message".to_string(),
+            },
+        )
+        .await?;
+    assert_eq!(saved_draft.message_id, message_id);
+    assert_eq!(saved_draft.draft_mailbox_id, mailbox_id);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT normalized_subject FROM messages WHERE tenant_id = $1 AND id = $2",
+        )
+        .bind(fixture.tenant_id)
+        .bind(message_id)
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        "Draft rewrite"
+    );
+    let draft_identity = sqlx::query(
+        "SELECT mapi_global_counter, source_key, mapi_change_number \
+         FROM mapi_object_identities \
+         WHERE tenant_id = $1 AND account_id = $2 AND object_kind = 'message' AND canonical_id = $3",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(draft_identity.get::<i64, _>("mapi_global_counter"), 60);
+    assert_eq!(draft_identity.get::<Vec<u8>, _>("source_key"), source_key);
+    assert_eq!(
+        draft_identity.get::<i64, _>("mapi_change_number"),
+        draft_save_change_number + 1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        draft_save_next_global_counter + 1
+    );
+
+    sqlx::query(
+        "DELETE FROM mapi_object_identities \
+         WHERE tenant_id = $1 AND account_id = $2 AND object_kind = 'message' AND canonical_id = $3",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(message_id)
+    .execute(fixture.storage.pool())
+    .await?;
+    fixture
+        .storage
+        .update_jmap_email_content(
+            fixture.account_id,
+            message_id,
+            None,
+            Some("After without identity".to_string()),
+            AuditEntryInput {
+                actor: "test".to_string(),
+                action: "update".to_string(),
+                subject: "message without identity".to_string(),
+            },
+        )
+        .await?;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT next_global_counter FROM mapi_store_identity WHERE singleton = TRUE"
+        )
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        107
+    );
 
     fixture.cleanup().await
 }

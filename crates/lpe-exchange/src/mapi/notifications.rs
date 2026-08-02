@@ -1,3 +1,4 @@
+#[cfg(test)]
 use super::identity::wire_id_bytes_from_object_id;
 use super::rop::*;
 use super::wire::{
@@ -248,6 +249,7 @@ mod tests {
     #[test]
     fn new_mail_notification_with_message_id_encodes_message_notification_data() {
         // [MS-OXCNOTIF] section 4 shows NewMail with both FolderId and MessageId.
+        let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
         let folder_id = 0x0000_0000_0005_0001;
         let message_id = 0x0000_0001_009a_0001;
         let event = MapiNotificationEvent::canonical(
@@ -268,8 +270,8 @@ mod tests {
         )
         .with_new_mail_message_flags(0x12);
 
-        let response =
-            rop_notify_response(3, 0, &event).expect("complete NewMail notification serializes");
+        let response = rop_notify_response(&identity_codec, 3, 0, &event)
+            .expect("complete NewMail notification serializes");
 
         assert_eq!(response[0], 0x2A);
         assert_eq!(&response[1..5], &3u32.to_le_bytes());
@@ -289,6 +291,7 @@ mod tests {
 
     #[test]
     fn new_mail_notification_without_message_class_defaults_to_ipm_note() {
+        let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
         let event = MapiNotificationEvent::canonical(
             MapiNotificationKind::Content,
             MapiNotificationEventMask::NewMail.as_u16(),
@@ -306,14 +309,15 @@ mod tests {
             None,
         );
 
-        let response =
-            rop_notify_response(3, 0, &event).expect("complete NewMail notification serializes");
+        let response = rop_notify_response(&identity_codec, 3, 0, &event)
+            .expect("complete NewMail notification serializes");
 
         assert_eq!(&response[28..], b"\0IPM.Note\0");
     }
 
     #[test]
     fn object_moved_and_copied_notifications_preserve_source_message_id() {
+        let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
         let folder_id = 0x0000_0000_0006_0001;
         let message_id = 0x0000_0001_009a_0001;
         let old_folder_id = 0x0000_0000_0005_0001;
@@ -341,7 +345,7 @@ mod tests {
             )
             .with_old_message_id(Some(old_message_id));
 
-            let response = rop_notify_response(3, 0, &event)
+            let response = rop_notify_response(&identity_codec, 3, 0, &event)
                 .expect("complete movement notification serializes");
 
             assert_eq!(&response[6..8], &expected_flags.to_le_bytes());
@@ -366,6 +370,7 @@ mod tests {
 
     #[test]
     fn incomplete_message_move_notifications_are_not_serialized() {
+        let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
         let event = MapiNotificationEvent::canonical(
             MapiNotificationKind::Content,
             MapiNotificationEventMask::ObjectMoved.as_u16(),
@@ -383,7 +388,7 @@ mod tests {
             None,
         );
 
-        assert!(rop_notify_response(3, 0, &event).is_none());
+        assert!(rop_notify_response(&identity_codec, 3, 0, &event).is_none());
 
         let event_without_old_folder = MapiNotificationEvent::canonical(
             MapiNotificationKind::Content,
@@ -403,7 +408,7 @@ mod tests {
         )
         .with_old_message_id(Some(0x0000_0001_0089_0001));
 
-        assert!(rop_notify_response(3, 0, &event_without_old_folder).is_none());
+        assert!(rop_notify_response(&identity_codec, 3, 0, &event_without_old_folder).is_none());
     }
 }
 
@@ -422,6 +427,7 @@ pub(in crate::mapi) fn notification_wait_body(event_pending: bool) -> Vec<u8> {
 /// section 2.2.1.4.1.2. RopNotify is an extra ROP response appended to the
 /// RopsList and carries the notification subscription's server object handle.
 pub(in crate::mapi) fn rop_notify_response(
+    identity_codec: &crate::mapi::identity::MapiIdentityCodec,
     notification_handle: u32,
     logon_id: u8,
     event: &MapiNotificationEvent,
@@ -432,11 +438,15 @@ pub(in crate::mapi) fn rop_notify_response(
     let mut response = vec![0x2A];
     write_u32(&mut response, notification_handle);
     response.push(logon_id);
-    append_notification_data(&mut response, event);
+    append_notification_data(&mut response, identity_codec, event);
     Some(response)
 }
 
-fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEvent) {
+fn append_notification_data(
+    response: &mut Vec<u8>,
+    identity_codec: &crate::mapi::identity::MapiIdentityCodec,
+    event: &MapiNotificationEvent,
+) {
     let notification_type = event.event_mask & 0x0FFF;
     let message_event = event.kind == MapiNotificationKind::Content && event.message_id.is_some();
     match notification_type {
@@ -456,7 +466,10 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
                 flags |= 0x2000;
             }
             write_u16(response, flags);
-            append_event_object_ids(response, event, message_event);
+            append_event_object_ids(response, identity_codec, event, message_event);
+            // [MS-OXCNOTIF] section 2.2.1.4.1.2: ObjectModified TagCount
+            // SHOULD be zero. The nonzero vectors in the examples are legacy
+            // Exchange behavior and are not the Exchange 2016 reference shape.
             write_u16(response, 0);
             if let Some(total_messages) = event.total_messages {
                 write_u32(response, total_messages.max(0) as u32);
@@ -470,9 +483,9 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
                 response,
                 notification_type | if message_event { 0x8000 } else { 0 },
             );
-            append_event_object_ids(response, event, message_event);
+            append_event_object_ids(response, identity_codec, event, message_event);
             if !message_event {
-                append_wire_id(response, event.folder_id);
+                append_wire_id(response, identity_codec, event.folder_id);
             }
             if notification_type == 0x0004 {
                 write_u16(response, 0);
@@ -484,14 +497,19 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
                 notification_type | if message_event { 0x8000 } else { 0 },
             );
             let object_id = event_object_id(event);
-            append_wire_id(response, object_id);
+            append_wire_id(response, identity_codec, object_id);
             if message_event {
-                append_wire_id(response, event.message_id.unwrap_or_default());
+                append_wire_id(
+                    response,
+                    identity_codec,
+                    event.message_id.unwrap_or_default(),
+                );
             } else {
-                append_wire_id(response, event.folder_id);
+                append_wire_id(response, identity_codec, event.folder_id);
             }
             append_wire_id(
                 response,
+                identity_codec,
                 event
                     .old_folder_id
                     .expect("movement notification was validated before encoding"),
@@ -499,6 +517,7 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
             if message_event {
                 append_wire_id(
                     response,
+                    identity_codec,
                     event
                         .old_message_id
                         .expect("movement notification was validated before encoding"),
@@ -506,6 +525,7 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
             } else {
                 append_wire_id(
                     response,
+                    identity_codec,
                     event
                         .old_folder_id
                         .expect("movement notification was validated before encoding"),
@@ -514,7 +534,7 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
         }
         0x0002 if message_event => {
             write_u16(response, 0x8002);
-            append_event_object_ids(response, event, true);
+            append_event_object_ids(response, identity_codec, event, true);
             // [MS-OXCNOTIF] section 2.2.1.4.1.2 carries PidTagMessageFlags
             // in every NewMail notification.
             write_u32(response, event.new_mail_message_flags.unwrap_or_default());
@@ -533,7 +553,7 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
         }
         0x0080 => {
             write_u16(response, 0x0080);
-            append_wire_id(response, event_object_id(event));
+            append_wire_id(response, identity_codec, event_object_id(event));
         }
         _ => {
             write_u16(response, 0x0100);
@@ -544,12 +564,17 @@ fn append_notification_data(response: &mut Vec<u8>, event: &MapiNotificationEven
 
 fn append_event_object_ids(
     response: &mut Vec<u8>,
+    identity_codec: &crate::mapi::identity::MapiIdentityCodec,
     event: &MapiNotificationEvent,
     message_event: bool,
 ) {
-    append_wire_id(response, event_object_id(event));
+    append_wire_id(response, identity_codec, event_object_id(event));
     if message_event {
-        append_wire_id(response, event.message_id.unwrap_or_default());
+        append_wire_id(
+            response,
+            identity_codec,
+            event.message_id.unwrap_or_default(),
+        );
     }
 }
 
@@ -560,8 +585,16 @@ fn event_object_id(event: &MapiNotificationEvent) -> u64 {
     }
 }
 
-fn append_wire_id(response: &mut Vec<u8>, object_id: u64) {
-    response.extend_from_slice(&wire_id_bytes_from_object_id(object_id).unwrap_or([0; 8]));
+fn append_wire_id(
+    response: &mut Vec<u8>,
+    identity_codec: &crate::mapi::identity::MapiIdentityCodec,
+    object_id: u64,
+) {
+    response.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(object_id)
+            .unwrap_or([0; 8]),
+    );
 }
 
 pub(in crate::mapi) fn registration_matches_event(

@@ -1221,6 +1221,30 @@ not by itself authorize broad client publication.
   action FAI rows, destroyed conversation actions as `IncrSyncDel`, tombstones,
   read-state changes, and final state. It emits no conversation action row when
   canonical `conversation_actions` is empty.
+- Normal-mail content rows retain their persisted `mapi_object_identities`
+  identity/version tuple when a snapshot is loaded: `PidTagMid`, SourceKey,
+  ChangeNumber, ChangeKey, predecessor list, and last-modification time are not
+  synthesized from mailbox `modseq`. A canonical normal-mail content,
+  recipient, attachment, non-read flag, or existing-draft mutation preserves
+  its MID, SourceKey, and InstanceKey while atomically allocating and persisting
+  a successor CN/ChangeKey/PCL. The same durable CN is used for the emitted row
+  and `MetaTagCnsetSeen`, so a client cannot acknowledge a synthetic version
+  that differs from the advertised object. This follows `[MS-OXCFXICS]`
+  sections 2.2.1.2.3, 2.2.1.2.7, 2.2.1.2.8, 3.1.5.3, and 3.2.5.9.1.1.
+- Normal-message direct GetProps, regular/categorized contents tables, and
+  FindRow use that same durable tuple. Direct `CopyTo`/`CopyProperties` project
+  SourceKey, ChangeKey, predecessor list, and last-modification time only when
+  the existing property filter permits them; provider-internal MID and CN remain
+  outside that direct message-content projection. This keeps the direct and ICS
+  versions coherent without changing the documented CopyTo/CopyProperties
+  selection contract.
+- A server-side normal-mail inter-folder move allocates a distinct destination
+  MID and SourceKey, retains the retired source MID on the source
+  mailbox-message tombstone, and emits that exact retired MID in the source
+  ICS deletion. Its moved notification therefore carries distinct destination
+  and old message identifiers rather than reusing the destination MID. This
+  follows `[MS-OXCFXICS]` section 3.1.5.3 and `[MS-OXCNOTIF]` section
+  2.2.1.4.1.2.
 - When `SynchronizationExtraFlags.OrderByDeliveryTime` is set, the complete
   normal/FAI `messageChange` sequence is ordered newest to oldest by
   `PidTagMessageDeliveryTime`, falling back to `PidTagLastModificationTime` when
@@ -1292,7 +1316,11 @@ not by itself authorize broad client publication.
   event delivery remain session-local; after process restart or movement to a
   different worker, the session must re-register and resume from canonical
   sync/checkpoint behavior rather than relying on cross-process notification
-  delivery. The generic mailbox-copy path does not yet produce a durable
+  delivery. Notification FolderId and MessageId fields are serialized through
+  the authenticated request's scoped identity codec, including an otherwise
+  release-only Execute that has registered notification targets; logical
+  default-folder role IDs are never emitted as wire identifiers. The generic
+  mailbox-copy path does not yet produce a durable
   `copied` change, so it cannot emit `ObjectCopied` until the canonical copy
   identity lifecycle is implemented. Full notification registration, all table
   row values, and Exchange delivery parity remain deferred.

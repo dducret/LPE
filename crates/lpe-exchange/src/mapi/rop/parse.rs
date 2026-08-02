@@ -308,6 +308,14 @@ impl RopRequest {
         usize::from(requested)
     }
 
+    pub(in crate::mapi) fn fast_transfer_uses_server_determined_buffer_size(&self) -> bool {
+        self.payload
+            .get(..2)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            == Some(0xBABE)
+    }
+
     pub(in crate::mapi) fn stream_data(&self) -> &[u8] {
         let Some(size_bytes) = self.payload.get(..4) else {
             return &[];

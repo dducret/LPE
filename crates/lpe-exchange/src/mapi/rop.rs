@@ -1131,13 +1131,18 @@ pub(in crate::mapi) fn serialize_object_property(
             message_id,
             saved_email,
             ..
-        }) => message_for_id(*folder_id, *message_id, mailboxes, emails)
+        }) => snapshot
+            .message_for_id(*folder_id, *message_id)
+            .map(|message| serialize_mapi_message_row(message, &[tag]))
             .or_else(|| {
-                search_folder_message_for_id(snapshot, *folder_id, *message_id)
-                    .map(|message| &message.email)
+                message_for_id(*folder_id, *message_id, mailboxes, emails)
+                    .or_else(|| {
+                        search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                            .map(|message| &message.email)
+                    })
+                    .or(saved_email.as_ref().map(|saved| &saved.email))
+                    .map(|email| serialize_message_row(email, &[tag]))
             })
-            .or(saved_email.as_ref().map(|saved| &saved.email))
-            .map(|email| serialize_message_row(email, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);

@@ -4,7 +4,10 @@ use anyhow::{anyhow, bail, Result};
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::{AuditEntryInput, JmapEmail, JmapEmailFollowupUpdate, Storage};
+use crate::{
+    mapi_message_identity::rotate_active_mapi_message_identity_in_tx, AuditEntryInput, JmapEmail,
+    JmapEmailFollowupUpdate, Storage,
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct MessageFlagUpdate {
@@ -154,6 +157,24 @@ pub async fn update_imap_flags(
     .await?;
 
     if !rows.is_empty() {
+        if flagged.is_some() {
+            // [MS-OXCFXICS] sections 2.2.1.2.3, 2.2.1.2.7, 2.2.1.2.8, and
+            // 3.1.5.3 require a new server change version for a direct
+            // message-property change. Read-state-only updates use CnsetRead.
+            let mut changed_message_ids = rows
+                .iter()
+                .map(|row| row.try_get::<Uuid, _>("message_id"))
+                .collect::<Result<Vec<_>, _>>()?;
+            changed_message_ids.sort_unstable();
+            changed_message_ids.dedup();
+            for message_id in changed_message_ids {
+                rotate_active_mapi_message_identity_in_tx(
+                    &mut tx, &tenant_id, account_id, message_id,
+                )
+                .await?;
+            }
+        }
+
         let principals =
             Storage::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
         for row in rows {

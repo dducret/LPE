@@ -95,19 +95,64 @@ fn category_value_to_string(value: &MapiValue) -> String {
 }
 
 pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32]) -> Vec<u8> {
-    serialize_message_row_with_table_instance(email, columns, 0, 0, None)
+    serialize_message_row_with_table_instance(email, None, columns, 0, 0, None)
+}
+
+pub(in crate::mapi) fn serialize_mapi_message_row(
+    message: &MapiMessage,
+    columns: &[u32],
+) -> Vec<u8> {
+    serialize_message_row_with_table_instance(
+        &message.email,
+        message.durable_identity.as_ref(),
+        columns,
+        0,
+        0,
+        None,
+    )
 }
 
 pub(in crate::mapi) fn serialize_message_property_row(
     email: &JmapEmail,
     columns: &[u32],
 ) -> Vec<u8> {
+    serialize_message_property_row_with_durable_identity(email, None, columns)
+}
+
+pub(in crate::mapi) fn serialize_mapi_message_property_row(
+    message: &MapiMessage,
+    columns: &[u32],
+) -> Vec<u8> {
+    serialize_message_property_row_with_durable_identity(
+        &message.email,
+        message.durable_identity.as_ref(),
+        columns,
+    )
+}
+
+pub(in crate::mapi) fn serialize_message_property_row_in_snapshot(
+    email: &JmapEmail,
+    snapshot: &MapiMailStoreSnapshot,
+    columns: &[u32],
+) -> Vec<u8> {
+    snapshot
+        .message_for_canonical_id(email.id)
+        .map(|message| serialize_mapi_message_property_row(message, columns))
+        .unwrap_or_else(|| serialize_message_property_row(email, columns))
+}
+
+fn serialize_message_property_row_with_durable_identity(
+    email: &JmapEmail,
+    durable_identity: Option<&crate::store::MapiIdentityRecord>,
+    columns: &[u32],
+) -> Vec<u8> {
     let present = columns
         .iter()
-        .map(|column| message_table_property_is_present(email, *column))
+        .map(|column| message_table_property_is_present(email, durable_identity, *column))
         .collect::<Vec<_>>();
     if present.iter().all(|present| *present) {
-        let values = serialize_message_row(email, columns);
+        let values =
+            serialize_message_row_with_table_instance(email, durable_identity, columns, 0, 0, None);
         let mut row = Vec::new();
         write_query_rows_property_row(&mut row, columns, &values);
         return row;
@@ -117,7 +162,14 @@ pub(in crate::mapi) fn serialize_message_property_row(
     for (column, present) in columns.iter().zip(present) {
         if present {
             row.push(0);
-            let value = serialize_message_row(email, &[*column]);
+            let value = serialize_message_row_with_table_instance(
+                email,
+                durable_identity,
+                &[*column],
+                0,
+                0,
+                None,
+            );
             let mut standard = Vec::new();
             write_query_rows_property_row(&mut standard, &[*column], &value);
             row.extend_from_slice(&standard[1..]);
@@ -129,15 +181,20 @@ pub(in crate::mapi) fn serialize_message_property_row(
     row
 }
 
-fn message_table_property_is_present(email: &JmapEmail, property_tag: u32) -> bool {
+fn message_table_property_is_present(
+    email: &JmapEmail,
+    durable_identity: Option<&crate::store::MapiIdentityRecord>,
+    property_tag: u32,
+) -> bool {
     matches!(
         canonical_property_storage_tag(property_tag),
         PID_TAG_INST_ID | PID_TAG_INSTANCE_NUM | PID_TAG_ROW_TYPE | PID_TAG_DEPTH
-    ) || email_property_value(email, property_tag).is_some()
+    ) || email_property_value_with_durable_identity(email, durable_identity, property_tag).is_some()
 }
 
 pub(super) fn serialize_categorized_message_row(
     email: &JmapEmail,
+    durable_identity: Option<&crate::store::MapiIdentityRecord>,
     columns: &[u32],
     category_property_tag: u32,
     category_value: &str,
@@ -145,6 +202,7 @@ pub(super) fn serialize_categorized_message_row(
 ) -> Vec<u8> {
     serialize_message_row_with_table_instance(
         email,
+        durable_identity,
         columns,
         instance_num,
         1,
@@ -154,11 +212,15 @@ pub(super) fn serialize_categorized_message_row(
 
 fn serialize_message_row_with_table_instance(
     email: &JmapEmail,
+    durable_identity: Option<&crate::store::MapiIdentityRecord>,
     columns: &[u32],
     instance_num: u32,
     depth: u32,
     category_value: Option<(u32, &str)>,
 ) -> Vec<u8> {
+    let message_id = durable_identity
+        .map(|identity| identity.object_id)
+        .unwrap_or_else(|| mapi_message_id(email));
     let mut row = Vec::new();
     for column in columns {
         let storage_tag = canonical_property_storage_tag(*column);
@@ -172,8 +234,8 @@ fn serialize_message_row_with_table_instance(
             PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID => {
                 write_object_id(&mut row, mapi_folder_id_for_email(email))
             }
-            PID_TAG_MID => write_object_id(&mut row, mapi_message_id(email)),
-            PID_TAG_INST_ID => write_u64(&mut row, mapi_message_id(email)),
+            PID_TAG_MID => write_object_id(&mut row, message_id),
+            PID_TAG_INST_ID => write_u64(&mut row, message_id),
             PID_TAG_INSTANCE_NUM => write_u32(&mut row, instance_num),
             PID_TAG_ROW_TYPE => write_u32(&mut row, TABLE_LEAF_ROW),
             PID_TAG_DEPTH => write_u32(&mut row, depth),
@@ -183,12 +245,17 @@ fn serialize_message_row_with_table_instance(
             PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => {
                 write_utf16z(&mut row, message_class_for_email(email))
             }
-            PID_TAG_CREATION_TIME
-            | PID_TAG_MESSAGE_DELIVERY_TIME
-            | PID_TAG_LAST_MODIFICATION_TIME
-            | PID_TAG_LOCAL_COMMIT_TIME => write_u64(
+            PID_TAG_CREATION_TIME | PID_TAG_MESSAGE_DELIVERY_TIME => write_u64(
                 &mut row,
                 mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
+            ),
+            PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => write_u64(
+                &mut row,
+                durable_identity
+                    .map(|identity| identity.last_modification_time)
+                    .unwrap_or_else(|| {
+                        mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at)
+                    }),
             ),
             PID_TAG_CLIENT_SUBMIT_TIME => {
                 write_u64(&mut row, email_client_submit_time_filetime(email))
@@ -234,13 +301,14 @@ fn serialize_message_row_with_table_instance(
             PID_TAG_MESSAGE_LOCALE_ID => write_u32(&mut row, 0x0409),
             PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
                 &mut row,
-                &crate::mapi::identity::instance_key_for_object_id(mapi_message_id(email)),
+                &crate::mapi::identity::instance_key_for_object_id(message_id),
             ),
             PID_TAG_INTERNET_MESSAGE_ID_W => {
                 write_utf16z(&mut row, email.internet_message_id.as_deref().unwrap_or(""))
             }
             PID_NAME_CONTENT_CLASS_W_TAG => write_utf16z(&mut row, "urn:content-classes:message"),
-            _ => match email_property_value(email, *column) {
+            _ => match email_property_value_with_durable_identity(email, durable_identity, *column)
+            {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
             },
@@ -250,6 +318,7 @@ fn serialize_message_row_with_table_instance(
 }
 
 pub(super) fn categorized_email_rows(
+    snapshot: Option<&MapiMailStoreSnapshot>,
     folder_id: u64,
     emails: Vec<&JmapEmail>,
     columns: &[u32],
@@ -263,7 +332,10 @@ pub(super) fn categorized_email_rows(
             .map(|email| CategorizedTableRow {
                 category_id: 0,
                 leaf_count: 1,
-                row: serialize_message_row(email, columns),
+                row: snapshot
+                    .and_then(|snapshot| snapshot.message_for_canonical_id(email.id))
+                    .map(|message| serialize_mapi_message_row(message, columns))
+                    .unwrap_or_else(|| serialize_message_row(email, columns)),
                 leaf: true,
             })
             .collect();
@@ -309,22 +381,23 @@ pub(super) fn categorized_email_rows(
             leaf: false,
         });
         if expanded {
-            rows.extend(
-                leaves
-                    .into_iter()
-                    .map(|(email, instance_num)| CategorizedTableRow {
-                        category_id,
-                        leaf_count: 1,
-                        row: serialize_categorized_message_row(
-                            email,
-                            columns,
-                            category_sort.property_tag,
-                            &value,
-                            instance_num,
-                        ),
-                        leaf: true,
-                    }),
-            );
+            rows.extend(leaves.into_iter().map(|(email, instance_num)| {
+                CategorizedTableRow {
+                    category_id,
+                    leaf_count: 1,
+                    row: serialize_categorized_message_row(
+                        email,
+                        snapshot
+                            .and_then(|snapshot| snapshot.message_for_canonical_id(email.id))
+                            .and_then(|message| message.durable_identity.as_ref()),
+                        columns,
+                        category_sort.property_tag,
+                        &value,
+                        instance_num,
+                    ),
+                    leaf: true,
+                }
+            }));
         }
     }
     rows

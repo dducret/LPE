@@ -747,6 +747,18 @@ impl MapiMailStoreSnapshot {
             .collect()
     }
 
+    pub(crate) fn message_for_canonical_id(&self, canonical_id: Uuid) -> Option<&MapiMessage> {
+        self.messages
+            .iter()
+            .find(|message| message.canonical_id == canonical_id)
+    }
+
+    pub(crate) fn message_for_id(&self, folder_id: u64, message_id: u64) -> Option<&MapiMessage> {
+        self.messages
+            .iter()
+            .find(|message| message.folder_id == folder_id && message.id == message_id)
+    }
+
     pub(crate) fn content_table_window_emails(
         &self,
         folder_id: u64,

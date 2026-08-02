@@ -3,8 +3,9 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::{
-    normalize_email, normalize_subject, sha256_hex, trim_optional_text, AuditEntryInput,
-    JmapEmailRecipientRow, Storage,
+    mapi_message_identity::rotate_active_mapi_message_identity_in_tx, normalize_email,
+    normalize_subject, sha256_hex, trim_optional_text, AuditEntryInput, JmapEmailRecipientRow,
+    Storage,
 };
 
 mod delegation;
@@ -129,7 +130,56 @@ impl Storage {
             .await?;
         }
 
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        let rows = sqlx::query(
+            r#"
+            UPDATE mailbox_messages
+            SET modseq = $4, updated_at = NOW()
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND message_id = $3
+              AND visibility = 'visible'
+            RETURNING id, mailbox_id, thread_id, imap_uid
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .bind(modseq)
+        .fetch_all(&mut *tx)
+        .await?;
+        if rows.is_empty() {
+            bail!("message not found");
+        }
+        rotate_active_mapi_message_identity_in_tx(&mut tx, &tenant_id, account_id, message_id)
+            .await?;
+
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        for row in rows {
+            Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(account_id),
+                Some(row.try_get("mailbox_id")?),
+                "mailbox_message",
+                row.try_get("id")?,
+                "updated",
+                modseq,
+                &principals,
+                serde_json::json!({
+                    "messageId": message_id,
+                    "threadId": row.try_get::<Uuid, _>("thread_id")?,
+                    "imapUid": row.try_get::<i64, _>("imap_uid")?,
+                    "recipientsChanged": true
+                }),
+            )
+            .await?;
+        }
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -505,6 +555,15 @@ impl Storage {
             "",
         )
         .await?;
+        if existing_draft_update {
+            rotate_active_mapi_message_identity_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                message_id,
+            )
+            .await?;
+        }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;

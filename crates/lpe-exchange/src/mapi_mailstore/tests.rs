@@ -510,15 +510,45 @@ fn sync_manifest_serializes_content_message_header_in_fixed_order() {
         email_id,
         crate::mapi::identity::mapi_store_id(50),
     );
-    let email = test_email();
-    let buffer = sync_manifest_buffer_with_attachments(
-        0x01,
+    let mut email = test_email();
+    email.modseq = 7;
+    email.mailbox_states[0].modseq = 7;
+    let durable_object_id = crate::mapi::identity::mapi_store_id(65_668);
+    let durable_change_number = 65_669;
+    let durable_source_key = source_key_for_store_id(durable_object_id);
+    let durable_change_key = change_key_for_change_number(durable_change_number);
+    let durable_predecessor_change_list = predecessor_change_list(durable_change_number);
+    let durable_last_modification_time = 133_983_180_000_000_000;
+    let durable_fact = NormalMessageSyncFact {
+        canonical_id: email.id,
+        object_id: durable_object_id,
+        source_key: durable_source_key.clone(),
+        change_number: durable_change_number,
+        change_key: durable_change_key.clone(),
+        predecessor_change_list: durable_predecessor_change_list.clone(),
+        last_modification_time: durable_last_modification_time,
+    };
+    let buffer = sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times_and_normal_message_facts(
+        Uuid::nil(),
+        SYNC_TYPE_CONTENTS,
         SYNC_FLAG_NORMAL,
         SYNC_EXTRA_FLAG_EID | SYNC_EXTRA_FLAG_MESSAGE_SIZE | SYNC_EXTRA_FLAG_CHANGE_NUMBER,
         &[],
         crate::mapi::identity::INBOX_FOLDER_ID,
         &[],
-        &[email],
+        std::slice::from_ref(&email),
+        &[],
+        std::slice::from_ref(&durable_fact),
+        &[],
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&email),
+        &[],
+        std::slice::from_ref(&durable_fact),
+        &[],
+        std::slice::from_ref(&email),
+        &[],
         &[],
         &[],
         1,
@@ -542,11 +572,47 @@ fn sync_manifest_serializes_content_message_header_in_fixed_order() {
     );
     assert_bool_property(&buffer, PID_TAG_ASSOCIATED, false);
     assert_i32_property(&buffer, PID_TAG_MESSAGE_SIZE, 42);
-    assert_change_number_property(
-        &buffer,
-        PID_TAG_CHANGE_NUMBER,
-        canonical_message_change_number(&test_email()),
+    assert_change_number_property(&buffer, PID_TAG_CHANGE_NUMBER, durable_change_number);
+    let mid_offset = buffer
+        .windows(4)
+        .position(|window| window == PID_TAG_MID.to_le_bytes())
+        .expect("MID is present");
+    assert_eq!(
+        &buffer[mid_offset + 4..mid_offset + 12],
+        &crate::mapi::identity::wire_id_bytes_from_object_id(durable_object_id).unwrap(),
     );
+    assert_i64_property(
+        &buffer,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        durable_last_modification_time as i64,
+    );
+    assert_variable_property(&buffer, PID_TAG_SOURCE_KEY, &durable_source_key);
+    assert_variable_property(&buffer, PID_TAG_CHANGE_KEY, &durable_change_key);
+    assert_variable_property(
+        &buffer,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &durable_predecessor_change_list,
+    );
+    assert_variable_property(
+        &buffer,
+        META_TAG_CNSET_SEEN,
+        &replguid_idset_from_counters(&[durable_change_number]),
+    );
+    let change_facts = download_change_facts_with_normal_message_sync_facts(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        std::slice::from_ref(&email),
+        &[],
+        std::slice::from_ref(&durable_fact),
+        &[],
+        &[],
+    );
+    assert_eq!(change_facts.len(), 1);
+    assert_eq!(change_facts[0].object_id, durable_object_id);
+    assert_eq!(change_facts[0].change_number, durable_change_number);
+    assert_eq!(change_facts[0].source_key, durable_source_key);
 }
 
 #[test]
@@ -1128,6 +1194,7 @@ fn fast_transfer_copy_properties_filters_message_identity_properties() {
     let buffer = fast_transfer_message_content_buffer_with_attachments(
         &email,
         &[],
+        None,
         FastTransferDirectPropertyFilter::CopyPropertiesIncluding(&[
             PID_TAG_MESSAGE_DELIVERY_TIME,
             PID_TAG_SENDER_NAME_W,
@@ -1149,6 +1216,91 @@ fn fast_transfer_copy_properties_filters_message_identity_properties() {
     assert_absent_property(&buffer, PID_TAG_MESSAGE_CLASS_W);
     assert_absent_property(&buffer, PID_TAG_SUBJECT_W);
     assert_absent_property(&buffer, PID_TAG_BODY_W);
+}
+
+#[test]
+fn direct_fast_transfer_uses_persisted_normal_message_identity_properties() {
+    let email = test_email();
+    let durable_identity = crate::store::MapiIdentityRecord {
+        object_kind: crate::store::MapiIdentityObjectKind::Message,
+        canonical_id: email.id,
+        object_id: crate::mapi::identity::mapi_store_id(0x1234),
+        change_number: 0x5678,
+        source_key: vec![0x11; 22],
+        change_key: vec![0x22; 22],
+        predecessor_change_list: vec![0x16, 0x33, 0x44, 0x55],
+        last_modification_time: 133_987_654_321_000_000,
+    };
+    let identity_property_tags = [
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_LAST_MODIFICATION_TIME,
+    ];
+
+    let copy_to = fast_transfer_message_content_buffer_with_attachments(
+        &email,
+        &[],
+        Some(&durable_identity),
+        FastTransferDirectPropertyFilter::CopyToExcluding(&[]),
+        FastTransferMessageChildren::new(false, false),
+    );
+    assert_variable_property(&copy_to, PID_TAG_SOURCE_KEY, &durable_identity.source_key);
+    assert_variable_property(&copy_to, PID_TAG_CHANGE_KEY, &durable_identity.change_key);
+    assert_variable_property(
+        &copy_to,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &durable_identity.predecessor_change_list,
+    );
+    assert_i64_property(
+        &copy_to,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        durable_identity.last_modification_time as i64,
+    );
+    assert_absent_property(&copy_to, PID_TAG_MID);
+    assert_absent_property(&copy_to, PID_TAG_CHANGE_NUMBER);
+
+    let copy_properties = fast_transfer_message_content_buffer_with_attachments(
+        &email,
+        &[],
+        Some(&durable_identity),
+        FastTransferDirectPropertyFilter::CopyPropertiesIncluding(&identity_property_tags),
+        FastTransferMessageChildren::new(false, false),
+    );
+    assert_variable_property(
+        &copy_properties,
+        PID_TAG_SOURCE_KEY,
+        &durable_identity.source_key,
+    );
+    assert_variable_property(
+        &copy_properties,
+        PID_TAG_CHANGE_KEY,
+        &durable_identity.change_key,
+    );
+    assert_variable_property(
+        &copy_properties,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &durable_identity.predecessor_change_list,
+    );
+    assert_i64_property(
+        &copy_properties,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        durable_identity.last_modification_time as i64,
+    );
+
+    let excluded_change_key = fast_transfer_message_content_buffer_with_attachments(
+        &email,
+        &[],
+        Some(&durable_identity),
+        FastTransferDirectPropertyFilter::CopyToExcluding(&[PID_TAG_CHANGE_KEY]),
+        FastTransferMessageChildren::new(false, false),
+    );
+    assert_variable_property(
+        &excluded_change_key,
+        PID_TAG_SOURCE_KEY,
+        &durable_identity.source_key,
+    );
+    assert_absent_property(&excluded_change_key, PID_TAG_CHANGE_KEY);
 }
 
 #[test]

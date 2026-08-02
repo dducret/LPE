@@ -7,6 +7,7 @@ use super::*;
 struct ScopedCalendarIdentities {
     folders: HashMap<Uuid, u64>,
     events: HashMap<Uuid, (u64, Vec<u8>)>,
+    messages: HashMap<Uuid, MapiIdentityRecord>,
     folder_versions: MapiFolderVersions,
 }
 
@@ -17,10 +18,14 @@ impl ScopedCalendarIdentities {
     ) -> Self {
         let mut folders = HashMap::new();
         let mut events = HashMap::new();
+        let mut messages = HashMap::new();
         for record in records {
             match record.object_kind {
                 MapiIdentityObjectKind::Mailbox => {
                     folders.insert(record.canonical_id, record.object_id);
+                }
+                MapiIdentityObjectKind::Message => {
+                    messages.insert(record.canonical_id, record.clone());
                 }
                 MapiIdentityObjectKind::CalendarEvent
                 | MapiIdentityObjectKind::DeletedCalendarEvent => {
@@ -35,6 +40,7 @@ impl ScopedCalendarIdentities {
         Self {
             folders,
             events,
+            messages,
             folder_versions: MapiFolderVersions::from_identity_records(records, identity_codec),
         }
     }
@@ -63,6 +69,10 @@ impl ScopedCalendarIdentities {
                 canonical_id
             )
         })
+    }
+
+    fn message_identity(&self, canonical_id: Uuid) -> Option<&MapiIdentityRecord> {
+        self.messages.get(&canonical_id)
     }
 }
 
@@ -219,6 +229,13 @@ impl MapiMailStoreSnapshot {
             .into_iter()
             .map(|email| {
                 let folder_id = mapi_message_folder_id(&email, &folders);
+                let durable_identity = calendar_identities
+                    .and_then(|identities| identities.message_identity(email.id))
+                    .cloned();
+                let message_id = durable_identity
+                    .as_ref()
+                    .map(|identity| identity.object_id)
+                    .unwrap_or_else(|| mapi_message_id(&email));
                 let message_attachments = attachments
                     .iter()
                     .find(|(message_id, _)| *message_id == email.id)
@@ -238,9 +255,10 @@ impl MapiMailStoreSnapshot {
                     })
                     .collect::<Vec<_>>();
                 MapiMessage {
-                    id: mapi_message_id(&email),
+                    id: message_id,
                     folder_id,
                     canonical_id: email.id,
+                    durable_identity,
                     email,
                     attachments: message_attachments,
                 }

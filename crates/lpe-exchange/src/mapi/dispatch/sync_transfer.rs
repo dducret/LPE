@@ -32,6 +32,8 @@ pub(super) async fn append_sync_transfer_dispatch_response<S>(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    max_rop_out: u32,
+    extended: bool,
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
     completed_hierarchy_sync: &mut Option<(u64, String, String)>,
@@ -110,6 +112,12 @@ where
             false
         }
         Some(RopId::FastTransferSourceGetBuffer) => {
+            let residual_rop_out_size = available_execute_rop_response_size(
+                max_rop_out,
+                extended,
+                responses.len(),
+                handle_slots.len(),
+            );
             *completed_hierarchy_sync = append_fast_transfer_source_get_buffer_response(
                 store,
                 principal,
@@ -117,6 +125,7 @@ where
                 session,
                 handle_slots,
                 request,
+                residual_rop_out_size,
                 responses,
             )
             .await;

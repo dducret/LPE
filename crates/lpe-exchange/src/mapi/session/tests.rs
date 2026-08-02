@@ -396,9 +396,14 @@ fn notification_subscription_preserves_rop_logon_id_through_rop_notify() {
     let (handle, delivery_logon_id, event) = &deliveries[0];
     assert_eq!(*handle, notification_handle);
     assert_eq!(*delivery_logon_id, 1);
-    let response =
-        crate::mapi::notifications::rop_notify_response(*handle, *delivery_logon_id, event)
-            .expect("ObjectModified notification serializes");
+    let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
+    let response = crate::mapi::notifications::rop_notify_response(
+        &identity_codec,
+        *handle,
+        *delivery_logon_id,
+        event,
+    )
+    .expect("ObjectModified notification serializes");
     assert_eq!(response[5], 1);
 }
 

@@ -251,15 +251,15 @@ where
         "allocate message identities",
         message_identity_requests.len(),
     );
-    for identity in store
+    let allocated_message_identities = store
         .fetch_or_allocate_mapi_identities(account_id, &message_identity_requests)
         .await
-        .context("allocate MAPI message identities")?
-    {
+        .context("allocate MAPI message identities")?;
+    for identity in &allocated_message_identities {
         crate::mapi::identity::remember_mapi_identity_with_source_key(
             identity.canonical_id,
             identity.object_id,
-            Some(identity.source_key),
+            Some(identity.source_key.clone()),
         );
     }
     log_mapi_store_load_step(
@@ -738,6 +738,7 @@ where
     }
     let snapshot_identities = allocated_mailbox_identities
         .iter()
+        .chain(allocated_message_identities.iter())
         .chain(allocated_non_message_identities.iter())
         .cloned()
         .collect::<Vec<_>>();

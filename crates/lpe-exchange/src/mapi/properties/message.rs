@@ -205,6 +205,32 @@ pub(in crate::mapi) fn email_property_value(
     }
 }
 
+pub(in crate::mapi) fn email_property_value_with_durable_identity(
+    email: &JmapEmail,
+    durable_identity: Option<&crate::store::MapiIdentityRecord>,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    if let Some(identity) = durable_identity {
+        // [MS-OXCFXICS] section 3.2.5.3 requires a Message object's version
+        // properties to remain consistent with the durable change identity
+        // advertised by ICS, rather than with mailbox modseq or delivery time.
+        match property_tag {
+            PID_TAG_SOURCE_KEY => return Some(MapiValue::Binary(identity.source_key.clone())),
+            PID_TAG_CHANGE_KEY => return Some(MapiValue::Binary(identity.change_key.clone())),
+            PID_TAG_PREDECESSOR_CHANGE_LIST => {
+                return Some(MapiValue::Binary(identity.predecessor_change_list.clone()));
+            }
+            PID_TAG_CHANGE_NUMBER => return Some(MapiValue::U64(identity.change_number)),
+            PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
+                return Some(MapiValue::U64(identity.last_modification_time));
+            }
+            _ => {}
+        }
+    }
+    email_property_value(email, property_tag)
+}
+
 pub(in crate::mapi) fn email_sender_name(email: &JmapEmail) -> &str {
     email
         .sender_display

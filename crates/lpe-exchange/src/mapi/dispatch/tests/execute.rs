@@ -103,6 +103,34 @@ fn execute_response_budget_reserves_extended_framing_and_handle_table() {
 }
 
 #[test]
+fn automatic_fast_transfer_buffer_uses_execute_residual_output_budget() {
+    let request = RopRequest {
+        rop_id: RopId::FastTransferSourceGetBuffer.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: [0xBABEu16.to_le_bytes(), 0x7BC0u16.to_le_bytes()].concat(),
+    };
+    let residual_rop_out_size = available_execute_rop_response_size(40, true, 0, 1);
+
+    assert_eq!(residual_rop_out_size, 26);
+    let transfer_buffer_size =
+        fast_transfer_source_get_buffer_transfer_size(&request, residual_rop_out_size);
+    assert_eq!(transfer_buffer_size, 11);
+
+    let mut position = 0;
+    let response = rop_fast_transfer_source_get_buffer_response(
+        &request,
+        &[0; 32],
+        &mut position,
+        transfer_buffer_size,
+    );
+    let rop_buffer = rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(response, &[0x56]));
+
+    assert_eq!(position, 11);
+    assert_eq!(rop_buffer.len(), 40);
+}
+
+#[test]
 fn execute_stall_warning_requires_specific_post_hierarchy_pre_sync_stop() {
     assert!(should_log_execute_stalled_before_content_sync(
         "emsmdb",
@@ -172,6 +200,27 @@ fn release_only_execute_batch_is_store_independent() {
     release_then_getprops.extend_from_slice(&0x3601_0003u32.to_le_bytes());
     let mixed = rop_buffer_with_response(release_then_getprops, &[0x34, 0xff]);
     assert!(!rop_buffer_is_store_independent_release_only(&mixed));
+}
+
+#[test]
+fn release_only_execute_with_notification_target_requires_identity_scope() {
+    let release_only = rop_buffer_with_response(vec![0x01, 0x00, 0x00], &[0x34]);
+    let mut session = test_mapi_session();
+
+    assert!(execute_can_skip_identity_scope(&release_only, &session));
+
+    session.handles.insert(
+        0x1a,
+        MapiObject::NotificationSubscription {
+            registration: crate::mapi::notifications::MapiNotificationRegistration {
+                logon_id: 0,
+                notification_types: crate::mapi::wire::MapiNotificationEventMask::NewMail.as_u16(),
+                folder_id: None,
+            },
+        },
+    );
+
+    assert!(!execute_can_skip_identity_scope(&release_only, &session));
 }
 
 #[test]

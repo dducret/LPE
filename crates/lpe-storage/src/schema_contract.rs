@@ -2880,6 +2880,14 @@ fn mailbox_moves_create_target_membership_and_tombstone_source_uid() {
         !move_body.contains("SET mailbox_id = $4"),
         "mailbox moves must not rewrite the source membership mailbox_id in place"
     );
+    let tombstones = table_definition("tombstones");
+    assert!(
+        tombstones.contains("mapi_object_id BIGINT CHECK")
+            && tombstones.contains("object_kind = 'mailbox_message'")
+            && move_body.contains("mapi_object_id,\n                deleted_modseq")
+            && move_body.contains("rekey_active_mapi_message_identity_for_server_move_in_tx"),
+        "normal MAPI moves must retain the retired source MID on the source tombstone"
+    );
 }
 
 #[test]

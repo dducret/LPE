@@ -92,20 +92,27 @@ pub(super) fn deleted_items_content_row_id(row: &DeletedItemsContentRow<'_>) -> 
 
 pub(super) fn serialize_deleted_items_content_row(
     row: DeletedItemsContentRow<'_>,
+    snapshot: &MapiMailStoreSnapshot,
     columns: &[u32],
 ) -> Vec<u8> {
     match row {
-        DeletedItemsContentRow::Message(email) => serialize_message_row(email, columns),
+        DeletedItemsContentRow::Message(email) => snapshot
+            .message_for_canonical_id(email.id)
+            .map(|message| serialize_mapi_message_row(message, columns))
+            .unwrap_or_else(|| serialize_message_row(email, columns)),
         DeletedItemsContentRow::Event(event) => serialize_versioned_event_row(event, columns),
     }
 }
 
 pub(super) fn serialize_deleted_items_content_property_row(
     row: DeletedItemsContentRow<'_>,
+    snapshot: &MapiMailStoreSnapshot,
     columns: &[u32],
 ) -> Vec<u8> {
     match row {
-        DeletedItemsContentRow::Message(email) => serialize_message_property_row(email, columns),
+        DeletedItemsContentRow::Message(email) => {
+            serialize_message_property_row_in_snapshot(email, snapshot, columns)
+        }
         DeletedItemsContentRow::Event(event) => {
             let values = serialize_versioned_event_row(event, columns);
             let mut property_row = Vec::new();
@@ -117,6 +124,7 @@ pub(super) fn serialize_deleted_items_content_property_row(
 
 pub(super) fn categorized_deleted_items_content_rows(
     rows: Vec<DeletedItemsContentRow<'_>>,
+    snapshot: &MapiMailStoreSnapshot,
     columns: &[u32],
     sort_orders: &[MapiSortOrder],
     expanded_count: u16,
@@ -128,7 +136,7 @@ pub(super) fn categorized_deleted_items_content_rows(
             .map(|row| CategorizedTableRow {
                 category_id: 0,
                 leaf_count: 1,
-                row: serialize_deleted_items_content_row(row, columns),
+                row: serialize_deleted_items_content_row(row, snapshot, columns),
                 leaf: true,
             })
             .collect();
@@ -186,6 +194,7 @@ pub(super) fn categorized_deleted_items_content_rows(
                         leaf_count: 1,
                         row: serialize_categorized_deleted_items_content_row(
                             row,
+                            snapshot,
                             columns,
                             category_sort.property_tag,
                             &value,
@@ -224,6 +233,7 @@ fn deleted_items_content_row_is_unread(row: &DeletedItemsContentRow<'_>) -> bool
 
 fn serialize_categorized_deleted_items_content_row(
     row: DeletedItemsContentRow<'_>,
+    snapshot: &MapiMailStoreSnapshot,
     columns: &[u32],
     category_property_tag: u32,
     category_value: &str,
@@ -232,6 +242,9 @@ fn serialize_categorized_deleted_items_content_row(
     match row {
         DeletedItemsContentRow::Message(email) => serialize_categorized_message_row(
             email,
+            snapshot
+                .message_for_canonical_id(email.id)
+                .and_then(|message| message.durable_identity.as_ref()),
             columns,
             category_property_tag,
             category_value,

@@ -17,6 +17,7 @@ pub mod mail_items;
 pub mod mailboxes;
 pub mod mapi_contacts;
 pub mod mapi_events;
+mod mapi_message_identity;
 pub mod mapi_store_identity;
 mod message_ops;
 pub mod models;

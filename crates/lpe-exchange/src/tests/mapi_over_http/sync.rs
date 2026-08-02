@@ -5447,6 +5447,46 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
 }
 
 #[tokio::test]
+async fn mapi_over_http_content_sync_uses_retired_move_mid_for_source_tombstone() {
+    // [MS-OXCFXICS] section 3.1.5.3 assigns the moved copy a new MID. The
+    // source folder must therefore delete the retained old MID, not resolve
+    // the current target identity from the canonical message ID.
+    let inbox_id = Uuid::parse_str("45454545-4545-4545-4545-454545454545").unwrap();
+    let old_mapi_object_id = crate::mapi::identity::mapi_store_id(0x222);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 1,
+        current_modseq: 1,
+        deleted_message_object_ids: vec![old_mapi_object_id],
+        ..Default::default()
+    };
+
+    let response_rops = outlook_content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &outlook_content_sync_state_properties(&[old_mapi_object_id >> 16], &[], &[], &[]),
+    )
+    .await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), None);
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert!(stream.message_changes.is_empty());
+    assert!(strict_replid_globset_contains_counter(
+        stream.deleted_idset.as_deref().unwrap(),
+        &globcnt_bytes(old_mapi_object_id >> 16),
+    )
+    .unwrap());
+}
+
+#[tokio::test]
 async fn mapi_over_http_content_sync_first_baseline_exports_all_current_messages() {
     let inbox_id = Uuid::parse_str("51515151-5151-5151-5151-515151515151").unwrap();
     let first_id = Uuid::parse_str("61616161-6161-6161-6161-616161616161").unwrap();

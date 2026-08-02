@@ -101,9 +101,29 @@ pub(super) fn write_fast_transfer_message_content(
     buffer: &mut Vec<u8>,
     email: &JmapEmail,
     attachments: &[AttachmentSyncFact],
+    durable_identity: Option<&crate::store::MapiIdentityRecord>,
     property_filter: FastTransferDirectPropertyFilter<'_>,
     message_children: FastTransferMessageChildren,
 ) {
+    if let Some(identity) = durable_identity {
+        if property_filter.includes(PID_TAG_SOURCE_KEY) {
+            write_binary_property(buffer, PID_TAG_SOURCE_KEY, &identity.source_key);
+        }
+        if property_filter.includes(PID_TAG_LAST_MODIFICATION_TIME) {
+            write_u32(buffer, PID_TAG_LAST_MODIFICATION_TIME);
+            write_i64(buffer, identity.last_modification_time as i64);
+        }
+        if property_filter.includes(PID_TAG_CHANGE_KEY) {
+            write_binary_property(buffer, PID_TAG_CHANGE_KEY, &identity.change_key);
+        }
+        if property_filter.includes(PID_TAG_PREDECESSOR_CHANGE_LIST) {
+            write_binary_property(
+                buffer,
+                PID_TAG_PREDECESSOR_CHANGE_LIST,
+                &identity.predecessor_change_list,
+            );
+        }
+    }
     let delivery_time = email_delivery_time(email, attachments);
     if property_filter.includes(PID_TAG_MESSAGE_DELIVERY_TIME) {
         write_u32(buffer, PID_TAG_MESSAGE_DELIVERY_TIME);
@@ -209,6 +229,42 @@ pub(crate) fn canonical_message_change_number_with_attachments(
     )
 }
 
+pub(crate) fn normal_message_sync_fact_for(
+    email: &JmapEmail,
+    attachments: &[AttachmentSyncFact],
+    durable_facts: &[NormalMessageSyncFact],
+) -> NormalMessageSyncFact {
+    durable_facts
+        .iter()
+        .find(|fact| fact.canonical_id == email.id)
+        .cloned()
+        .unwrap_or_else(|| {
+            let change_number =
+                canonical_message_change_number_with_attachments(email, attachments);
+            NormalMessageSyncFact {
+                canonical_id: email.id,
+                object_id: crate::mapi::identity::mapped_mapi_object_id(&email.id)
+                    .unwrap_or_default(),
+                source_key: source_key_for_uuid(&email.id),
+                change_number,
+                change_key: change_key_for_change_number(change_number),
+                predecessor_change_list: predecessor_change_list(change_number),
+                last_modification_time: filetime_from_change_number(change_number),
+            }
+        })
+}
+
+pub(crate) fn normal_message_sync_source_key_for_fact(
+    fact: &NormalMessageSyncFact,
+    sync_flags: u16,
+) -> Vec<u8> {
+    if sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0 {
+        source_key_for_store_id(fact.object_id)
+    } else {
+        fact.source_key.clone()
+    }
+}
+
 pub(crate) fn source_key_for_uuid(id: &Uuid) -> Vec<u8> {
     if let Some(source_key) = crate::mapi::identity::mapped_mapi_source_key(id) {
         return source_key;
@@ -216,16 +272,6 @@ pub(crate) fn source_key_for_uuid(id: &Uuid) -> Vec<u8> {
     let object_id =
         crate::mapi::identity::mapped_mapi_object_id(id).expect("MAPI identity mapping missing");
     crate::mapi::identity::source_key_for_object_id(object_id)
-}
-
-pub(super) fn normal_message_sync_source_key(email: &JmapEmail, sync_flags: u16) -> Vec<u8> {
-    if sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0 {
-        let object_id = crate::mapi::identity::mapped_mapi_object_id(&email.id)
-            .expect("MAPI message identity mapping missing");
-        source_key_for_store_id(object_id)
-    } else {
-        source_key_for_uuid(&email.id)
-    }
 }
 
 pub(crate) fn source_key_for_store_id(store_id: u64) -> Vec<u8> {
@@ -385,13 +431,14 @@ pub(crate) fn sync_state_token_with_attachments(
     )
 }
 
-pub(crate) fn sync_state_token_with_special_objects(
+pub(crate) fn sync_state_token_with_special_objects_and_normal_message_facts(
     sync_type: u8,
     sync_flags: u16,
     folder_id: u64,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
+    normal_message_facts: &[NormalMessageSyncFact],
     special_objects: &[SpecialMessageSyncFact],
     folder_versions: &[crate::mapi_store::MapiFolderVersion],
 ) -> Vec<u8> {
@@ -416,19 +463,29 @@ pub(crate) fn sync_state_token_with_special_objects(
     };
     let mut source_key_identities = scoped_emails
         .iter()
-        .filter_map(|email| {
-            let object_id = crate::mapi::identity::mapped_mapi_object_id(&email.id)?;
-            Some((normal_message_sync_source_key(email, sync_flags), object_id))
+        .map(|email| {
+            let fact = normal_message_sync_fact_for(
+                email,
+                attachments_for_message(email.id, attachment_facts),
+                normal_message_facts,
+            );
+            (
+                normal_message_sync_source_key_for_fact(&fact, sync_flags),
+                fact.object_id,
+            )
         })
         .collect::<Vec<_>>();
-    let normal_change_numbers = sync_state_change_numbers(
-        sync_type,
-        folder_id,
-        mailboxes,
-        scoped_emails,
-        attachment_facts,
-        folder_versions,
-    );
+    let normal_change_numbers = scoped_emails
+        .iter()
+        .map(|email| {
+            normal_message_sync_fact_for(
+                email,
+                attachments_for_message(email.id, attachment_facts),
+                normal_message_facts,
+            )
+            .change_number
+        })
+        .collect::<Vec<_>>();
     let default_include_associated =
         default_content_sync_includes_associated(scoped_emails, special_objects);
     let scoped_special_objects = special_objects
@@ -669,6 +726,59 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
     state_mailboxes: &[JmapMailbox],
     state_emails: &[JmapEmail],
     state_attachment_facts: &[MessageAttachmentSyncFacts],
+    state_special_objects: &[SpecialMessageSyncFact],
+    aggregate_emails: &[JmapEmail],
+    aggregate_attachment_facts: &[MessageAttachmentSyncFacts],
+    folder_versions: &[crate::mapi_store::MapiFolderVersion],
+    folder_commit_times: &[(u64, u64)],
+    _final_change_sequence: u64,
+) -> Vec<u8> {
+    sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times_and_normal_message_facts(
+        mailbox_guid,
+        sync_type,
+        sync_flags,
+        sync_extra_flags,
+        sync_property_tags,
+        folder_id,
+        mailboxes,
+        emails,
+        attachment_facts,
+        &[],
+        special_objects,
+        deleted_message_ids,
+        parent_context_mailboxes,
+        state_mailboxes,
+        state_emails,
+        state_attachment_facts,
+        &[],
+        state_special_objects,
+        aggregate_emails,
+        aggregate_attachment_facts,
+        folder_versions,
+        folder_commit_times,
+        _final_change_sequence,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times_and_normal_message_facts(
+    mailbox_guid: Uuid,
+    sync_type: u8,
+    sync_flags: u16,
+    sync_extra_flags: u32,
+    sync_property_tags: &[u32],
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+    normal_message_facts: &[NormalMessageSyncFact],
+    special_objects: &[SpecialMessageSyncFact],
+    deleted_message_ids: &[u64],
+    parent_context_mailboxes: &[JmapMailbox],
+    state_mailboxes: &[JmapMailbox],
+    state_emails: &[JmapEmail],
+    state_attachment_facts: &[MessageAttachmentSyncFacts],
+    state_normal_message_facts: &[NormalMessageSyncFact],
     state_special_objects: &[SpecialMessageSyncFact],
     aggregate_emails: &[JmapEmail],
     aggregate_attachment_facts: &[MessageAttachmentSyncFacts],
@@ -939,38 +1049,29 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         let attachments = attachments_for_message(email.id, attachment_facts);
         let delivery_time = email_delivery_time(email, attachments);
         let mut buffer = Vec::new();
-        let change_number = canonical_message_change_number_with_attachments(email, attachments);
+        let identity = normal_message_sync_fact_for(email, attachments, normal_message_facts);
+        let change_number = identity.change_number;
         let message_size = email.size_octets.min(i32::MAX as i64) as i32;
         // [MS-OXCFXICS] section 3.2.5.9.1.1: NoForeignIdentifiers requires
         // a SourceKey generated from the local MAPI identifier.
-        let source_key = normal_message_sync_source_key(email, sync_flags);
+        let source_key = normal_message_sync_source_key_for_fact(&identity, sync_flags);
         if sync_type == SYNC_TYPE_CONTENTS && sync_flags & SYNC_FLAG_PROGRESS != 0 {
             write_content_sync_progress_per_message(&mut buffer, message_size, false);
         }
         write_u32(&mut buffer, INCR_SYNC_CHG);
         write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
         write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
-        write_i64(
-            &mut buffer,
-            filetime_from_change_number(change_number) as i64,
-        );
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_CHANGE_KEY,
-            &change_key_for_change_number(change_number),
-        );
+        write_i64(&mut buffer, identity.last_modification_time as i64);
+        write_binary_property(&mut buffer, PID_TAG_CHANGE_KEY, &identity.change_key);
         write_binary_property(
             &mut buffer,
             PID_TAG_PREDECESSOR_CHANGE_LIST,
-            &predecessor_change_list(change_number),
+            &identity.predecessor_change_list,
         );
         write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, false);
         if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
             write_u32(&mut buffer, PID_TAG_MID);
-            write_object_id(
-                &mut buffer,
-                crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0),
-            );
+            write_object_id(&mut buffer, identity.object_id);
         }
         if sync_extra_flags & SYNC_EXTRA_FLAG_MESSAGE_SIZE != 0 {
             write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, message_size);
@@ -989,7 +1090,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             if let Some(entry_id) = crate::mapi::identity::message_entry_id_from_object_ids(
                 mailbox_guid,
                 folder_id,
-                crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0),
+                identity.object_id,
             ) {
                 write_binary_property(&mut buffer, PID_TAG_ENTRY_ID, &entry_id);
             }
@@ -1346,16 +1447,19 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         );
     }
 
-    buffer.extend_from_slice(&sync_state_token_with_special_objects(
-        sync_type,
-        sync_flags,
-        folder_id,
-        state_mailboxes,
-        state_emails,
-        state_attachment_facts,
-        state_special_objects,
-        folder_versions,
-    ));
+    buffer.extend_from_slice(
+        &sync_state_token_with_special_objects_and_normal_message_facts(
+            sync_type,
+            sync_flags,
+            folder_id,
+            state_mailboxes,
+            state_emails,
+            state_attachment_facts,
+            state_normal_message_facts,
+            state_special_objects,
+            folder_versions,
+        ),
+    );
     write_u32(&mut buffer, INCR_SYNC_END);
     buffer
 }

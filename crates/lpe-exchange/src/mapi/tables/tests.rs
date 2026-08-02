@@ -2851,6 +2851,7 @@ fn categorized_keywords_project_multivalue_instances_and_table_row_metadata() {
     ];
 
     let rows = categorized_email_rows(
+        None,
         INBOX_FOLDER_ID,
         vec![&email],
         &columns,
@@ -8814,6 +8815,82 @@ fn message_row_projects_containing_folder_ids() {
     assert_eq!(
         crate::mapi::identity::object_id_from_wire_id(&row[16..24]),
         Some(mapi_message_id(&email))
+    );
+}
+
+#[test]
+fn normal_contents_property_row_uses_durable_message_identity() {
+    let email_id = Uuid::from_u128(0x7171_0001);
+    let email = test_table_email(email_id, Uuid::from_u128(0x8181_0001), "Durable identity");
+    let identity = crate::store::MapiIdentityRecord {
+        object_kind: crate::store::MapiIdentityObjectKind::Message,
+        canonical_id: email_id,
+        object_id: crate::mapi::identity::mapi_store_id(0x84),
+        change_number: 0x44_0000_0001,
+        source_key: vec![0x11; 22],
+        change_key: vec![0x22; 22],
+        predecessor_change_list: vec![0x33; 44],
+        last_modification_time: 133_936_000_000_000_000,
+    };
+    let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
+    let snapshot = MapiMailStoreSnapshot::new_with_scoped_calendar_identities(
+        Vec::new(),
+        vec![email.clone()],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &[identity.clone()],
+        &identity_codec,
+    )
+    .unwrap();
+    let columns = [
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME,
+    ];
+
+    let row = serialize_message_property_row_in_snapshot(&email, &snapshot, &columns);
+    let mut cursor = Cursor::new(row.as_slice());
+
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_SOURCE_KEY).unwrap(),
+        MapiValue::Binary(identity.source_key.clone())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_CHANGE_KEY).unwrap(),
+        MapiValue::Binary(identity.change_key.clone())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_PREDECESSOR_CHANGE_LIST).unwrap(),
+        MapiValue::Binary(identity.predecessor_change_list.clone())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_CHANGE_NUMBER).unwrap(),
+        MapiValue::I64(u64::from_le_bytes(
+            crate::mapi::identity::wire_id_bytes_from_object_id(
+                crate::mapi::identity::mapi_store_id(identity.change_number),
+            )
+            .unwrap(),
+        ) as i64,)
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_LAST_MODIFICATION_TIME).unwrap(),
+        MapiValue::I64(identity.last_modification_time as i64)
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_LOCAL_COMMIT_TIME).unwrap(),
+        MapiValue::I64(identity.last_modification_time as i64)
     );
 }
 

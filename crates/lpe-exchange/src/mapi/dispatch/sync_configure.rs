@@ -231,6 +231,8 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         snapshot,
     )
     .await;
+    let normal_message_sync_facts =
+        normal_message_sync_facts_for(&all_sync_emails, &sync_attachment_facts, snapshot);
     let aggregate_sync_emails = if sync_type == 0x02 {
         emails.to_vec()
     } else {
@@ -243,6 +245,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         mapi_message_ids_for_deleted_changes(store, principal, &changes.deleted_message_ids)
             .await
             .unwrap_or_default();
+    deleted_message_ids.extend(changes.deleted_message_object_ids.iter().copied());
     if checkpoint_kind == MapiCheckpointKind::Hierarchy {
         deleted_message_ids.extend(changes.deleted_mailbox_object_ids.iter().copied());
         deleted_message_ids.extend(changes.deleted_search_folder_object_ids.iter().copied());
@@ -287,14 +290,17 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
             .unwrap_or_default(),
         );
     }
+    deleted_message_ids.sort_unstable();
+    deleted_message_ids.dedup();
     let folder_versions = snapshot.folder_versions();
-    let state = mapi_mailstore::sync_state_token_with_special_objects(
+    let state = mapi_mailstore::sync_state_token_with_special_objects_and_normal_message_facts(
         sync_type,
         sync_flags,
         folder_id,
         &state_sync_mailboxes,
         &all_sync_emails,
         &state_attachment_facts,
+        &normal_message_sync_facts,
         &all_special_sync_objects,
         &folder_versions,
     );
@@ -311,18 +317,20 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     } else {
         Vec::new()
     };
-    let download_change_facts = mapi_mailstore::download_change_facts(
-        sync_type,
-        sync_flags,
-        folder_id,
-        &all_sync_mailboxes,
-        &all_sync_emails,
-        &sync_attachment_facts,
-        &all_special_sync_objects,
-        &folder_versions,
-    );
+    let download_change_facts =
+        mapi_mailstore::download_change_facts_with_normal_message_sync_facts(
+            sync_type,
+            sync_flags,
+            folder_id,
+            &all_sync_mailboxes,
+            &all_sync_emails,
+            &sync_attachment_facts,
+            &normal_message_sync_facts,
+            &all_special_sync_objects,
+            &folder_versions,
+        );
     let initial_state = mapi_mailstore::initial_sync_state_stream(sync_type);
-    let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times(
+    let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times_and_normal_message_facts(
         principal.account_id,
         sync_type,
         sync_flags,
@@ -332,12 +340,14 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         &all_sync_mailboxes,
         &all_sync_emails,
         &sync_attachment_facts,
+        &normal_message_sync_facts,
         &all_special_sync_objects,
         &deleted_message_ids,
         mailboxes,
         &state_sync_mailboxes,
         &all_sync_emails,
         &state_attachment_facts,
+        &normal_message_sync_facts,
         &all_special_sync_objects,
         &aggregate_sync_emails,
         &aggregate_attachment_facts,

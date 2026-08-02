@@ -16,21 +16,28 @@ pub(in crate::mapi) fn rop_fast_transfer_source_get_buffer_response(
     request: &RopRequest,
     transfer_buffer: &[u8],
     transfer_position: &mut usize,
+    transfer_buffer_size: usize,
 ) -> Vec<u8> {
-    let requested = request
-        .fast_transfer_buffer_size()
-        .clamp(1, u16::MAX as usize);
+    let requested = transfer_buffer_size.min(u16::MAX as usize);
     let end = transfer_position
         .saturating_add(requested)
         .min(transfer_buffer.len());
     let chunk = transfer_buffer[*transfer_position..end].to_vec();
     *transfer_position = end;
     let done = *transfer_position >= transfer_buffer.len();
-    let total_steps = transfer_buffer
-        .len()
-        .div_ceil(requested)
-        .min(u16::MAX as usize) as u16;
-    let completed_steps = if total_steps == 0 {
+    let total_steps = if requested == 0 {
+        0
+    } else {
+        transfer_buffer
+            .len()
+            .div_ceil(requested)
+            .min(u16::MAX as usize) as u16
+    };
+    // [MS-OXCFXICS] section 2.2.3.1.1.5.2 defines these as progress-only
+    // counters. Exchange 2016 returns 0/1 for a terminal one-buffer transfer.
+    let completed_steps = if done && total_steps == 1 {
+        0
+    } else if total_steps == 0 || requested == 0 {
         0
     } else {
         (*transfer_position)

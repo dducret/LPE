@@ -1406,7 +1406,7 @@ macro_rules! store_impl_mapi_metadata {
             if checkpoint_kind != MapiCheckpointKind::Hierarchy {
                 let tombstones = sqlx::query(
                     r#"
-                    SELECT message_id
+                    SELECT message_id, mapi_object_id
                     FROM tombstones
                     WHERE tenant_id = $1
                       AND account_id = $2
@@ -1426,7 +1426,17 @@ macro_rules! store_impl_mapi_metadata {
                 .fetch_all(self.pool())
                 .await?;
                 for row in tombstones {
-                    push_unique_uuid(&mut changes.deleted_message_ids, row.get("message_id"));
+                    let mapi_object_id = row.get::<Option<i64>, _>("mapi_object_id");
+                    if let Some(mapi_object_id) = mapi_object_id.filter(|value| *value > 0) {
+                        let mapi_object_id = u64::try_from(mapi_object_id).map_err(|_| {
+                            anyhow::anyhow!("stored tombstone MAPI object id is invalid")
+                        })?;
+                        if !changes.deleted_message_object_ids.contains(&mapi_object_id) {
+                            changes.deleted_message_object_ids.push(mapi_object_id);
+                        }
+                    } else {
+                        push_unique_uuid(&mut changes.deleted_message_ids, row.get("message_id"));
+                    }
                 }
                 let collaboration_tombstones = sqlx::query(
                     r#"

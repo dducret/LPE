@@ -15,9 +15,12 @@ mod special_message;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use client_state::download_change_facts;
 pub(crate) use client_state::{
-    download_change_facts, select_download_manifest_for_client_state,
-    validate_download_state_property, DownloadChangeFact,
+    download_change_facts_with_normal_message_sync_facts,
+    select_download_manifest_for_client_state, validate_download_state_property,
+    DownloadChangeFact,
 };
 pub(crate) use folders::*;
 
@@ -31,10 +34,10 @@ pub(crate) use manifest::{
     change_number_for_store_id, filetime_from_change_number, filetime_from_rfc3339_utc,
     predecessor_change_list, source_key_for_mailbox_folder, source_key_for_mailbox_role,
     source_key_for_store_id, source_key_for_uuid,
-    sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times,
-    sync_state_token_with_attachments, sync_state_token_with_special_objects,
-    virtual_special_mailbox, AttachmentSyncFact, FaiContentSyncDebugContext,
-    MessageAttachmentSyncFacts,
+    sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times_and_normal_message_facts,
+    sync_state_token_with_attachments,
+    sync_state_token_with_special_objects_and_normal_message_facts, virtual_special_mailbox,
+    AttachmentSyncFact, FaiContentSyncDebugContext, MessageAttachmentSyncFacts,
 };
 #[cfg(test)]
 pub(crate) use manifest::{
@@ -45,6 +48,17 @@ pub(crate) use special_message::{
     fast_transfer_message_content_buffer_with_special_object, special_message_source_key,
     SpecialMessagePropertyValue, SpecialMessageSyncFact,
 };
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NormalMessageSyncFact {
+    pub(crate) canonical_id: Uuid,
+    pub(crate) object_id: u64,
+    pub(crate) source_key: Vec<u8>,
+    pub(crate) change_number: u64,
+    pub(crate) change_key: Vec<u8>,
+    pub(crate) predecessor_change_list: Vec<u8>,
+    pub(crate) last_modification_time: u64,
+}
 
 #[cfg(test)]
 pub(crate) use diagnostics::{
@@ -775,6 +789,7 @@ pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
             &mut buffer,
             email,
             attachments,
+            None,
             FastTransferDirectPropertyFilter::All,
             FastTransferMessageChildren::all(),
         );
@@ -786,6 +801,7 @@ pub(crate) fn fast_transfer_message_list_buffer_with_attachments(
 pub(crate) fn fast_transfer_message_content_buffer_with_attachments(
     email: &JmapEmail,
     attachment_facts: &[MessageAttachmentSyncFacts],
+    durable_identity: Option<&crate::store::MapiIdentityRecord>,
     property_filter: FastTransferDirectPropertyFilter<'_>,
     message_children: FastTransferMessageChildren,
 ) -> Vec<u8> {
@@ -794,6 +810,7 @@ pub(crate) fn fast_transfer_message_content_buffer_with_attachments(
         &mut buffer,
         email,
         attachments_for_message(email.id, attachment_facts),
+        durable_identity,
         property_filter,
         message_children,
     );

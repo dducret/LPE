@@ -245,6 +245,7 @@ fn expanded_categorized_rows(
         sort_deleted_items_content_rows(&mut rows, sort_orders);
         return categorized_deleted_items_content_rows(
             rows,
+            snapshot,
             columns,
             sort_orders,
             1,
@@ -257,7 +258,15 @@ fn expanded_categorized_rows(
         restriction_matches_email_in_snapshot(restriction, email, folder_id, snapshot)
     });
     sort_emails(&mut rows, sort_orders);
-    categorized_email_rows(folder_id, rows, columns, sort_orders, 1, &HashSet::new())
+    categorized_email_rows(
+        Some(snapshot),
+        folder_id,
+        rows,
+        columns,
+        sort_orders,
+        1,
+        &HashSet::new(),
+    )
 }
 
 fn read_u16_from(bytes: &[u8], offset: &mut usize) -> Option<u16> {

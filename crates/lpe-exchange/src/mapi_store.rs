@@ -111,6 +111,7 @@ pub(crate) struct MapiMessage {
     pub(crate) id: u64,
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
+    pub(crate) durable_identity: Option<MapiIdentityRecord>,
     pub(crate) email: JmapEmail,
     pub(crate) attachments: Vec<MapiAttachment>,
 }

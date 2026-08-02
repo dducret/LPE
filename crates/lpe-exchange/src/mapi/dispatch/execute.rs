@@ -57,6 +57,19 @@ pub(super) fn rop_buffer_is_store_independent_release_only(rop_buffer: &[u8]) ->
     saw_request
 }
 
+pub(in crate::mapi) fn execute_can_skip_identity_scope(
+    rop_buffer: &[u8],
+    session: &MapiSession,
+) -> bool {
+    // A release-only Execute can carry RopNotify. Its FolderId must be encoded
+    // with the durable special-folder identity for this mailbox, so it cannot
+    // bypass the request-scoped identity codec while a notification target is
+    // active.
+    (rop_buffer_has_no_requests(rop_buffer)
+        || rop_buffer_is_store_independent_release_only(rop_buffer))
+        && !session.has_notification_targets()
+}
+
 #[cfg(test)]
 pub(super) fn rop_buffer_is_store_independent_special_folder_getprops_probe(
     rop_buffer: &[u8],

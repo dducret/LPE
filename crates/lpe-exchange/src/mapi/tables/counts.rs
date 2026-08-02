@@ -267,6 +267,7 @@ pub(in crate::mapi) fn table_position_and_count(
                 if *category_count > 0 {
                     categorized_deleted_items_content_rows(
                         rows,
+                        snapshot,
                         &default_contents_columns(),
                         sort_orders,
                         *expanded_count,
@@ -428,6 +429,7 @@ pub(in crate::mapi) fn table_position_and_count(
                 );
                 sort_emails(&mut rows, sort_orders);
                 categorized_email_rows(
+                    Some(snapshot),
                     *folder_id,
                     rows,
                     &default_contents_columns(),

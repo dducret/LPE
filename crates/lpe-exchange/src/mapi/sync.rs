@@ -70,6 +70,51 @@ pub(in crate::mapi) fn sync_emails_for(
         .collect()
 }
 
+pub(in crate::mapi) fn normal_message_sync_facts_for(
+    emails: &[JmapEmail],
+    attachment_facts: &[mapi_mailstore::MessageAttachmentSyncFacts],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<mapi_mailstore::NormalMessageSyncFact> {
+    emails
+        .iter()
+        .map(|email| {
+            if let Some(identity) = snapshot
+                .message_for_canonical_id(email.id)
+                .and_then(|message| message.durable_identity.as_ref())
+            {
+                return mapi_mailstore::NormalMessageSyncFact {
+                    canonical_id: email.id,
+                    object_id: identity.object_id,
+                    source_key: identity.source_key.clone(),
+                    change_number: identity.change_number,
+                    change_key: identity.change_key.clone(),
+                    predecessor_change_list: identity.predecessor_change_list.clone(),
+                    last_modification_time: identity.last_modification_time,
+                };
+            }
+
+            let attachments = attachment_facts
+                .iter()
+                .find(|facts| facts.message_id == email.id)
+                .map(|facts| facts.attachments.as_slice())
+                .unwrap_or_default();
+            let change_number = mapi_mailstore::canonical_message_change_number_with_attachments(
+                email,
+                attachments,
+            );
+            mapi_mailstore::NormalMessageSyncFact {
+                canonical_id: email.id,
+                object_id: mapi_message_id(email),
+                source_key: mapi_mailstore::source_key_for_uuid(&email.id),
+                change_number,
+                change_key: mapi_mailstore::change_key_for_change_number(change_number),
+                predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+                last_modification_time: mapi_mailstore::filetime_from_change_number(change_number),
+            }
+        })
+        .collect()
+}
+
 pub(in crate::mapi) fn sync_checkpoint_kind(sync_type: u8) -> MapiCheckpointKind {
     if sync_type == 0x02 {
         MapiCheckpointKind::Hierarchy
@@ -1152,6 +1197,9 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
             let message = message_for_id(*folder_id, *message_id, mailboxes, emails)
                 .or(saved_email.as_ref().map(|saved| &saved.email))?
                 .clone();
+            let durable_identity = snapshot
+                .message_for_canonical_id(message.id)
+                .and_then(|message| message.durable_identity.as_ref());
             let attachment_facts =
                 sync_attachment_facts_for(*folder_id, std::slice::from_ref(&message), snapshot);
             Some((
@@ -1159,6 +1207,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 mapi_mailstore::fast_transfer_message_content_buffer_with_attachments(
                     &message,
                     &attachment_facts,
+                    durable_identity,
                     direct_property_filter,
                     message_children,
                 ),

@@ -1850,6 +1850,14 @@ CREATE TABLE tombstones (
     message_id UUID,
     mailbox_message_id UUID,
     imap_uid BIGINT CHECK (imap_uid IS NULL OR imap_uid > 0),
+    mapi_object_id BIGINT CHECK (
+        mapi_object_id IS NULL
+        OR (
+            object_kind = 'mailbox_message'
+            AND mapi_object_id > 0
+            AND (mapi_object_id & 65535) = 1
+        )
+    ),
     deleted_modseq BIGINT NOT NULL CHECK (deleted_modseq > 0),
     change_cursor BIGINT NOT NULL,
     reason TEXT NOT NULL CHECK (reason IN ('delete', 'expunge', 'destroyed', 'move', 'purge')),

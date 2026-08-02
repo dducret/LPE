@@ -4,6 +4,10 @@ use uuid::Uuid;
 
 use crate::{
     mapi_events::merge_predecessor_change_list,
+    mapi_message_identity::{
+        rekey_active_mapi_message_identity_for_server_move_in_tx,
+        rotate_active_mapi_message_identity_in_tx,
+    },
     mapi_store_identity::{
         allocate_mapi_store_global_counter_in_tx, ensure_mapi_mailbox_replica_in_tx,
         ensure_mapi_store_identity_in_tx, mapi_store_id, MapiMessageIdentityMove,
@@ -603,7 +607,12 @@ impl Storage {
                 )
                 .await?,
             ),
-            None => None,
+            None => {
+                rekey_active_mapi_message_identity_for_server_move_in_tx(
+                    &mut tx, &tenant_id, account_id, message_id,
+                )
+                .await?
+            }
         };
         let (old_mapi_object_id, new_mapi_object_id, move_identity_snapshot_complete) =
             if let Some(identity) = identity.as_ref() {
@@ -612,11 +621,6 @@ impl Storage {
                     Some(identity.new_mapi_object_id),
                     true,
                 )
-            } else if let Some(mapi_object_id) =
-                active_mapi_message_object_id_in_tx(&mut tx, &tenant_id, account_id, message_id)
-                    .await?
-            {
-                (Some(mapi_object_id), Some(mapi_object_id), true)
             } else {
                 (None, None, false)
             };
@@ -675,10 +679,10 @@ impl Storage {
             r#"
             INSERT INTO tombstones (
                 id, tenant_id, account_id, mailbox_id, object_kind, object_id,
-                message_id, mailbox_message_id, imap_uid, deleted_modseq,
-                change_cursor, reason
+                message_id, mailbox_message_id, imap_uid, mapi_object_id,
+                deleted_modseq, change_cursor, reason
             )
-            VALUES ($1, $2, $3, $4, 'mailbox_message', $5, $6, $5, $7, $8, $9, 'move')
+            VALUES ($1, $2, $3, $4, 'mailbox_message', $5, $6, $5, $7, $8, $9, $10, 'move')
             "#,
         )
         .bind(Uuid::new_v4())
@@ -688,6 +692,7 @@ impl Storage {
         .bind(source_membership_id)
         .bind(message_id)
         .bind(source_imap_uid)
+        .bind(old_mapi_object_id.map(|object_id| object_id as i64))
         .bind(modseq)
         .bind(source_cursor)
         .execute(&mut *tx)
@@ -767,6 +772,20 @@ impl Storage {
         let reminder_changed = update.reminder_set.is_some()
             || update.reminder_at.is_some()
             || update.reminder_dismissed_at.is_some();
+        let non_read_state_change = update.flagged.is_some()
+            || update.followup_flag_status.is_some()
+            || update.followup_icon.is_some()
+            || update.todo_item_flags.is_some()
+            || update.followup_request.is_some()
+            || update.followup_start_at.is_some()
+            || update.followup_due_at.is_some()
+            || update.followup_completed_at.is_some()
+            || update.reminder_set.is_some()
+            || update.reminder_at.is_some()
+            || update.reminder_dismissed_at.is_some()
+            || update.swapped_todo_store_id.is_some()
+            || update.swapped_todo_data.is_some()
+            || categories.is_some();
 
         let mut tx = self.pool.begin().await?;
         let modseq = self
@@ -864,6 +883,13 @@ impl Storage {
         if rows.is_empty() {
             bail!("message not found");
         }
+        if non_read_state_change {
+            // [MS-OXCFXICS] sections 2.2.1.2.3, 2.2.1.2.7, 2.2.1.2.8, and
+            // 3.1.5.3 require a new server change version for direct property
+            // changes. Read-state-only updates use the separate CnsetRead state.
+            rotate_active_mapi_message_identity_in_tx(&mut tx, &tenant_id, account_id, message_id)
+                .await?;
+        }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
@@ -956,7 +982,7 @@ impl Storage {
             sqlx::query(
                 r#"
                 UPDATE messages
-                SET normalized_subject = $4, updated_at = NOW()
+                SET normalized_subject = $4
                 WHERE tenant_id = $1 AND domain_id = $2 AND id = $3
                 "#,
             )
@@ -991,6 +1017,12 @@ impl Storage {
         if rows.is_empty() {
             bail!("message not found");
         }
+        // [MS-OXCFXICS] sections 2.2.1.2.3, 2.2.1.2.7, and 2.2.1.2.8 require
+        // a server-side message change to receive a new local CN/ChangeKey and
+        // a PCL that integrates that ChangeKey. Read-state updates do not use
+        // this content-mutation path.
+        rotate_active_mapi_message_identity_in_tx(&mut tx, &tenant_id, account_id, message_id)
+            .await?;
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
             Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
@@ -1282,37 +1314,6 @@ impl Storage {
             snapshot_json: row.snapshot_json,
         }))
     }
-}
-
-async fn active_mapi_message_object_id_in_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    tenant_id: &Uuid,
-    account_id: Uuid,
-    message_id: Uuid,
-) -> Result<Option<u64>> {
-    let mapi_object_id = sqlx::query_scalar::<_, i64>(
-        r#"
-        SELECT mapi_object_id
-        FROM mapi_object_identities
-        WHERE tenant_id = $1
-          AND account_id = $2
-          AND object_kind = 'message'
-          AND canonical_id = $3
-          AND deleted_at IS NULL
-        FOR UPDATE
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(account_id)
-    .bind(message_id)
-    .fetch_optional(&mut **tx)
-    .await?;
-    mapi_object_id
-        .map(|value| {
-            u64::try_from(value)
-                .map_err(|_| anyhow::anyhow!("stored MAPI message object id is invalid"))
-        })
-        .transpose()
 }
 
 async fn rekey_mapi_message_identity_in_tx(

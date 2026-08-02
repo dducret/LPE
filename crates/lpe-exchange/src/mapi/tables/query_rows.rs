@@ -309,7 +309,9 @@ fn rop_query_rows_response_inner(
                 );
                 sort_emails(&mut rows, sort_orders);
                 rows.into_iter()
-                    .map(|email| serialize_message_property_row(email, &columns))
+                    .map(|email| {
+                        serialize_message_property_row_in_snapshot(email, snapshot, &columns)
+                    })
                     .collect::<Vec<_>>()
             } else if *folder_id == TRASH_FOLDER_ID {
                 rows_are_serialized_property_rows = *category_count == 0;
@@ -319,6 +321,7 @@ fn rop_query_rows_response_inner(
                 if *category_count > 0 {
                     categorized_deleted_items_content_rows(
                         rows,
+                        snapshot,
                         &columns,
                         sort_orders,
                         *expanded_count,
@@ -329,7 +332,9 @@ fn rop_query_rows_response_inner(
                     .collect::<Vec<_>>()
                 } else {
                     rows.into_iter()
-                        .map(|row| serialize_deleted_items_content_property_row(row, &columns))
+                        .map(|row| {
+                            serialize_deleted_items_content_property_row(row, snapshot, &columns)
+                        })
                         .collect::<Vec<_>>()
                 }
             } else if *folder_id == CALENDAR_FOLDER_ID {
@@ -445,7 +450,7 @@ fn rop_query_rows_response_inner(
                 );
                 sort_mapi_messages(&mut rows, sort_orders);
                 rows.into_iter()
-                    .map(|message| serialize_message_property_row(&message.email, &columns))
+                    .map(|message| serialize_mapi_message_property_row(message, &columns))
                     .collect::<Vec<_>>()
             } else if *folder_id == REMINDERS_FOLDER_ID {
                 let mut rows = reminder_search_content_rows(snapshot, restriction.as_ref());
@@ -509,6 +514,7 @@ fn rop_query_rows_response_inner(
                     };
                     if *category_count > 0 {
                         categorized_email_rows(
+                            Some(snapshot),
                             *folder_id,
                             window_emails,
                             &columns,
@@ -522,7 +528,11 @@ fn rop_query_rows_response_inner(
                     } else {
                         window_emails
                             .into_iter()
-                            .map(|email| serialize_message_property_row(email, &columns))
+                            .map(|email| {
+                                serialize_message_property_row_in_snapshot(
+                                    email, snapshot, &columns,
+                                )
+                            })
                             .collect::<Vec<_>>()
                     }
                 } else {
@@ -542,6 +552,7 @@ fn rop_query_rows_response_inner(
                     sort_emails(&mut rows, sort_orders);
                     if *category_count > 0 {
                         categorized_email_rows(
+                            Some(snapshot),
                             *folder_id,
                             rows,
                             &columns,
@@ -554,7 +565,11 @@ fn rop_query_rows_response_inner(
                         .collect::<Vec<_>>()
                     } else {
                         rows.into_iter()
-                            .map(|email| serialize_message_property_row(email, &columns))
+                            .map(|email| {
+                                serialize_message_property_row_in_snapshot(
+                                    email, snapshot, &columns,
+                                )
+                            })
                             .collect::<Vec<_>>()
                     }
                 }

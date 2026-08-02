@@ -79,6 +79,16 @@ impl MapiSession {
         self.pending_notifications.len()
     }
 
+    pub(in crate::mapi) fn has_notification_targets(&self) -> bool {
+        self.handles
+            .values()
+            .any(|object| matches!(object, MapiObject::NotificationSubscription { .. }))
+            || self
+                .table_notification_active_handles
+                .iter()
+                .any(|handle| self.handles.contains_key(handle))
+    }
+
     pub(in crate::mapi) fn take_pending_notification_deliveries(
         &mut self,
     ) -> Vec<(u32, u8, MapiNotificationEvent)> {
