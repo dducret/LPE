@@ -288,6 +288,12 @@ schema_version="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT schema_ve
 [[ "$schema_version" == "$expected_schema_version" ]] || fail "Unexpected schema version: $schema_version; expected $expected_schema_version"
 pass "Schema version is $expected_schema_version"
 
+mail_change_log_copy_kind_shape_status="$(mail_change_log_copy_kind_shape_ok "$DATABASE_URL")" \
+  || fail "Unable to inspect the mailbox copy replay change-kind constraint"
+[[ "$mail_change_log_copy_kind_shape_status" == "1" ]] \
+  || fail "Mailbox copy replay change-kind constraint is missing or invalid. Initialize a fresh LPE ${expected_release_version} database with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "Mailbox copy replay change-kind constraint is current"
+
 mapi_store_identity_shape_status="$(mapi_store_identity_shape_ok "$DATABASE_URL")" \
   || fail "Unable to inspect MAPI store identity schema"
 [[ "$mapi_store_identity_shape_status" == "1" ]] \

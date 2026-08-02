@@ -277,7 +277,7 @@ async fn mapi_response_start_time_uses_current_http_date_not_sentinel() {
     let body = String::from_utf8(body.to_vec()).unwrap();
 
     assert!(body.contains("\r\nX-StartTime: "));
-    assert!(body.contains(" GMT\r\n\r\n"));
+    assert!(body.contains(" GMT\r\nX-ElapsedTime: 0\r\n\r\n"));
     assert!(!body.contains("Mon, 01 Jan 2001 00:00:00 GMT"));
 }
 
@@ -801,7 +801,7 @@ fn partial_scope_checkpoint_not_stored_count_counts_expected_partial_scope_summa
 }
 
 #[test]
-fn post_fai_inbox_probe_loop_terminal_summary_requires_no_normal_contents() {
+fn post_fai_inbox_probe_loop_terminal_summary_requires_no_normal_or_inbox_ics_contents() {
     let mut state = PostHierarchyActionState {
         post_inbox_fai_folder_type_probe_loop_logged: true,
         inbox_associated_contents_table_observed: true,
@@ -828,6 +828,11 @@ fn post_fai_inbox_probe_loop_terminal_summary_requires_no_normal_contents() {
         .contains("next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"));
 
     state.inbox_normal_contents_table_observed = true;
+
+    assert!(post_fai_inbox_probe_loop_terminal_summary(&state).is_none());
+
+    state.inbox_normal_contents_table_observed = false;
+    state.inbox_content_sync_configure_observed = true;
 
     assert!(post_fai_inbox_probe_loop_terminal_summary(&state).is_none());
 }
@@ -876,6 +881,26 @@ fn outlook_bootstrap_phase_classifies_current_wall_and_successful_progress() {
         outlook_bootstrap_next_expected_phase(&state),
         "inbox_normal_contents_setcolumns"
     );
+}
+
+#[test]
+fn outlook_bootstrap_stall_requires_inbox_content_sync() {
+    let mut state = PostHierarchyActionState {
+        content_sync_configure_observed: true,
+        inbox_associated_contents_table_observed: true,
+        last_inbox_related_release_context: "handle=13;role=ipm_subtree".to_string(),
+        ..PostHierarchyActionState::default()
+    };
+
+    assert_eq!(outlook_bootstrap_stall_code(&state), 1);
+    assert_eq!(
+        outlook_bootstrap_stall_name(outlook_bootstrap_stall_code(&state)),
+        "after_inbox_fai_without_inbox_contents"
+    );
+
+    state.inbox_content_sync_configure_observed = true;
+
+    assert_eq!(outlook_bootstrap_stall_code(&state), 0);
 }
 
 #[test]

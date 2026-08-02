@@ -233,6 +233,22 @@ macro_rules! store_impl_public_address_im {
                     log.change_kind,
                     log.modseq,
                     log.summary_json,
+                    (log.summary_json ? 'parentId') AS hierarchy_parent_id_present,
+                    COALESCE(
+                        jsonb_typeof(log.summary_json->'parentId') = 'null',
+                        FALSE
+                    ) AS hierarchy_parent_is_root,
+                    NULLIF(log.summary_json->>'parentId', '')::uuid
+                        AS hierarchy_parent_id,
+                    (log.summary_json ? 'oldParentId') AS old_parent_id_present,
+                    COALESCE(
+                        jsonb_typeof(log.summary_json->'oldParentId') = 'null',
+                        FALSE
+                    ) AS old_parent_is_root,
+                    NULLIF(log.summary_json->>'oldParentId', '')::uuid
+                        AS old_parent_id,
+                    NULLIF(log.summary_json->>'sourceMailboxId', '')::uuid
+                        AS source_mailbox_id,
                     scope_box.display_name AS scope_display_name,
                     scope_box.role AS scope_role,
                     scope_box.total_messages AS scope_total_messages,
@@ -246,6 +262,8 @@ macro_rules! store_impl_public_address_im {
                     parent_box.display_name AS parent_display_name,
                     parent_box.role AS parent_role,
                     source_box.display_name AS source_display_name,
+                    source_box.role AS source_role,
+                    old_parent_box.role AS old_parent_role,
                     message.normalized_subject AS message_subject,
                     event_calendar.id AS calendar_id,
                     event_calendar.role AS calendar_role,
@@ -274,6 +292,7 @@ macro_rules! store_impl_public_address_im {
                         FALSE
                     ) AS message_move_identity_snapshot_complete,
                     source_identity.mapi_object_id AS source_mapi_object_id,
+                    old_parent_identity.mapi_object_id AS old_parent_mapi_object_id,
                     navigation_shortcut_identity.mapi_object_id
                         AS navigation_shortcut_mapi_object_id,
                     associated_config_identity.mapi_object_id
@@ -308,11 +327,19 @@ macro_rules! store_impl_public_address_im {
                 LEFT JOIN mailboxes parent_box
                   ON parent_box.tenant_id = object_box.tenant_id
                  AND parent_box.account_id = object_box.account_id
-                 AND parent_box.id = object_box.parent_mailbox_id
+                 AND parent_box.id = CASE
+                     WHEN log.summary_json ? 'parentId'
+                         THEN NULLIF(log.summary_json->>'parentId', '')::uuid
+                     ELSE object_box.parent_mailbox_id
+                 END
                 LEFT JOIN mailboxes source_box
                   ON source_box.tenant_id = log.tenant_id
                  AND source_box.account_id = log.account_id
                  AND source_box.id = (log.summary_json->>'sourceMailboxId')::uuid
+                LEFT JOIN mailboxes old_parent_box
+                  ON old_parent_box.tenant_id = log.tenant_id
+                 AND old_parent_box.account_id = log.account_id
+                 AND old_parent_box.id = NULLIF(log.summary_json->>'oldParentId', '')::uuid
                 LEFT JOIN messages message
                   ON message.tenant_id = log.tenant_id
                  AND message.id = (log.summary_json->>'messageId')::uuid
@@ -352,28 +379,38 @@ macro_rules! store_impl_public_address_im {
                  AND log.object_kind IN ('calendar_event', 'deleted_calendar_event')
                 LEFT JOIN mapi_object_identities scope_identity
                   ON scope_identity.tenant_id = log.tenant_id
-                 AND scope_identity.account_id = log.account_id
+                 AND scope_identity.account_id = $3
                  AND scope_identity.object_kind = 'mailbox'
                  AND scope_identity.canonical_id = log.mailbox_id
                  AND scope_identity.deleted_at IS NULL
                 LEFT JOIN mapi_object_identities object_identity
                   ON object_identity.tenant_id = log.tenant_id
-                 AND object_identity.account_id = log.account_id
+                 AND object_identity.account_id = $3
                  AND object_identity.object_kind = 'mailbox'
                  AND object_identity.canonical_id = log.object_id
-                 AND object_identity.deleted_at IS NULL
+                 AND (
+                     object_identity.deleted_at IS NULL
+                     OR log.change_kind IN ('destroyed', 'deleted', 'expunged')
+                 )
                 LEFT JOIN mapi_object_identities scope_parent_identity
                   ON scope_parent_identity.tenant_id = log.tenant_id
-                 AND scope_parent_identity.account_id = log.account_id
+                 AND scope_parent_identity.account_id = $3
                  AND scope_parent_identity.object_kind = 'mailbox'
                  AND scope_parent_identity.canonical_id = scope_box.parent_mailbox_id
                  AND scope_parent_identity.deleted_at IS NULL
                 LEFT JOIN mapi_object_identities parent_identity
                   ON parent_identity.tenant_id = log.tenant_id
-                 AND parent_identity.account_id = log.account_id
+                 AND parent_identity.account_id = $3
                  AND parent_identity.object_kind = 'mailbox'
-                 AND parent_identity.canonical_id = object_box.parent_mailbox_id
-                 AND parent_identity.deleted_at IS NULL
+                 AND parent_identity.canonical_id = CASE
+                     WHEN log.summary_json ? 'parentId'
+                         THEN NULLIF(log.summary_json->>'parentId', '')::uuid
+                     ELSE object_box.parent_mailbox_id
+                 END
+                 AND (
+                     parent_identity.deleted_at IS NULL
+                     OR log.change_kind IN ('destroyed', 'deleted', 'expunged')
+                 )
                 LEFT JOIN mapi_object_identities message_identity
                   ON message_identity.tenant_id = log.tenant_id
                  AND message_identity.account_id = $3
@@ -382,10 +419,16 @@ macro_rules! store_impl_public_address_im {
                  AND message_identity.deleted_at IS NULL
                 LEFT JOIN mapi_object_identities source_identity
                   ON source_identity.tenant_id = log.tenant_id
-                 AND source_identity.account_id = log.account_id
+                 AND source_identity.account_id = $3
                  AND source_identity.object_kind = 'mailbox'
                  AND source_identity.canonical_id = (log.summary_json->>'sourceMailboxId')::uuid
                  AND source_identity.deleted_at IS NULL
+                LEFT JOIN mapi_object_identities old_parent_identity
+                  ON old_parent_identity.tenant_id = log.tenant_id
+                 AND old_parent_identity.account_id = $3
+                 AND old_parent_identity.object_kind = 'mailbox'
+                 AND old_parent_identity.canonical_id = NULLIF(log.summary_json->>'oldParentId', '')::uuid
+                 AND old_parent_identity.deleted_at IS NULL
                 LEFT JOIN mapi_object_identities navigation_shortcut_identity
                   ON navigation_shortcut_identity.tenant_id = log.tenant_id
                  AND navigation_shortcut_identity.account_id = log.account_id
@@ -432,23 +475,36 @@ macro_rules! store_impl_public_address_im {
             let mut notification_identity_requests = Vec::new();
             for row in &rows {
                 let object_kind = row.get::<String, _>("object_kind");
-                // [MS-OXCNOTIF] sections 2.2.1.1 and 4 require a NewMail
-                // message notification to carry both the receive-folder ID
-                // and the delivered Message ID.
-                let is_new_mail_without_identity = object_kind == "mailbox_message"
-                    && row.get::<String, _>("change_kind") == "created"
-                    && row
-                        .try_get::<Option<String>, _>("scope_role")
-                        .ok()
-                        .flatten()
-                        .as_deref()
-                        == Some("inbox")
-                    && row
+                if object_kind == "mailbox" {
+                    for canonical_id in mapi_mailbox_notification_identity_ids_from_row(row) {
+                        if notification_identity_requests.iter().any(
+                            |request: &MapiIdentityRequest| {
+                                request.object_kind == MapiIdentityObjectKind::Mailbox
+                                    && request.canonical_id == canonical_id
+                            },
+                        ) {
+                            continue;
+                        }
+                        notification_identity_requests.push(MapiIdentityRequest {
+                            object_kind: MapiIdentityObjectKind::Mailbox,
+                            canonical_id,
+                            reserved_global_counter: None,
+                            source_key: None,
+                        });
+                    }
+                }
+                // [MS-OXCNOTIF] section 2.2.1.4.1.2 makes every message
+                // event carry a MessageId, not only Inbox NewMail. Attachment
+                // mutations are reported against their parent Message object.
+                let message_notification_without_identity = matches!(
+                    object_kind.as_str(),
+                    "mailbox_message" | "attachment"
+                ) && row
                         .try_get::<Option<i64>, _>("message_mapi_object_id")
                         .ok()
                         .flatten()
                         .is_none();
-                if is_new_mail_without_identity {
+                if message_notification_without_identity {
                     if let Some(canonical_id) = row
                         .try_get::<Option<Uuid>, _>("message_id")
                         .ok()
@@ -521,6 +577,7 @@ macro_rules! store_impl_public_address_im {
                 }
             }
             let mut calendar_folder_ids = std::collections::HashMap::new();
+            let mut mailbox_folder_ids = std::collections::HashMap::new();
             let mut calendar_event_ids = std::collections::HashMap::new();
             let mut mailbox_message_ids = std::collections::HashMap::new();
             if !notification_identity_requests.is_empty() {
@@ -535,6 +592,7 @@ macro_rules! store_impl_public_address_im {
                 {
                     if request.object_kind == MapiIdentityObjectKind::Mailbox {
                         calendar_folder_ids.insert(identity.canonical_id, identity.object_id);
+                        mailbox_folder_ids.insert(identity.canonical_id, identity.object_id);
                     } else if request.object_kind == MapiIdentityObjectKind::CalendarEvent {
                         calendar_event_ids.insert(identity.canonical_id, identity.object_id);
                     } else if request.object_kind == MapiIdentityObjectKind::Message {
@@ -556,9 +614,14 @@ macro_rules! store_impl_public_address_im {
                     row,
                     &calendar_folder_ids,
                     &calendar_event_ids,
+                    &mailbox_folder_ids,
                     &mailbox_message_ids,
                 ) {
+                    let source_hierarchy_table_event = event.source_hierarchy_table_event();
                     events.push(event);
+                    if let Some(source_hierarchy_table_event) = source_hierarchy_table_event {
+                        events.push(source_hierarchy_table_event);
+                    }
                 }
             }
             let cursor = cursor.or(current_cursor);

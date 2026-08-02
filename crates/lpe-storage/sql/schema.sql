@@ -1648,7 +1648,7 @@ CREATE TABLE mail_change_log (
     )),
     object_id UUID NOT NULL,
     object_uid TEXT,
-    change_kind TEXT NOT NULL CHECK (change_kind IN ('created', 'updated', 'destroyed', 'moved', 'expunged')),
+    change_kind TEXT NOT NULL CHECK (change_kind IN ('created', 'updated', 'destroyed', 'moved', 'copied', 'expunged')),
     modseq BIGINT NOT NULL CHECK (modseq > 0),
     affected_principal_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
     summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,

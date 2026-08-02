@@ -647,6 +647,7 @@ fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
         "UNIQUE (tenant_id, cursor, object_kind, object_id)",
         "CHECK (jsonb_typeof(summary_json) = 'object')",
         "CHECK (array_position(affected_principal_ids, NULL) IS NULL)",
+        "'copied'",
         "object_kind = 'mailbox'\n            AND account_id IS NOT NULL\n            AND mailbox_id IS NOT NULL",
         "object_kind = 'mailbox_message'",
         "summary_json ? 'messageId'",
@@ -1729,6 +1730,8 @@ fn fresh_schema_checks_validate_constraint_shape_without_migration_names() {
             "conrelid = 'public.mail_change_log'::regclass AND contype = 'c'",
             "pg_get_constraintdef(oid) LIKE '%associated_config%'",
             "pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%'",
+            "mail_change_log_copy_kind_shape_ok",
+            "pg_get_constraintdef(oid) LIKE '%''copied''%'",
         ],
     );
 }

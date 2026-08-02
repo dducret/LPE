@@ -480,10 +480,14 @@ before it is advertised.
   real Exchange divergence even though the tag remains absent from public
   `[MS-OXPROPS]`. LPE now computes that bounded property only for
   `IPM.Configuration.MessageListSettings` GetProps, table, and stream access.
-  Neither Exchange capture contains `RopFastTransferSourceCopyTo`, so the
-  direct FastTransfer stream remains unchanged. The next clean Outlook rerun
-  must determine whether correcting the earlier post-save GetProps response
-  prevents the later CopyTo recovery path and synchronization report.
+  Those two Exchange captures do not contain `RopFastTransferSourceCopyTo`,
+  but the later Exchange 2016 reference capture `test1_202607281754.saz`
+  contains the exact `RopFastTransferSourceCopyTo` ->
+  `RopFastTransferSourceGetBuffer` sequence. The direct FastTransfer stream is
+  therefore governed by that reference sequence; the two earlier captures
+  establish only the post-save GetProps result. The next clean Outlook rerun
+  must determine whether the aligned GetProps and CopyTo behavior prevents the
+  synchronization report.
 - The `202607312152` LPE trace shows that recovery path directly: Outlook opens
   the persisted Inbox `IPM.Configuration.MessageListSettings` FAI, sends
   `RopFastTransferSourceCopyTo` with an empty exclusion list, and immediately

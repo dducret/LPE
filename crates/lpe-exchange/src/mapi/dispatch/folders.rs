@@ -537,6 +537,17 @@ pub(super) async fn append_folder_move_copy_response<S: ExchangeStore>(
         ));
         return;
     }
+    // [MS-OXCFOLD] sections 2.2.1.8 and 3.2.5.8 require CopyFolder to copy
+    // canonical folder contents and honor WantRecursive. LPE does not have
+    // that complete operation yet, so never claim an empty hierarchy-only copy.
+    if rop_id == RopId::CopyFolder.as_u8() {
+        responses.extend_from_slice(&rop_error_response(
+            rop_id,
+            response_handle_index,
+            0x8004_0102,
+        ));
+        return;
+    }
     let Some(source_parent_folder_id) =
         input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
     else {
@@ -582,48 +593,6 @@ pub(super) async fn append_folder_move_copy_response<S: ExchangeStore>(
         return;
     }
 
-    if rop_id == RopId::CopyFolder.as_u8() {
-        if let (Some(source_public_folder), Some(target_public_folder)) = (
-            snapshot.public_folder_for_id(folder_id),
-            snapshot.public_folder_for_id(target_folder_id),
-        ) {
-            let partial_completion = match copy_public_folder_tree_for_mapi(
-                store,
-                principal,
-                source_public_folder.folder.id,
-                target_public_folder.folder.id,
-                display_name,
-            )
-            .await
-            {
-                Ok(copied_folder) => {
-                    if let Ok(copied_folder_id) = remember_created_mapi_identity(
-                        store,
-                        principal,
-                        MapiIdentityObjectKind::PublicFolder,
-                        copied_folder.id,
-                        None,
-                        None,
-                    )
-                    .await
-                    {
-                        session.record_notification(MapiNotificationEvent::hierarchy(
-                            target_folder_id,
-                            Some(copied_folder_id),
-                        ));
-                    }
-                    false
-                }
-                Err(_) => true,
-            };
-            responses.extend_from_slice(&rop_partial_completion_response(
-                rop_id,
-                response_handle_index,
-                partial_completion,
-            ));
-            return;
-        }
-    }
     if rop_id == RopId::MoveFolder.as_u8() {
         if let (Some(source_public_folder), Some(target_public_folder)) = (
             snapshot.public_folder_for_id(folder_id),
@@ -665,12 +634,15 @@ pub(super) async fn append_folder_move_copy_response<S: ExchangeStore>(
                 .await
                 .is_err();
             if !partial_completion {
-                session.record_notification(MapiNotificationEvent::hierarchy(
+                session.record_notification(MapiNotificationEvent::hierarchy_move_or_copy(
+                    crate::mapi::wire::MapiNotificationEventMask::ObjectMoved.as_u16(),
+                    target_folder_id,
+                    folder_id,
+                    folder_id,
                     source_parent_folder_id,
-                    Some(folder_id),
                 ));
                 session.record_notification(MapiNotificationEvent::hierarchy(
-                    target_folder_id,
+                    source_parent_folder_id,
                     Some(folder_id),
                 ));
             }
@@ -683,20 +655,6 @@ pub(super) async fn append_folder_move_copy_response<S: ExchangeStore>(
         }
     }
 
-    let target_parent_id = match target_folder_id {
-        IPM_SUBTREE_FOLDER_ID => None,
-        folder_id => match folder_row_for_id(folder_id, mailboxes) {
-            Some(mailbox) if mailbox.role == "custom" => Some(mailbox.id),
-            _ => {
-                responses.extend_from_slice(&rop_error_response(
-                    rop_id,
-                    response_handle_index,
-                    0x8007_0005,
-                ));
-                return;
-            }
-        },
-    };
     let Some(source_mailbox) = folder_row_for_id(folder_id, mailboxes) else {
         responses.extend_from_slice(&rop_error_response(
             rop_id,
@@ -713,60 +671,50 @@ pub(super) async fn append_folder_move_copy_response<S: ExchangeStore>(
         ));
         return;
     }
-
-    let result = if request.rop_id == RopId::CopyFolder.as_u8() {
-        match store
-            .create_jmap_mailbox(
-                JmapMailboxCreateInput {
-                    account_id: principal.account_id,
-                    name: display_name.to_string(),
-                    parent_id: target_parent_id,
-                    sort_order: None,
-                    is_subscribed: source_mailbox.is_subscribed,
-                },
-                AuditEntryInput {
-                    actor: principal.email.clone(),
-                    action: "mapi-copy-folder".to_string(),
-                    subject: format!("folder:{}->{}", source_mailbox.id, display_name),
-                },
-            )
-            .await
-        {
-            Ok(mailbox) => match remember_created_mapi_identity(
-                store,
-                principal,
-                MapiIdentityObjectKind::Mailbox,
-                mailbox.id,
-                None,
-                None,
-            )
-            .await
-            {
-                Ok(copied_folder_id) => Ok((mailbox.id, copied_folder_id)),
-                Err(error) => Err(error),
-            },
-            Err(error) => Err(error),
-        }
-    } else {
-        store
-            .update_jmap_mailbox(
-                JmapMailboxUpdateInput {
-                    account_id: principal.account_id,
-                    mailbox_id: source_mailbox.id,
-                    name: Some(display_name.to_string()),
-                    parent_id: Some(target_parent_id),
-                    sort_order: None,
-                    is_subscribed: None,
-                },
-                AuditEntryInput {
-                    actor: principal.email.clone(),
-                    action: "mapi-move-folder".to_string(),
-                    subject: format!("folder:{}", source_mailbox.id),
-                },
-            )
-            .await
-            .map(|mailbox| (mailbox.id, folder_id))
+    if rop_id == RopId::MoveFolder.as_u8()
+        && source_parent_folder_id
+            != mailbox_parent_folder_id_for_dispatch(source_mailbox, mailboxes)
+    {
+        responses.extend_from_slice(&rop_error_response(
+            rop_id,
+            response_handle_index,
+            0x8004_010F,
+        ));
+        return;
+    }
+    let target_parent_id = match target_folder_id {
+        IPM_SUBTREE_FOLDER_ID => None,
+        folder_id => match folder_row_for_id(folder_id, mailboxes) {
+            Some(mailbox) if mailbox.role == "custom" => Some(mailbox.id),
+            _ => {
+                responses.extend_from_slice(&rop_error_response(
+                    rop_id,
+                    response_handle_index,
+                    0x8007_0005,
+                ));
+                return;
+            }
+        },
     };
+
+    let result = store
+        .update_jmap_mailbox(
+            JmapMailboxUpdateInput {
+                account_id: principal.account_id,
+                mailbox_id: source_mailbox.id,
+                name: Some(display_name.to_string()),
+                parent_id: Some(target_parent_id),
+                sort_order: None,
+                is_subscribed: None,
+            },
+            AuditEntryInput {
+                actor: principal.email.clone(),
+                action: "mapi-move-folder".to_string(),
+                subject: format!("folder:{}", source_mailbox.id),
+            },
+        )
+        .await
+        .map(|mailbox| (mailbox.id, folder_id));
 
     if let Ok((_changed_mailbox_id, changed_folder_id)) = result.as_ref() {
         let old_parent_folder_id = mailbox_parent_folder_id_for_dispatch(source_mailbox, mailboxes);
@@ -778,15 +726,16 @@ pub(super) async fn append_folder_move_copy_response<S: ExchangeStore>(
                     .map(mapi_folder_id)
             })
             .unwrap_or(IPM_SUBTREE_FOLDER_ID);
-        if request.rop_id == RopId::MoveFolder.as_u8() {
-            session.record_notification(MapiNotificationEvent::hierarchy(
-                old_parent_folder_id,
-                Some(*changed_folder_id),
-            ));
-        }
-        session.record_notification(MapiNotificationEvent::hierarchy(
+        session.record_notification(MapiNotificationEvent::hierarchy_move_or_copy(
+            crate::mapi::wire::MapiNotificationEventMask::ObjectMoved.as_u16(),
             new_parent_folder_id,
-            Some(*changed_folder_id),
+            *changed_folder_id,
+            folder_id,
+            old_parent_folder_id,
+        ));
+        session.record_notification(MapiNotificationEvent::hierarchy(
+            old_parent_folder_id,
+            Some(folder_id),
         ));
     }
     let partial_completion = result.is_err();

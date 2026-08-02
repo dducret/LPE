@@ -8672,7 +8672,12 @@ fn common_views_sort_snapshot(account_id: Uuid) -> MapiMailStoreSnapshot {
 
 #[test]
 fn message_table_row_flags_absent_deadline_expiry_and_recall_times() {
-    let email = test_table_email(Uuid::from_u128(0x1904), Uuid::from_u128(0x1001), "Test");
+    let email_id = Uuid::from_u128(0x1904);
+    crate::mapi::identity::remember_mapi_identity(
+        email_id,
+        crate::mapi::identity::mapi_store_id(0x1904),
+    );
+    let email = test_table_email(email_id, Uuid::from_u128(0x1001), "Test");
     let columns = [
         PID_TAG_SUBJECT_W,
         PID_TAG_REPLY_TIME,

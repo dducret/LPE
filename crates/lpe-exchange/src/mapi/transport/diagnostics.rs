@@ -320,6 +320,7 @@ pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
     pub(in crate::mapi) execute_count: usize,
     pub(in crate::mapi) rop_ids_seen: String,
     pub(in crate::mapi) content_sync_configure_observed: bool,
+    pub(in crate::mapi) inbox_content_sync_configure_observed: bool,
     pub(in crate::mapi) release_client_initiated: bool,
     pub(in crate::mapi) logoff_client_initiated: bool,
     pub(in crate::mapi) disconnect_client_initiated: bool,
@@ -367,6 +368,7 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
         execute_count: actions.execute_count,
         rop_ids_seen: format_rop_ids_for_debug(&actions.rop_ids_seen),
         content_sync_configure_observed: actions.content_sync_configure_observed,
+        inbox_content_sync_configure_observed: actions.inbox_content_sync_configure_observed,
         release_client_initiated: actions.release_client_initiated,
         logoff_client_initiated: actions.logoff_client_initiated,
         disconnect_client_initiated: disconnect_client_initiated
@@ -481,12 +483,14 @@ pub(in crate::mapi) fn outlook_bootstrap_phase_name(phase: u64) -> &'static str 
 }
 
 pub(in crate::mapi) fn outlook_bootstrap_stall_code(actions: &PostHierarchyActionState) -> u64 {
+    let inbox_contents_progressed = actions.inbox_normal_contents_table_observed
+        || actions.inbox_content_sync_configure_observed;
     if !actions
         .last_inbox_notification_registration_context
         .is_empty()
         && !actions.last_common_views_inbox_shortcut_context.is_empty()
         && !actions.inbox_associated_contents_table_observed
-        && !actions.inbox_normal_contents_table_observed
+        && !inbox_contents_progressed
     {
         4
     } else if actions.inbox_associated_contents_table_observed
@@ -494,20 +498,18 @@ pub(in crate::mapi) fn outlook_bootstrap_stall_code(actions: &PostHierarchyActio
         && !actions.inbox_associated_findrow_returned_content
         && !actions.inbox_associated_query_rows_returned_non_empty
         && !actions.inbox_associated_config_open_observed
-        && !actions.inbox_normal_contents_table_observed
+        && !inbox_contents_progressed
     {
         5
-    } else if actions.post_inbox_fai_folder_type_probe_loop_logged
-        && !actions.inbox_normal_contents_table_observed
-    {
+    } else if actions.post_inbox_fai_folder_type_probe_loop_logged && !inbox_contents_progressed {
         3
     } else if !actions.last_inbox_hierarchy_query_context.is_empty()
         && actions.inbox_open_folder_probe_count >= 2
-        && !actions.inbox_normal_contents_table_observed
+        && !inbox_contents_progressed
     {
         2
     } else if actions.inbox_associated_contents_table_observed
-        && !actions.inbox_normal_contents_table_observed
+        && !inbox_contents_progressed
         && !actions.last_inbox_related_release_context.is_empty()
     {
         1
@@ -673,6 +675,7 @@ pub(in crate::mapi) fn post_fai_inbox_probe_loop_terminal_summary(
     if !actions.post_inbox_fai_folder_type_probe_loop_logged
         || !actions.inbox_associated_contents_table_observed
         || actions.inbox_normal_contents_table_observed
+        || actions.inbox_content_sync_configure_observed
         || actions.inbox_open_folder_probe_count < 2
         || actions.inbox_folder_type_getprops_probe_count < 2
     {
@@ -1035,6 +1038,10 @@ pub(in crate::mapi) fn log_mapi_session_disconnect(
                 session
                     .post_hierarchy_actions
                     .inbox_normal_contents_table_observed,
+            inbox_content_sync_configure_observed =
+                session
+                    .post_hierarchy_actions
+                    .inbox_content_sync_configure_observed,
             normal_inbox_setcolumns_observed =
                 session
                     .post_hierarchy_actions

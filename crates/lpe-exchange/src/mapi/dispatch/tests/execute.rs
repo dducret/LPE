@@ -123,6 +123,7 @@ fn automatic_fast_transfer_buffer_uses_execute_residual_output_budget() {
         &[0; 32],
         &mut position,
         transfer_buffer_size,
+        false,
     );
     let rop_buffer = rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(response, &[0x56]));
 
@@ -667,13 +668,13 @@ fn execute_rop_response_summary_keeps_get_address_types_frame_boundary() {
     );
     assert!(response_summary
         .frames
-        .contains("0x49@0..18:len=18:out=0:rv=0x00000000"));
+        .contains("0x49@0..23:len=23:out=0:rv=0x00000000"));
     assert!(response_summary
         .frames
-        .contains("0x02@18..26:len=8:out=2:rv=0x00000000"));
+        .contains("0x02@23..31:len=8:out=2:rv=0x00000000"));
     assert!(response_summary
         .frames
-        .contains("0x07@26..37:len=11:out=2:rv=0x00000000"));
+        .contains("0x07@31..42:len=11:out=2:rv=0x00000000"));
     assert!(response_summary.parse_error.is_empty());
 }
 

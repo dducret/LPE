@@ -642,6 +642,7 @@ pub(in crate::mapi) fn simulate_table_access(
                     checkpoint_zero_delta: false,
                     sync_type,
                     sync_flags: 0,
+                    transfer_state_source: true,
                     initial_state: state.clone(),
                     state: state.clone(),
                     state_upload_property_tag: None,

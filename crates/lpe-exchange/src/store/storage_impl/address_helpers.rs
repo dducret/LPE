@@ -145,6 +145,7 @@ fn mapi_notification_event_from_change_row(
     row: sqlx::postgres::PgRow,
     calendar_folder_ids: &std::collections::HashMap<Uuid, u64>,
     calendar_event_ids: &std::collections::HashMap<Uuid, u64>,
+    mailbox_folder_ids: &std::collections::HashMap<Uuid, u64>,
     mailbox_message_ids: &std::collections::HashMap<Uuid, u64>,
 ) -> Option<MapiNotificationEvent> {
     let object_kind = row.get::<String, _>("object_kind");
@@ -154,25 +155,64 @@ fn mapi_notification_event_from_change_row(
     match object_kind.as_str() {
         "mailbox" => {
             let event_mask = mapi_notification_event_mask_for_change(&change_kind, false);
-            let changed_folder_id = mapi_folder_id_from_role_or_identity(
+            let changed_folder_id = mapi_notification_folder_id(
                 row.try_get::<String, _>("object_role").ok().as_deref(),
                 row.try_get::<i64, _>("object_mapi_object_id").ok(),
+                row.try_get::<Uuid, _>("object_id").ok(),
+                mailbox_folder_ids,
             )?;
             let virtual_metadata =
                 crate::mapi_mailstore::virtual_special_folder_metadata(changed_folder_id);
-            let parent_folder_id = row
-                .try_get::<String, _>("parent_role")
+            let parent_id_present = row
+                .try_get::<bool, _>("hierarchy_parent_id_present")
+                .unwrap_or(false);
+            let parent_is_root = row
+                .try_get::<bool, _>("hierarchy_parent_is_root")
+                .unwrap_or(false);
+            if matches!(event_mask, 0x0020 | 0x0040) && !parent_id_present {
+                tracing::warn!(
+                    adapter = "mapi",
+                    operation = "poll notifications",
+                    cursor,
+                    change_kind,
+                    "skipping hierarchy movement notification without historical destination parent metadata"
+                );
+                return None;
+            }
+            let parent_canonical_id = row
+                .try_get::<Option<Uuid>, _>("hierarchy_parent_id")
                 .ok()
-                .as_deref()
-                .and_then(crate::mapi_store::reserved_folder_counter_for_role)
-                .map(crate::mapi::identity::mapi_store_id)
+                .flatten()
                 .or_else(|| {
-                    row.try_get::<i64, _>("parent_mapi_object_id")
-                        .ok()
-                        .map(|value| value as u64)
-                })
+                    (!parent_id_present)
+                        .then(|| {
+                            row.try_get::<Option<Uuid>, _>("object_parent_id")
+                                .ok()
+                                .flatten()
+                        })
+                        .flatten()
+                });
+            let parent_folder_id = if parent_id_present {
+                if parent_is_root {
+                    Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+                } else {
+                    mapi_notification_folder_id(
+                        row.try_get::<String, _>("parent_role").ok().as_deref(),
+                        row.try_get::<i64, _>("parent_mapi_object_id").ok(),
+                        parent_canonical_id,
+                        mailbox_folder_ids,
+                    )
+                }
+            } else {
+                mapi_notification_folder_id(
+                    row.try_get::<String, _>("parent_role").ok().as_deref(),
+                    row.try_get::<i64, _>("parent_mapi_object_id").ok(),
+                    parent_canonical_id,
+                    mailbox_folder_ids,
+                )
                 .or_else(|| virtual_metadata.map(|(_, _, _, parent_id, _)| parent_id))
-                .or(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID));
+                .or(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID))
+            };
             let display_name = row
                 .try_get("object_display_name")
                 .ok()
@@ -182,12 +222,59 @@ fn mapi_notification_event_from_change_row(
                     .and_then(crate::mapi_mailstore::virtual_special_folder_metadata)
                     .map(|(_, name, _, _, _)| name.to_string())
             });
+            let (old_folder_id, old_parent_folder_id) =
+                if matches!(event_mask, 0x0020 | 0x0040) {
+                    let source_folder_id = mapi_notification_folder_id(
+                        row.try_get::<String, _>("source_role").ok().as_deref(),
+                        row.try_get::<i64, _>("source_mapi_object_id").ok(),
+                        row.try_get::<Option<Uuid>, _>("source_mailbox_id")
+                            .ok()
+                            .flatten(),
+                        mailbox_folder_ids,
+                    );
+                    let old_parent_folder_id = mapi_hierarchy_old_parent_folder_id(
+                        row.try_get::<bool, _>("old_parent_id_present")
+                            .unwrap_or(false),
+                        row.try_get::<bool, _>("old_parent_is_root")
+                            .unwrap_or(false),
+                        row.try_get::<String, _>("old_parent_role").ok().as_deref(),
+                        row.try_get::<i64, _>("old_parent_mapi_object_id")
+                            .ok(),
+                        row.try_get::<Option<Uuid>, _>("old_parent_id")
+                            .ok()
+                            .flatten(),
+                        mailbox_folder_ids,
+                    );
+                    let Some((old_folder_id, old_parent_folder_id)) =
+                        mapi_hierarchy_movement_source_ids(
+                            event_mask,
+                            changed_folder_id,
+                            source_folder_id,
+                            old_parent_folder_id,
+                        )
+                    else {
+                        tracing::warn!(
+                            adapter = "mapi",
+                            operation = "poll notifications",
+                            cursor,
+                            change_kind,
+                            changed_folder_id = format_args!("{changed_folder_id:#018x}"),
+                            source_folder_id = ?source_folder_id,
+                            old_parent_folder_id = ?old_parent_folder_id,
+                            "skipping hierarchy movement notification with incomplete durable identity metadata"
+                        );
+                        return None;
+                    };
+                    (Some(old_folder_id), Some(old_parent_folder_id))
+                } else {
+                    (None, None)
+                };
             Some(MapiNotificationEvent::canonical(
                 MapiNotificationKind::Hierarchy,
                 event_mask,
                 parent_folder_id?,
                 Some(changed_folder_id),
-                None,
+                old_folder_id,
                 cursor,
                 modseq,
                 row.try_get("object_total_messages").ok(),
@@ -204,6 +291,7 @@ fn mapi_notification_event_from_change_row(
                     row.try_get::<Uuid, _>("object_id").ok(),
                 )
             })
+            .map(|event| event.with_old_parent_folder_id(old_parent_folder_id))
         }
         "calendar_event" => {
             let event_id = row.try_get::<Uuid, _>("object_id").ok();
@@ -466,6 +554,22 @@ fn mapi_notification_event_from_change_row(
                 canonical_message_id,
                 mailbox_message_ids,
             );
+            // [MS-OXCNOTIF] section 2.2.1.4.1.2 requires every message event
+            // to carry the parent MessageId. Do not downgrade a canonical
+            // message mutation into a folder event when identity allocation is
+            // unavailable.
+            let Some(message_id) = message_id else {
+                tracing::warn!(
+                    adapter = "mapi",
+                    operation = "poll notifications",
+                    cursor,
+                    object_kind,
+                    canonical_message_id = ?canonical_message_id,
+                    change_kind,
+                    "skipping message notification with incomplete durable identity metadata"
+                );
+                return None;
+            };
             let old_message_id = mapi_notification_old_message_id(
                 event_mask,
                 row.try_get::<Option<i64>, _>("old_message_mapi_object_id")
@@ -480,7 +584,7 @@ fn mapi_notification_event_from_change_row(
                 MapiNotificationKind::Content,
                 event_mask,
                 folder_id,
-                message_id,
+                Some(message_id),
                 row.try_get::<i64, _>("source_mapi_object_id")
                     .ok()
                     .map(|value| value as u64),
@@ -533,6 +637,22 @@ fn mapi_notification_old_message_id(
         return None;
     }
     captured_old_message_id.map(|value| value as u64)
+}
+
+/// [MS-OXCNOTIF] section 2.2.1.4.1.2 requires the hierarchy source object
+/// and source parent fields to stay distinct from the destination fields.
+fn mapi_hierarchy_movement_source_ids(
+    event_mask: u16,
+    changed_folder_id: u64,
+    source_folder_id: Option<u64>,
+    old_parent_folder_id: Option<u64>,
+) -> Option<(u64, u64)> {
+    let old_parent_folder_id = old_parent_folder_id?;
+    match event_mask {
+        0x0020 => Some((changed_folder_id, old_parent_folder_id)),
+        0x0040 => Some((source_folder_id?, old_parent_folder_id)),
+        _ => None,
+    }
 }
 
 fn mapi_calendar_event_object_id(
@@ -710,6 +830,106 @@ fn mapi_folder_id_from_role_or_identity(role: Option<&str>, identity: Option<i64
         .or_else(|| identity.map(|value| value as u64))
 }
 
+fn mapi_notification_folder_id(
+    role: Option<&str>,
+    durable_identity: Option<i64>,
+    canonical_id: Option<Uuid>,
+    allocated_ids: &std::collections::HashMap<Uuid, u64>,
+) -> Option<u64> {
+    mapi_folder_id_from_role_or_identity(role, durable_identity)
+        .or_else(|| canonical_id.and_then(|canonical_id| allocated_ids.get(&canonical_id).copied()))
+}
+
+fn mapi_hierarchy_old_parent_folder_id(
+    old_parent_id_present: bool,
+    old_parent_is_root: bool,
+    role: Option<&str>,
+    durable_identity: Option<i64>,
+    canonical_id: Option<Uuid>,
+    allocated_ids: &std::collections::HashMap<Uuid, u64>,
+) -> Option<u64> {
+    if !old_parent_id_present {
+        return None;
+    }
+    if old_parent_is_root {
+        return Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
+    }
+    mapi_notification_folder_id(role, durable_identity, canonical_id, allocated_ids)
+}
+
+fn mapi_mailbox_notification_identity_ids_from_row(row: &sqlx::postgres::PgRow) -> Vec<Uuid> {
+    // A deleted folder must retain the receiver's pre-existing FID. Allocating
+    // one while replaying the deletion would revive a tombstoned identity for
+    // a folder the receiver never observed.
+    if row.get::<String, _>("change_kind") == "destroyed" {
+        return Vec::new();
+    }
+    let mut identity_ids = Vec::new();
+    let object_role = row
+        .try_get::<Option<String>, _>("object_role")
+        .ok()
+        .flatten();
+    let parent_role = row
+        .try_get::<Option<String>, _>("parent_role")
+        .ok()
+        .flatten();
+    let source_role = row
+        .try_get::<Option<String>, _>("source_role")
+        .ok()
+        .flatten();
+    let old_parent_role = row
+        .try_get::<Option<String>, _>("old_parent_role")
+        .ok()
+        .flatten();
+    let mut append_identity = |canonical_id: Option<Uuid>, role: Option<&str>| {
+        if role
+            .and_then(crate::mapi_store::reserved_folder_counter_for_role)
+            .is_none()
+        {
+            if let Some(canonical_id) = canonical_id {
+                push_unique_uuid(&mut identity_ids, canonical_id);
+            }
+        }
+    };
+
+    append_identity(row.try_get::<Uuid, _>("object_id").ok(), object_role.as_deref());
+    append_identity(
+        row.try_get::<Option<Uuid>, _>("hierarchy_parent_id")
+            .ok()
+            .flatten()
+            .or_else(|| {
+                (!row
+                    .try_get::<bool, _>("hierarchy_parent_id_present")
+                    .unwrap_or(false))
+                .then(|| {
+                    row.try_get::<Option<Uuid>, _>("object_parent_id")
+                        .ok()
+                        .flatten()
+                })
+                .flatten()
+            }),
+        parent_role.as_deref(),
+    );
+    append_identity(
+        row.try_get::<Option<Uuid>, _>("source_mailbox_id")
+            .ok()
+            .flatten(),
+        source_role.as_deref(),
+    );
+    if row
+        .try_get::<bool, _>("old_parent_id_present")
+        .unwrap_or(false)
+    {
+        append_identity(
+            row.try_get::<Option<Uuid>, _>("old_parent_id")
+                .ok()
+                .flatten(),
+            old_parent_role.as_deref(),
+        );
+    }
+    identity_ids
+}
+
 fn mapi_notification_event_mask_for_change(change_kind: &str, is_new_mail: bool) -> u16 {
     match change_kind {
         "created" if is_new_mail => 0x0002,
@@ -725,8 +945,10 @@ fn mapi_notification_event_mask_for_change(change_kind: &str, is_new_mail: bool)
 mod notification_tests {
     use super::{
         mapi_calendar_event_object_id, mapi_calendar_notification_event,
-        mapi_notification_event_mask_for_change, mapi_notification_message_object_id,
-        mapi_notification_old_message_id, MapiCalendarNotificationData,
+        mapi_hierarchy_movement_source_ids, mapi_hierarchy_old_parent_folder_id,
+        mapi_notification_event_mask_for_change,
+        mapi_notification_message_object_id, mapi_notification_old_message_id,
+        MapiCalendarNotificationData,
     };
     use crate::mapi::notifications::MapiNotificationKind;
     use std::collections::HashMap;
@@ -745,6 +967,68 @@ mod notification_tests {
         assert_eq!(
             mapi_notification_event_mask_for_change("copied", false),
             0x0040
+        );
+    }
+
+    #[test]
+    fn hierarchy_movement_uses_strict_source_folder_and_parent_ids() {
+        let destination_folder_id = 0x0000_0000_0007_0001;
+        let source_folder_id = 0x0000_0000_0005_0001;
+        let source_parent_folder_id = 0x0000_0000_0004_0001;
+
+        assert_eq!(
+            mapi_hierarchy_movement_source_ids(
+                0x0020,
+                destination_folder_id,
+                Some(source_folder_id),
+                Some(source_parent_folder_id),
+            ),
+            Some((destination_folder_id, source_parent_folder_id))
+        );
+        assert_eq!(
+            mapi_hierarchy_movement_source_ids(
+                0x0040,
+                destination_folder_id,
+                Some(source_folder_id),
+                Some(source_parent_folder_id),
+            ),
+            Some((source_folder_id, source_parent_folder_id))
+        );
+        assert_eq!(
+            mapi_hierarchy_movement_source_ids(
+                0x0040,
+                destination_folder_id,
+                None,
+                Some(source_parent_folder_id),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn hierarchy_old_parent_requires_explicit_metadata_but_preserves_root() {
+        let allocated_ids = HashMap::new();
+        assert_eq!(
+            mapi_hierarchy_old_parent_folder_id(
+                false,
+                false,
+                None,
+                None,
+                None,
+                &allocated_ids,
+            ),
+            None
+        );
+        assert_eq!(
+            mapi_hierarchy_old_parent_folder_id(
+                true,
+                true,
+                None,
+                None,
+                None,
+                &allocated_ids,
+            ),
+            Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
         );
     }
 
@@ -789,6 +1073,20 @@ mod notification_tests {
                 &scoped_message_ids,
             ),
             Some(historical_message_id)
+        );
+    }
+
+    #[test]
+    fn message_notification_without_durable_mid_is_not_publishable() {
+        // [MS-OXCNOTIF] section 2.2.1.4.1.2 requires the MessageId field
+        // when the notification represents a message object.
+        assert_eq!(
+            mapi_notification_message_object_id(
+                None,
+                Some(Uuid::from_u128(0x2233)),
+                &HashMap::new(),
+            ),
+            None
         );
     }
 

@@ -629,8 +629,18 @@ async fn repair_stale_mapi_object_identities(
               SELECT 1
               FROM mailboxes mailbox
               WHERE mailbox.tenant_id = identity.tenant_id
-                AND mailbox.account_id = identity.account_id
                 AND mailbox.id = identity.canonical_id
+                AND (
+                    mailbox.account_id = identity.account_id
+                    OR EXISTS (
+                        SELECT 1
+                        FROM mailbox_delegation_grants grant_row
+                        WHERE grant_row.tenant_id = mailbox.tenant_id
+                          AND grant_row.owner_account_id = mailbox.account_id
+                          AND grant_row.grantee_account_id = identity.account_id
+                          AND grant_row.may_read
+                    )
+                )
           )
         "#,
     )
@@ -675,8 +685,18 @@ async fn repair_stale_mapi_object_identities(
               SELECT 1
               FROM mailboxes mailbox
               WHERE mailbox.tenant_id = checkpoint.tenant_id
-                AND mailbox.account_id = checkpoint.account_id
                 AND mailbox.id = checkpoint.mailbox_id
+                AND (
+                    mailbox.account_id = checkpoint.account_id
+                    OR EXISTS (
+                        SELECT 1
+                        FROM mailbox_delegation_grants grant_row
+                        WHERE grant_row.tenant_id = mailbox.tenant_id
+                          AND grant_row.owner_account_id = mailbox.account_id
+                          AND grant_row.grantee_account_id = checkpoint.account_id
+                          AND grant_row.may_read
+                    )
+                )
           )
         "#,
     )

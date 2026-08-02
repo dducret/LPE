@@ -2596,6 +2596,7 @@ async fn postgres_mapi_sync_checkpoint_ignores_and_refreshes_expired_rows() {
                 parent_id: None,
                 sort_order: Some(310),
                 is_subscribed: true,
+                copy_source_mailbox_id: None,
             },
             lpe_storage::AuditEntryInput {
                 actor: "alice@example.test".to_string(),
@@ -2721,6 +2722,7 @@ async fn mapi_identity_repair_removes_orphaned_checkpoint_and_config_state() {
                 parent_id: None,
                 sort_order: Some(300),
                 is_subscribed: true,
+                copy_source_mailbox_id: None,
             },
             lpe_storage::AuditEntryInput {
                 actor: "alice@example.test".to_string(),
@@ -5063,6 +5065,7 @@ impl ExchangeStore for FakeStore {
                         parent_id: None,
                         sort_order: None,
                         is_subscribed: input.is_subscribed,
+                        copy_source_mailbox_id: None,
                     });
                 Ok(mailbox)
             })

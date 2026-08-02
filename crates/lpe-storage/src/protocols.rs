@@ -1319,7 +1319,9 @@ fn is_mapi_only_change(summary_json: &Value) -> bool {
 fn jmap_change_kind(change_kind: &str) -> String {
     match change_kind {
         "destroyed" | "expunged" => "destroyed",
-        "created" => "created",
+        // A folder copy has a new canonical object ID. JMAP must receive it
+        // as a creation, rather than as an update to an unknown object.
+        "created" | "copied" => "created",
         _ => "updated",
     }
     .to_string()
@@ -1397,7 +1399,7 @@ fn summary_json_reminder_changed(summary_json: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_mapi_only_change, jmap_exact_object_kind, jmap_object_replay_kinds,
+        is_mapi_only_change, jmap_change_kind, jmap_exact_object_kind, jmap_object_replay_kinds,
         jmap_replay_object_id,
     };
     use serde_json::json;
@@ -1408,6 +1410,12 @@ mod tests {
         assert!(is_mapi_only_change(&json!({ "mapiOnly": true })));
         assert!(!is_mapi_only_change(&json!({ "mapiOnly": false })));
         assert!(!is_mapi_only_change(&json!({})));
+    }
+
+    #[test]
+    fn jmap_replay_treats_folder_copies_as_new_objects() {
+        assert_eq!(jmap_change_kind("copied"), "created");
+        assert_eq!(jmap_change_kind("moved"), "updated");
     }
 
     #[test]

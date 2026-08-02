@@ -1082,6 +1082,14 @@ impl MapiSession {
         self.post_hierarchy_actions.content_sync_configure_observed = true;
     }
 
+    pub(in crate::mapi) fn record_content_sync_configure_for_folder(&mut self, folder_id: u64) {
+        self.record_content_sync_configure();
+        if folder_id == INBOX_FOLDER_ID {
+            self.post_hierarchy_actions
+                .inbox_content_sync_configure_observed = true;
+        }
+    }
+
     pub(in crate::mapi) fn record_logoff_after_hierarchy_completion(&mut self) {
         if self.hierarchy_sync_completed() {
             self.post_hierarchy_actions.logoff_client_initiated = true;

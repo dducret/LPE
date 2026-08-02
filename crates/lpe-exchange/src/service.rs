@@ -418,6 +418,7 @@ where
                         parent_id: None,
                         sort_order: None,
                         is_subscribed: true,
+                        copy_source_mailbox_id: None,
                     },
                     AuditEntryInput {
                         actor: principal.email.clone(),
@@ -526,6 +527,7 @@ where
                                     parent_id,
                                     sort_order: None,
                                     is_subscribed: true,
+                                    copy_source_mailbox_id: None,
                                 },
                                 AuditEntryInput {
                                     actor: principal.email.clone(),
@@ -775,6 +777,7 @@ where
                         parent_id,
                         sort_order: Some(current.sort_order),
                         is_subscribed: current.is_subscribed,
+                        copy_source_mailbox_id: Some(current.id),
                     },
                     AuditEntryInput {
                         actor: principal.email.clone(),

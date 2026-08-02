@@ -32,6 +32,7 @@ pub struct JmapMailboxCreateInput {
     pub parent_id: Option<Uuid>,
     pub sort_order: Option<i32>,
     pub is_subscribed: bool,
+    pub copy_source_mailbox_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -536,6 +537,25 @@ impl Storage {
             None,
         )
         .await?;
+        let copy_source_parent_id =
+            if let Some(copy_source_mailbox_id) = input.copy_source_mailbox_id {
+                sqlx::query_scalar::<_, Option<Uuid>>(
+                    r#"
+                SELECT parent_mailbox_id
+                FROM mailboxes
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                LIMIT 1
+                "#,
+                )
+                .bind(&tenant_id)
+                .bind(input.account_id)
+                .bind(copy_source_mailbox_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| anyhow!("copy source mailbox not found"))?
+            } else {
+                None
+            };
 
         let next_sort_order = sqlx::query_scalar::<_, i32>(
             r#"
@@ -584,6 +604,11 @@ impl Storage {
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
             Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, input.account_id).await?;
+        let change_kind = if input.copy_source_mailbox_id.is_some() {
+            "copied"
+        } else {
+            "created"
+        };
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
@@ -591,10 +616,15 @@ impl Storage {
             Some(mailbox_id),
             "mailbox",
             mailbox_id,
-            "created",
+            change_kind,
             modseq,
             &principals,
-            serde_json::json!({"name": name, "parentId": input.parent_id}),
+            serde_json::json!({
+                "name": name,
+                "parentId": input.parent_id,
+                "sourceMailboxId": input.copy_source_mailbox_id,
+                "oldParentId": copy_source_parent_id,
+            }),
         )
         .await?;
         Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
@@ -970,6 +1000,11 @@ impl Storage {
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
             Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, input.account_id).await?;
+        let change_kind = if parent_id != current_parent_id {
+            "moved"
+        } else {
+            "updated"
+        };
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
@@ -977,10 +1012,14 @@ impl Storage {
             Some(input.mailbox_id),
             "mailbox",
             input.mailbox_id,
-            "updated",
+            change_kind,
             modseq,
             &principals,
-            serde_json::json!({"name": name, "parentId": parent_id}),
+            serde_json::json!({
+                "name": name,
+                "parentId": parent_id,
+                "oldParentId": current_parent_id,
+            }),
         )
         .await?;
         Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
@@ -1004,7 +1043,7 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let current = sqlx::query(
             r#"
-            SELECT role, sort_order
+            SELECT role, sort_order, parent_mailbox_id
             FROM mailboxes
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             LIMIT 1
@@ -1018,6 +1057,7 @@ impl Storage {
         .ok_or_else(|| anyhow!("mailbox not found"))?;
 
         let role = current.try_get::<String, _>("role")?;
+        let current_parent_id = current.try_get::<Option<Uuid>, _>("parent_mailbox_id")?;
         if is_system_mailbox_role(&role) {
             bail!("system mailbox cannot be modified through IMAP");
         }
@@ -1126,10 +1166,18 @@ impl Storage {
             Some(mailbox_id),
             "mailbox",
             mailbox_id,
-            "updated",
+            if parent_id != current_parent_id {
+                "moved"
+            } else {
+                "updated"
+            },
             modseq,
             &principals,
-            serde_json::json!({"name": name, "parentId": parent_id}),
+            serde_json::json!({
+                "name": name,
+                "parentId": parent_id,
+                "oldParentId": current_parent_id,
+            }),
         )
         .await?;
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
@@ -1211,7 +1259,7 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let current = sqlx::query(
             r#"
-            SELECT role
+            SELECT role, parent_mailbox_id
             FROM mailboxes
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             LIMIT 1
@@ -1225,6 +1273,7 @@ impl Storage {
         .ok_or_else(|| anyhow!("mailbox not found"))?;
 
         let role = current.try_get::<String, _>("role")?;
+        let parent_id = current.try_get::<Option<Uuid>, _>("parent_mailbox_id")?;
         if is_system_mailbox_role(&role) {
             bail!("system mailbox cannot be deleted through JMAP");
         }
@@ -1263,7 +1312,7 @@ impl Storage {
             "destroyed",
             modseq,
             &principals,
-            serde_json::json!({"reason": "delete"}),
+            serde_json::json!({"reason": "delete", "parentId": parent_id}),
         )
         .await?;
         sqlx::query(

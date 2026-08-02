@@ -667,6 +667,7 @@ fn jmap_create_input(
         parent_id,
         sort_order: None,
         is_subscribed: true,
+        copy_source_mailbox_id: None,
     }
 }
 

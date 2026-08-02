@@ -553,6 +553,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
             checkpoint_zero_delta,
             sync_type,
             sync_flags,
+            transfer_state_source: false,
             state: initial_state.clone(),
             initial_state,
             state_upload_property_tag: None,
@@ -572,6 +573,9 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     set_handle_slot(handle_slots, request.output_handle_index, handle);
     responses.extend_from_slice(&rop_synchronization_configure_response(&request));
     output_handles.push(handle);
+    if sync_type == 0x01 {
+        session.record_content_sync_configure_for_folder(folder_id);
+    }
     *content_sync_configure_observed = sync_type == 0x01;
     SyncConfigureFlow::Continue
 }

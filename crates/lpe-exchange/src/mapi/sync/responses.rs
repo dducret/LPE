@@ -17,6 +17,7 @@ pub(in crate::mapi) fn rop_fast_transfer_source_get_buffer_response(
     transfer_buffer: &[u8],
     transfer_position: &mut usize,
     transfer_buffer_size: usize,
+    transfer_state_source: bool,
 ) -> Vec<u8> {
     let requested = transfer_buffer_size.min(u16::MAX as usize);
     let end = transfer_position
@@ -34,8 +35,9 @@ pub(in crate::mapi) fn rop_fast_transfer_source_get_buffer_response(
             .min(u16::MAX as usize) as u16
     };
     // [MS-OXCFXICS] section 2.2.3.1.1.5.2 defines these as progress-only
-    // counters. Exchange 2016 returns 0/1 for a terminal one-buffer transfer.
-    let completed_steps = if done && total_steps == 1 {
+    // counters. Exchange 2016 returns 0/1 from GetTransferState, but 1/1
+    // from SynchronizationConfigure ICS transfers.
+    let completed_steps = if transfer_state_source && done && total_steps == 1 {
         0
     } else if total_steps == 0 || requested == 0 {
         0

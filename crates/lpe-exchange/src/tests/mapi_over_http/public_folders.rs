@@ -738,7 +738,8 @@ async fn mapi_over_http_microsoft_public_folder_empty_folder_deletes_canonical_i
 }
 
 #[tokio::test]
-async fn mapi_over_http_microsoft_public_folder_copy_folder_uses_canonical_store() {
+async fn mapi_over_http_microsoft_public_folder_copy_folder_is_not_supported_without_side_effects()
+{
     let source_parent_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     let source_id = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
     let target_parent_id = "dddddddd-eeee-ffff-0000-111111111111";
@@ -837,22 +838,22 @@ async fn mapi_over_http_microsoft_public_folder_copy_folder_uses_canonical_store
         .unwrap();
     assert_eq!(copy_response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(copy_response).await;
-    assert!(contains_bytes(&response_rops, &[0x36, 0x01, 0, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x36, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
     let folders = public_folders.lock().unwrap();
-    let copied_folder = folders
+    assert_eq!(folders.len(), 3);
+    assert!(folders
         .iter()
-        .find(|folder| folder.display_name == "Copied Public")
-        .unwrap();
-    assert_eq!(
-        copied_folder.parent_folder_id,
-        Some(Uuid::parse_str(target_parent_id).unwrap())
-    );
+        .all(|folder| folder.display_name != "Copied Public"));
     let items = public_folder_items.lock().unwrap();
-    let copied_item = items
-        .iter()
-        .find(|item| item.public_folder_id == copied_folder.id)
-        .unwrap();
-    assert_eq!(copied_item.subject, "Public post");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, Uuid::parse_str(item_id).unwrap());
+    assert_eq!(
+        items[0].public_folder_id,
+        Uuid::parse_str(source_id).unwrap()
+    );
 }
 
 #[tokio::test]

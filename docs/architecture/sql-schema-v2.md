@@ -228,6 +228,13 @@ Tombstones reference the matching `(tenant_id, cursor, object_kind, object_id)`
 change-log row so destroyed-object replay cannot point at an unrelated cursor.
 Retained replay queries ignore rows whose `retained_until` has expired.
 
+Mailbox hierarchy `moved` and `copied` rows retain historical parents in
+`summary_json`: `parentId` is the destination, `oldParentId` is the source
+parent, and copied rows retain `sourceMailboxId`. An explicit JSON null parent
+denotes the IPM subtree/root. Destroyed mailbox rows retain their pre-delete
+`parentId`, so notification replay never derives historical hierarchy identity
+from a live mailbox row.
+
 JMAP `Mailbox/changes`, `Email/changes`, `Thread/changes`,
 `EmailSubmission/changes`, and collaboration object changes use
 `mail_change_log` replay when the client state token carries a retained change

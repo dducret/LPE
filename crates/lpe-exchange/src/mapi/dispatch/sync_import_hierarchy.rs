@@ -296,6 +296,7 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 parent_id,
                 sort_order: None,
                 is_subscribed: true,
+                copy_source_mailbox_id: None,
             },
             AuditEntryInput {
                 actor: principal.email.clone(),

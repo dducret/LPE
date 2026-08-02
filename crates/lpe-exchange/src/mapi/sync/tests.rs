@@ -819,7 +819,7 @@ fn import_rop_success_responses_return_zero_object_ids() {
 }
 
 #[test]
-fn fast_transfer_terminal_one_buffer_matches_exchange_progress_metadata() {
+fn fast_transfer_get_transfer_state_one_buffer_matches_exchange_progress_metadata() {
     let request = RopRequest {
         rop_id: 0x4E,
         input_handle_index: Some(2),
@@ -833,6 +833,7 @@ fn fast_transfer_terminal_one_buffer_matches_exchange_progress_metadata() {
         &[0x3A, 0x40, 0x03, 0x00],
         &mut transfer_position,
         request.fast_transfer_buffer_size(),
+        true,
     );
 
     assert_eq!(transfer_position, 4);
@@ -843,6 +844,40 @@ fn fast_transfer_terminal_one_buffer_matches_exchange_progress_metadata() {
             0x00, 0x00, 0x00, 0x00, // ReturnValue
             0x03, 0x00, // TransferStatus: Done
             0x00, 0x00, // InProgressCount
+            0x01, 0x00, // TotalStepCount
+            0x00, // Reserved
+            0x04, 0x00, // TransferBufferSize
+            0x3A, 0x40, 0x03, 0x00,
+        ]
+    );
+}
+
+#[test]
+fn fast_transfer_configure_one_buffer_keeps_exchange_ics_progress_metadata() {
+    let request = RopRequest {
+        rop_id: 0x4E,
+        input_handle_index: Some(1),
+        output_handle_index: None,
+        payload: [0xBABEu16.to_le_bytes(), 0x7BC0u16.to_le_bytes()].concat(),
+    };
+    let mut transfer_position = 0;
+
+    let response = rop_fast_transfer_source_get_buffer_response(
+        &request,
+        &[0x3A, 0x40, 0x03, 0x00],
+        &mut transfer_position,
+        request.fast_transfer_buffer_size(),
+        false,
+    );
+
+    assert_eq!(transfer_position, 4);
+    assert_eq!(
+        response,
+        vec![
+            0x4E, 0x01, // RopId, InputHandleIndex
+            0x00, 0x00, 0x00, 0x00, // ReturnValue
+            0x03, 0x00, // TransferStatus: Done
+            0x01, 0x00, // InProgressCount
             0x01, 0x00, // TotalStepCount
             0x00, // Reserved
             0x04, 0x00, // TransferBufferSize

@@ -665,7 +665,7 @@ async fn mapi_over_http_create_folder_creates_canonical_mailbox() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_microsoft_oxcfold_folder_examples_use_canonical_mailboxes() {
+async fn mapi_over_http_microsoft_oxcfold_create_delete_and_move_use_canonical_mailboxes() {
     let source_id = Uuid::parse_str("31313131-3131-4131-8131-313131313132").unwrap();
     let target_parent_id = Uuid::parse_str("32323232-3232-4232-8232-323232323233").unwrap();
     let delete_id = Uuid::parse_str("66666666-6666-4666-8666-666666666662").unwrap();
@@ -758,14 +758,15 @@ async fn mapi_over_http_microsoft_oxcfold_folder_examples_use_canonical_mailboxe
     assert!(contains_bytes(&response_rops, &[0x1C, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x1D, 0x01, 0, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x35, 0x01, 0, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, &[0x36, 0x01, 0, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x36, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
 
     let created = created_mailboxes.lock().unwrap();
-    assert_eq!(created.len(), 2);
+    assert_eq!(created.len(), 1);
     assert_eq!(created[0].name, "Folder1");
     assert_eq!(created[0].parent_id, None);
-    assert_eq!(created[1].name, "Folder1");
-    assert_eq!(created[1].parent_id, Some(target_parent_id));
     assert_eq!(destroyed_mailboxes.lock().unwrap().as_slice(), &[delete_id]);
     let updated = updated_mailboxes.lock().unwrap();
     assert_eq!(updated.len(), 1);
@@ -1677,7 +1678,7 @@ async fn mapi_over_http_delete_folder_rejects_system_mailbox() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_copy_folder_creates_custom_canonical_mailbox() {
+async fn mapi_over_http_copy_folder_is_not_supported_without_side_effects() {
     let source_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
     let target_parent_id = Uuid::parse_str("34343434-3434-4434-8434-343434343434").unwrap();
     let source_mapi_id = test_mapi_uuid_id(&source_id);
@@ -1685,6 +1686,7 @@ async fn mapi_over_http_copy_folder_creates_custom_canonical_mailbox() {
     crate::mapi::identity::remember_mapi_identity(source_id, source_mapi_id);
     crate::mapi::identity::remember_mapi_identity(target_parent_id, target_parent_mapi_id);
     let created_mailboxes = Arc::new(Mutex::new(Vec::new()));
+    let updated_mailboxes = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![
@@ -1696,6 +1698,7 @@ async fn mapi_over_http_copy_folder_creates_custom_canonical_mailbox() {
             (target_parent_id, target_parent_mapi_id),
         ]))),
         created_mailboxes: created_mailboxes.clone(),
+        updated_mailboxes: updated_mailboxes.clone(),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -1705,25 +1708,99 @@ async fn mapi_over_http_copy_folder_creates_custom_canonical_mailbox() {
         .unwrap();
     let cookie = mapi_cookie_header(&connect);
 
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    for want_recursive in [0x00, 0x01] {
+        let mut rops = Vec::new();
+        append_rop_open_folder(
+            &mut rops,
+            0,
+            1,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        );
+        append_rop_open_folder(&mut rops, 0, 2, target_parent_mapi_id);
+        rops.extend_from_slice(&[
+            0x36,
+            0x00,
+            0x01,
+            0x02, // RopCopyFolder
+            0x00, // synchronous
+            want_recursive,
+            0x00, // multibyte name
+        ]);
+        append_mapi_wire_id(&mut rops, source_mapi_id);
+        rops.extend_from_slice(b"Copied Projects\0");
+
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &execute_headers,
+                &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let response_rops = response_rops_from_execute_response(response).await;
+        assert!(contains_bytes(
+            &response_rops,
+            &[0x36, 0x01, 0x02, 0x01, 0x04, 0x80]
+        ));
+        renew_mapi_request_id(&mut execute_headers);
+    }
+    assert!(created_mailboxes.lock().unwrap().is_empty());
+    assert!(updated_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_move_folder_rejects_wrong_source_parent_without_side_effects() {
+    let source_id = Uuid::parse_str("35353535-3535-4535-8535-353535353536").unwrap();
+    let wrong_parent_id = Uuid::parse_str("36363636-3636-4636-8636-363636363637").unwrap();
+    let source_mapi_id = test_mapi_uuid_id(&source_id);
+    let wrong_parent_mapi_id = test_mapi_uuid_id(&wrong_parent_id);
+    crate::mapi::identity::remember_mapi_identity(source_id, source_mapi_id);
+    crate::mapi::identity::remember_mapi_identity(wrong_parent_id, wrong_parent_mapi_id);
+    let updated_mailboxes = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&source_id.to_string(), "custom", "Projects"),
+            FakeStore::mailbox(&wrong_parent_id.to_string(), "custom", "Other"),
+        ])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([
+            (source_id, source_mapi_id),
+            (wrong_parent_id, wrong_parent_mapi_id),
+        ]))),
+        updated_mailboxes: updated_mailboxes.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
     let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, wrong_parent_mapi_id);
     append_rop_open_folder(
         &mut rops,
         0,
-        1,
+        2,
         crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
     );
-    append_rop_open_folder(&mut rops, 0, 2, target_parent_mapi_id);
     rops.extend_from_slice(&[
-        0x36, 0x00, 0x01, 0x02, // RopCopyFolder
+        0x35, 0x00, 0x01, 0x02, // RopMoveFolder
         0x00, // synchronous
-        0x01, // recursive
-        0x00, // multibyte name
+        0x01, // Unicode name
     ]);
     append_mapi_wire_id(&mut rops, source_mapi_id);
-    rops.extend_from_slice(b"Copied Projects\0");
+    rops.extend_from_slice(&utf16z("Moved Projects"));
 
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -1735,15 +1812,15 @@ async fn mapi_over_http_copy_folder_creates_custom_canonical_mailbox() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &[0x36, 0x01, 0, 0, 0, 0, 0]));
-    let created = created_mailboxes.lock().unwrap();
-    assert_eq!(created.len(), 1);
-    assert_eq!(created[0].name, "Copied Projects");
-    assert_eq!(created[0].parent_id, Some(target_parent_id));
+    assert!(
+        contains_bytes(&response_rops, &[0x35, 0x01, 0x0F, 0x01, 0x04, 0x80]),
+        "unexpected MoveFolder response: {response_rops:02x?}"
+    );
+    assert!(updated_mailboxes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn mapi_over_http_microsoft_folder_move_copy_accepts_nonzero_boolean_fields() {
+async fn mapi_over_http_microsoft_folder_move_accepts_nonzero_boolean_fields_and_copy_rejects() {
     let source_id = Uuid::parse_str("33333333-3333-4333-8333-333333333334").unwrap();
     let target_parent_id = Uuid::parse_str("34343434-3434-4434-8434-343434343435").unwrap();
     let source_mapi_id = test_mapi_uuid_id(&source_id);
@@ -1803,10 +1880,12 @@ async fn mapi_over_http_microsoft_folder_move_copy_accepts_nonzero_boolean_field
             .await
             .unwrap();
         let response_rops = response_rops_from_execute_response(response).await;
-        assert!(contains_bytes(
-            &response_rops,
-            &[rop_id, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00]
-        ));
+        let expected_response = if rop_id == 0x35 {
+            vec![rop_id, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00]
+        } else {
+            vec![rop_id, 0x01, 0x02, 0x01, 0x04, 0x80]
+        };
+        assert!(contains_bytes(&response_rops, &expected_response));
         renew_mapi_request_id(&mut execute_headers);
     }
 
@@ -1816,10 +1895,7 @@ async fn mapi_over_http_microsoft_folder_move_copy_accepts_nonzero_boolean_field
     assert_eq!(updated[0].parent_id, Some(Some(target_parent_id)));
     drop(updated);
 
-    let created = created_mailboxes.lock().unwrap();
-    assert_eq!(created.len(), 1);
-    assert_eq!(created[0].name, "Copied Projects");
-    assert_eq!(created[0].parent_id, Some(target_parent_id));
+    assert!(created_mailboxes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

@@ -198,6 +198,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     parent_id: parent_mailbox_id,
                     sort_order: None,
                     is_subscribed: true,
+                    copy_source_mailbox_id: None,
                 },
                 active_sync_audit(principal, "activesync.folder_create", display_name),
             )

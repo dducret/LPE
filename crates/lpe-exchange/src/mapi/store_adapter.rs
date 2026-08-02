@@ -70,6 +70,17 @@ where
     })
 }
 
+#[cfg(test)]
+pub(crate) async fn load_mapi_identity_codec_for_test<S>(
+    store: &S,
+    account_id: Uuid,
+) -> Result<crate::mapi::identity::MapiIdentityCodec>
+where
+    S: ExchangeStore,
+{
+    Ok(load_mapi_identity_scope(store, account_id).await?.codec)
+}
+
 pub(in crate::mapi) async fn load_mapi_store_for_access_plan<S>(
     store: &S,
     account_id: Uuid,

@@ -923,6 +923,24 @@ THEN 1 ELSE 0 END;
 SQL
 }
 
+mail_change_log_copy_kind_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT CASE WHEN COUNT(*) = 1 THEN 1 ELSE 0 END
+FROM pg_constraint
+WHERE conrelid = 'public.mail_change_log'::regclass
+  AND contype = 'c'
+  AND pg_get_constraintdef(oid) LIKE '%change_kind%'
+  AND pg_get_constraintdef(oid) LIKE '%''created''%'
+  AND pg_get_constraintdef(oid) LIKE '%''updated''%'
+  AND pg_get_constraintdef(oid) LIKE '%''destroyed''%'
+  AND pg_get_constraintdef(oid) LIKE '%''moved''%'
+  AND pg_get_constraintdef(oid) LIKE '%''copied''%'
+  AND pg_get_constraintdef(oid) LIKE '%''expunged''%';
+SQL
+}
+
 canonical_schema_shape_is_current() {
   local database_url="$1"
   local expected_schema_version="$2"
@@ -945,6 +963,7 @@ canonical_schema_shape_is_current() {
   [[ "$(mapi_active_source_key_index_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(mapi_special_folder_alias_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(mapi_store_identity_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mail_change_log_copy_kind_shape_ok "${database_url}")" == "1" ]] || return 1
 
   shape_counts="$(
     psql "${database_url}" -X -v ON_ERROR_STOP=1 -At -F '|' -c "SELECT (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_object_identities' AND column_name IN ('mapi_change_number', 'predecessor_change_list') AND is_nullable = 'NO' AND data_type = CASE column_name WHEN 'mapi_change_number' THEN 'bigint' WHEN 'predecessor_change_list' THEN 'bytea' END), (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'calendar_events' AND column_name IN ('lifecycle_state', 'deleted_at') AND is_nullable = CASE column_name WHEN 'lifecycle_state' THEN 'NO' WHEN 'deleted_at' THEN 'YES' END AND data_type = CASE column_name WHEN 'lifecycle_state' THEN 'text' WHEN 'deleted_at' THEN 'timestamp with time zone' END), (SELECT to_regclass('public.mapi_calendar_event_identity_moves')), (SELECT COUNT(DISTINCT table_row.relname) FROM pg_constraint constraint_row JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace WHERE namespace_row.nspname = 'public' AND table_row.relname IN ('mail_change_log', 'mapi_object_identities') AND constraint_row.contype = 'c' AND pg_get_constraintdef(constraint_row.oid) LIKE '%deleted_calendar_event%');"

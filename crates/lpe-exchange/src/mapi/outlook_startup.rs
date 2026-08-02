@@ -7,7 +7,7 @@ const STARTUP_GATES: [&str; 10] = [
     "ipm_subtree_hierarchy_opened",
     "inbox_folder_opened",
     "inbox_associated_contents_table_opened",
-    "ipm_configuration_findrow_matched",
+    "ipm_configuration_or_inbox_content_sync_observed",
     "fai_content_delivered",
     "receive_folder_verification_passed",
     "normal_inbox_contents_table_opened",
@@ -66,6 +66,8 @@ pub(in crate::mapi) fn outlook_startup_gate_summary(
 ) -> OutlookStartupGateSummary {
     let actions = &session.post_hierarchy_actions;
     let abandoned = session.abandoned_after_inbox_fai_query_rows();
+    let inbox_contents_progressed = actions.inbox_normal_contents_table_observed
+        || actions.inbox_content_sync_configure_observed;
     let ipm_subtree_hierarchy_opened = actions.opened_folder_ids.contains(&IPM_SUBTREE_FOLDER_ID)
         || actions.last_completed_hierarchy_sync_root == Some(IPM_SUBTREE_FOLDER_ID)
         || actions.receive_folder_verification_passed
@@ -79,13 +81,15 @@ pub(in crate::mapi) fn outlook_startup_gate_summary(
         inbox_folder_opened,
         actions.inbox_associated_contents_table_observed,
         actions.inbox_associated_broad_ipm_configuration_findrow_matched
-            || actions.inbox_associated_exact_ipm_configuration_findrow_matched,
+            || actions.inbox_associated_exact_ipm_configuration_findrow_matched
+            || actions.inbox_content_sync_configure_observed,
         actions.inbox_associated_findrow_returned_content
             || actions.inbox_associated_query_rows_returned_non_empty,
         actions.receive_folder_verification_passed,
-        actions.inbox_normal_contents_table_observed,
+        inbox_contents_progressed,
         actions.inbox_normal_contents_table_query_rows_observed
-            || actions.inbox_normal_contents_table_find_row_observed,
+            || actions.inbox_normal_contents_table_find_row_observed
+            || actions.inbox_content_sync_configure_observed,
         !abandoned,
     ];
     let first_missing_index = passed.iter().position(|passed| !passed);
@@ -116,7 +120,8 @@ pub(in crate::mapi) fn normal_inbox_visible_row_missing_reason(
     session: &MapiSession,
 ) -> &'static str {
     let actions = &session.post_hierarchy_actions;
-    if actions.inbox_normal_contents_table_query_rows_observed
+    if actions.inbox_content_sync_configure_observed
+        || actions.inbox_normal_contents_table_query_rows_observed
         || actions.inbox_normal_contents_table_find_row_observed
     {
         "none"
@@ -168,6 +173,8 @@ pub(in crate::mapi) fn configured_smart_input_variant() -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::mapi::sync::CALENDAR_FOLDER_ID;
+
     use super::super::session::MapiLogonIdentityDebug;
     use super::*;
 
@@ -277,6 +284,59 @@ mod tests {
     }
 
     #[test]
+    fn classifier_accepts_inbox_content_ics_without_ipm_configuration_findrow() {
+        let mut session = crate::mapi::transport::tests::test_session_for_outlook_startup();
+        session.logon_identity = Some(MapiLogonIdentityDebug::default());
+        session.record_opened_folder(IPM_SUBTREE_FOLDER_ID);
+        session.record_opened_folder(INBOX_FOLDER_ID);
+        session.record_inbox_associated_contents_table();
+        session.record_inbox_associated_findrow_returned_content();
+        session.record_receive_folder_verification_passed();
+        session.record_content_sync_configure_for_folder(INBOX_FOLDER_ID);
+
+        let summary = outlook_startup_gate_summary(&session);
+
+        assert_eq!(summary.first_missing_gate, "none");
+        assert!(summary
+            .gates
+            .contains("ipm_configuration_or_inbox_content_sync_observed=true"));
+        assert!(summary
+            .gates
+            .contains("normal_inbox_contents_table_opened=true"));
+        assert!(summary
+            .gates
+            .contains("normal_inbox_visible_row_observed=true"));
+        assert_eq!(normal_inbox_visible_row_missing_reason(&session), "none");
+    }
+
+    #[test]
+    fn classifier_does_not_treat_non_inbox_content_ics_as_inbox_progress() {
+        let mut session = crate::mapi::transport::tests::test_session_for_outlook_startup();
+        session.logon_identity = Some(MapiLogonIdentityDebug::default());
+        session.record_opened_folder(IPM_SUBTREE_FOLDER_ID);
+        session.record_opened_folder(INBOX_FOLDER_ID);
+        session.record_inbox_associated_contents_table();
+        session.record_inbox_associated_exact_findrow(true);
+        session.record_inbox_associated_findrow_returned_content();
+        session.record_receive_folder_verification_passed();
+        session.record_content_sync_configure_for_folder(CALENDAR_FOLDER_ID);
+
+        let summary = outlook_startup_gate_summary(&session);
+
+        assert_eq!(
+            summary.first_missing_gate,
+            "normal_inbox_contents_table_opened"
+        );
+        assert!(summary
+            .gates
+            .contains("normal_inbox_contents_table_opened=false"));
+        assert_eq!(
+            normal_inbox_visible_row_missing_reason(&session),
+            "normal_inbox_not_opened"
+        );
+    }
+
+    #[test]
     fn classifier_reports_visible_inbox_release_before_query_rows() {
         let mut session = crate::mapi::transport::tests::test_session_for_outlook_startup();
         session.record_inbox_normal_contents_table();
@@ -314,12 +374,12 @@ mod tests {
 
         assert_eq!(
             summary.last_successful_gate,
-            "ipm_configuration_findrow_matched"
+            "ipm_configuration_or_inbox_content_sync_observed"
         );
         assert_eq!(summary.first_missing_gate, "fai_content_delivered");
         assert!(summary
             .gates
-            .contains("ipm_configuration_findrow_matched=true"));
+            .contains("ipm_configuration_or_inbox_content_sync_observed=true"));
     }
 
     #[test]

@@ -366,6 +366,132 @@ async fn mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_ide
 }
 
 #[tokio::test]
+async fn mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXCNOTIF] section 2.2.1.4.1.2 requires ObjectCreated to carry both
+    // FolderId and MessageId when it represents a message, including Sent.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let sent_id = storage
+        .ensure_jmap_system_mailboxes(account_id)
+        .await?
+        .into_iter()
+        .find(|mailbox| mailbox.role == "sent")
+        .map(|mailbox| mailbox.id)
+        .expect("canonical Sent mailbox");
+    let baseline_cursor = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    let imported = storage
+        .import_jmap_email(
+            JmapImportedEmailInput {
+                account_id,
+                submitted_by_account_id: account_id,
+                mailbox_id: sent_id,
+                source: "mapi-notification-regression".to_string(),
+                raw_message: None,
+                from_display: Some("Sent Sender".to_string()),
+                from_address: "sender@example.test".to_string(),
+                sender_display: None,
+                sender_address: None,
+                to: Vec::new(),
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Sent message identity notification".to_string(),
+                body_text: "Sent message notification identity regression".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: Some(format!("<{}@example.test>", Uuid::new_v4())),
+                mime_blob_ref: String::new(),
+                size_octets: 64,
+                received_at: None,
+                thread_id: None,
+                attachments: Vec::new(),
+            },
+            postgres_mapi_audit("import-sent-message", account_id),
+        )
+        .await?;
+    let created_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT cursor
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND mailbox_id = $2
+          AND object_kind = 'mailbox_message'
+          AND change_kind = 'created'
+          AND summary_json->>'messageId' = $3
+          AND cursor > $4
+        ORDER BY cursor DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(account_id)
+    .bind(sent_id)
+    .bind(imported.id.to_string())
+    .bind(baseline_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    let identity_before_poll = sqlx::query_scalar::<_, Option<i64>>(
+        r#"
+        SELECT mapi_object_id
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'message'
+          AND canonical_id = $2
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(account_id)
+    .bind(imported.id)
+    .fetch_optional(storage.pool())
+    .await?
+    .flatten();
+    assert!(identity_before_poll.is_none());
+
+    let poll = storage
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+    let message_id = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT mapi_object_id
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'message'
+          AND canonical_id = $2
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(account_id)
+    .bind(imported.id)
+    .fetch_one(storage.pool())
+    .await? as u64;
+
+    assert!(poll.event_pending);
+    assert_eq!(poll.cursor, Some(created_cursor));
+    assert_eq!(poll.events.len(), 1);
+    assert_eq!(
+        poll.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            0x0004,
+            crate::mapi::identity::SENT_FOLDER_ID,
+            Some(message_id),
+            None,
+            None,
+            Some("mailbox_message"),
+        )
+    );
+    assert_eq!(poll.events[0].canonical_folder_id(), Some(sent_id));
+    assert_eq!(poll.events[0].canonical_message_id(), Some(imported.id));
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql(
 ) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
@@ -1005,6 +1131,557 @@ async fn mapi_navigation_shortcut_notifications_are_durable_across_storage_insta
     // FAI rows. [MS-OXCNOTIF] sections 2.2.1.1, 2.2.1.1.1, 3.1.4.3,
     // and 3.2.4.2 require another client viewing that table to observe its
     // create, update, and delete changes through table notifications.
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+async fn create_notification_mailbox(
+    storage: &Storage,
+    account_id: Uuid,
+    name: &str,
+    parent_id: Option<Uuid>,
+) -> anyhow::Result<JmapMailbox> {
+    Ok(storage
+        .create_jmap_mailbox(
+            JmapMailboxCreateInput {
+                account_id,
+                name: name.to_string(),
+                parent_id,
+                sort_order: None,
+                is_subscribed: true,
+                copy_source_mailbox_id: None,
+            },
+            postgres_mapi_audit("create-notification-mailbox", account_id),
+        )
+        .await?)
+}
+
+#[tokio::test]
+async fn mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let owner_account_id = fixture.account_id;
+    let grantee_account_id = Uuid::parse_str("10000000-0000-0000-0000-000000000021")?;
+    insert_notification_account(
+        &storage,
+        owner_account_id,
+        grantee_account_id,
+        "folder-replay-grantee@example.test",
+        "Folder Replay Grantee",
+    )
+    .await?;
+    storage
+        .ensure_jmap_system_mailboxes(owner_account_id)
+        .await?;
+    storage
+        .upsert_mailbox_delegation_grant(
+            lpe_storage::MailboxDelegationGrantInput {
+                owner_account_id,
+                grantee_email: "folder-replay-grantee@example.test".to_string(),
+                may_write: false,
+            },
+            postgres_mapi_audit("grant-folder-replay", grantee_account_id),
+        )
+        .await?;
+
+    let source_parent =
+        create_notification_mailbox(&storage, owner_account_id, "Projects", None).await?;
+    let middle_parent =
+        create_notification_mailbox(&storage, owner_account_id, "Clients", None).await?;
+    let destination_parent =
+        create_notification_mailbox(&storage, owner_account_id, "Archive", None).await?;
+    let moving_folder = create_notification_mailbox(
+        &storage,
+        owner_account_id,
+        "Quarterly reports",
+        Some(source_parent.id),
+    )
+    .await?;
+    let canonical_ids = vec![
+        source_parent.id,
+        middle_parent.id,
+        destination_parent.id,
+        moving_folder.id,
+    ];
+    let owner_identities = storage
+        .fetch_or_allocate_mapi_identities(
+            owner_account_id,
+            &canonical_ids
+                .iter()
+                .copied()
+                .map(|canonical_id| MapiIdentityRequest {
+                    object_kind: MapiIdentityObjectKind::Mailbox,
+                    canonical_id,
+                    reserved_global_counter: None,
+                    source_key: None,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+    let owner_folder_ids = owner_identities
+        .into_iter()
+        .map(|identity| (identity.canonical_id, identity.object_id))
+        .collect::<HashMap<_, _>>();
+    let grantee_identity_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'mailbox'
+          AND canonical_id = ANY($2)
+        "#,
+    )
+    .bind(grantee_account_id)
+    .bind(&canonical_ids)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(grantee_identity_count, 0);
+
+    let baseline_cursor = storage
+        .fetch_mapi_notification_cursor(owner_account_id)
+        .await?
+        .unwrap_or(0);
+    for parent_id in [middle_parent.id, destination_parent.id] {
+        storage
+            .update_jmap_mailbox(
+                JmapMailboxUpdateInput {
+                    account_id: owner_account_id,
+                    mailbox_id: moving_folder.id,
+                    name: None,
+                    parent_id: Some(Some(parent_id)),
+                    sort_order: None,
+                    is_subscribed: None,
+                },
+                postgres_mapi_audit("move-notification-mailbox", moving_folder.id),
+            )
+            .await?;
+    }
+
+    let moved = storage
+        .poll_mapi_notifications(grantee_account_id, baseline_cursor)
+        .await?;
+    assert!(moved.event_pending);
+    assert_eq!(moved.events.len(), 4);
+    let source_parent_id = moved.events[1].notification_test_shape().2;
+    let middle_parent_id = moved.events[0].notification_test_shape().2;
+    let destination_parent_id = moved.events[2].notification_test_shape().2;
+    let moving_folder_id = moved.events[0]
+        .notification_test_shape()
+        .3
+        .expect("moved folder ID");
+    assert_ne!(moving_folder_id, owner_folder_ids[&moving_folder.id]);
+    assert_ne!(source_parent_id, owner_folder_ids[&source_parent.id]);
+    assert_ne!(middle_parent_id, owner_folder_ids[&middle_parent.id]);
+    assert_ne!(
+        destination_parent_id,
+        owner_folder_ids[&destination_parent.id]
+    );
+    assert_eq!(
+        moved.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Hierarchy,
+            0x0020,
+            middle_parent_id,
+            Some(moving_folder_id),
+            Some(moving_folder_id),
+            None,
+            Some("mailbox"),
+        )
+    );
+    assert_eq!(
+        moved.events[0].old_parent_folder_id(),
+        Some(source_parent_id)
+    );
+    assert!(moved.events[0].is_complete_for_wire());
+    assert_eq!(
+        moved.events[1].notification_test_shape(),
+        (
+            MapiNotificationKind::Hierarchy,
+            0x0100,
+            source_parent_id,
+            Some(moving_folder_id),
+            None,
+            None,
+            None,
+        )
+    );
+    assert_eq!(
+        moved.events[2].notification_test_shape(),
+        (
+            MapiNotificationKind::Hierarchy,
+            0x0020,
+            destination_parent_id,
+            Some(moving_folder_id),
+            Some(moving_folder_id),
+            None,
+            Some("mailbox"),
+        )
+    );
+    assert_eq!(
+        moved.events[2].old_parent_folder_id(),
+        Some(middle_parent_id)
+    );
+    assert!(moved.events[2].is_complete_for_wire());
+    assert_eq!(
+        moved.events[3].notification_test_shape(),
+        (
+            MapiNotificationKind::Hierarchy,
+            0x0100,
+            middle_parent_id,
+            Some(moving_folder_id),
+            None,
+            None,
+            None,
+        )
+    );
+    let moved_grantee_identity_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'mailbox'
+          AND canonical_id = ANY($2)
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(grantee_account_id)
+    .bind(vec![source_parent.id, middle_parent.id, moving_folder.id])
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(moved_grantee_identity_count, 3);
+    storage
+        .store_mapi_sync_checkpoint(
+            grantee_account_id,
+            Some(moving_folder.id),
+            MapiCheckpointKind::Content,
+            7,
+            11,
+            serde_json::json!({"sharedMailbox": true}),
+        )
+        .await?;
+
+    let copied_folder = storage
+        .create_jmap_mailbox(
+            JmapMailboxCreateInput {
+                account_id: owner_account_id,
+                name: "Quarterly reports copy".to_string(),
+                parent_id: Some(destination_parent.id),
+                sort_order: None,
+                is_subscribed: true,
+                copy_source_mailbox_id: Some(moving_folder.id),
+            },
+            postgres_mapi_audit("copy-notification-mailbox", moving_folder.id),
+        )
+        .await?;
+    let copied = storage
+        .poll_mapi_notifications(
+            grantee_account_id,
+            moved.cursor.expect("movement notification cursor"),
+        )
+        .await?;
+    assert!(copied.event_pending);
+    assert_eq!(copied.events.len(), 1);
+    let copied_folder_id = copied.events[0]
+        .notification_test_shape()
+        .3
+        .expect("copied folder ID");
+    assert_eq!(
+        copied.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Hierarchy,
+            0x0040,
+            destination_parent_id,
+            Some(copied_folder_id),
+            Some(moving_folder_id),
+            None,
+            Some("mailbox"),
+        )
+    );
+    assert_eq!(
+        copied.events[0].old_parent_folder_id(),
+        Some(destination_parent_id)
+    );
+    assert!(copied.events[0].is_complete_for_wire());
+    let shared_checkpoint = storage
+        .fetch_mapi_sync_checkpoint(
+            grantee_account_id,
+            Some(moving_folder.id),
+            MapiCheckpointKind::Content,
+        )
+        .await?;
+    assert_eq!(
+        shared_checkpoint
+            .as_ref()
+            .map(|checkpoint| checkpoint.last_change_sequence),
+        Some(7)
+    );
+    let allocated_grantee_identity_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'mailbox'
+          AND canonical_id = ANY($2)
+          AND deleted_at IS NULL
+        "#,
+    )
+    .bind(grantee_account_id)
+    .bind(vec![
+        source_parent.id,
+        middle_parent.id,
+        moving_folder.id,
+        copied_folder.id,
+    ])
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(allocated_grantee_identity_count, 4);
+
+    // [MS-OXCNOTIF] section 2.2.1.4.1.2 requires each hierarchy movement to
+    // retain destination and source folder identities, even when the receiver
+    // polls after multiple canonical updates.
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_nested_folder_delete_replay_uses_historical_parent_and_retained_identity_in_postgresql(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let parent = create_notification_mailbox(&storage, account_id, "Projects", None).await?;
+    let child =
+        create_notification_mailbox(&storage, account_id, "Quarterly reports", Some(parent.id))
+            .await?;
+    let identities = storage
+        .fetch_or_allocate_mapi_identities(
+            account_id,
+            &[parent.id, child.id]
+                .into_iter()
+                .map(|canonical_id| MapiIdentityRequest {
+                    object_kind: MapiIdentityObjectKind::Mailbox,
+                    canonical_id,
+                    reserved_global_counter: None,
+                    source_key: None,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+    let folder_ids = identities
+        .into_iter()
+        .map(|identity| (identity.canonical_id, identity.object_id))
+        .collect::<HashMap<_, _>>();
+    let baseline_cursor = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    storage
+        .destroy_jmap_mailbox(
+            account_id,
+            child.id,
+            postgres_mapi_audit("delete-notification-mailbox", child.id),
+        )
+        .await?;
+    let deleted_log = sqlx::query(
+        r#"
+        SELECT cursor, summary_json
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'mailbox'
+          AND object_id = $2
+          AND change_kind = 'destroyed'
+          AND cursor > $3
+        ORDER BY cursor DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(account_id)
+    .bind(child.id)
+    .bind(baseline_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    let parent_id_string = parent.id.to_string();
+    assert_eq!(
+        deleted_log
+            .get::<serde_json::Value, _>("summary_json")
+            .get("parentId")
+            .and_then(serde_json::Value::as_str),
+        Some(parent_id_string.as_str())
+    );
+    sqlx::query(
+        r#"
+        UPDATE mapi_object_identities
+        SET deleted_at = NOW()
+        WHERE account_id = $1
+          AND object_kind = 'mailbox'
+          AND canonical_id = $2
+        "#,
+    )
+    .bind(account_id)
+    .bind(child.id)
+    .execute(storage.pool())
+    .await?;
+
+    let deleted = storage
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+    assert!(deleted.event_pending);
+    assert_eq!(deleted.cursor, Some(deleted_log.get("cursor")));
+    assert_eq!(deleted.events.len(), 1);
+    assert_eq!(
+        deleted.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Hierarchy,
+            0x0008,
+            folder_ids[&parent.id],
+            Some(folder_ids[&child.id]),
+            None,
+            None,
+            Some("mailbox"),
+        )
+    );
+    let retained_identity_is_deleted = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT deleted_at IS NOT NULL
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'mailbox'
+          AND canonical_id = $2
+        "#,
+    )
+    .bind(account_id)
+    .bind(child.id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert!(retained_identity_is_deleted);
+
+    // [MS-OXCNOTIF] section 2.2.1.4.1.2 needs the parent FolderId and deleted
+    // FolderId from the historical hierarchy state; polling must not revive a
+    // tombstoned folder identity merely to construct a notification.
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_imap_cross_parent_rename_replays_a_hierarchy_move_in_postgresql() -> anyhow::Result<()>
+{
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let source_parent = create_notification_mailbox(&storage, account_id, "Projects", None).await?;
+    let destination_parent =
+        create_notification_mailbox(&storage, account_id, "Client archive", None).await?;
+    let renamed_folder = create_notification_mailbox(
+        &storage,
+        account_id,
+        "Quarterly reports",
+        Some(source_parent.id),
+    )
+    .await?;
+    let identities = storage
+        .fetch_or_allocate_mapi_identities(
+            account_id,
+            &[source_parent.id, destination_parent.id, renamed_folder.id]
+                .into_iter()
+                .map(|canonical_id| MapiIdentityRequest {
+                    object_kind: MapiIdentityObjectKind::Mailbox,
+                    canonical_id,
+                    reserved_global_counter: None,
+                    source_key: None,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+    let folder_ids = identities
+        .into_iter()
+        .map(|identity| (identity.canonical_id, identity.object_id))
+        .collect::<HashMap<_, _>>();
+    let baseline_cursor = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    storage
+        .rename_imap_mailbox(
+            account_id,
+            renamed_folder.id,
+            "Client archive/Quarterly reports renamed",
+            postgres_mapi_audit("imap-cross-parent-rename", renamed_folder.id),
+        )
+        .await?;
+    let renamed_log = sqlx::query(
+        r#"
+        SELECT cursor, change_kind, summary_json
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'mailbox'
+          AND object_id = $2
+          AND cursor > $3
+        ORDER BY cursor DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(account_id)
+    .bind(renamed_folder.id)
+    .bind(baseline_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(renamed_log.get::<String, _>("change_kind"), "moved");
+    let source_parent_id = source_parent.id.to_string();
+    let destination_parent_id = destination_parent.id.to_string();
+    let summary = renamed_log.get::<serde_json::Value, _>("summary_json");
+    assert_eq!(
+        summary
+            .get("oldParentId")
+            .and_then(serde_json::Value::as_str),
+        Some(source_parent_id.as_str())
+    );
+    assert_eq!(
+        summary.get("parentId").and_then(serde_json::Value::as_str),
+        Some(destination_parent_id.as_str())
+    );
+
+    let moved = storage
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+    assert!(moved.event_pending);
+    assert_eq!(moved.cursor, Some(renamed_log.get("cursor")));
+    assert_eq!(moved.events.len(), 2);
+    assert_eq!(
+        moved.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Hierarchy,
+            0x0020,
+            folder_ids[&destination_parent.id],
+            Some(folder_ids[&renamed_folder.id]),
+            Some(folder_ids[&renamed_folder.id]),
+            None,
+            Some("mailbox"),
+        )
+    );
+    assert_eq!(
+        moved.events[0].old_parent_folder_id(),
+        Some(folder_ids[&source_parent.id])
+    );
+    assert_eq!(
+        moved.events[1].notification_test_shape(),
+        (
+            MapiNotificationKind::Hierarchy,
+            0x0100,
+            folder_ids[&source_parent.id],
+            Some(folder_ids[&renamed_folder.id]),
+            None,
+            None,
+            None,
+        )
+    );
+
     fixture.cleanup().await?;
     Ok(())
 }

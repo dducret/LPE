@@ -42,6 +42,7 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
             checkpoint_zero_delta,
             sync_type,
             sync_flags,
+            transfer_state_source,
             initial_state,
             state,
             state_upload_buffer,
@@ -134,6 +135,7 @@ pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeS
                 transfer_buffer,
                 transfer_position,
                 requested_buffer_bytes,
+                *transfer_state_source,
             );
             let completed = *transfer_position >= transfer_buffer.len();
             let response_debug = summarize_fast_transfer_get_buffer_response(&response, completed);

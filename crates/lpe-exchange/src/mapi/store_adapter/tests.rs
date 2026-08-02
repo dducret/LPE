@@ -275,6 +275,7 @@ fn access_plan_cached_mode_transfer_state_get_buffer_uses_session_state() {
             checkpoint_zero_delta: false,
             sync_type: 0x01,
             sync_flags: 0,
+            transfer_state_source: false,
             initial_state: vec![0x01, 0x02],
             state: vec![0x03, 0x04],
             state_upload_property_tag: None,

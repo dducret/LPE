@@ -362,6 +362,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                     parent_id: input.parent_id,
                                     sort_order: input.sort_order,
                                     is_subscribed: input.is_subscribed,
+                                    copy_source_mailbox_id: None,
                                 },
                                 audit,
                             )

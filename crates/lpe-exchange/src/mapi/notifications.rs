@@ -25,6 +25,7 @@ pub(crate) struct MapiNotificationEvent {
     pub(in crate::mapi) parent_folder_id: Option<u64>,
     pub(in crate::mapi) message_id: Option<u64>,
     pub(in crate::mapi) old_folder_id: Option<u64>,
+    pub(in crate::mapi) old_parent_folder_id: Option<u64>,
     pub(in crate::mapi) old_message_id: Option<u64>,
     pub(in crate::mapi) canonical_folder_id: Option<uuid::Uuid>,
     pub(in crate::mapi) canonical_message_id: Option<uuid::Uuid>,
@@ -50,6 +51,7 @@ impl MapiNotificationEvent {
             parent_folder_id: None,
             message_id,
             old_folder_id: None,
+            old_parent_folder_id: None,
             old_message_id: None,
             canonical_folder_id: None,
             canonical_message_id: None,
@@ -75,6 +77,7 @@ impl MapiNotificationEvent {
             parent_folder_id: None,
             message_id: changed_folder_id,
             old_folder_id: None,
+            old_parent_folder_id: None,
             old_message_id: None,
             canonical_folder_id: None,
             canonical_message_id: None,
@@ -115,6 +118,7 @@ impl MapiNotificationEvent {
             parent_folder_id: None,
             message_id,
             old_folder_id,
+            old_parent_folder_id: None,
             old_message_id: None,
             canonical_folder_id: None,
             canonical_message_id: None,
@@ -162,6 +166,54 @@ impl MapiNotificationEvent {
         self
     }
 
+    pub(crate) fn with_old_parent_folder_id(mut self, old_parent_folder_id: Option<u64>) -> Self {
+        self.old_parent_folder_id = old_parent_folder_id;
+        self
+    }
+
+    /// [MS-OXCNOTIF] section 2.2.1.4.1.2 gives hierarchy moves and copies
+    /// separate destination FolderId/ParentFolderId and source
+    /// OldFolderId/OldParentFolderId fields.
+    pub(crate) fn hierarchy_move_or_copy(
+        event_mask: u16,
+        parent_folder_id: u64,
+        folder_id: u64,
+        old_folder_id: u64,
+        old_parent_folder_id: u64,
+    ) -> Self {
+        debug_assert!(matches!(event_mask, 0x0020 | 0x0040));
+        Self {
+            folder_id: parent_folder_id,
+            parent_folder_id: None,
+            message_id: Some(folder_id),
+            old_folder_id: Some(old_folder_id),
+            old_parent_folder_id: Some(old_parent_folder_id),
+            old_message_id: None,
+            canonical_folder_id: None,
+            canonical_message_id: None,
+            kind: MapiNotificationKind::Hierarchy,
+            event_mask,
+            change_cursor: None,
+            modseq: None,
+            total_messages: None,
+            unread_messages: None,
+            object_kind: Some("mailbox"),
+            change_kind: Some(
+                if event_mask == MapiNotificationEventMask::ObjectMoved.as_u16() {
+                    "moved"
+                } else {
+                    "copied"
+                }
+                .to_string(),
+            ),
+            display_name: None,
+            parent_display_name: None,
+            message_subject: None,
+            message_class: None,
+            new_mail_message_flags: None,
+        }
+    }
+
     pub(crate) fn with_object_kind(mut self, object_kind: &'static str) -> Self {
         self.object_kind = Some(object_kind);
         self
@@ -191,13 +243,36 @@ impl MapiNotificationEvent {
             return true;
         }
         self.old_folder_id.is_some()
-            && (self.kind != MapiNotificationKind::Content
-                || (self.message_id.is_some() && self.old_message_id.is_some()))
+            && match self.kind {
+                MapiNotificationKind::Content => {
+                    self.message_id.is_some() && self.old_message_id.is_some()
+                }
+                MapiNotificationKind::Hierarchy => {
+                    self.message_id.is_some() && self.old_parent_folder_id.is_some()
+                }
+            }
+    }
+
+    /// A folder move changes both parents' hierarchy tables. The primary
+    /// ObjectMoved event refreshes the destination table; this companion
+    /// TableModified event refreshes the source table.
+    pub(crate) fn source_hierarchy_table_event(&self) -> Option<Self> {
+        if self.kind != MapiNotificationKind::Hierarchy
+            || self.event_mask & 0x0FFF != MapiNotificationEventMask::ObjectMoved.as_u16()
+        {
+            return None;
+        }
+        Some(Self::hierarchy(self.old_parent_folder_id?, self.message_id))
     }
 
     #[cfg(test)]
     pub(crate) fn new_mail_message_flags(&self) -> Option<u32> {
         self.new_mail_message_flags
+    }
+
+    #[cfg(test)]
+    pub(crate) fn old_parent_folder_id(&self) -> Option<u64> {
+        self.old_parent_folder_id
     }
 
     #[cfg(test)]
@@ -369,6 +444,98 @@ mod tests {
     }
 
     #[test]
+    fn hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately() {
+        let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
+        let destination_parent_folder_id = 0x0000_0000_0006_0001;
+        let destination_folder_id = 0x0000_0000_0007_0001;
+        let source_folder_id = 0x0000_0000_0005_0001;
+        let source_parent_folder_id = 0x0000_0000_0004_0001;
+
+        for (event_mask, old_folder_id, expected_flags) in [
+            (
+                MapiNotificationEventMask::ObjectMoved.as_u16(),
+                destination_folder_id,
+                0x0020u16,
+            ),
+            (
+                MapiNotificationEventMask::ObjectCopied.as_u16(),
+                source_folder_id,
+                0x0040u16,
+            ),
+        ] {
+            let event = MapiNotificationEvent::hierarchy_move_or_copy(
+                event_mask,
+                destination_parent_folder_id,
+                destination_folder_id,
+                old_folder_id,
+                source_parent_folder_id,
+            );
+
+            let response = rop_notify_response(&identity_codec, 3, 0, &event)
+                .expect("complete hierarchy movement notification serializes");
+
+            let mut expected = vec![0x2A, 0x03, 0, 0, 0, 0];
+            expected.extend_from_slice(&expected_flags.to_le_bytes());
+            expected.extend_from_slice(&[0x01, 0, 0, 0, 0, 0, 0, 0x07]);
+            expected.extend_from_slice(&[0x01, 0, 0, 0, 0, 0, 0, 0x06]);
+            expected.extend_from_slice(&[
+                0x01,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                if event_mask == MapiNotificationEventMask::ObjectMoved.as_u16() {
+                    0x07
+                } else {
+                    0x05
+                },
+            ]);
+            expected.extend_from_slice(&[0x01, 0, 0, 0, 0, 0, 0, 0x04]);
+            assert_eq!(response, expected);
+        }
+    }
+
+    #[test]
+    fn hierarchy_move_emits_a_source_parent_table_refresh() {
+        let destination_parent_folder_id = 0x0000_0000_0006_0001;
+        let destination_folder_id = 0x0000_0000_0007_0001;
+        let source_parent_folder_id = 0x0000_0000_0004_0001;
+        let moved = MapiNotificationEvent::hierarchy_move_or_copy(
+            MapiNotificationEventMask::ObjectMoved.as_u16(),
+            destination_parent_folder_id,
+            destination_folder_id,
+            destination_folder_id,
+            source_parent_folder_id,
+        );
+
+        assert_eq!(
+            moved
+                .source_hierarchy_table_event()
+                .expect("folder move source table refresh")
+                .notification_test_shape(),
+            (
+                MapiNotificationKind::Hierarchy,
+                MapiNotificationEventMask::TableModified.as_u16(),
+                source_parent_folder_id,
+                Some(destination_folder_id),
+                None,
+                None,
+                None,
+            )
+        );
+        let copied = MapiNotificationEvent::hierarchy_move_or_copy(
+            MapiNotificationEventMask::ObjectCopied.as_u16(),
+            destination_parent_folder_id,
+            destination_folder_id,
+            0x0000_0000_0005_0001,
+            source_parent_folder_id,
+        );
+        assert!(copied.source_hierarchy_table_event().is_none());
+    }
+
+    #[test]
     fn incomplete_message_move_notifications_are_not_serialized() {
         let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
         let event = MapiNotificationEvent::canonical(
@@ -409,6 +576,29 @@ mod tests {
         .with_old_message_id(Some(0x0000_0001_0089_0001));
 
         assert!(rop_notify_response(&identity_codec, 3, 0, &event_without_old_folder).is_none());
+    }
+
+    #[test]
+    fn incomplete_hierarchy_move_notification_is_not_serialized() {
+        let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
+        let event = MapiNotificationEvent::canonical(
+            MapiNotificationKind::Hierarchy,
+            MapiNotificationEventMask::ObjectMoved.as_u16(),
+            0x0000_0000_0006_0001,
+            Some(0x0000_0000_0007_0001),
+            Some(0x0000_0000_0005_0001),
+            1,
+            1,
+            None,
+            None,
+            "moved".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        assert!(rop_notify_response(&identity_codec, 3, 0, &event).is_none());
     }
 }
 
@@ -527,7 +717,7 @@ fn append_notification_data(
                     response,
                     identity_codec,
                     event
-                        .old_folder_id
+                        .old_parent_folder_id
                         .expect("movement notification was validated before encoding"),
                 );
             }
@@ -602,7 +792,11 @@ pub(in crate::mapi) fn registration_matches_event(
     event: &MapiNotificationEvent,
 ) -> bool {
     if let Some(folder_id) = registration.folder_id {
-        if folder_id != event.folder_id {
+        let hierarchy_movement_from_registered_parent = event.kind
+            == MapiNotificationKind::Hierarchy
+            && matches!(event.event_mask & 0x0FFF, 0x0020 | 0x0040)
+            && event.old_parent_folder_id == Some(folder_id);
+        if folder_id != event.folder_id && !hierarchy_movement_from_registered_parent {
             return false;
         }
     }

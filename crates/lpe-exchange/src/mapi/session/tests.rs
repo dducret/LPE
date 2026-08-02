@@ -356,6 +356,87 @@ fn session_delivers_only_complete_message_moves_and_copies_to_subscriptions() {
 }
 
 #[test]
+fn hierarchy_move_notifies_the_source_subscription_and_refreshes_both_parent_tables() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let source_parent_folder_id = 0x0000_0000_0004_0001;
+    let destination_parent_folder_id = 0x0000_0000_0006_0001;
+    let folder_id = 0x0000_0000_0007_0001;
+    let notification_handle = 77;
+    let source_table_handle = 78;
+    let destination_table_handle = 79;
+
+    session.handles.insert(
+        notification_handle,
+        MapiObject::NotificationSubscription {
+            registration: crate::mapi::notifications::MapiNotificationRegistration {
+                logon_id: 0,
+                notification_types: MapiNotificationEventMask::ObjectMoved.as_u16(),
+                folder_id: Some(source_parent_folder_id),
+            },
+        },
+    );
+    for (handle, folder_id) in [
+        (source_table_handle, source_parent_folder_id),
+        (destination_table_handle, destination_parent_folder_id),
+    ] {
+        session.handles.insert(
+            handle,
+            MapiObject::HierarchyTable {
+                folder_id,
+                columns: Vec::new(),
+                columns_set: true,
+                sort_orders: Vec::new(),
+                category_count: 0,
+                expanded_count: 0,
+                collapsed_categories: HashSet::new(),
+                deleted_advertised_special_folders: HashSet::new(),
+                restriction: None,
+                bookmarks: HashMap::new(),
+                next_bookmark: 1,
+                position: 0,
+            },
+        );
+        session.remember_table_notification_eligibility(handle, 0, true);
+        session.table_notification_active_handles.insert(handle);
+    }
+
+    session.record_notification(MapiNotificationEvent::hierarchy_move_or_copy(
+        MapiNotificationEventMask::ObjectMoved.as_u16(),
+        destination_parent_folder_id,
+        folder_id,
+        folder_id,
+        source_parent_folder_id,
+    ));
+    session.record_notification(MapiNotificationEvent::hierarchy(
+        source_parent_folder_id,
+        Some(folder_id),
+    ));
+
+    let deliveries = session.take_pending_notification_deliveries();
+    assert_eq!(deliveries.len(), 3);
+    assert!(deliveries.iter().any(|(handle, _, event)| {
+        *handle == notification_handle
+            && event.event_mask == MapiNotificationEventMask::ObjectMoved.as_u16()
+            && event.old_folder_id == Some(folder_id)
+            && event.old_parent_folder_id == Some(source_parent_folder_id)
+    }));
+    let mut table_handles = deliveries
+        .iter()
+        .filter_map(|(handle, _, event)| {
+            (event.event_mask == MapiNotificationEventMask::TableModified.as_u16())
+                .then_some(*handle)
+        })
+        .collect::<Vec<_>>();
+    table_handles.sort_unstable();
+    assert_eq!(
+        table_handles,
+        vec![source_table_handle, destination_table_handle]
+    );
+}
+
+#[test]
 fn notification_subscription_preserves_rop_logon_id_through_rop_notify() {
     let raw_request = [0x29, 0x01, 0x00, 0x02, 0x10, 0x00, 0x01];
     let (request, logon_id) = crate::mapi::rop::read_rop_request_with_logon_id(

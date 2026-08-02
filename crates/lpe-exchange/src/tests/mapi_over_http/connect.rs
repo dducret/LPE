@@ -761,6 +761,7 @@ async fn mapi_over_http_move_copy_messages_uses_canonical_store() {
     let moved_emails = store.moved_emails.clone();
     let copied_emails = store.copied_emails.clone();
     let canonical_emails = store.emails.clone();
+    let identity_store = store.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -777,36 +778,46 @@ async fn mapi_over_http_move_copy_messages_uses_canonical_store() {
         .unwrap()
         .to_string();
 
-    let mut rops = vec![
-        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
-    ];
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
-    rops.push(0);
-    rops.extend_from_slice(&[
-        0x02, 0x00, 0x00, 0x02, // RopOpenFolder, Archive
-    ]);
-    append_mapi_wire_id(&mut rops, crate::mapi::identity::ARCHIVE_FOLDER_ID);
-    rops.push(0);
-    rops.extend_from_slice(&[
-        0x33, 0x00, 0x01, 0x02, // RopMoveCopyMessages, move
-    ]);
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_wire_id(
-        &mut rops,
-        test_mapi_message_id(&move_message_id.to_string()),
-    );
-    rops.push(0);
-    rops.push(0);
-    rops.extend_from_slice(&[
-        0x33, 0x00, 0x01, 0x02, // RopMoveCopyMessages, copy
-    ]);
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_wire_id(
-        &mut rops,
-        test_mapi_message_id(&copy_message_id.to_string()),
-    );
-    rops.push(0);
-    rops.push(1);
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(
+        &identity_store,
+        FakeStore::account().account_id,
+    )
+    .await
+    .unwrap();
+    let rops = crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+        let mut rops = vec![
+            0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
+        ];
+        append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+        rops.push(0);
+        rops.extend_from_slice(&[
+            0x02, 0x00, 0x00, 0x02, // RopOpenFolder, Archive
+        ]);
+        append_mapi_wire_id(&mut rops, crate::mapi::identity::ARCHIVE_FOLDER_ID);
+        rops.push(0);
+        rops.extend_from_slice(&[
+            0x33, 0x00, 0x01, 0x02, // RopMoveCopyMessages, move
+        ]);
+        rops.extend_from_slice(&1u16.to_le_bytes());
+        append_mapi_wire_id(
+            &mut rops,
+            test_mapi_message_id(&move_message_id.to_string()),
+        );
+        rops.push(0);
+        rops.push(0);
+        rops.extend_from_slice(&[
+            0x33, 0x00, 0x01, 0x02, // RopMoveCopyMessages, copy
+        ]);
+        rops.extend_from_slice(&1u16.to_le_bytes());
+        append_mapi_wire_id(
+            &mut rops,
+            test_mapi_message_id(&copy_message_id.to_string()),
+        );
+        rops.push(0);
+        rops.push(1);
+        rops
+    })
+    .await;
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());

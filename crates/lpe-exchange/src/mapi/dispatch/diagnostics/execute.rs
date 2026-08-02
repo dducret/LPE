@@ -79,6 +79,8 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
         last_completed_hierarchy_sync_root = %post_hierarchy.last_completed_hierarchy_sync_root,
         content_sync_started_after_hierarchy =
             post_hierarchy.content_sync_configure_observed,
+        inbox_content_sync_started_after_hierarchy =
+            post_hierarchy.inbox_content_sync_configure_observed,
         post_hierarchy_close_kind = post_hierarchy.close_kind,
         outlook_bootstrap_phase = post_hierarchy.outlook_bootstrap_phase,
         outlook_bootstrap_phase_name = post_hierarchy.outlook_bootstrap_phase_name,
@@ -100,6 +102,10 @@ pub(in crate::mapi::dispatch) fn log_execute_rop_debug(
             session
                 .post_hierarchy_actions
                 .inbox_normal_contents_table_observed,
+        inbox_content_sync_configure_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_content_sync_configure_observed,
         normal_inbox_setcolumns_observed =
             session
                 .post_hierarchy_actions
