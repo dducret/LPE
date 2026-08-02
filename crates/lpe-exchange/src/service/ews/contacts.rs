@@ -1,29 +1,13 @@
 use super::super::*;
 
-pub(in crate::service) fn contact_change_key(
+pub(in crate::service) fn contact_change_key(contact: &AccessibleContact, version: &str) -> String {
+    versioned_change_key("contact", &contact.id.to_string(), version)
+}
+
+pub(in crate::service) fn contact_summary_xml_with_change_key(
     contact: &AccessibleContact,
-    sync_version: Option<&str>,
+    change_key: &str,
 ) -> String {
-    stable_change_key(&[
-        "contact",
-        &contact.id.to_string(),
-        sync_version.unwrap_or_default(),
-        &contact.collection_id,
-        &contact.name,
-        &contact.role,
-        &contact.email,
-        &contact.phone,
-        &contact.team,
-        &contact.notes,
-    ])
-}
-
-pub(in crate::service) fn contact_summary_xml(contact: &AccessibleContact) -> String {
-    let change_key = contact_change_key(contact, None);
-    contact_summary_xml_with_change_key(contact, &change_key)
-}
-
-fn contact_summary_xml_with_change_key(contact: &AccessibleContact, change_key: &str) -> String {
     format!(
         concat!(
             "<t:Contact>",
@@ -36,11 +20,6 @@ fn contact_summary_xml_with_change_key(contact: &AccessibleContact, change_key: 
         change_key = escape_xml(change_key),
         name = escape_xml(&contact.name),
     )
-}
-
-pub(in crate::service) fn contact_item_xml(contact: &AccessibleContact) -> String {
-    let change_key = contact_change_key(contact, None);
-    contact_item_xml_with_change_key(contact, &change_key)
 }
 
 pub(in crate::service) fn contact_item_xml_with_change_key(
@@ -110,7 +89,10 @@ pub(in crate::service) fn contact_item_xml_with_change_key(
     )
 }
 
-pub(in crate::service) fn create_contact_success_response(contact: &AccessibleContact) -> String {
+pub(in crate::service) fn create_contact_success_response(
+    contact: &AccessibleContact,
+    change_key: &str,
+) -> String {
     format!(
         concat!(
             "<m:CreateItemResponse>",
@@ -119,7 +101,7 @@ pub(in crate::service) fn create_contact_success_response(contact: &AccessibleCo
             "<m:ResponseCode>NoError</m:ResponseCode>",
             "<m:Items>",
             "<t:Contact>",
-            "<t:ItemId Id=\"contact:{id}\" ChangeKey=\"created\"/>",
+            "<t:ItemId Id=\"contact:{id}\" ChangeKey=\"{change_key}\"/>",
             "<t:ParentFolderId Id=\"{folder_id}\"/>",
             "<t:Subject>{name}</t:Subject>",
             "<t:DisplayName>{name}</t:DisplayName>",
@@ -130,6 +112,7 @@ pub(in crate::service) fn create_contact_success_response(contact: &AccessibleCo
             "</m:CreateItemResponse>"
         ),
         id = contact.id,
+        change_key = escape_xml(change_key),
         folder_id = escape_xml(&contact.collection_id),
         name = escape_xml(&contact.name),
     )

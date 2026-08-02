@@ -1,4 +1,5 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use sha2::{Digest, Sha256};
 
 use super::super::*;
 
@@ -59,17 +60,16 @@ pub(in crate::service) fn canonical_message_id_from_ews_id(id: &str) -> Option<U
         .and_then(|value| Uuid::parse_str(value).ok())
 }
 
-pub(in crate::service) fn stable_change_key(parts: &[&str]) -> String {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for part in parts {
-        for byte in part.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(0x100000001b3);
+/// [MS-OXWSCORE] section 2.2.4.25 defines ChangeKey as an identifier for a
+/// specific item version.  The token deliberately contains only a
+/// collision-resistant digest of the canonical identity and durable revision.
+pub(in crate::service) fn versioned_change_key(kind: &str, id: &str, version: &str) -> String {
+    let mut hasher = Sha256::new();
+    for part in [kind, id, version] {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
     }
-    format!("ck-{hash:016x}")
+    format!("ck-v1-{}", URL_SAFE_NO_PAD.encode(hasher.finalize()))
 }
 
 pub(in crate::service) fn requested_convert_ids(request: &str) -> Vec<ConvertIdSource> {

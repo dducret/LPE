@@ -1,13 +1,11 @@
 use super::super::*;
 
 pub(in crate::service) fn public_folder_item_change_key(item: &PublicFolderItem) -> String {
-    stable_change_key(&[
+    versioned_change_key(
         "public-folder-item",
         &item.id.to_string(),
-        &item.public_folder_id.to_string(),
         &item.change_counter.to_string(),
-        &item.updated_at,
-    ])
+    )
 }
 
 pub(in crate::service) fn public_folder_item_summary_xml(item: &PublicFolderItem) -> String {

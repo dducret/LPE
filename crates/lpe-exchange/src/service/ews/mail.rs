@@ -1,6 +1,29 @@
 use super::super::*;
 
+pub(in crate::service) fn message_change_key(email: &JmapEmail) -> String {
+    let version = email
+        .mailbox_states
+        .iter()
+        .map(|state| state.modseq)
+        .max()
+        .unwrap_or(email.modseq);
+    versioned_change_key("message", &email.id.to_string(), &version.to_string())
+}
+
 pub(in crate::service) fn message_summary_xml(email: &JmapEmail) -> String {
+    message_summary_xml_for_mailbox(email, email.mailbox_id)
+}
+
+pub(in crate::service) fn message_summary_xml_for_mailbox(
+    email: &JmapEmail,
+    mailbox_id: Uuid,
+) -> String {
+    let unread = email
+        .mailbox_states
+        .iter()
+        .find(|state| state.mailbox_id == mailbox_id)
+        .map(|state| state.unread)
+        .unwrap_or(email.unread);
     format!(
         concat!(
             "<t:Message>",
@@ -14,13 +37,13 @@ pub(in crate::service) fn message_summary_xml(email: &JmapEmail) -> String {
             "</t:Message>"
         ),
         id = email.id,
-        change_key = escape_xml(&email.delivery_status),
-        mailbox_id = email.mailbox_id,
+        change_key = escape_xml(&message_change_key(email)),
+        mailbox_id = mailbox_id,
         subject = escape_xml(&email.subject),
         received_at = escape_xml(&email.received_at),
         size = email.size_octets.max(0),
         has_attachments = email.has_attachments,
-        is_read = !email.unread,
+        is_read = !unread,
     )
 }
 
@@ -65,7 +88,7 @@ pub(in crate::service) fn root_item_id_xml(email: &JmapEmail) -> String {
     format!(
         "<m:RootItemId RootItemId=\"message:{id}\" RootItemChangeKey=\"{change_key}\"/>",
         id = email.id,
-        change_key = escape_xml(&email.delivery_status),
+        change_key = escape_xml(&message_change_key(email)),
     )
 }
 
@@ -145,7 +168,8 @@ where
                     .await?;
                 moved_item_ids.push_str(&format!(
                     "<m:MovedItemId Id=\"message:{}\" ChangeKey=\"{}\"/>",
-                    moved.id, moved.modseq
+                    moved.id,
+                    escape_xml(&message_change_key(&moved))
                 ));
             }
             Ok(mark_as_junk_success_response(moved_item_ids))
@@ -158,10 +182,7 @@ where
     }
 }
 
-pub(in crate::service) fn create_item_success_response(
-    message_id: Uuid,
-    delivery_status: &str,
-) -> String {
+pub(in crate::service) fn create_item_success_response(email: &JmapEmail) -> String {
     format!(
         concat!(
             "<m:CreateItemResponse>",
@@ -170,15 +191,15 @@ pub(in crate::service) fn create_item_success_response(
             "<m:ResponseCode>NoError</m:ResponseCode>",
             "<m:Items>",
             "<t:Message>",
-            "<t:ItemId Id=\"message:{message_id}\" ChangeKey=\"{delivery_status}\"/>",
+            "<t:ItemId Id=\"message:{message_id}\" ChangeKey=\"{change_key}\"/>",
             "</t:Message>",
             "</m:Items>",
             "</m:CreateItemResponseMessage>",
             "</m:ResponseMessages>",
             "</m:CreateItemResponse>"
         ),
-        message_id = message_id,
-        delivery_status = escape_xml(delivery_status),
+        message_id = email.id,
+        change_key = escape_xml(&message_change_key(email)),
     )
 }
 

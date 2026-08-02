@@ -44,26 +44,40 @@ where
             + public_folder_item_ids.len();
 
         let mut items = String::new();
-        for contact in self
+        let contacts = self
             .store
             .fetch_accessible_contacts_by_ids(principal.account_id, &contact_ids)
-            .await?
-        {
-            items.push_str(&contact_item_xml(&contact));
+            .await?;
+        let contact_change_keys =
+            contact_change_keys(&self.store, principal.account_id, &contacts).await?;
+        for contact in &contacts {
+            items.push_str(&contact_item_xml_with_change_key(
+                contact,
+                change_key_for(&contact_change_keys, contact.id, "contact")?,
+            ));
         }
-        for event in self
+        let events = self
             .store
             .fetch_accessible_events_by_ids(principal.account_id, &event_ids)
-            .await?
-        {
-            items.push_str(&calendar_item_xml(&event));
+            .await?;
+        let event_change_keys =
+            event_change_keys(&self.store, principal.account_id, &events).await?;
+        for event in &events {
+            items.push_str(&calendar_item_xml_with_change_key(
+                event,
+                change_key_for(&event_change_keys, event.id, "calendar")?,
+            ));
         }
-        for task in self
+        let tasks = self
             .store
             .fetch_accessible_tasks_by_ids(principal.account_id, &task_ids)
-            .await?
-        {
-            items.push_str(&task_item_xml(&task));
+            .await?;
+        let task_change_keys = task_change_keys(&self.store, principal.account_id, &tasks).await?;
+        for task in &tasks {
+            items.push_str(&task_item_xml_with_change_key(
+                task,
+                change_key_for(&task_change_keys, task.id, "task")?,
+            ));
         }
         for email in self
             .store
@@ -146,9 +160,18 @@ where
                     .store
                     .fetch_accessible_contacts_in_collection(principal.account_id, collection_id)
                     .await?;
-                Ok(find_item_response(
-                    contacts.iter().map(contact_summary_xml).collect(),
-                ))
+                let change_keys =
+                    contact_change_keys(&self.store, principal.account_id, &contacts).await?;
+                let items = contacts
+                    .iter()
+                    .map(|contact| {
+                        Ok(contact_summary_xml_with_change_key(
+                            contact,
+                            change_key_for(&change_keys, contact.id, "contact")?,
+                        ))
+                    })
+                    .collect::<Result<String>>()?;
+                Ok(find_item_response(items))
             }
             FolderKind::Calendar => {
                 let collection_id = requested_collection_id(request).unwrap_or(CALENDAR_FOLDER_ID);
@@ -156,9 +179,18 @@ where
                     .store
                     .fetch_accessible_events_in_collection(principal.account_id, collection_id)
                     .await?;
-                Ok(find_item_response(
-                    events.iter().map(calendar_item_summary_xml).collect(),
-                ))
+                let change_keys =
+                    event_change_keys(&self.store, principal.account_id, &events).await?;
+                let items = events
+                    .iter()
+                    .map(|event| {
+                        Ok(calendar_item_summary_xml_with_change_key(
+                            event,
+                            change_key_for(&change_keys, event.id, "calendar")?,
+                        ))
+                    })
+                    .collect::<Result<String>>()?;
+                Ok(find_item_response(items))
             }
             FolderKind::Tasks => {
                 let collection_id = requested_collection_id(request).unwrap_or(TASKS_FOLDER_ID);
@@ -166,9 +198,18 @@ where
                     .store
                     .fetch_accessible_tasks_in_collection(principal.account_id, collection_id)
                     .await?;
-                Ok(find_item_response(
-                    tasks.iter().map(task_item_summary_xml).collect(),
-                ))
+                let change_keys =
+                    task_change_keys(&self.store, principal.account_id, &tasks).await?;
+                let items = tasks
+                    .iter()
+                    .map(|task| {
+                        Ok(task_item_summary_xml_with_change_key(
+                            task,
+                            change_key_for(&change_keys, task.id, "task")?,
+                        ))
+                    })
+                    .collect::<Result<String>>()?;
+                Ok(find_item_response(items))
             }
             FolderKind::Mailbox => {
                 let Some(mailbox_id) = self
@@ -196,8 +237,13 @@ where
                 Ok(find_item_response(
                     emails
                         .iter()
-                        .filter(|email| email.mailbox_id == mailbox_id)
-                        .map(message_summary_xml)
+                        .filter(|email| {
+                            email
+                                .mailbox_states
+                                .iter()
+                                .any(|state| state.mailbox_id == mailbox_id)
+                        })
+                        .map(|email| message_summary_xml_for_mailbox(email, mailbox_id))
                         .collect(),
                 ))
             }
@@ -308,7 +354,13 @@ where
                         parse_update_contact_input(principal, &existing, request),
                     )
                     .await?;
-                items.push_str(&contact_item_xml(&updated));
+                let change_keys =
+                    contact_change_keys(&self.store, principal.account_id, std::slice::from_ref(&updated))
+                        .await?;
+                items.push_str(&contact_item_xml_with_change_key(
+                    &updated,
+                    change_key_for(&change_keys, updated.id, "contact")?,
+                ));
             }
             for event_id in event_ids {
                 let existing = self
@@ -326,7 +378,13 @@ where
                         parse_update_event_input(principal, &existing, request)?,
                     )
                     .await?;
-                items.push_str(&calendar_item_xml(&updated));
+                let change_keys =
+                    event_change_keys(&self.store, principal.account_id, std::slice::from_ref(&updated))
+                        .await?;
+                items.push_str(&calendar_item_xml_with_change_key(
+                    &updated,
+                    change_key_for(&change_keys, updated.id, "calendar")?,
+                ));
             }
             for task_id in task_ids {
                 let existing = self
@@ -344,7 +402,13 @@ where
                         parse_update_task_input(principal, &existing, request)?,
                     )
                     .await?;
-                items.push_str(&task_item_xml(&updated));
+                let change_keys =
+                    task_change_keys(&self.store, principal.account_id, std::slice::from_ref(&updated))
+                        .await?;
+                items.push_str(&task_item_xml_with_change_key(
+                    &updated,
+                    change_key_for(&change_keys, updated.id, "task")?,
+                ));
             }
             let public_folder_items = self
                 .store
@@ -404,7 +468,16 @@ where
                         parse_create_contact_input(principal, request)?,
                     )
                     .await?;
-                return Ok(create_contact_success_response(&contact));
+                let change_keys = contact_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&contact),
+                )
+                .await?;
+                return Ok(create_contact_success_response(
+                    &contact,
+                    change_key_for(&change_keys, contact.id, "contact")?,
+                ));
             }
             if element_content(request, "CalendarItem").is_some() {
                 let collection_id = requested_collection_id_in(request, "SavedItemFolderId");
@@ -416,7 +489,16 @@ where
                         parse_create_event_input(principal, request)?,
                     )
                     .await?;
-                return Ok(create_event_success_response(&event));
+                let change_keys = event_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&event),
+                )
+                .await?;
+                return Ok(create_event_success_response(
+                    &event,
+                    change_key_for(&change_keys, event.id, "calendar")?,
+                ));
             }
             if element_content(request, "Task").is_some() {
                 let task = self
@@ -426,7 +508,16 @@ where
                         parse_create_task_input(principal, request)?,
                     )
                     .await?;
-                return Ok(create_task_success_response(&task));
+                let change_keys = task_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&task),
+                )
+                .await?;
+                return Ok(create_task_success_response(
+                    &task,
+                    change_key_for(&change_keys, task.id, "task")?,
+                ));
             }
 
             let input = parse_create_message_input(principal, request)?;
@@ -479,10 +570,7 @@ where
                                 },
                             )
                             .await?;
-                        return Ok(create_item_success_response(
-                            imported.id,
-                            &imported.delivery_status,
-                        ));
+                        return Ok(create_item_success_response(&imported));
                     }
                     let draft = self
                         .store
@@ -495,7 +583,14 @@ where
                             },
                         )
                         .await?;
-                    Ok(create_item_success_response(draft.message_id, "draft"))
+                    let email = self
+                        .store
+                        .fetch_jmap_emails(principal.account_id, &[draft.message_id])
+                        .await?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow!("saved draft was not found after creation"))?;
+                    Ok(create_item_success_response(&email))
                 }
                 "SendOnly" | "SendAndSaveCopy" => {
                     let submitted = self
@@ -509,7 +604,14 @@ where
                             },
                         )
                         .await?;
-                    Ok(create_item_success_response(submitted.message_id, "queued"))
+                    let email = self
+                        .store
+                        .fetch_jmap_emails(principal.account_id, &[submitted.message_id])
+                        .await?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow!("submitted message was not found after creation"))?;
+                    Ok(create_item_success_response(&email))
                 }
                 other => Ok(operation_error_response(
                     "CreateItem",

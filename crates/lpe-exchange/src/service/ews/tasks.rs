@@ -1,26 +1,13 @@
 use super::super::*;
 
-pub(in crate::service) fn task_change_key(task: &ClientTask, sync_version: Option<&str>) -> String {
-    stable_change_key(&[
-        "task",
-        &task.id.to_string(),
-        sync_version.unwrap_or_default(),
-        &task.task_list_id.to_string(),
-        &task.title,
-        &task.description,
-        &task.status,
-        task.due_at.as_deref().unwrap_or_default(),
-        task.completed_at.as_deref().unwrap_or_default(),
-        &task.sort_order.to_string(),
-    ])
+pub(in crate::service) fn task_change_key(task: &ClientTask, version: &str) -> String {
+    versioned_change_key("task", &task.id.to_string(), version)
 }
 
-pub(in crate::service) fn task_item_summary_xml(task: &ClientTask) -> String {
-    let change_key = task_change_key(task, None);
-    task_item_summary_xml_with_change_key(task, &change_key)
-}
-
-fn task_item_summary_xml_with_change_key(task: &ClientTask, change_key: &str) -> String {
+pub(in crate::service) fn task_item_summary_xml_with_change_key(
+    task: &ClientTask,
+    change_key: &str,
+) -> String {
     format!(
         concat!(
             "<t:Task>",
@@ -38,11 +25,6 @@ fn task_item_summary_xml_with_change_key(task: &ClientTask, change_key: &str) ->
         due_date = optional_text_element("t:DueDate", task.due_at.as_deref()),
         complete_date = optional_text_element("t:CompleteDate", task.completed_at.as_deref()),
     )
-}
-
-pub(in crate::service) fn task_item_xml(task: &ClientTask) -> String {
-    let change_key = task_change_key(task, None);
-    task_item_xml_with_change_key(task, &change_key)
 }
 
 pub(in crate::service) fn task_item_xml_with_change_key(
@@ -72,7 +54,10 @@ pub(in crate::service) fn task_item_xml_with_change_key(
     )
 }
 
-pub(in crate::service) fn create_task_success_response(task: &ClientTask) -> String {
+pub(in crate::service) fn create_task_success_response(
+    task: &ClientTask,
+    change_key: &str,
+) -> String {
     format!(
         concat!(
             "<m:CreateItemResponse>",
@@ -94,7 +79,7 @@ pub(in crate::service) fn create_task_success_response(task: &ClientTask) -> Str
             "</m:CreateItemResponse>"
         ),
         id = task.id,
-        change_key = escape_xml(&task_change_key(task, None)),
+        change_key = escape_xml(change_key),
         folder_id = task.task_list_id,
         title = escape_xml(&task.title),
         status = ews_task_status(&task.status),

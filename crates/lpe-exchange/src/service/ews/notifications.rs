@@ -84,29 +84,50 @@ where
                 "The requested EWS notification watermark is no longer available in canonical change-log retention.",
             ));
         }
+        let event_rows = poll
+            .events
+            .into_iter()
+            .filter_map(|event| {
+                let Some(mailbox_id) = event.canonical_folder_id() else {
+                    return None;
+                };
+                let Some(item_id) = event.canonical_message_id() else {
+                    return None;
+                };
+                let sequence = event
+                    .change_cursor()
+                    .unwrap_or_else(|| cursor.unwrap_or(after_cursor))
+                    .max(0) as u64;
+                let kind = match event.change_kind().unwrap_or_default() {
+                    "deleted" | "destroyed" | "removed" => EwsNotificationKind::Deleted,
+                    "created" | "inserted" | "new" => EwsNotificationKind::NewMail,
+                    _ => EwsNotificationKind::Created,
+                };
+                Some((sequence, kind, item_id, mailbox_id))
+            })
+            .collect::<Vec<_>>();
+        let event_ids = event_rows
+            .iter()
+            .map(|(_, _, item_id, _)| *item_id)
+            .collect::<Vec<_>>();
+        let emails_by_id = self
+            .store
+            .fetch_jmap_emails(principal.account_id, &event_ids)
+            .await?
+            .into_iter()
+            .map(|email| (email.id, email))
+            .collect::<HashMap<_, _>>();
         let mut notifications = Vec::new();
-        for event in poll.events {
-            let Some(mailbox_id) = event.canonical_folder_id() else {
-                continue;
-            };
-            let Some(item_id) = event.canonical_message_id() else {
-                continue;
-            };
-            let sequence = event
-                .change_cursor()
-                .unwrap_or_else(|| cursor.unwrap_or(after_cursor))
-                .max(0) as u64;
-            let kind = match event.change_kind().unwrap_or_default() {
-                "deleted" | "destroyed" | "removed" => EwsNotificationKind::Deleted,
-                "created" | "inserted" | "new" => EwsNotificationKind::NewMail,
-                _ => EwsNotificationKind::Created,
-            };
+        for (sequence, kind, item_id, mailbox_id) in event_rows {
             notifications.push(EwsQueuedNotification {
                 sequence,
                 kind,
                 item_id,
                 mailbox_id,
-                change_key: sequence.to_string(),
+                change_key: emails_by_id
+                    .get(&item_id)
+                    .map(message_change_key)
+                    .unwrap_or_else(|| sequence.to_string()),
                 timestamp: "1970-01-01T00:00:00Z".to_string(),
             });
         }

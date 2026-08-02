@@ -71,7 +71,7 @@ macro_rules! store_impl_collaboration {
                 r#"
                 SELECT
                     id,
-                    to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at
+                    modseq::text AS version
                 FROM contacts
                 WHERE id = ANY($1)
                 "#,
@@ -81,7 +81,7 @@ macro_rules! store_impl_collaboration {
             .await?;
             Ok(rows
                 .into_iter()
-                .map(|row| (row.get("id"), row.get("updated_at")))
+                .map(|row| (row.get("id"), row.get("version")))
                 .collect())
         })
     }
@@ -114,7 +114,7 @@ macro_rules! store_impl_collaboration {
                 r#"
                 SELECT
                     id,
-                    to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at
+                    modseq::text AS version
                 FROM calendar_events
                 WHERE id = ANY($1)
                 "#,
@@ -124,7 +124,7 @@ macro_rules! store_impl_collaboration {
             .await?;
             Ok(rows
                 .into_iter()
-                .map(|row| (row.get("id"), row.get("updated_at")))
+                .map(|row| (row.get("id"), row.get("version")))
                 .collect())
         })
     }
@@ -222,10 +222,27 @@ macro_rules! store_impl_collaboration {
     ) -> StoreFuture<'a, Vec<(Uuid, String)>> {
         Box::pin(async move {
             let tasks = self.fetch_client_tasks(principal_account_id).await?;
-            Ok(tasks
-                .into_iter()
+            let ids = tasks
+                .iter()
                 .filter(|task| task_matches_collection(task, collection_id))
-                .map(|task| (task.id, task.updated_at))
+                .map(|task| task.id)
+                .collect::<Vec<_>>();
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let rows = sqlx::query(
+                r#"
+                SELECT id, modseq::text AS version
+                FROM tasks
+                WHERE id = ANY($1)
+                "#,
+            )
+            .bind(&ids)
+            .fetch_all(self.pool())
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| (row.get("id"), row.get("version")))
                 .collect())
         })
     }

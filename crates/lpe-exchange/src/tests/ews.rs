@@ -2027,6 +2027,21 @@ async fn create_item_saveonly_stores_message_as_canonical_draft() {
     assert!(body.contains("<m:CreateItemResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("message:dddddddd-dddd-dddd-dddd-dddddddddddd"));
+    let create_change_key =
+        test_item_change_key(&body, "message:dddddddd-dddd-dddd-dddd-dddddddddddd");
+    assert!(create_change_key.starts_with("ck-v1-"));
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="message:dddddddd-dddd-dddd-dddd-dddddddddddd"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let get_body = response_text(response).await;
+    assert_eq!(
+        test_item_change_key(&get_body, "message:dddddddd-dddd-dddd-dddd-dddddddddddd"),
+        create_change_key
+    );
     let recorded = saved_drafts.lock().unwrap();
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].source, "ews-createitem");
@@ -4652,6 +4667,12 @@ async fn pull_and_streaming_notifications_replay_canonical_sql_change_cursor() {
     ]));
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            &message_id.to_string(),
+            &mailbox_id.to_string(),
+            "inbox",
+            "Hello",
+        )])),
         mapi_notification_cursor: mapi_notification_cursor.clone(),
         mapi_notification_polls: mapi_notification_polls.clone(),
         ..Default::default()
@@ -4685,6 +4706,22 @@ async fn pull_and_streaming_notifications_replay_canonical_sql_change_cursor() {
     assert!(body.contains("<m:GetEventsResponse>"));
     assert!(body.contains(&format!("<t:ItemId Id=\"message:{message_id}\"")));
     assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{mailbox_id}\"")));
+    let notification_change_key = test_item_change_key(&body, &format!("message:{message_id}"));
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="message:{message_id}"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let get_body = response_text(response).await;
+    assert_eq!(
+        test_item_change_key(&get_body, &format!("message:{message_id}")),
+        notification_change_key
+    );
 
     let response = service
         .handle(
@@ -4709,6 +4746,16 @@ fn test_xml_text(xml: &str, local_name: &str) -> Option<String> {
     let rest = &xml[start..];
     let end = rest.find(&close)?;
     Some(rest[..end].trim().to_string())
+}
+
+fn test_item_change_key(xml: &str, item_id: &str) -> String {
+    let marker = format!("Id=\"{item_id}\" ChangeKey=\"");
+    xml.split_once(&marker)
+        .and_then(|(_, rest)| {
+            rest.split_once('"')
+                .map(|(change_key, _)| change_key.to_string())
+        })
+        .unwrap_or_else(|| panic!("missing EWS ChangeKey for {item_id}"))
 }
 
 #[tokio::test]
@@ -6737,6 +6784,137 @@ async fn sync_folder_items_returns_no_contact_change_for_current_keyed_sync_stat
 }
 
 #[tokio::test]
+async fn ews_contact_change_key_is_stable_across_get_find_and_sync() {
+    let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let unrelated_contact_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    let collection = FakeStore::collection("default", "contacts", "Contacts");
+    let contact_versions = Arc::new(Mutex::new(HashMap::from([
+        (contact_id, 41),
+        (unrelated_contact_id, 9),
+    ])));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![collection.clone()])),
+        contacts: Arc::new(Mutex::new(vec![
+            AccessibleContact {
+                id: contact_id,
+                collection_id: collection.id.clone(),
+                owner_account_id: collection.owner_account_id,
+                owner_email: collection.owner_email.clone(),
+                owner_display_name: collection.owner_display_name.clone(),
+                rights: collection.rights.clone(),
+                name: "Stable Contact".to_string(),
+                ..Default::default()
+            },
+            AccessibleContact {
+                id: unrelated_contact_id,
+                collection_id: collection.id.clone(),
+                owner_account_id: collection.owner_account_id,
+                owner_email: collection.owner_email.clone(),
+                owner_display_name: collection.owner_display_name.clone(),
+                rights: collection.rights.clone(),
+                name: "Unrelated Contact".to_string(),
+                ..Default::default()
+            },
+        ])),
+        contact_versions: contact_versions.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let get_request = br#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#;
+
+    let response = service
+        .handle(&bearer_headers(), get_request)
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    let first_key = test_item_change_key(&body, "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    assert!(first_key.starts_with("ck-v1-"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:DistinguishedFolderId Id="contacts"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert_eq!(
+        test_item_change_key(&body, "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        first_key
+    );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>contacts:default:0</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert_eq!(
+        test_item_change_key(&body, "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        first_key
+    );
+    let sync_state = test_xml_text(&body, "SyncState").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>{sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(!body.contains("<t:Create>"));
+    assert!(!body.contains("<t:Update>"));
+    assert!(!body.contains("<t:Delete>"));
+
+    contact_versions
+        .lock()
+        .unwrap()
+        .insert(unrelated_contact_id, 10);
+    let response = service
+        .handle(&bearer_headers(), get_request)
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert_eq!(
+        test_item_change_key(&body, "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        first_key
+    );
+
+    contact_versions.lock().unwrap().insert(contact_id, 42);
+    let response = service
+        .handle(&bearer_headers(), get_request)
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    let changed_key = test_item_change_key(&body, "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    assert_ne!(changed_key, first_key);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>{sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Update>"));
+    assert_eq!(
+        test_item_change_key(&body, "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        changed_key
+    );
+}
+
+#[tokio::test]
 async fn update_contact_round_trips_through_sync_folder_items() {
     let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
     let collection = FakeStore::collection("default", "contacts", "Contacts");
@@ -7066,9 +7244,8 @@ async fn sync_folder_items_returns_empty_sync_for_custom_mailbox_folder() {
     let body = response_text(response).await;
     assert!(body.contains("<m:SyncFolderItemsResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(
-        body.contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:</m:SyncState>")
-    );
+    assert!(body
+        .contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:v2:0</m:SyncState>"));
     assert!(body.contains("<m:Changes></m:Changes>"));
 }
 
@@ -7096,9 +7273,8 @@ async fn sync_folder_items_accepts_any_folder_id_namespace_prefix() {
     let body = response_text(response).await;
     assert!(body.contains("<m:SyncFolderItemsResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(
-        body.contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:</m:SyncState>")
-    );
+    assert!(body
+        .contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:v2:0</m:SyncState>"));
 }
 
 #[tokio::test]
@@ -7242,6 +7418,85 @@ async fn find_item_lists_custom_mailbox_messages() {
 }
 
 #[tokio::test]
+async fn ews_mail_change_key_is_stable_for_a_non_primary_mailbox_membership() {
+    let inbox_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let archive_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let mut email = FakeStore::email(
+        &message_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Multi-folder message",
+    );
+    let mut archive_state = email.mailbox_states[0].clone();
+    archive_state.mailbox_id = archive_id;
+    archive_state.role = "archive".to_string();
+    archive_state.name = "Archive".to_string();
+    archive_state.modseq = 42;
+    archive_state.unread = true;
+    email.mailbox_ids.push(archive_id);
+    email.mailbox_states.push(archive_state);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox"),
+            FakeStore::mailbox(&archive_id.to_string(), "archive", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:FolderId Id="mailbox:{archive_id}"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{archive_id}\"/>")));
+    assert!(body.contains("<t:IsRead>false</t:IsRead>"));
+    let find_key = test_item_change_key(&body, &format!("message:{message_id}"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="message:{message_id}"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert_eq!(
+        test_item_change_key(&body, &format!("message:{message_id}")),
+        find_key
+    );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{archive_id}"/></m:SyncFolderId><m:SyncState>mailbox:{archive_id}:0</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{archive_id}\"/>")));
+    assert_eq!(
+        test_item_change_key(&body, &format!("message:{message_id}")),
+        find_key
+    );
+}
+
+#[tokio::test]
 async fn find_item_lists_system_mailbox_messages_by_distinguished_id() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -7300,20 +7555,25 @@ async fn sync_folder_items_reports_custom_mailbox_create_and_delete_changes() {
     let body = response_text(response).await;
     assert!(body.contains("<t:Create><t:Message>"));
     assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
-    assert!(body.contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:99999999-9999-9999-9999-999999999999</m:SyncState>"));
+    assert!(body.contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:v2:99999999-9999-9999-9999-999999999999=ck-v1-"));
+    let change_key = test_item_change_key(&body, "message:99999999-9999-9999-9999-999999999999");
+    let sync_state = test_xml_text(&body, "SyncState").unwrap();
 
     emails.lock().unwrap().clear();
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:99999999-9999-9999-9999-999999999999</m:SyncState><m:SyncFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#,
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncState>{sync_state}</m:SyncState><m:SyncFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
         )
         .await
         .unwrap();
     let body = response_text(response).await;
-    assert!(
-        body.contains("<t:Delete><t:ItemId Id=\"message:99999999-9999-9999-9999-999999999999\"")
-    );
+    assert!(body.contains(&format!(
+        "<t:Delete><t:ItemId Id=\"message:99999999-9999-9999-9999-999999999999\" ChangeKey=\"{change_key}\"/>"
+    )));
 }
 
 #[tokio::test]
@@ -7347,7 +7607,7 @@ async fn sync_folder_items_reports_system_mailbox_messages() {
     assert!(body.contains("<m:SyncFolderItemsResponse>"));
     assert!(body.contains("<t:Create><t:Message>"));
     assert!(body.contains("message:88888888-8888-8888-8888-888888888888"));
-    assert!(body.contains("<m:SyncState>mailbox:55555555-5555-5555-5555-555555555555:88888888-8888-8888-8888-888888888888</m:SyncState>"));
+    assert!(body.contains("<m:SyncState>mailbox:55555555-5555-5555-5555-555555555555:v2:88888888-8888-8888-8888-888888888888=ck-v1-"));
 }
 
 #[tokio::test]
@@ -7445,6 +7705,7 @@ async fn sync_folder_items_reports_public_folder_items() {
         )])),
         ..Default::default()
     };
+    let public_folder_items = store.public_folder_items.clone();
     let service = ExchangeService::new(store);
 
     let response = service
@@ -7460,7 +7721,50 @@ async fn sync_folder_items_reports_public_folder_items() {
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:Create><t:Message>"));
     assert!(body.contains("public-folder-item:abababab-abab-abab-abab-abababababab"));
-    assert!(body.contains("<m:SyncState>public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:v2:abababab-abab-abab-abab-abababababab="));
+    let change_key = test_item_change_key(
+        &body,
+        "public-folder-item:abababab-abab-abab-abab-abababababab",
+    );
+    let first_sync_state = test_xml_text(&body, "SyncState").unwrap();
+    assert!(first_sync_state.starts_with(
+        "public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:v3:abababab-abab-abab-abab-abababababab="
+    ));
+    assert!(first_sync_state.ends_with("|0"));
+
+    public_folder_items.lock().unwrap()[0].is_read = true;
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:SyncFolderId><m:SyncState>{first_sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:ReadFlagChange>"));
+    assert!(body.contains(&format!(
+        "<t:ItemId Id=\"public-folder-item:abababab-abab-abab-abab-abababababab\" ChangeKey=\"{change_key}\"/>"
+    )));
+    assert!(body.contains("<t:IsRead>true</t:IsRead>"));
+    assert!(!body.contains("<t:Update>"));
+    let current_sync_state = test_xml_text(&body, "SyncState").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:SyncFolderId><m:SyncState>{current_sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(!body.contains("<t:Create>"));
+    assert!(!body.contains("<t:Update>"));
+    assert!(!body.contains("<t:ReadFlagChange>"));
 }
 
 #[tokio::test]

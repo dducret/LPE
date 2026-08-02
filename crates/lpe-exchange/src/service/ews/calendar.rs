@@ -1,34 +1,14 @@
 use super::super::*;
 use crate::ews_types::{EwsMonth, EwsResponseType, EwsWeekday};
 
-pub(in crate::service) fn calendar_change_key(
+pub(in crate::service) fn calendar_change_key(event: &AccessibleEvent, version: &str) -> String {
+    versioned_change_key("calendar", &event.id.to_string(), version)
+}
+
+pub(in crate::service) fn calendar_item_summary_xml_with_change_key(
     event: &AccessibleEvent,
-    sync_version: Option<&str>,
+    change_key: &str,
 ) -> String {
-    stable_change_key(&[
-        "calendar",
-        &event.id.to_string(),
-        sync_version.unwrap_or_default(),
-        &event.collection_id,
-        &event.date,
-        &event.time,
-        &event.time_zone,
-        &event.duration_minutes.to_string(),
-        &event.recurrence_rule,
-        &event.title,
-        &event.location,
-        &event.attendees,
-        &event.attendees_json,
-        &event.notes,
-    ])
-}
-
-pub(in crate::service) fn calendar_item_summary_xml(event: &AccessibleEvent) -> String {
-    let change_key = calendar_change_key(event, None);
-    calendar_item_summary_xml_with_change_key(event, &change_key)
-}
-
-fn calendar_item_summary_xml_with_change_key(event: &AccessibleEvent, change_key: &str) -> String {
     format!(
         concat!(
             "<t:CalendarItem>",
@@ -44,11 +24,6 @@ fn calendar_item_summary_xml_with_change_key(event: &AccessibleEvent, change_key
         start = escape_xml(&ews_datetime(&event.date, &event.time)),
         end = escape_xml(&event_end_datetime(event)),
     )
-}
-
-pub(in crate::service) fn calendar_item_xml(event: &AccessibleEvent) -> String {
-    let change_key = calendar_change_key(event, None);
-    calendar_item_xml_with_change_key(event, &change_key)
 }
 
 pub(in crate::service) fn calendar_item_xml_with_change_key(
@@ -83,7 +58,10 @@ pub(in crate::service) fn calendar_item_xml_with_change_key(
     )
 }
 
-pub(in crate::service) fn create_event_success_response(event: &AccessibleEvent) -> String {
+pub(in crate::service) fn create_event_success_response(
+    event: &AccessibleEvent,
+    change_key: &str,
+) -> String {
     format!(
         concat!(
             "<m:CreateItemResponse>",
@@ -92,7 +70,7 @@ pub(in crate::service) fn create_event_success_response(event: &AccessibleEvent)
             "<m:ResponseCode>NoError</m:ResponseCode>",
             "<m:Items>",
             "<t:CalendarItem>",
-            "<t:ItemId Id=\"event:{id}\" ChangeKey=\"created\"/>",
+            "<t:ItemId Id=\"event:{id}\" ChangeKey=\"{change_key}\"/>",
             "<t:ParentFolderId Id=\"{folder_id}\"/>",
             "<t:Subject>{title}</t:Subject>",
             "<t:Start>{start}</t:Start>",
@@ -104,6 +82,7 @@ pub(in crate::service) fn create_event_success_response(event: &AccessibleEvent)
             "</m:CreateItemResponse>"
         ),
         id = event.id,
+        change_key = escape_xml(change_key),
         folder_id = escape_xml(&event.collection_id),
         title = escape_xml(&event.title),
         start = escape_xml(&ews_datetime(&event.date, &event.time)),

@@ -2278,6 +2278,7 @@ local_cache = "docs/microsoft/cache/MS-OXWSMSG.pdf"
 sha256 = "b0807c05d784be65f041ec879a5f3c91c710e4442ae94508814b5bc95cb612b9"
 used_for = [
   "EWS message create/get/update/delete/move/copy/send behavior over canonical messages and submission",
+  "EWS ItemId and ChangeKey version identity over durable canonical message revisions",
 ]
 sections = [
   "2.2 Common Message Syntax",
@@ -2326,15 +2327,20 @@ local_cache = "docs/microsoft/cache/MS-OXWSSYNC.pdf"
 sha256 = "e4da9a1f723f30cd0e33ae8cb69b821796ba03f0d4d1132068660a0122ba22ee"
 used_for = [
   "EWS SyncFolderHierarchy and SyncFolderItems behavior over canonical change state",
+  "EWS SyncFolderItems incremental ChangeKey comparison and per-user ReadFlagChange behavior",
 ]
 sections = [
   "2.2 Common Message Syntax",
   "2.2.9 Common Data Structures",
+  "3.1.1 Server Details",
   "3.1.4.1 SyncFolderHierarchy",
   "3.1.4.1.3.1 t:SyncFolderHierarchyChangesType Complex Type",
   "3.1.4.1.3.2 t:SyncFolderHierarchyCreateOrUpdateType Complex Type",
   "3.1.4.1.3.3 t:SyncFolderHierarchyDeleteType Complex Type",
   "3.1.4.1.3.6 m:SyncFolderHierarchyType Complex Type",
+  "3.1.4.2 SyncFolderItems",
+  "3.1.4.2.3.2 t:SyncFolderItemsChangesType Complex Type",
+  "3.1.4.2.3.5 t:SyncFolderItemsReadFlagType Complex Type",
 ]
 
 [[protocol]]
@@ -2405,6 +2411,7 @@ local_cache = "docs/microsoft/cache/MS-OXWSCORE.pdf"
 sha256 = "a2b5145234ee768016ec3772d5c5b913ef740e3928d976a29c9ad2bffc33ef63"
 used_for = [
   "EWS core item, contact, calendar, and operation catalog routing over canonical LPE state",
+  "Opaque EWS ItemId ChangeKey identity for a specific canonical item version",
 ]
 sections = [
   "2.2 Common Message Syntax",

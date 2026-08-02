@@ -199,6 +199,24 @@ impl Storage {
                 CanonicalChangeCategory::Tasks.as_str(),
             )
             .await?;
+        let versioned = sqlx::query(
+            r#"
+            UPDATE tasks
+            SET modseq = $4
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .bind(task_id)
+        .bind(modseq)
+        .execute(&mut *tx)
+        .await?;
+        if versioned.rows_affected() != 1 {
+            bail!("task disappeared before version assignment");
+        }
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
@@ -300,6 +318,24 @@ impl Storage {
                 CanonicalChangeCategory::Tasks.as_str(),
             )
             .await?;
+        let versioned = sqlx::query(
+            r#"
+            UPDATE tasks
+            SET modseq = $4
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(existing.owner_account_id)
+        .bind(task_id)
+        .bind(modseq)
+        .execute(&mut *tx)
+        .await?;
+        if versioned.rows_affected() != 1 {
+            bail!("task disappeared before version assignment");
+        }
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,

@@ -536,6 +536,42 @@ impl Storage {
                 CanonicalChangeCategory::Contacts.as_str(),
             )
             .await?;
+        let versioned = sqlx::query(
+            r#"
+            UPDATE contacts
+            SET modseq = $5
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND contact_book_id = $3
+              AND id = $4
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(input.account_id)
+        .bind(contact_book_id)
+        .bind(contact_id)
+        .bind(modseq)
+        .execute(&mut *tx)
+        .await?;
+        if versioned.rows_affected() != 1 {
+            bail!("contact disappeared before version assignment");
+        }
+        sqlx::query(
+            r#"
+            UPDATE contact_books
+            SET sync_modseq = GREATEST(sync_modseq, $4),
+                updated_at = NOW()
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(input.account_id)
+        .bind(contact_book_id)
+        .bind(modseq)
+        .execute(&mut *tx)
+        .await?;
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,

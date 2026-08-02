@@ -26,6 +26,7 @@ No current EWS operation is marked `implemented` against full Microsoft parity. 
 - Message submission must use canonical submission and authoritative `Sent`; EWS must not introduce client `SMTP`, an EWS `Outbox`, or an EWS-only `Sent` copy.
 - Unsupported operations must return parseable SOAP/EWS errors rather than generic transport failures.
 - EWS ids are currently LPE-prefixed canonical ids such as `message:{uuid}`, `mailbox:{uuid}`, `contact:{uuid}`, `event:{uuid}`, `task:{uuid}`, `attachment:{message_uuid}:{attachment_uuid}`, `public-folder:{uuid}`, and `public-folder-item:{uuid}`. `ConvertId` also exposes a stateless opaque form for alternate EWS formats.
+- EWS item `ChangeKey` values are opaque SHA-256 tokens over a canonical item id and its durable revision: mailbox-membership `modseq` for messages, `modseq` for contacts, calendar events, and tasks, and `change_counter` for public-folder items. Reads never advance a revision, so an unchanged item has the same key in `CreateItem`, `GetItem`, `FindItem`, `SyncFolderItems`, conversation results, and current-item notifications. Public-folder per-user read state keeps that shared item key stable and is returned through `SyncFolderItems` `ReadFlagChange`. This follows [MS-OXWSCORE] section 2.2.4.25, [MS-OXWSMSG] section 3.1.4.4, and [MS-OXWSSYNC] sections 3.1.4.2.3.2 and 3.1.4.2.3.5.
 
 ## Full Microsoft EWS Operation Matrix
 

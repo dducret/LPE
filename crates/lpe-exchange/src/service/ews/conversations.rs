@@ -429,7 +429,7 @@ fn conversation_summary_xml(thread_id: Uuid, messages: &[&JmapEmail]) -> String 
             format!(
                 "<t:ItemId Id=\"message:{}\" ChangeKey=\"{}\"/>",
                 email.id,
-                escape_xml(&email.delivery_status)
+                escape_xml(&message_change_key(email))
             )
         })
         .collect::<String>();

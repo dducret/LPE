@@ -7635,14 +7635,9 @@ impl ExchangeStore for FakeStore {
             .iter()
             .filter(|contact| contact.collection_id == collection_id)
             .map(|contact| {
-                let version = versions.get(&contact.id).copied().unwrap_or_default();
                 (
                     contact.id,
-                    format!(
-                        "2026-07-15T10:{:02}:{:02}Z",
-                        (version / 60) % 60,
-                        version % 60
-                    ),
+                    versions.get(&contact.id).copied().unwrap_or(1).to_string(),
                 )
             })
             .collect();
@@ -8607,11 +8602,7 @@ impl ExchangeStore for FakeStore {
             .map(|task| {
                 (
                     task.id,
-                    versions
-                        .get(&task.id)
-                        .copied()
-                        .map(|version| version.to_string())
-                        .unwrap_or_else(|| task.updated_at.clone()),
+                    versions.get(&task.id).copied().unwrap_or(1).to_string(),
                 )
             })
             .collect();
@@ -8713,7 +8704,7 @@ impl ExchangeStore for FakeStore {
         let version = versions
             .get(&contact_id)
             .copied()
-            .unwrap_or_default()
+            .unwrap_or(1)
             .saturating_add(1);
         versions.insert(contact_id, version);
         let contact = contact.clone();
@@ -10727,7 +10718,9 @@ impl ExchangeStore for FakeStore {
             .lock()
             .unwrap()
             .iter()
-            .filter(|email| mailbox_id.map_or(true, |mailbox_id| email.mailbox_id == mailbox_id))
+            .filter(|email| {
+                mailbox_id.map_or(true, |mailbox_id| email.mailbox_ids.contains(&mailbox_id))
+            })
             .filter(|email| {
                 search_text.map_or(true, |search_text| jmap_search_matches(email, search_text))
             })
@@ -11637,14 +11630,39 @@ impl ExchangeStore for FakeStore {
         input: SubmitMessageInput,
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, SavedDraftMessage> {
+        let message_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
+        let draft_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+        let mut draft = FakeStore::email(
+            &message_id.to_string(),
+            &draft_mailbox_id.to_string(),
+            "drafts",
+            &input.subject,
+        );
+        draft.from_address = input.from_address.clone();
+        draft.from_display = input.from_display.clone();
+        draft.sender_address = input.sender_address.clone();
+        draft.sender_display = input.sender_display.clone();
+        draft.to = FakeStore::email_addresses(&input.to);
+        draft.cc = FakeStore::email_addresses(&input.cc);
+        draft.bcc = FakeStore::email_addresses(&input.bcc);
+        draft.preview = input.body_text.clone();
+        draft.body_text = input.body_text.clone();
+        draft.body_html_sanitized = input.body_html_sanitized.clone();
+        draft.unread = input.unread.unwrap_or(false);
+        draft.flagged = input.flagged.unwrap_or(false);
+        draft.has_attachments = !input.attachments.is_empty();
+        let mut emails = self.emails.lock().unwrap();
+        emails.retain(|email| email.id != message_id);
+        emails.push(draft);
+        drop(emails);
         self.saved_drafts.lock().unwrap().push(input);
         Box::pin(async move {
             Ok(SavedDraftMessage {
-                message_id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
+                message_id,
                 account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
                 submitted_by_account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
                     .unwrap(),
-                draft_mailbox_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
+                draft_mailbox_id,
                 delivery_status: "draft".to_string(),
             })
         })
