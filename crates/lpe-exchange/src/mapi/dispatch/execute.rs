@@ -294,11 +294,11 @@ pub(super) fn record_execute_stream_batch_observation(
 pub(super) fn read_next_execute_rop_request(
     cursor: &mut Cursor<'_>,
     responses: &mut Vec<u8>,
-) -> Option<RopRequest> {
+) -> Option<(RopRequest, u8)> {
     if cursor.remaining_is_zero_padding() {
         return None;
     }
-    match read_rop_request(cursor) {
+    match read_rop_request_with_logon_id(cursor) {
         Ok(request) => Some(request),
         Err(_) => {
             responses.extend_from_slice(&rop_parse_error_response());

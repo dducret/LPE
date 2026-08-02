@@ -9,11 +9,13 @@ impl MapiSession {
     pub(in crate::mapi) fn remember_table_notification_eligibility(
         &mut self,
         handle: u32,
+        logon_id: u8,
         notifications_enabled: bool,
     ) {
         self.table_notification_active_handles.remove(&handle);
         if notifications_enabled {
-            self.table_notification_eligible_handles.insert(handle);
+            self.table_notification_eligible_handles
+                .insert(handle, logon_id);
         } else {
             self.table_notification_eligible_handles.remove(&handle);
         }
@@ -44,7 +46,9 @@ impl MapiSession {
         let Some(handle) = input_handle(handle_slots, request) else {
             return;
         };
-        if self.table_notification_eligible_handles.contains(&handle)
+        if self
+            .table_notification_eligible_handles
+            .contains_key(&handle)
             && matches!(
                 self.handles.get(&handle),
                 Some(MapiObject::HierarchyTable { .. } | MapiObject::ContentsTable { .. })
@@ -77,7 +81,7 @@ impl MapiSession {
 
     pub(in crate::mapi) fn take_pending_notification_deliveries(
         &mut self,
-    ) -> Vec<(u32, MapiNotificationEvent)> {
+    ) -> Vec<(u32, u8, MapiNotificationEvent)> {
         let events: Vec<_> = self.pending_notifications.drain(..).collect();
         let mut deliveries = Vec::new();
         let mut delivered_table_changes = HashSet::new();
@@ -94,26 +98,49 @@ impl MapiSession {
                         if event.is_complete_for_wire()
                             && registration_matches_event(registration, &event)
                         {
-                            event_deliveries.push((*handle, event.clone(), false));
+                            event_deliveries.push((
+                                *handle,
+                                registration.logon_id,
+                                event.clone(),
+                                false,
+                            ));
                         }
                         if let Some(folder_event) = &folder_event {
                             if registration_matches_event(registration, folder_event) {
-                                event_deliveries.push((*handle, folder_event.clone(), false));
+                                event_deliveries.push((
+                                    *handle,
+                                    registration.logon_id,
+                                    folder_event.clone(),
+                                    false,
+                                ));
                             }
                         }
                         if event.event_mask != MapiNotificationEventMask::TableModified.as_u16()
                             && registration_matches_event(registration, &table_event)
                         {
-                            event_deliveries.push((*handle, table_event.clone(), true));
+                            event_deliveries.push((
+                                *handle,
+                                registration.logon_id,
+                                table_event.clone(),
+                                true,
+                            ));
                         }
                     }
                     _ if self.table_notification_active_handles.contains(handle) => {
+                        let Some(logon_id) = self
+                            .table_notification_eligible_handles
+                            .get(handle)
+                            .copied()
+                        else {
+                            continue;
+                        };
                         if table_matches_event(object, &event) {
-                            event_deliveries.push((*handle, table_event.clone(), true));
+                            event_deliveries.push((*handle, logon_id, table_event.clone(), true));
                         } else if let Some(hierarchy_table_event) = &hierarchy_table_event {
                             if table_matches_event(object, hierarchy_table_event) {
                                 event_deliveries.push((
                                     *handle,
+                                    logon_id,
                                     hierarchy_table_event.clone(),
                                     true,
                                 ));
@@ -123,7 +150,7 @@ impl MapiSession {
                     _ => {}
                 }
             }
-            event_deliveries.sort_unstable_by_key(|(handle, delivery, table_change)| {
+            event_deliveries.sort_unstable_by_key(|(handle, _logon_id, delivery, table_change)| {
                 (
                     *handle,
                     *table_change,
@@ -133,13 +160,13 @@ impl MapiSession {
                     },
                 )
             });
-            for (handle, delivery, table_change) in event_deliveries {
+            for (handle, logon_id, delivery, table_change) in event_deliveries {
                 if table_change
                     && !delivered_table_changes.insert((handle, delivery.kind, delivery.folder_id))
                 {
                     continue;
                 }
-                deliveries.push((handle, delivery));
+                deliveries.push((handle, logon_id, delivery));
             }
         }
         deliveries

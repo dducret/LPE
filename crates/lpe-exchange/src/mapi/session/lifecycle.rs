@@ -144,7 +144,7 @@ pub(in crate::mapi) fn create_session(
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
         notification_cursor: None,
         pending_notifications: VecDeque::new(),
-        table_notification_eligible_handles: HashSet::new(),
+        table_notification_eligible_handles: HashMap::new(),
         table_notification_active_handles: HashSet::new(),
         completed_execute_requests: HashMap::new(),
         completed_execute_request_order: VecDeque::new(),

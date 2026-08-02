@@ -7,9 +7,15 @@ use crate::mapi::wire::RopId;
 use anyhow::{anyhow, Result};
 
 pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
+    read_rop_request_with_logon_id(cursor).map(|(request, _logon_id)| request)
+}
+
+pub(in crate::mapi) fn read_rop_request_with_logon_id(
+    cursor: &mut Cursor<'_>,
+) -> Result<(RopRequest, u8)> {
     let rop_id = cursor.read_u8()?;
-    let _logon_id = cursor.read_u8()?;
-    match RopId::from_u8(rop_id) {
+    let logon_id = cursor.read_u8()?;
+    let request: Result<RopRequest> = match RopId::from_u8(rop_id) {
         Some(RopId::Release) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
@@ -1459,5 +1465,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-    }
+    };
+    let request = request?;
+    Ok((request, logon_id))
 }

@@ -41,7 +41,7 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) next_named_property_id: u16,
     pub(in crate::mapi) notification_cursor: Option<i64>,
     pub(in crate::mapi) pending_notifications: VecDeque<MapiNotificationEvent>,
-    pub(in crate::mapi) table_notification_eligible_handles: HashSet<u32>,
+    pub(in crate::mapi) table_notification_eligible_handles: HashMap<u32, u8>,
     pub(in crate::mapi) table_notification_active_handles: HashSet<u32>,
     pub(in crate::mapi) completed_execute_requests: HashMap<String, CachedExecuteResponse>,
     pub(in crate::mapi) completed_execute_request_order: VecDeque<String>,

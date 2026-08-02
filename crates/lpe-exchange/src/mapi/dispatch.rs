@@ -939,7 +939,8 @@ where
         session,
     );
     while cursor.remaining() > 0 {
-        let Some(request) = read_next_execute_rop_request(&mut cursor, &mut responses) else {
+        let Some((request, logon_id)) = read_next_execute_rop_request(&mut cursor, &mut responses)
+        else {
             break;
         };
         let typed_request = request.typed();
@@ -1036,6 +1037,7 @@ where
                     session,
                     &mut handle_slots,
                     &request,
+                    logon_id,
                     mailboxes,
                     emails,
                     snapshot,
@@ -1297,6 +1299,7 @@ where
                     session,
                     &mut handle_slots,
                     &request,
+                    logon_id,
                     &mut responses,
                     &mut output_handles,
                 )
@@ -1426,7 +1429,7 @@ where
     if !notification_deliveries.is_empty() {
         let notification_targets = notification_deliveries
             .iter()
-            .map(|(handle, event)| {
+            .map(|(handle, _logon_id, event)| {
                 format!(
                     "handle={handle};target={};event=0x{:04x};folder=0x{:016x}",
                     if session.table_notification_active_handles.contains(handle) {
@@ -1451,8 +1454,8 @@ where
             notification_targets,
             "mapi execute appended RopNotify responses"
         );
-        for (notification_handle, event) in notification_deliveries {
-            if let Some(response) = rop_notify_response(notification_handle, 0, &event) {
+        for (notification_handle, logon_id, event) in notification_deliveries {
+            if let Some(response) = rop_notify_response(notification_handle, logon_id, &event) {
                 responses.extend_from_slice(&response);
             }
         }

@@ -16,6 +16,7 @@ pub(super) async fn append_table_open_dispatch_response<S>(
     session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
+    logon_id: u8,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
@@ -34,6 +35,7 @@ pub(super) async fn append_table_open_dispatch_response<S>(
                 session,
                 handle_slots,
                 request,
+                logon_id,
                 mailboxes,
                 emails,
                 snapshot,
@@ -64,6 +66,7 @@ pub(super) async fn append_open_table_response<S>(
     session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
+    logon_id: u8,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
@@ -104,7 +107,11 @@ pub(super) async fn append_open_table_response<S>(
                 ),
             );
             let table_flags = request.payload.first().copied().unwrap_or(0);
-            session.remember_table_notification_eligibility(handle, table_flags & 0x10 == 0);
+            session.remember_table_notification_eligibility(
+                handle,
+                logon_id,
+                table_flags & 0x10 == 0,
+            );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
             let row_count = if folder_id == PUBLIC_FOLDERS_ROOT_FOLDER_ID
                 && snapshot.public_folders().is_empty()
@@ -276,7 +283,11 @@ pub(super) async fn append_open_table_response<S>(
                     initial_sort.clone(),
                 ),
             );
-            session.remember_table_notification_eligibility(handle, table_flags & 0x10 == 0);
+            session.remember_table_notification_eligibility(
+                handle,
+                logon_id,
+                table_flags & 0x10 == 0,
+            );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
             let row_count = contents_table_open_row_count(
                 contents_folder_id,

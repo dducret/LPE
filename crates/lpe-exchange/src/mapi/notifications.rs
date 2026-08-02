@@ -6,6 +6,8 @@ use super::wire::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiNotificationRegistration {
+    // [MS-OXCROPS] section 2.2.14.2: RopNotify carries the associated LogonId.
+    pub(in crate::mapi) logon_id: u8,
     pub(in crate::mapi) notification_types: u16,
     pub(in crate::mapi) folder_id: Option<u64>,
 }
@@ -590,6 +592,7 @@ fn notification_type_matches(requested: u16, event_mask: u16) -> bool {
 
 pub(in crate::mapi) fn notification_registration_from_request(
     request: &RopRequest,
+    logon_id: u8,
 ) -> MapiNotificationRegistration {
     let notification_types = request.notification_types().unwrap_or(0);
     let folder_id = if request.notification_want_whole_store().unwrap_or(true) {
@@ -598,6 +601,7 @@ pub(in crate::mapi) fn notification_registration_from_request(
         request.notification_folder_id()
     };
     MapiNotificationRegistration {
+        logon_id,
         notification_types,
         folder_id,
     }

@@ -262,6 +262,7 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
             position: 0,
         },
     );
+    session.remember_table_notification_eligibility(hierarchy_handle, 1, true);
     session
         .table_notification_active_handles
         .insert(hierarchy_handle);
@@ -290,13 +291,14 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
     let deliveries = session.take_pending_notification_deliveries();
     assert_eq!(deliveries.len(), 1);
     assert_eq!(deliveries[0].0, hierarchy_handle);
-    assert_eq!(deliveries[0].1.kind, MapiNotificationKind::Hierarchy);
+    assert_eq!(deliveries[0].1, 1);
+    assert_eq!(deliveries[0].2.kind, MapiNotificationKind::Hierarchy);
     assert_eq!(
-        deliveries[0].1.event_mask,
+        deliveries[0].2.event_mask,
         MapiNotificationEventMask::TableModified.as_u16()
     );
     assert_eq!(
-        deliveries[0].1.folder_id,
+        deliveries[0].2.folder_id,
         crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
     );
 }
@@ -315,6 +317,7 @@ fn session_delivers_only_complete_message_moves_and_copies_to_subscriptions() {
             notification_handle,
             MapiObject::NotificationSubscription {
                 registration: crate::mapi::notifications::MapiNotificationRegistration {
+                    logon_id: 0,
                     notification_types: event_mask.as_u16(),
                     folder_id: None,
                 },
@@ -348,8 +351,55 @@ fn session_delivers_only_complete_message_moves_and_copies_to_subscriptions() {
         let deliveries = session.take_pending_notification_deliveries();
         assert_eq!(deliveries.len(), 1);
         assert_eq!(deliveries[0].0, notification_handle);
-        assert_eq!(deliveries[0].1.old_message_id, Some(0x0000_0001_0089_0001));
+        assert_eq!(deliveries[0].2.old_message_id, Some(0x0000_0001_0089_0001));
     }
+}
+
+#[test]
+fn notification_subscription_preserves_rop_logon_id_through_rop_notify() {
+    let raw_request = [0x29, 0x01, 0x00, 0x02, 0x10, 0x00, 0x01];
+    let (request, logon_id) = crate::mapi::rop::read_rop_request_with_logon_id(
+        &mut crate::mapi::rop::Cursor::new(&raw_request),
+    )
+    .expect("RegisterNotification request parses");
+    let registration =
+        crate::mapi::notifications::notification_registration_from_request(&request, logon_id);
+    assert_eq!(registration.logon_id, 1);
+
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let notification_handle = 79;
+    session.handles.insert(
+        notification_handle,
+        MapiObject::NotificationSubscription { registration },
+    );
+    session.record_notification(MapiNotificationEvent::canonical(
+        MapiNotificationKind::Hierarchy,
+        MapiNotificationEventMask::ObjectModified.as_u16(),
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        Some(crate::mapi::identity::INBOX_FOLDER_ID),
+        None,
+        1,
+        1,
+        Some(3),
+        Some(3),
+        "updated".to_string(),
+        None,
+        None,
+        None,
+        None,
+    ));
+
+    let deliveries = session.take_pending_notification_deliveries();
+    assert_eq!(deliveries.len(), 1);
+    let (handle, delivery_logon_id, event) = &deliveries[0];
+    assert_eq!(*handle, notification_handle);
+    assert_eq!(*delivery_logon_id, 1);
+    let response =
+        crate::mapi::notifications::rop_notify_response(*handle, *delivery_logon_id, event)
+            .expect("ObjectModified notification serializes");
+    assert_eq!(response[5], 1);
 }
 
 #[test]

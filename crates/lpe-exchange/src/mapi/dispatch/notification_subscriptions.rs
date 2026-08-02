@@ -13,6 +13,7 @@ pub(super) async fn append_notification_dispatch_response<S>(
     session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
+    logon_id: u8,
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
 ) where
@@ -30,6 +31,7 @@ pub(super) async fn append_notification_dispatch_response<S>(
             session,
             handle_slots,
             request,
+            logon_id,
             responses,
             output_handles,
         )
@@ -45,12 +47,13 @@ pub(super) async fn append_register_notification_response<S>(
     session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
+    logon_id: u8,
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
 ) where
     S: ExchangeStore,
 {
-    let registration = notification_registration_from_request(request);
+    let registration = notification_registration_from_request(request, logon_id);
     let input_handle_value = input_handle(handle_slots, request);
     let input_object = input_object(session, handle_slots, request);
     let input_object_kind = mapi_object_debug_kind(input_object);
