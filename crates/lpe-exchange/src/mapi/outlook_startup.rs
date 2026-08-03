@@ -66,8 +66,6 @@ pub(in crate::mapi) fn outlook_startup_gate_summary(
 ) -> OutlookStartupGateSummary {
     let actions = &session.post_hierarchy_actions;
     let abandoned = session.abandoned_after_inbox_fai_query_rows();
-    let inbox_contents_progressed = actions.inbox_normal_contents_table_observed
-        || actions.inbox_content_sync_configure_observed;
     let ipm_subtree_hierarchy_opened = actions.opened_folder_ids.contains(&IPM_SUBTREE_FOLDER_ID)
         || actions.last_completed_hierarchy_sync_root == Some(IPM_SUBTREE_FOLDER_ID)
         || actions.receive_folder_verification_passed
@@ -86,10 +84,9 @@ pub(in crate::mapi) fn outlook_startup_gate_summary(
         actions.inbox_associated_findrow_returned_content
             || actions.inbox_associated_query_rows_returned_non_empty,
         actions.receive_folder_verification_passed,
-        inbox_contents_progressed,
+        actions.inbox_normal_contents_table_observed,
         actions.inbox_normal_contents_table_query_rows_observed
-            || actions.inbox_normal_contents_table_find_row_observed
-            || actions.inbox_content_sync_configure_observed,
+            || actions.inbox_normal_contents_table_find_row_observed,
         !abandoned,
     ];
     let first_missing_index = passed.iter().position(|passed| !passed);
@@ -120,8 +117,7 @@ pub(in crate::mapi) fn normal_inbox_visible_row_missing_reason(
     session: &MapiSession,
 ) -> &'static str {
     let actions = &session.post_hierarchy_actions;
-    if actions.inbox_content_sync_configure_observed
-        || actions.inbox_normal_contents_table_query_rows_observed
+    if actions.inbox_normal_contents_table_query_rows_observed
         || actions.inbox_normal_contents_table_find_row_observed
     {
         "none"
@@ -284,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn classifier_accepts_inbox_content_ics_without_ipm_configuration_findrow() {
+    fn classifier_does_not_treat_inbox_content_ics_as_normal_contents_table_progress() {
         let mut session = crate::mapi::transport::tests::test_session_for_outlook_startup();
         session.logon_identity = Some(MapiLogonIdentityDebug::default());
         session.record_opened_folder(IPM_SUBTREE_FOLDER_ID);
@@ -296,17 +292,23 @@ mod tests {
 
         let summary = outlook_startup_gate_summary(&session);
 
-        assert_eq!(summary.first_missing_gate, "none");
+        assert_eq!(
+            summary.first_missing_gate,
+            "normal_inbox_contents_table_opened"
+        );
         assert!(summary
             .gates
             .contains("ipm_configuration_or_inbox_content_sync_observed=true"));
         assert!(summary
             .gates
-            .contains("normal_inbox_contents_table_opened=true"));
+            .contains("normal_inbox_contents_table_opened=false"));
         assert!(summary
             .gates
-            .contains("normal_inbox_visible_row_observed=true"));
-        assert_eq!(normal_inbox_visible_row_missing_reason(&session), "none");
+            .contains("normal_inbox_visible_row_observed=false"));
+        assert_eq!(
+            normal_inbox_visible_row_missing_reason(&session),
+            "normal_inbox_not_opened"
+        );
     }
 
     #[test]

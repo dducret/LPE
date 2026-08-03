@@ -66,7 +66,7 @@ pub(super) async fn append_register_notification_response<S>(
             .fetch_mapi_notification_cursor(principal.account_id)
             .await
             .ok()
-            .flatten();
+            .map(|cursor| cursor.unwrap_or(0));
     }
     let handle = session.allocate_output_handle(
         request.output_handle_index,

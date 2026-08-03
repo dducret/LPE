@@ -3661,6 +3661,110 @@ async fn mapi_over_http_register_notification_returns_protocol_success_handles()
 }
 
 #[tokio::test]
+async fn mapi_over_http_register_notification_from_empty_change_log_observes_later_new_mail() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let folder_id = test_mapi_folder_id(5);
+    let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
+    let notification_polls = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(None)),
+        mapi_notification_polls: notification_polls.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, folder_id);
+    rops.push(0);
+    rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&0x0002u16.to_le_bytes());
+    rops.push(1);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&response);
+
+    notification_polls
+        .lock()
+        .unwrap()
+        .push(MapiNotificationPoll {
+            event_pending: true,
+            cursor: Some(1),
+            events: vec![
+                crate::mapi::notifications::MapiNotificationEvent::canonical(
+                    crate::mapi::notifications::MapiNotificationKind::Content,
+                    0x0002,
+                    folder_id,
+                    Some(message_id),
+                    None,
+                    1,
+                    1,
+                    Some(1),
+                    Some(1),
+                    "created".to_string(),
+                    Some("Inbox".to_string()),
+                    None,
+                    Some("Later delivery".to_string()),
+                    Some("IPM.Note".to_string()),
+                )
+                .with_new_mail_message_flags(0x0002),
+            ],
+        });
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&response);
+    let body = tokio::time::timeout(std::time::Duration::from_secs(1), response_bytes(response))
+        .await
+        .expect("notification wait should observe the later mail");
+    assert_eq!(body.len(), 16);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 0);
+
+    let mut notification_execute_headers = mapi_headers("Execute");
+    notification_execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &notification_execute_headers,
+            &execute_body(&rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(&response_rops[..6], &[0x2A, 0x03, 0, 0, 0, 0x00]);
+    assert_eq!(&response_rops[6..8], &0x8002u16.to_le_bytes());
+    assert_ne!(&response_rops[8..16], &[0; 8]);
+    assert_eq!(&response_rops[16..24], &mapi_wire_id_bytes(message_id));
+    assert_eq!(
+        &response_rops[24..],
+        &[2, 0, 0, 0, 0, b'I', b'P', b'M', b'.', b'N', b'o', b't', b'e', 0]
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_notification_wait_reports_content_event_after_registered_delete() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let message_id = "99999999-9999-9999-9999-999999999999";
