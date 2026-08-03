@@ -226,12 +226,40 @@ pub(in crate::mapi) fn rpc_header_ext_payload(buffer: &[u8]) -> Option<&[u8]> {
 }
 
 pub(in crate::mapi) fn rpc_header_ext_rop_buffer(payload: Vec<u8>) -> Vec<u8> {
+    rpc_header_ext_rop_buffer_with_flags(payload, 0x0004)
+}
+
+pub(in crate::mapi) fn rpc_header_ext_rop_buffer_with_flags(
+    payload: Vec<u8>,
+    flags: u16,
+) -> Vec<u8> {
     let size = payload.len().min(u16::MAX as usize) as u16;
     let mut buffer = Vec::with_capacity(8 + payload.len());
     buffer.extend_from_slice(&0u16.to_le_bytes());
-    buffer.extend_from_slice(&0x0004u16.to_le_bytes());
+    buffer.extend_from_slice(&(flags & 0x0004).to_le_bytes());
     buffer.extend_from_slice(&size.to_le_bytes());
     buffer.extend_from_slice(&size.to_le_bytes());
     buffer.extend_from_slice(&payload);
     buffer
+}
+
+pub(in crate::mapi) fn rpc_header_ext_rop_buffer_chain(
+    mut first: Vec<u8>,
+    additional_payloads: Vec<Vec<u8>>,
+) -> Vec<u8> {
+    if additional_payloads.is_empty() {
+        return first;
+    }
+    debug_assert!(is_rpc_header_ext_rop_buffer(&first));
+    first[2..4].copy_from_slice(&0u16.to_le_bytes());
+    let last_payload_index = additional_payloads.len() - 1;
+    for (index, payload) in additional_payloads.into_iter().enumerate() {
+        let flags = if index == last_payload_index {
+            0x0004
+        } else {
+            0
+        };
+        first.extend_from_slice(&rpc_header_ext_rop_buffer_with_flags(payload, flags));
+    }
+    first
 }

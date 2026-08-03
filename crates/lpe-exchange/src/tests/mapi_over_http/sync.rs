@@ -1160,6 +1160,142 @@ async fn mapi_over_http_sync_configure_returns_canonical_manifest_buffer() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_chain_packs_terminal_fast_transfer_get_buffer_until_done() {
+    let mailbox_id = "56565656-5656-4565-8565-565656565656";
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(
+        "57575757-5757-4575-8575-575757575757",
+        mailbox_id,
+        "inbox",
+        "Chained FastTransfer message",
+    );
+    email.body_text = "x".repeat(40_000);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x80, 0x00, // content sync, OnlySpecifiedProperties
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x01, 0x00, // PropertyTagCount
+    ]);
+    rops.extend_from_slice(&PID_TAG_BODY_W.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x4E, 0x00, 0x02, // terminal RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&0xBABEu16.to_le_bytes());
+    rops.extend_from_slice(&0x7BC0u16.to_le_bytes());
+
+    let mut payload = rop_buffer(&rops, &[1, u32::MAX, u32::MAX]);
+    payload[..2].copy_from_slice(&((rops.len() + 2) as u16).to_le_bytes());
+    let mut extended_rop_buffer = Vec::new();
+    extended_rop_buffer.extend_from_slice(&0u16.to_le_bytes());
+    extended_rop_buffer.extend_from_slice(&0x0004u16.to_le_bytes());
+    extended_rop_buffer.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+    extended_rop_buffer.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+    extended_rop_buffer.extend_from_slice(&payload);
+    let mut request = Vec::new();
+    request.extend_from_slice(&0x0000_0006u32.to_le_bytes()); // NoXorMagic | Chain
+    request.extend_from_slice(&(extended_rop_buffer.len() as u32).to_le_bytes());
+    request.extend_from_slice(&extended_rop_buffer);
+    request.extend_from_slice(&0x0010_0000u32.to_le_bytes());
+    request.extend_from_slice(&0u32.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(response_body[12..16].try_into().unwrap()) as usize;
+    let response_rop_buffer = &response_body[16..16 + rop_buffer_size];
+    let mut frame_flags = Vec::new();
+    let mut synthetic_get_buffer_statuses = Vec::new();
+    let mut response_handle_table: Option<Vec<u8>> = None;
+    let mut offset = 0;
+    while offset < response_rop_buffer.len() {
+        assert_eq!(
+            u16::from_le_bytes(response_rop_buffer[offset..offset + 2].try_into().unwrap()),
+            0
+        );
+        let flags = u16::from_le_bytes(
+            response_rop_buffer[offset + 2..offset + 4]
+                .try_into()
+                .unwrap(),
+        );
+        let payload_size = u16::from_le_bytes(
+            response_rop_buffer[offset + 4..offset + 6]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        assert_eq!(
+            u16::from_le_bytes(
+                response_rop_buffer[offset + 6..offset + 8]
+                    .try_into()
+                    .unwrap(),
+            ) as usize,
+            payload_size
+        );
+        let frame_end = offset + 8 + payload_size;
+        assert!(frame_end <= response_rop_buffer.len());
+        assert!(frame_end - offset <= 32 * 1024);
+        let frame_payload = &response_rop_buffer[offset + 8..frame_end];
+        let rop_size = u16::from_le_bytes(frame_payload[0..2].try_into().unwrap()) as usize;
+        assert!(rop_size <= frame_payload.len());
+        let handles = &frame_payload[rop_size..];
+        if let Some(expected) = &response_handle_table {
+            assert_eq!(handles, expected.as_slice());
+        } else {
+            response_handle_table = Some(handles.to_vec());
+        }
+        if offset != 0 {
+            assert_eq!(frame_payload[2], 0x4E);
+            synthetic_get_buffer_statuses
+                .push(u16::from_le_bytes(frame_payload[8..10].try_into().unwrap()));
+        }
+        frame_flags.push(flags);
+        offset = frame_end;
+    }
+
+    assert_eq!(offset, response_rop_buffer.len());
+    assert!(
+        frame_flags.len() >= 3,
+        "expected packed frames, got flags={frame_flags:?}, response={response_rop_buffer:02x?}",
+    );
+    assert!(frame_flags[..frame_flags.len() - 1]
+        .iter()
+        .all(|flags| *flags == 0));
+    assert_eq!(frame_flags.last(), Some(&0x0004));
+    assert!(synthetic_get_buffer_statuses.len() >= 2);
+    assert!(
+        synthetic_get_buffer_statuses[..synthetic_get_buffer_statuses.len() - 1]
+            .iter()
+            .all(|status| *status == 0x0001)
+    );
+    assert_eq!(synthetic_get_buffer_statuses.last(), Some(&0x0003));
+}
+
+#[tokio::test]
 async fn mapi_over_http_content_sync_partial_item_uses_microsoft_full_item_fallback() {
     let mailbox_id = "55555555-5555-5555-5555-555555555555";
     let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");

@@ -1,6 +1,9 @@
 use super::*;
 
 const FAST_TRANSFER_SOURCE_GET_BUFFER_RESULT_OVERHEAD: usize = 15;
+pub(super) const PACKED_FAST_TRANSFER_RESPONSE_FRAME_MAXIMUM: u32 = 32 * 1024;
+const PACKED_FAST_TRANSFER_MINIMUM_REMAINING_RESPONSE_BYTES: usize = 8 * 1024;
+const PACKED_FAST_TRANSFER_MAXIMUM_RESPONSE_FRAMES: usize = 96;
 
 pub(super) fn fast_transfer_source_get_buffer_transfer_size(
     request: &RopRequest,
@@ -17,6 +20,104 @@ pub(super) fn fast_transfer_source_get_buffer_transfer_size(
     } else {
         requested.clamp(1, u16::MAX as usize)
     }
+}
+
+pub(super) fn fast_transfer_source_get_buffer_response_is_partial(response: &[u8]) -> bool {
+    response.len() >= 8
+        && response[0] == RopId::FastTransferSourceGetBuffer.as_u8()
+        && response[2..6] == [0, 0, 0, 0]
+        && u16::from_le_bytes([response[6], response[7]]) == 0x0001
+}
+
+fn fast_transfer_source_transfer_position(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+) -> Option<usize> {
+    match input_object(session, handle_slots, request) {
+        Some(MapiObject::SynchronizationSource {
+            transfer_position, ..
+        }) => Some(*transfer_position),
+        _ => None,
+    }
+}
+
+pub(super) async fn packed_fast_transfer_source_get_buffer_response_payloads<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    request_id: &str,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    initial_rop_buffer_size: usize,
+    max_rop_out: u32,
+    response_handles: &[u32],
+) -> (Vec<Vec<u8>>, Option<(u64, String, String)>) {
+    let mut response_payloads = Vec::new();
+    let mut response_rop_buffer_size = initial_rop_buffer_size;
+    let mut completed_hierarchy_sync = None;
+
+    // [MS-OXCRPC] section 3.1.4.2.1.2.2 permits synthetic GetBuffer
+    // responses after a chained terminal GetBuffer request. Each has its own
+    // RPC_HEADER_EXT and complete response-handle table.
+    for _ in 1..PACKED_FAST_TRANSFER_MAXIMUM_RESPONSE_FRAMES {
+        let Some(transfer_position_before) =
+            fast_transfer_source_transfer_position(session, handle_slots, request)
+        else {
+            break;
+        };
+        let total_response_residual = if max_rop_out == 0 {
+            usize::MAX
+        } else {
+            (max_rop_out as usize).saturating_sub(response_rop_buffer_size)
+        };
+        if total_response_residual < PACKED_FAST_TRANSFER_MINIMUM_REMAINING_RESPONSE_BYTES {
+            break;
+        }
+        let frame_size_limit =
+            total_response_residual.min(PACKED_FAST_TRANSFER_RESPONSE_FRAME_MAXIMUM as usize);
+        let residual_rop_out_size = frame_size_limit
+            .saturating_sub(8)
+            .saturating_sub(2)
+            .saturating_sub(response_handles.len().saturating_mul(4));
+        if residual_rop_out_size <= FAST_TRANSFER_SOURCE_GET_BUFFER_RESULT_OVERHEAD {
+            break;
+        }
+
+        let mut response = Vec::new();
+        let completed = append_fast_transfer_source_get_buffer_response(
+            store,
+            principal,
+            request_id,
+            session,
+            handle_slots,
+            request,
+            residual_rop_out_size,
+            &mut response,
+        )
+        .await;
+        if response.is_empty() {
+            break;
+        }
+        let response_is_partial = fast_transfer_source_get_buffer_response_is_partial(&response);
+        let response_payload = rop_buffer_with_response_spec(response, response_handles);
+        let response_frame_size = 8 + response_payload.len();
+        debug_assert!(response_frame_size <= frame_size_limit);
+        response_rop_buffer_size += response_frame_size;
+        response_payloads.push(response_payload);
+        if completed.is_some() {
+            completed_hierarchy_sync = completed;
+        }
+        let transfer_progressed =
+            fast_transfer_source_transfer_position(session, handle_slots, request).is_some_and(
+                |transfer_position_after| transfer_position_after > transfer_position_before,
+            );
+        if !response_is_partial || !transfer_progressed {
+            break;
+        }
+    }
+
+    (response_payloads, completed_hierarchy_sync)
 }
 
 pub(super) async fn append_fast_transfer_source_get_buffer_response<S: ExchangeStore>(

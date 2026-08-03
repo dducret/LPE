@@ -491,12 +491,19 @@ pub(in crate::mapi) fn connect_auxiliary_buffer() -> Vec<u8> {
     let mut buffer = Vec::new();
     write_u16(&mut buffer, 0); // RPC_HEADER_EXT Version
     write_u16(&mut buffer, 0x0004); // Last flag, uncompressed and unobfuscated.
-    write_u16(&mut buffer, 0x0008); // Payload size.
-    write_u16(&mut buffer, 0x0008); // Uncompressed payload size.
+    write_u16(&mut buffer, 0x0010); // Payload size.
+    write_u16(&mut buffer, 0x0010); // Uncompressed payload size.
     write_u16(&mut buffer, 0x0008); // AUX_HEADER Size.
     buffer.push(0x01); // AUX_HEADER Version.
     buffer.push(0x17); // AUX_EXORGINFO.
     write_u32(&mut buffer, 0); // OrgFlags: no public folders are published by LPE.
+
+    // [MS-OXCRPC] section 2.2.2.2.19: advertise this only while Execute can
+    // return the matching Chain-packed FastTransfer download responses.
+    write_u16(&mut buffer, 0x0008); // AUX_HEADER Size.
+    buffer.push(0x01); // AUX_HEADER Version.
+    buffer.push(0x46); // AUX_SERVER_CAPABILITIES.
+    write_u32(&mut buffer, 0x0000_0008); // ULTRA_LARGE_PACKED_DOWNLOAD_BUFFERS.
     buffer
 }
 

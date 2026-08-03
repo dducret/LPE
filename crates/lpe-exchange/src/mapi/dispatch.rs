@@ -374,6 +374,7 @@ where
             validator,
             &execute.rop_buffer,
             execute.max_rop_out,
+            execute.flags,
             request_debug.all_release,
             request_debug.handle_count,
             &request_debug.handle_table_summary,
@@ -579,6 +580,7 @@ where
                 validator,
                 &execute.rop_buffer,
                 execute.max_rop_out,
+                execute.flags,
                 request_debug.all_release,
                 request_debug.handle_count,
                 &request_debug.handle_table_summary,
@@ -906,6 +908,7 @@ pub(in crate::mapi) async fn execute_rops<S, V>(
     validator: &Validator<V>,
     rop_buffer: &[u8],
     max_rop_out: u32,
+    execute_flags: u32,
     request_all_rops_are_release: bool,
     request_handle_count: usize,
     request_handle_table_summary: &str,
@@ -941,6 +944,7 @@ where
     let mut echo_input_handle_table = false;
     let mut released_handle_indexes = Vec::new();
     let mut deferred_save_changes_response_handles = Vec::new();
+    let mut chained_fast_transfer_get_buffer_request = None;
     record_execute_stream_batch_observation(
         principal,
         request_id,
@@ -953,7 +957,16 @@ where
         else {
             break;
         };
+        let last_client_rop = cursor.remaining_is_zero_padding();
         let typed_request = request.typed();
+        let chain_fast_transfer_get_buffer = extended
+            && execute_flags & EXECUTE_FLAG_CHAIN != 0
+            && last_client_rop
+            && matches!(
+                RopId::from_u8(typed_request.rop_id()),
+                Some(RopId::FastTransferSourceGetBuffer)
+            )
+            && request.fast_transfer_uses_server_determined_buffer_size();
         let save_changes_response_handle_target = matches!(
             RopId::from_u8(typed_request.rop_id()),
             Some(RopId::SaveChangesMessage)
@@ -1228,6 +1241,7 @@ where
                     snapshot,
                     max_rop_out,
                     extended,
+                    chain_fast_transfer_get_buffer,
                     &mut responses,
                     &mut output_handles,
                     &mut completed_hierarchy_sync,
@@ -1364,6 +1378,13 @@ where
         }
         if responses.len() != response_len_before {
             response_handle_indexes.push(request.response_handle_index());
+            if chain_fast_transfer_get_buffer
+                && fast_transfer_source_get_buffer_response_is_partial(
+                    &responses[response_len_before..],
+                )
+            {
+                chained_fast_transfer_get_buffer_request = Some(request.clone());
+            }
             if matches!(
                 RopId::from_u8(typed_request.rop_id()),
                 Some(RopId::SaveChangesMessage)
@@ -1503,15 +1524,48 @@ where
         &post_hierarchy_release_events,
         &responses,
     );
-    finalize_execute_rop_buffer(
-        responses,
-        &handle_slots,
-        &output_handles,
-        &response_handle_indexes,
-        echo_input_handle_table,
-        &released_handle_indexes,
-        extended,
-    )
+    if let Some(request) = chained_fast_transfer_get_buffer_request {
+        let response_handles = execute_response_handle_table(
+            &responses,
+            &handle_slots,
+            &output_handles,
+            &response_handle_indexes,
+            echo_input_handle_table,
+            &released_handle_indexes,
+        );
+        let response_payload = rop_buffer_with_response_spec(responses, &response_handles);
+        let response_rop_buffer = rpc_header_ext_rop_buffer(response_payload);
+        if response_rop_buffer.len() <= PACKED_FAST_TRANSFER_RESPONSE_FRAME_MAXIMUM as usize {
+            let (additional_payloads, completed_hierarchy_sync) =
+                packed_fast_transfer_source_get_buffer_response_payloads(
+                    store,
+                    principal,
+                    request_id,
+                    session,
+                    &handle_slots,
+                    &request,
+                    response_rop_buffer.len(),
+                    max_rop_out,
+                    &response_handles,
+                )
+                .await;
+            if !additional_payloads.is_empty() {
+                record_execute_sync_observations(session, completed_hierarchy_sync, false);
+                return rpc_header_ext_rop_buffer_chain(response_rop_buffer, additional_payloads);
+            }
+        }
+        response_rop_buffer
+    } else {
+        finalize_execute_rop_buffer(
+            responses,
+            &handle_slots,
+            &output_handles,
+            &response_handle_indexes,
+            echo_input_handle_table,
+            &released_handle_indexes,
+            extended,
+        )
+    }
 }
 
 #[cfg(test)]

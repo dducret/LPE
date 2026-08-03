@@ -246,6 +246,7 @@ where
                 validator,
                 rop_buffer,
                 0,
+                0,
                 false,
                 0,
                 "rpc_http_request_not_summarized",

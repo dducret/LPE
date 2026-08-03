@@ -82,8 +82,25 @@ fn parse_execute_request_keeps_max_rop_out() {
 
     let parsed = parse_execute_request(&body).unwrap();
 
+    assert_eq!(parsed.flags, 0);
     assert_eq!(parsed.rop_buffer, rop_buffer);
     assert_eq!(parsed.max_rop_out, 0x1234);
+}
+
+#[test]
+fn parse_execute_request_preserves_chain_flag() {
+    let rop_buffer = [0x02, 0x00];
+    let mut body = Vec::new();
+    body.extend_from_slice(&0x0000_0006u32.to_le_bytes());
+    body.extend_from_slice(&(rop_buffer.len() as u32).to_le_bytes());
+    body.extend_from_slice(&rop_buffer);
+    body.extend_from_slice(&0x0010_0000u32.to_le_bytes());
+    body.extend_from_slice(&0u32.to_le_bytes());
+
+    let parsed = parse_execute_request(&body).unwrap();
+
+    assert_eq!(parsed.flags, 0x0000_0006);
+    assert_eq!(parsed.max_rop_out, 0x0010_0000);
 }
 
 #[test]
@@ -129,6 +146,94 @@ fn automatic_fast_transfer_buffer_uses_execute_residual_output_budget() {
 
     assert_eq!(position, 11);
     assert_eq!(rop_buffer.len(), 40);
+}
+
+#[test]
+fn chained_fast_transfer_get_buffer_repeats_handles_until_done() {
+    let request = RopRequest {
+        rop_id: RopId::FastTransferSourceGetBuffer.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: [0xBABEu16.to_le_bytes(), 0x7BC0u16.to_le_bytes()].concat(),
+    };
+    let transfer = vec![0x5a; 31_680 * 2 + 1_142];
+    let mut transfer_position = 0;
+    let first = rop_fast_transfer_source_get_buffer_response(
+        &request,
+        &transfer,
+        &mut transfer_position,
+        31_680,
+        false,
+    );
+    let second = rop_fast_transfer_source_get_buffer_response(
+        &request,
+        &transfer,
+        &mut transfer_position,
+        31_680,
+        false,
+    );
+    let third = rop_fast_transfer_source_get_buffer_response(
+        &request,
+        &transfer,
+        &mut transfer_position,
+        31_680,
+        false,
+    );
+    assert_eq!(transfer_position, transfer.len());
+    assert!(fast_transfer_source_get_buffer_response_is_partial(&first));
+    assert!(fast_transfer_source_get_buffer_response_is_partial(&second));
+    assert!(!fast_transfer_source_get_buffer_response_is_partial(&third));
+
+    let handles = [0u32, 0x30, 0x31];
+    let first = rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(first, &handles));
+    let chained = rpc_header_ext_rop_buffer_chain(
+        first,
+        vec![
+            rop_buffer_with_response_spec(second, &handles),
+            rop_buffer_with_response_spec(third, &handles),
+        ],
+    );
+
+    let mut offset = 0;
+    for (expected_flags, expected_status, expected_chunk_size) in [
+        (0u16, 0x0001u16, 31_680u16),
+        (0, 0x0001, 31_680),
+        (0x0004, 0x0003, 1_142),
+    ] {
+        assert_eq!(
+            u16::from_le_bytes(chained[offset..offset + 2].try_into().unwrap()),
+            0
+        );
+        assert_eq!(
+            u16::from_le_bytes(chained[offset + 2..offset + 4].try_into().unwrap()),
+            expected_flags
+        );
+        let payload_size =
+            u16::from_le_bytes(chained[offset + 4..offset + 6].try_into().unwrap()) as usize;
+        assert_eq!(
+            u16::from_le_bytes(chained[offset + 6..offset + 8].try_into().unwrap()) as usize,
+            payload_size
+        );
+        assert!(
+            8 + payload_size <= 32 * 1024,
+            "frame payload_size={payload_size}, offset={offset}, chained_len={}",
+            chained.len()
+        );
+        let (response, handle_table) =
+            split_rop_payload_spec(&chained[offset + 8..offset + 8 + payload_size]).unwrap();
+        assert_eq!(response[0], RopId::FastTransferSourceGetBuffer.as_u8());
+        assert_eq!(
+            u16::from_le_bytes(response[6..8].try_into().unwrap()),
+            expected_status
+        );
+        assert_eq!(
+            u16::from_le_bytes(response[13..15].try_into().unwrap()),
+            expected_chunk_size
+        );
+        assert_eq!(handle_table, &[0, 0, 0, 0, 0x30, 0, 0, 0, 0x31, 0, 0, 0]);
+        offset += 8 + payload_size;
+    }
+    assert_eq!(offset, chained.len());
 }
 
 #[test]

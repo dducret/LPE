@@ -81,20 +81,24 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
     assert_eq!(&body[16..20], &10_000u32.to_le_bytes());
     assert!(body[20..].starts_with(b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=\0"));
     assert_eq!(
-        &body[body.len() - 20..body.len() - 16],
-        &16u32.to_le_bytes()
+        &body[body.len() - 28..body.len() - 24],
+        &24u32.to_le_bytes()
     );
     assert_eq!(
-        &body[body.len() - 16..],
+        &body[body.len() - 24..],
         &[
             0x00, 0x00, // RPC_HEADER_EXT Version
             0x04, 0x00, // Last flag
-            0x08, 0x00, // Payload size
-            0x08, 0x00, // Uncompressed payload size
+            0x10, 0x00, // Payload size
+            0x10, 0x00, // Uncompressed payload size
             0x08, 0x00, // AUX_HEADER Size
             0x01, // AUX_HEADER Version
             0x17, // AUX_EXORGINFO
             0x00, 0x00, 0x00, 0x00, // OrgFlags
+            0x08, 0x00, // AUX_HEADER Size
+            0x01, // AUX_HEADER Version
+            0x46, // AUX_SERVER_CAPABILITIES
+            0x08, 0x00, 0x00, 0x00, // ULTRA_LARGE_PACKED_DOWNLOAD_BUFFERS
         ]
     );
 }

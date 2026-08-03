@@ -140,6 +140,13 @@ before it is advertised.
   lexical value sizes such as two-byte `PtypBoolean` values. A full normal or
   FAI `messageChange` ends when the following grammar marker begins; LPE must
   not insert a null property tag as an object terminator.
+- For an extended `Execute` request with `Chain` set and a terminal
+  `RopFastTransferSourceGetBuffer`, LPE returns the original response followed
+  by independently framed synthetic GetBuffer responses until the transfer is
+  complete or the documented response limits apply. Every frame repeats the
+  response handle table and only the final `RPC_HEADER_EXT` has `Last`. LPE
+  advertises `ULTRA_LARGE_PACKED_DOWNLOAD_BUFFERS` only with this behavior.
+  This follows `[MS-OXCRPC]` sections 2.2.2.2.19 and 3.1.4.2.1.2.2.
 - `RopFastTransferSourceCopyTo` and `RopFastTransferSourceCopyProperties` on a
   Message object return `messageContent` directly. `StartMessage` and
   `StartFAIMsg` are `message`-element wrappers and must not surround that root.

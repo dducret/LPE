@@ -34,6 +34,7 @@ pub(super) async fn append_sync_transfer_dispatch_response<S>(
     snapshot: &MapiMailStoreSnapshot,
     max_rop_out: u32,
     extended: bool,
+    chain_fast_transfer_get_buffer: bool,
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
     completed_hierarchy_sync: &mut Option<(u64, String, String)>,
@@ -112,8 +113,17 @@ where
             false
         }
         Some(RopId::FastTransferSourceGetBuffer) => {
+            let response_max_rop_out = if chain_fast_transfer_get_buffer {
+                if max_rop_out == 0 {
+                    PACKED_FAST_TRANSFER_RESPONSE_FRAME_MAXIMUM
+                } else {
+                    max_rop_out.min(PACKED_FAST_TRANSFER_RESPONSE_FRAME_MAXIMUM)
+                }
+            } else {
+                max_rop_out
+            };
             let residual_rop_out_size = available_execute_rop_response_size(
-                max_rop_out,
+                response_max_rop_out,
                 extended,
                 responses.len(),
                 handle_slots.len(),

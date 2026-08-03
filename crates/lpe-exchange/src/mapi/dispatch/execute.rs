@@ -2,21 +2,24 @@ use super::*;
 
 const EXECUTE_ACTIVE_SESSION_RETRY_ATTEMPTS: usize = 50;
 const EXECUTE_ACTIVE_SESSION_RETRY_DELAY_MS: u64 = 10;
+pub(in crate::mapi) const EXECUTE_FLAG_CHAIN: u32 = 0x0000_0004;
 
 pub(in crate::mapi) struct ExecuteRequest {
+    pub(in crate::mapi) flags: u32,
     pub(in crate::mapi) rop_buffer: Vec<u8>,
     pub(in crate::mapi) max_rop_out: u32,
 }
 
 pub(in crate::mapi) fn parse_execute_request(body: &[u8]) -> Result<ExecuteRequest> {
     let mut cursor = Cursor::new(body);
-    let _flags = cursor.read_u32()?;
+    let flags = cursor.read_u32()?;
     let rop_buffer_size = cursor.read_u32()? as usize;
     let rop_buffer = cursor.read_bytes(rop_buffer_size)?.to_vec();
     let max_rop_out = cursor.read_u32()?;
     let auxiliary_buffer_size = cursor.read_u32()? as usize;
     let _auxiliary_buffer = cursor.read_bytes(auxiliary_buffer_size)?;
     Ok(ExecuteRequest {
+        flags,
         rop_buffer,
         max_rop_out,
     })
