@@ -951,9 +951,12 @@ non-canonical LPE state.
   returns it from the associated-table startup query
   (`test1_202608031300.saz`, raw/551). LPE therefore enumerates the
   bounded virtual row only for that exact `PidTagMessageClass` restriction,
-  with the required `Outlook Rules Organizer` subject; any non-empty
-  client-owned `PidTagRwRulesStream` remains opaque and takes precedence over
-  that empty projection. This follows `[MS-OXORULE]` section 3.1.4.2.4. Exact,
+  with the required `Outlook Rules Organizer` subject. The matching Exchange
+  `RopOpenStream` / `RopReadStream` sequence (`raw/554`) succeeds with a
+  66-byte `PidTagRwRulesStream`, so the fresh virtual FAI projects that exact
+  opaque default rather than an empty stream. Any non-empty client-owned
+  `PidTagRwRulesStream` remains opaque and takes precedence over the default.
+  This follows `[MS-OXORULE]` section 3.1.4.2.4. Exact,
   bounded lookups may expose persisted backed rows with valid
   payloads, and the Inbox `IPM.Configuration.UMOLK.UserOptions` exact lookup
   exposes a non-empty modeled roaming-dictionary row because Outlook 2016/2019

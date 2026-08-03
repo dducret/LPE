@@ -7516,19 +7516,22 @@ fn inbox_associated_query_rows_returns_virtual_rule_organizer() {
 }
 
 #[test]
-fn rule_organizer_without_client_payload_has_no_synthetic_stream_property() {
-    let message = MapiAssociatedConfigMessage {
-        id: crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED),
-        folder_id: INBOX_FOLDER_ID,
-        canonical_id: Uuid::from_u128(0x6d617069_7275_6c65_8000_000000000001),
-        message_class: crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
-        subject: "Outlook Rules Organizer".to_string(),
-        properties_json: serde_json::json!({}),
-    };
+fn virtual_rule_organizer_projects_exchange_stream_property() {
+    // Exchange 2016 test1_202608031300.saz raw/554: 66-byte successful
+    // RopOpenStream/RopReadStream payload. [MS-OXORULE] section 3.1.4.2.4.
+    let message = MapiMailStoreSnapshot::empty()
+        .associated_config_message_for_id(crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED))
+        .expect("virtual Rules Organizer FAI");
 
     assert_eq!(
         associated_config_property_value(&message, OUTLOOK_RULE_ORGANIZER_BINARY_6802),
-        None
+        Some(MapiValue::Binary(vec![
+            0x14, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFE, 0xFF,
+        ]))
     );
 }
 

@@ -84,6 +84,15 @@ const OUTLOOK_INBOX_RULE_ORGANIZER_SUBJECT: &str = "Outlook Rules Organizer";
 pub(super) const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED);
 pub(super) const OUTLOOK_RULE_ORGANIZER_BINARY_6802_JSON_KEY: &str = "0x68020102";
+// [MS-OXORULE] section 3.1.4.2.4; Exchange 2016
+// test1_202608031300.saz raw/554 returns this 66-byte Rules Organizer stream.
+const OUTLOOK_MINIMAL_RULE_ORGANIZER_BINARY_6802: [u8; 66] = [
+    0x14, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+    0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFE, 0xFF,
+];
 pub(crate) const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS: &str =
     "IPM.Microsoft.FolderDesign.NamedView";
 pub(crate) const OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID: u64 =
@@ -298,7 +307,12 @@ pub(super) fn outlook_inbox_associated_config_defaults(
             canonical_id: Uuid::from_u128(0x6d617069_7275_6c65_8000_000000000001),
             message_class: OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
             subject: OUTLOOK_INBOX_RULE_ORGANIZER_SUBJECT.to_string(),
-            properties_json: serde_json::json!({}),
+            properties_json: serde_json::json!({
+                "0x68020102": {
+                    "type": "binary",
+                    "value": lpe_domain::crypto::hex_lower(&OUTLOOK_MINIMAL_RULE_ORGANIZER_BINARY_6802)
+                }
+            }),
         },
         MapiAssociatedConfigMessage {
             id: OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_ID,

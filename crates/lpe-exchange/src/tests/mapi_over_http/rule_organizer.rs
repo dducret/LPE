@@ -138,7 +138,10 @@ async fn mapi_over_http_exchange_rule_organizer_query_rows_opens_returned_messag
         .unwrap();
     assert_eq!(open_response.status(), StatusCode::OK);
     assert_eq!(open_response.headers().get("x-responsecode").unwrap(), "0");
-    let open_response_rops = response_rops_from_execute_response(open_response).await;
+    let open_response_body = response_bytes(open_response).await;
+    let (open_response_rops, open_response_handles) =
+        response_rops_and_handles_from_execute_body(&open_response_body);
+    let message_handle = open_response_handles[2];
     assert!(contains_bytes(
         &open_response_rops,
         &[0x03, 0x02, 0, 0, 0, 0]
@@ -158,4 +161,44 @@ async fn mapi_over_http_exchange_rule_organizer_query_rows_opens_returned_messag
         &open_response_rops[subject_offset..subject_offset + subject.len()],
         subject.as_slice()
     );
+
+    // Exchange 2016 test1_202608031300.saz raw/554 opens this stream, requests
+    // 4096 bytes, and returns exactly 66. [MS-OXORULE] section 3.1.4.2.4.
+    renew_mapi_request_id(&mut execute_headers);
+    let mut stream_rops = vec![0x2B, 0x00, 0x02, 0x03]; // RopOpenStream, read.
+    stream_rops.extend_from_slice(&0x6802_0102u32.to_le_bytes());
+    stream_rops.push(0x00);
+    stream_rops.extend_from_slice(&[0x2C, 0x00, 0x03]); // RopReadStream.
+    stream_rops.extend_from_slice(&4096u16.to_le_bytes());
+    let stream_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &stream_rops,
+                &[1, folder_handle, message_handle, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stream_response.status(), StatusCode::OK);
+    assert_eq!(
+        stream_response.headers().get("x-responsecode").unwrap(),
+        "0"
+    );
+    let stream_response_rops = response_rops_from_execute_response(stream_response).await;
+    assert!(contains_bytes(
+        &stream_response_rops,
+        &[0x2B, 0x03, 0, 0, 0, 0, 66, 0, 0, 0]
+    ));
+    let mut expected_read = vec![0x2C, 0x03, 0, 0, 0, 0];
+    expected_read.extend_from_slice(&66u16.to_le_bytes());
+    expected_read.extend_from_slice(&[
+        0x14, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0xFE, 0xFF,
+    ]);
+    assert!(contains_bytes(&stream_response_rops, &expected_read));
 }

@@ -173,7 +173,7 @@ pub(super) fn apply_execute_max_rop_out(
     response_rop_buffer: Vec<u8>,
     max_rop_out: u32,
 ) -> Vec<u8> {
-    if max_rop_out == 0 || response_rop_buffer.len() <= max_rop_out as usize {
+    if !execute_response_exceeds_max_rop_out(&response_rop_buffer, max_rop_out) {
         return response_rop_buffer;
     }
     let Some((requests, handle_table)) = split_rop_buffer(request_rop_buffer) else {
@@ -200,6 +200,30 @@ pub(super) fn apply_execute_max_rop_out(
         "rca debug mapi execute max rop out exceeded"
     );
     replacement
+}
+
+pub(super) fn execute_response_exceeds_max_rop_out(
+    response_rop_buffer: &[u8],
+    max_rop_out: u32,
+) -> bool {
+    max_rop_out != 0 && response_rop_buffer.len() > max_rop_out as usize
+}
+
+pub(super) fn restore_pending_notifications_after_execute_overflow(
+    session: &mut MapiSession,
+    mut delivered_notification_events: VecDeque<MapiNotificationEvent>,
+    response_rop_buffer: &[u8],
+    max_rop_out: u32,
+) {
+    if !execute_response_exceeds_max_rop_out(response_rop_buffer, max_rop_out) {
+        return;
+    }
+
+    // [MS-OXCNOTIF] section 3.1.5.7 keeps notifications available when their
+    // RopNotify responses do not fit. Execute will return RopBufferTooSmall,
+    // so retain this batch for a later successful Execute rather than lose it.
+    delivered_notification_events.append(&mut session.pending_notifications);
+    session.pending_notifications = delivered_notification_events;
 }
 
 pub(super) fn available_execute_rop_response_size(

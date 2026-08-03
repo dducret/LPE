@@ -1,5 +1,6 @@
 use super::super::*;
 use super::*;
+use crate::mapi::wire::MapiNotificationEventMask;
 
 const EXCHANGE_RELEASED_HANDLE_SENTINEL: u32 = 0x01FF_FFFE;
 
@@ -21,6 +22,69 @@ fn execute_max_rop_out_returns_buffer_too_small_response() {
         &capped[12..],
         &[0x6D, 0x00, 0x00, 0x00, 0x56, 0x00, 0x00, 0x00]
     );
+}
+
+#[test]
+fn execute_overflow_restores_deliverable_notification_batch() {
+    let mut session = test_mapi_session();
+    let event = MapiNotificationEvent::content(INBOX_FOLDER_ID, Some(0x0000_0000_0020_0001));
+    session.handles.insert(
+        7,
+        MapiObject::NotificationSubscription {
+            registration: MapiNotificationRegistration {
+                logon_id: 0,
+                notification_types: MapiNotificationEventMask::TableModified.as_u16(),
+                folder_id: Some(INBOX_FOLDER_ID),
+            },
+        },
+    );
+    session.record_notification(event.clone());
+    let (deliveries, delivered_notification_events) =
+        session.take_pending_notification_delivery_batch();
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(session.pending_notification_count(), 0);
+
+    restore_pending_notifications_after_execute_overflow(
+        &mut session,
+        delivered_notification_events,
+        &[0; 33],
+        32,
+    );
+
+    assert_eq!(session.pending_notification_count(), 1);
+    assert_eq!(session.pending_notifications.front(), Some(&event));
+}
+
+#[test]
+fn execute_overflow_does_not_restore_unmatched_notification() {
+    let mut session = test_mapi_session();
+    let event = MapiNotificationEvent::content(INBOX_FOLDER_ID, Some(0x0000_0000_0020_0001));
+    session.handles.insert(
+        7,
+        MapiObject::NotificationSubscription {
+            registration: MapiNotificationRegistration {
+                logon_id: 0,
+                notification_types: MapiNotificationEventMask::TableModified.as_u16(),
+                folder_id: Some(INBOX_FOLDER_ID),
+            },
+        },
+    );
+    session.record_notification(event);
+    session.handles.remove(&7);
+
+    let (deliveries, delivered_notification_events) =
+        session.take_pending_notification_delivery_batch();
+    assert!(deliveries.is_empty());
+    assert!(delivered_notification_events.is_empty());
+
+    restore_pending_notifications_after_execute_overflow(
+        &mut session,
+        delivered_notification_events,
+        &[0; 33],
+        32,
+    );
+
+    assert_eq!(session.pending_notification_count(), 0);
 }
 
 #[test]

@@ -1471,7 +1471,8 @@ where
             }
         }
     }
-    let notification_deliveries = session.take_pending_notification_deliveries();
+    let (notification_deliveries, delivered_notification_events) =
+        session.take_pending_notification_delivery_batch();
     if !notification_deliveries.is_empty() {
         let notification_targets = notification_deliveries
             .iter()
@@ -1524,7 +1525,7 @@ where
         &post_hierarchy_release_events,
         &responses,
     );
-    if let Some(request) = chained_fast_transfer_get_buffer_request {
+    let response_rop_buffer = if let Some(request) = chained_fast_transfer_get_buffer_request {
         let response_handles = execute_response_handle_table(
             &responses,
             &handle_slots,
@@ -1551,10 +1552,13 @@ where
                 .await;
             if !additional_payloads.is_empty() {
                 record_execute_sync_observations(session, completed_hierarchy_sync, false);
-                return rpc_header_ext_rop_buffer_chain(response_rop_buffer, additional_payloads);
+                rpc_header_ext_rop_buffer_chain(response_rop_buffer, additional_payloads)
+            } else {
+                response_rop_buffer
             }
+        } else {
+            response_rop_buffer
         }
-        response_rop_buffer
     } else {
         finalize_execute_rop_buffer(
             responses,
@@ -1565,7 +1569,14 @@ where
             &released_handle_indexes,
             extended,
         )
-    }
+    };
+    restore_pending_notifications_after_execute_overflow(
+        session,
+        delivered_notification_events,
+        &response_rop_buffer,
+        max_rop_out,
+    );
+    response_rop_buffer
 }
 
 #[cfg(test)]

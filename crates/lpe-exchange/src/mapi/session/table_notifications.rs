@@ -92,8 +92,18 @@ impl MapiSession {
     pub(in crate::mapi) fn take_pending_notification_deliveries(
         &mut self,
     ) -> Vec<(u32, u8, MapiNotificationEvent)> {
+        self.take_pending_notification_delivery_batch().0
+    }
+
+    pub(in crate::mapi) fn take_pending_notification_delivery_batch(
+        &mut self,
+    ) -> (
+        Vec<(u32, u8, MapiNotificationEvent)>,
+        VecDeque<MapiNotificationEvent>,
+    ) {
         let events: Vec<_> = self.pending_notifications.drain(..).collect();
         let mut deliveries = Vec::new();
+        let mut delivered_events = VecDeque::new();
         let mut delivered_table_changes = HashSet::new();
         for event in events {
             let table_event = table_changed_event(&event);
@@ -170,6 +180,7 @@ impl MapiSession {
                     },
                 )
             });
+            let delivery_count_before_event = deliveries.len();
             for (handle, logon_id, delivery, table_change) in event_deliveries {
                 if table_change
                     && !delivered_table_changes.insert((handle, delivery.kind, delivery.folder_id))
@@ -178,8 +189,11 @@ impl MapiSession {
                 }
                 deliveries.push((handle, logon_id, delivery));
             }
+            if deliveries.len() > delivery_count_before_event {
+                delivered_events.push_back(event);
+            }
         }
-        deliveries
+        (deliveries, delivered_events)
     }
 
     pub(in crate::mapi) fn matching_notifications(
