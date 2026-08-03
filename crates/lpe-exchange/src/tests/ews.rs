@@ -1532,6 +1532,42 @@ async fn update_item_updates_message_read_and_flag_state() {
 }
 
 #[tokio::test]
+async fn update_item_rejects_stale_change_key_without_mutating_message() {
+    let mut email = FakeStore::email(
+        "dddddddd-dddd-dddd-dddd-dddddddddddd",
+        "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        "inbox",
+        "Mailbox message",
+    );
+    email.unread = true;
+    let emails = Arc::new(Mutex::new(vec![email]));
+    let service = ExchangeService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        emails: emails.clone(),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope><s:Body><m:UpdateItem><m:ItemChanges><t:ItemChange>
+              <t:ItemId Id="message:dddddddd-dddd-dddd-dddd-dddddddddddd" ChangeKey="stale"/>
+              <t:Updates><t:SetItemField><t:FieldURI FieldURI="message:IsRead"/>
+                <t:Message><t:IsRead>true</t:IsRead></t:Message>
+              </t:SetItemField></t:Updates>
+            </t:ItemChange></m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorIrresolvableConflict</m:ResponseCode>"));
+    assert!(emails.lock().unwrap()[0].unread);
+}
+
+#[tokio::test]
 async fn update_item_updates_public_folder_item() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -2326,6 +2362,12 @@ async fn accept_sharing_invitation_creates_same_tenant_calendar_grant() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
+    let change_key = body
+        .split("ChangeKey=\"")
+        .nth(1)
+        .and_then(|value| value.split('\"').next())
+        .expect("sharing acceptance must return a ChangeKey");
+    assert!(change_key.starts_with("ck-v1-"));
     assert!(body.contains("<m:CreateItemResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:AcceptSharingInvitation>"));

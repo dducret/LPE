@@ -825,6 +825,45 @@ impl Storage {
             .tenant_id_for_account_id(existing.owner_account_id)
             .await?;
         let mut tx = self.pool.begin().await?;
+        let changed = sqlx::query_scalar::<_, i32>(
+            r#"
+            SELECT 1
+            FROM calendar_events
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+              AND lifecycle_state = 'active'
+              AND (
+                  reminder_set IS DISTINCT FROM COALESCE($4::bool, reminder_set)
+                  OR reminder_at IS DISTINCT FROM CASE
+                      WHEN $4 = FALSE THEN NULL
+                      WHEN $5::text IS NOT NULL THEN NULLIF($5, '')::timestamptz
+                      ELSE reminder_at
+                  END
+                  OR reminder_dismissed_at IS DISTINCT FROM CASE
+                      WHEN $4 = FALSE THEN NULL
+                      WHEN $6::text IS NOT NULL THEN NULLIF($6, '')::timestamptz
+                      WHEN $5::text IS NOT NULL THEN NULL
+                      ELSE reminder_dismissed_at
+                  END
+              )
+            LIMIT 1
+            FOR UPDATE
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(existing.owner_account_id)
+        .bind(event_id)
+        .bind(reminder_set)
+        .bind(reminder_at.as_deref())
+        .bind(reminder_dismissed_at.as_deref())
+        .fetch_optional(&mut *tx)
+        .await?
+        .is_some();
+        if !changed {
+            tx.commit().await?;
+            return Ok(());
+        }
         sqlx::query(
             r#"
             UPDATE calendar_events

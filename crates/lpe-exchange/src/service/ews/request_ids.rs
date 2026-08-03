@@ -1,12 +1,28 @@
 use super::super::*;
 
 pub(in crate::service) fn requested_item_ids(request: &str) -> Vec<String> {
+    requested_item_references(request)
+        .into_iter()
+        .map(|reference| reference.id)
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::service) struct RequestedItemReference {
+    pub id: String,
+    pub change_key: Option<String>,
+}
+
+pub(in crate::service) fn requested_item_references(request: &str) -> Vec<RequestedItemReference> {
     let mut ids = Vec::new();
     let mut rest = request;
     while let Some(index) = rest.find("<t:ItemId").or_else(|| rest.find("<ItemId")) {
         rest = &rest[index..];
         if let Some(id) = attribute_value_after(rest, "ItemId", "Id") {
-            ids.push(id.to_string());
+            ids.push(RequestedItemReference {
+                id: id.to_string(),
+                change_key: attribute_value_after(rest, "ItemId", "ChangeKey").map(str::to_string),
+            });
         }
         rest = &rest[1..];
     }
@@ -144,4 +160,20 @@ pub(in crate::service) fn requested_distinguished_folder_id(request: &str) -> Op
 
 pub(in crate::service) fn ews_distinguished_mailbox_role(value: &str) -> Option<&'static str> {
     EwsDistinguishedFolderIdName::parse(value).and_then(EwsDistinguishedFolderIdName::mailbox_role)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::requested_item_references;
+
+    #[test]
+    fn item_references_keep_supplied_change_keys_with_their_item_ids() {
+        let references = requested_item_references(
+            r#"<t:ItemId Id="contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" ChangeKey="current"/><t:ItemId Id="event:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" ChangeKey="stale"/>"#,
+        );
+
+        assert_eq!(references.len(), 2);
+        assert_eq!(references[0].change_key.as_deref(), Some("current"));
+        assert_eq!(references[1].change_key.as_deref(), Some("stale"));
+    }
 }

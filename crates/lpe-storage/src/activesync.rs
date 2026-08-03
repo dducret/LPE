@@ -296,20 +296,7 @@ impl Storage {
             r#"
             SELECT
                 m.id,
-                concat_ws(
-                    '|',
-                    m.normalized_subject,
-                    COALESCE(left(b.body_text, 160), ''),
-                    COALESCE(b.content_hash, ''),
-                    to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-                    CASE WHEN NOT mm.is_seen THEN '1' ELSE '0' END,
-                    CASE WHEN mm.is_flagged THEN '1' ELSE '0' END,
-                    COALESCE(fr.display_name, ''),
-                    COALESCE(fr.address, ''),
-                    COALESCE(recipients.to_recipients, ''),
-                    COALESCE(recipients.cc_recipients, ''),
-                    COALESCE(sq.status, CASE WHEN mm.is_draft THEN 'draft' ELSE 'stored' END)
-                ) AS fingerprint
+                format('as-v1:mail-membership-rev:%s', mm.modseq) AS fingerprint
             FROM messages m
             JOIN mailbox_messages mm
               ON mm.tenant_id = m.tenant_id
@@ -317,32 +304,6 @@ impl Storage {
              AND mm.account_id = $2
              AND mm.mailbox_id = $3
              AND mm.visibility <> 'expunged'
-            LEFT JOIN message_bodies b
-              ON b.tenant_id = m.tenant_id
-             AND b.message_id = m.id
-             AND b.body_kind = 'text'
-            LEFT JOIN message_recipients fr
-              ON fr.tenant_id = m.tenant_id
-             AND fr.message_id = m.id
-             AND fr.role = 'from'
-            LEFT JOIN submission_queue sq
-              ON sq.tenant_id = mm.tenant_id
-             AND sq.account_id = mm.account_id
-             AND sq.sent_mailbox_message_id = mm.id
-            LEFT JOIN LATERAL (
-                SELECT
-                    string_agg(
-                        lower(r.address) || ':' || COALESCE(r.display_name, ''),
-                        ',' ORDER BY r.ordinal
-                    ) FILTER (WHERE r.role = 'to') AS to_recipients,
-                    string_agg(
-                        lower(r.address) || ':' || COALESCE(r.display_name, ''),
-                        ',' ORDER BY r.ordinal
-                    ) FILTER (WHERE r.role = 'cc') AS cc_recipients
-                FROM message_recipients r
-                WHERE r.tenant_id = $1
-                  AND r.message_id = m.id
-            ) recipients ON TRUE
             WHERE m.tenant_id = $1
             ORDER BY COALESCE(m.sent_at, m.received_at) DESC, m.id DESC
             OFFSET $4
@@ -382,20 +343,7 @@ impl Storage {
             r#"
             SELECT
                 m.id,
-                concat_ws(
-                    '|',
-                    m.normalized_subject,
-                    COALESCE(left(b.body_text, 160), ''),
-                    COALESCE(b.content_hash, ''),
-                    to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-                    CASE WHEN NOT mm.is_seen THEN '1' ELSE '0' END,
-                    CASE WHEN mm.is_flagged THEN '1' ELSE '0' END,
-                    COALESCE(fr.display_name, ''),
-                    COALESCE(fr.address, ''),
-                    COALESCE(recipients.to_recipients, ''),
-                    COALESCE(recipients.cc_recipients, ''),
-                    COALESCE(sq.status, CASE WHEN mm.is_draft THEN 'draft' ELSE 'stored' END)
-                ) AS fingerprint
+                format('as-v1:mail-membership-rev:%s', mm.modseq) AS fingerprint
             FROM messages m
             JOIN mailbox_messages mm
               ON mm.tenant_id = m.tenant_id
@@ -403,32 +351,6 @@ impl Storage {
              AND mm.account_id = $2
              AND mm.mailbox_id = $3
              AND mm.visibility <> 'expunged'
-            LEFT JOIN message_bodies b
-              ON b.tenant_id = m.tenant_id
-             AND b.message_id = m.id
-             AND b.body_kind = 'text'
-            LEFT JOIN message_recipients fr
-              ON fr.tenant_id = m.tenant_id
-             AND fr.message_id = m.id
-             AND fr.role = 'from'
-            LEFT JOIN submission_queue sq
-              ON sq.tenant_id = mm.tenant_id
-             AND sq.account_id = mm.account_id
-             AND sq.sent_mailbox_message_id = mm.id
-            LEFT JOIN LATERAL (
-                SELECT
-                    string_agg(
-                        lower(r.address) || ':' || COALESCE(r.display_name, ''),
-                        ',' ORDER BY r.ordinal
-                    ) FILTER (WHERE r.role = 'to') AS to_recipients,
-                    string_agg(
-                        lower(r.address) || ':' || COALESCE(r.display_name, ''),
-                        ',' ORDER BY r.ordinal
-                    ) FILTER (WHERE r.role = 'cc') AS cc_recipients
-                FROM message_recipients r
-                WHERE r.tenant_id = $1
-                  AND r.message_id = m.id
-            ) recipients ON TRUE
             WHERE m.tenant_id = $1
               AND m.id = ANY($4)
             "#,
@@ -459,7 +381,7 @@ impl Storage {
             r#"
             SELECT
                 id,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
+                format('as-v1:contact-rev:%s', modseq) AS fingerprint
             FROM contacts
             WHERE tenant_id = $1 AND owner_account_id = $2
             ORDER BY display_name ASC, id ASC
@@ -494,7 +416,7 @@ impl Storage {
             r#"
             SELECT
                 id,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
+                format('as-v1:contact-rev:%s', modseq) AS fingerprint
             FROM contacts
             WHERE tenant_id = $1
               AND owner_account_id = $2
@@ -526,7 +448,7 @@ impl Storage {
             r#"
             SELECT
                 id,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
+                format('as-v1:calendar-event-rev:%s', modseq) AS fingerprint
             FROM calendar_events
             WHERE tenant_id = $1
               AND owner_account_id = $2
@@ -563,7 +485,7 @@ impl Storage {
             r#"
             SELECT
                 id,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
+                format('as-v1:calendar-event-rev:%s', modseq) AS fingerprint
             FROM calendar_events
             WHERE tenant_id = $1
               AND owner_account_id = $2

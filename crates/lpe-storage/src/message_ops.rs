@@ -954,6 +954,21 @@ impl Storage {
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("message not found"));
         }
+        let existing = self
+            .fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("message not found"))?;
+        let subject_is_unchanged = subject
+            .as_ref()
+            .is_none_or(|value| existing.subject == crate::normalize_subject(value));
+        let body_is_unchanged = body_text
+            .as_ref()
+            .is_none_or(|value| existing.body_text == *value);
+        if subject_is_unchanged && body_is_unchanged {
+            return Ok(existing);
+        }
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let message = sqlx::query(
             r#"

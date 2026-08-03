@@ -39,6 +39,37 @@ pub async fn update_message_flags(
     update: MessageFlagUpdate,
     audit: AuditEntryInput,
 ) -> Result<JmapEmail> {
+    if update.unread.is_some() || update.flagged.is_some() {
+        let tenant_id = storage.tenant_id_for_account_id(account_id).await?;
+        let already_applied = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT COALESCE(bool_and(
+                ($4::bool IS NULL OR is_seen = NOT $4)
+                AND ($5::bool IS NULL OR is_flagged = $5)
+            ), FALSE)
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND message_id = $3
+              AND visibility = 'visible'
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .bind(update.unread)
+        .bind(update.flagged)
+        .fetch_one(&storage.pool)
+        .await?;
+        if already_applied {
+            return storage
+                .fetch_jmap_emails(account_id, &[message_id])
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow!("message not found"));
+        }
+    }
     storage
         .update_jmap_email_followup_flags(
             account_id,
@@ -95,6 +126,60 @@ pub async fn update_imap_flags(
     if modified_ids.len() == message_ids.len() {
         tx.rollback().await?;
         return Ok(modified_ids);
+    }
+
+    let has_changes = sqlx::query_scalar::<_, i32>(
+        r#"
+            SELECT 1
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND mailbox_id = $3
+              AND message_id = ANY($4)
+              AND visibility = 'visible'
+              AND ($5::bigint IS NULL OR modseq <= $5)
+              AND (
+                  ($6::bool IS NOT NULL AND is_seen IS DISTINCT FROM NOT $6)
+                  OR (
+                      $7::bool IS NOT NULL AND (
+                          is_flagged IS DISTINCT FROM $7
+                          OR followup_flag_status IS DISTINCT FROM
+                              CASE WHEN $7 THEN 'flagged' ELSE 'none' END
+                          OR followup_icon IS DISTINCT FROM
+                              CASE WHEN $7 AND followup_icon = 0 THEN 6
+                                   WHEN NOT $7 THEN 0 ELSE followup_icon END
+                          OR todo_item_flags IS DISTINCT FROM
+                              CASE WHEN $7 AND todo_item_flags = 0 THEN 8
+                                   WHEN NOT $7 THEN 0 ELSE todo_item_flags END
+                          OR (NOT $7 AND followup_completed_at IS NOT NULL)
+                      )
+                  )
+                  OR (
+                      $8::bool IS NOT NULL AND (
+                          is_deleted IS DISTINCT FROM $8
+                          OR ($8 AND deleted_at IS NULL)
+                          OR (NOT $8 AND deleted_at IS NOT NULL)
+                      )
+                  )
+              )
+            LIMIT 1
+            FOR UPDATE
+            "#,
+    )
+    .bind(&tenant_id)
+    .bind(account_id)
+    .bind(mailbox_id)
+    .bind(message_ids)
+    .bind(unchanged_since_i64)
+    .bind(unread)
+    .bind(flagged)
+    .bind(deleted)
+    .fetch_optional(&mut *tx)
+    .await?
+    .is_some();
+    if !has_changes {
+        tx.commit().await?;
+        return Ok(Vec::new());
     }
 
     let modseq = storage

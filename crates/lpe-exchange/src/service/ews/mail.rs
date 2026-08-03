@@ -107,6 +107,8 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            self.validate_mutating_item_change_keys(principal, request)
+                .await?;
             let is_junk = ews_bool_attribute(request, "MarkAsJunk", "IsJunk").unwrap_or(true);
             let move_item = ews_bool_attribute(request, "MarkAsJunk", "MoveItem").unwrap_or(false);
             if !is_junk || !move_item {
@@ -177,7 +179,11 @@ where
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response("MarkAsJunk", "ErrorInvalidOperation", &error.to_string())
+            operation_error_response(
+                "MarkAsJunk",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
         }))
     }
 }

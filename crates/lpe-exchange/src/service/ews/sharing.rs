@@ -124,7 +124,19 @@ where
                 },
             )
             .await?;
-        Ok(accept_sharing_invitation_response(&grant))
+        let category = match input.kind {
+            CollaborationResourceKind::Contacts => "contacts",
+            CollaborationResourceKind::Calendar => "calendar",
+            CollaborationResourceKind::Tasks => "tasks",
+        };
+        let revision = self
+            .store
+            .fetch_account_category_modseq(owner.id, category)
+            .await?;
+        Ok(accept_sharing_invitation_response(
+            &grant,
+            &versioned_change_key("sharing", &grant.id.to_string(), &revision.to_string()),
+        ))
     }
 
     async fn accessible_shared_collection(
@@ -250,7 +262,10 @@ pub(in crate::service) fn refresh_sharing_folder_response(
     )
 }
 
-pub(in crate::service) fn accept_sharing_invitation_response(grant: &CollaborationGrant) -> String {
+pub(in crate::service) fn accept_sharing_invitation_response(
+    grant: &CollaborationGrant,
+    change_key: &str,
+) -> String {
     format!(
         concat!(
             "<m:CreateItemResponse>",
@@ -259,7 +274,7 @@ pub(in crate::service) fn accept_sharing_invitation_response(grant: &Collaborati
             "<m:ResponseCode>NoError</m:ResponseCode>",
             "<m:Items>",
             "<t:AcceptSharingInvitation>",
-            "<t:ItemId Id=\"sharing:{kind}:{owner_id}:{grantee_id}\" ChangeKey=\"{updated_at}\"/>",
+            "<t:ItemId Id=\"sharing:{kind}:{owner_id}:{grantee_id}\" ChangeKey=\"{change_key}\"/>",
             "<t:SharedFolderId Id=\"shared-{kind}:{owner_id}\"/>",
             "<t:OwnerSmtpAddress>{owner}</t:OwnerSmtpAddress>",
             "<t:DataType>{data_type}</t:DataType>",
@@ -273,7 +288,7 @@ pub(in crate::service) fn accept_sharing_invitation_response(grant: &Collaborati
         kind = escape_xml(&grant.kind),
         owner_id = grant.owner_account_id,
         grantee_id = grant.grantee_account_id,
-        updated_at = escape_xml(&grant.updated_at),
+        change_key = escape_xml(change_key),
         owner = escape_xml(&grant.owner_email),
         data_type = ews_sharing_data_type(&grant.kind),
         permission = ews_permission_level(&grant.rights),

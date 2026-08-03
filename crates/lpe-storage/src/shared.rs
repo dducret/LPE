@@ -24,6 +24,29 @@ pub(crate) const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
 pub(crate) const EXPECTED_SCHEMA_VERSION: &str = "0.5.2-sql";
 
 impl Storage {
+    pub async fn fetch_account_category_modseq(
+        &self,
+        account_id: Uuid,
+        category: &str,
+    ) -> Result<u64> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let modseq = sqlx::query_scalar::<_, Option<i64>>(
+            r#"
+            SELECT current_modseq
+            FROM account_sync_state
+            WHERE tenant_id = $1 AND account_id = $2 AND category = $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(category)
+        .fetch_optional(&self.pool)
+        .await?
+        .flatten()
+        .unwrap_or(1);
+        u64::try_from(modseq).map_err(|_| anyhow!("account modseq is invalid"))
+    }
+
     pub(crate) async fn allocate_mail_modseq_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,

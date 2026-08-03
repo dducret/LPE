@@ -35,6 +35,9 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
   - authenticated endpoints only
 - EWS adapter rules:
   - reads and writes canonical mailbox, contacts, calendar, and task state
+  - emits opaque EWS ChangeKeys derived from stable item identity and durable
+    canonical revision; supplied stale ChangeKeys are rejected before mutation
+    with the EWS conflict result
   - contact updates preserve canonical rich fields, vCard/source metadata, and unsupported structured arrays when an EWS request omits them; explicit delete/update instructions clear only the addressed fields
   - treats Outlook-visible Suggested Contacts as the canonical `contact_books.role = 'suggested_contacts'` folder containing durable `contacts`
   - does not expose private `recipient_suggestions` rows as contacts, directory entries, shared contact grants, search results, or AI-facing data

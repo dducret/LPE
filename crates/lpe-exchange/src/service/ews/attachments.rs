@@ -56,6 +56,16 @@ where
                 "CreateAttachment currently supports exactly one canonical message parent id.",
             ));
         }
+        if let Err(error) = self
+            .validate_mutating_item_change_keys(principal, request)
+            .await
+        {
+            return Ok(operation_error_response(
+                "CreateAttachment",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            ));
+        }
         if element_content(request, "ItemAttachment").is_some() {
             return Ok(operation_error_response(
                 "CreateAttachment",

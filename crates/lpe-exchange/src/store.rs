@@ -448,6 +448,14 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, CollaborationGrant>;
 
+    fn fetch_account_category_modseq<'a>(
+        &'a self,
+        _account_id: Uuid,
+        _category: &'a str,
+    ) -> StoreFuture<'a, u64> {
+        Box::pin(async { Ok(1) })
+    }
+
     fn fetch_ews_delegates<'a>(
         &'a self,
         owner_account_id: Uuid,

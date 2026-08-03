@@ -27,6 +27,16 @@ macro_rules! store_impl_ews_delegation {
         })
     }
 
+    fn fetch_account_category_modseq<'a>(
+        &'a self,
+        account_id: Uuid,
+        category: &'a str,
+    ) -> StoreFuture<'a, u64> {
+        Box::pin(async move {
+            Storage::fetch_account_category_modseq(self, account_id, category).await
+        })
+    }
+
     fn fetch_ews_delegates<'a>(
         &'a self,
         owner_account_id: Uuid,

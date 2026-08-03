@@ -381,15 +381,16 @@ impl Storage {
         mut input: UpsertClientContactInput,
         contact_book_role: &str,
     ) -> Result<ClientContact> {
-        if let Some(contact_id) = input.id {
-            if let Some(existing) = self
-                .fetch_client_contacts_by_ids(input.account_id, &[contact_id])
+        let existing = if let Some(contact_id) = input.id {
+            self.fetch_client_contacts_by_ids(input.account_id, &[contact_id])
                 .await?
                 .into_iter()
                 .next()
-            {
-                input = merge_contact_update_input(&existing, input);
-            }
+        } else {
+            None
+        };
+        if let Some(existing) = &existing {
+            input = merge_contact_update_input(existing, input);
         }
         let name = input.name.trim();
         let emails_json = contact_emails_json(&input)?;
@@ -398,9 +399,25 @@ impl Storage {
             bail!("contact name and email are required");
         }
         let phones_json = contact_phones_json(&input)?;
-        let addresses_json = contact_array_json(input.addresses_json)?;
-        let urls_json = contact_array_json(input.urls_json)?;
-        let source_payload_json = contact_source_payload_json(input.source.source_payload_json)?;
+        let addresses_json = contact_array_json(input.addresses_json.clone())?;
+        let urls_json = contact_array_json(input.urls_json.clone())?;
+        let source_payload_json =
+            contact_source_payload_json(input.source.source_payload_json.clone())?;
+
+        if let Some(existing) = existing {
+            if contact_update_is_unchanged(
+                &existing,
+                &input,
+                contact_book_role,
+                &emails_json,
+                &phones_json,
+                &addresses_json,
+                &urls_json,
+                &source_payload_json,
+            ) {
+                return Ok(existing);
+            }
+        }
 
         let contact_id = input.id.unwrap_or_else(Uuid::new_v4);
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
@@ -618,6 +635,18 @@ impl Storage {
         }
 
         let event_id = input.id.unwrap_or_else(Uuid::new_v4);
+        if input.id.is_some() {
+            if let Some(existing) = self
+                .fetch_client_events_by_ids(input.account_id, &[event_id])
+                .await?
+                .into_iter()
+                .next()
+            {
+                if event_update_is_unchanged(&existing, &input, event_id) {
+                    return Ok(existing);
+                }
+            }
+        }
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let mut tx = self.pool.begin().await?;
         let calendar_id = match calendar_id {
@@ -1121,6 +1150,103 @@ pub(crate) fn contact_primary_email(value: &Value) -> String {
         .unwrap_or_default()
 }
 
+fn contact_update_is_unchanged(
+    existing: &ClientContact,
+    input: &UpsertClientContactInput,
+    contact_book_role: &str,
+    emails_json: &Value,
+    phones_json: &Value,
+    addresses_json: &Value,
+    urls_json: &Value,
+    source_payload_json: &Value,
+) -> bool {
+    existing.address_book_id == client_address_book_id_for_role(contact_book_role)
+        && existing.name == input.name.trim()
+        && existing.role == input.role.trim()
+        && existing.team == input.team.trim()
+        && existing.notes == input.notes.trim()
+        && existing.structured_name.prefix == input.structured_name.prefix.trim()
+        && existing.structured_name.given == input.structured_name.given.trim()
+        && existing.structured_name.middle == input.structured_name.middle.trim()
+        && existing.structured_name.family == input.structured_name.family.trim()
+        && existing.structured_name.suffix == input.structured_name.suffix.trim()
+        && existing.structured_name.nickname == input.structured_name.nickname.trim()
+        && existing.structured_name.phonetic_given == input.structured_name.phonetic_given.trim()
+        && existing.structured_name.phonetic_family == input.structured_name.phonetic_family.trim()
+        && existing.emails_json == *emails_json
+        && existing.phones_json == *phones_json
+        && existing.addresses_json == *addresses_json
+        && existing.urls_json == *urls_json
+        && existing.organization_name
+            == if input.organization_name.trim().is_empty() {
+                input.team.trim()
+            } else {
+                input.organization_name.trim()
+            }
+        && existing.job_title == input.job_title.trim()
+        && existing.raw_vcard == input.raw_vcard
+        && existing.source.import_source
+            == if input.source.import_source.trim().is_empty() {
+                "local"
+            } else {
+                input.source.import_source.trim()
+            }
+        && existing.source.source_uid == input.source.source_uid
+        && existing.source.source_etag == input.source.source_etag
+        && existing.source.source_payload_json == *source_payload_json
+}
+
+fn event_update_is_unchanged(
+    existing: &ClientEvent,
+    input: &UpsertClientEventInput,
+    event_id: Uuid,
+) -> bool {
+    existing.uid
+        == if input.uid.trim().is_empty() {
+            event_id.to_string()
+        } else {
+            input.uid.trim().to_string()
+        }
+        && existing.date == input.date.trim()
+        && existing.time == input.time.trim()
+        && existing.time_zone == input.time_zone.trim()
+        && existing.duration_minutes == input.duration_minutes.max(0)
+        && existing.all_day == input.all_day
+        && existing.status
+            == if input.status.trim().is_empty() {
+                "confirmed"
+            } else {
+                input.status.trim()
+            }
+        && existing.sequence == input.sequence.max(0)
+        && existing.recurrence_rule == input.recurrence_rule.trim()
+        && json_text_matches(&existing.recurrence_json, input.recurrence_json.trim())
+        && json_text_matches(
+            &existing.recurrence_exceptions_json,
+            input.recurrence_exceptions_json.trim(),
+        )
+        && existing.title == input.title.trim()
+        && existing.location == input.location.trim()
+        && json_text_matches(&existing.organizer_json, input.organizer_json.trim())
+        && existing.attendees == input.attendees.trim()
+        && json_text_matches(&existing.attendees_json, input.attendees_json.trim())
+        && existing.notes == input.notes.trim()
+        && existing.body_html == input.body_html.trim()
+}
+
+fn json_text_matches(existing: &str, candidate: &str) -> bool {
+    let candidate = if candidate.is_empty() {
+        if existing.trim_start().starts_with('[') {
+            "[]"
+        } else {
+            "{}"
+        }
+    } else {
+        candidate
+    };
+    serde_json::from_str::<Value>(existing).ok() == serde_json::from_str(candidate).ok()
+}
+
 fn merge_contact_update_input(
     existing: &ClientContact,
     mut input: UpsertClientContactInput,
@@ -1305,8 +1431,8 @@ fn client_address_book_id_for_role(role: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        client_folder, merge_contact_update_input, ClientContact, ContactSourceFields,
-        UpsertClientContactInput, Value,
+        client_folder, json_text_matches, merge_contact_update_input, ClientContact,
+        ContactSourceFields, UpsertClientContactInput, Value,
     };
     use serde_json::json;
     use uuid::Uuid;
@@ -1315,6 +1441,19 @@ mod tests {
     fn client_folder_preserves_trash_role() {
         assert_eq!(client_folder("trash"), "trash");
         assert_eq!(client_folder("unknown"), "inbox");
+    }
+
+    #[test]
+    fn canonical_event_json_comparison_ignores_whitespace() {
+        assert!(json_text_matches(
+            r#"{"weekday":"monday"}"#,
+            r#"{ "weekday": "monday" }"#
+        ));
+        assert!(json_text_matches("[]", ""));
+        assert!(!json_text_matches(
+            r#"{"weekday":"monday"}"#,
+            r#"{"weekday":"tuesday"}"#
+        ));
     }
 
     #[test]

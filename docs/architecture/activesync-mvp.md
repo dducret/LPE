@@ -48,6 +48,9 @@
   - supports multiple collections in one request
   - accepts common protocol options that are not fully material to the adapter response
   - uses persisted sync keys and canonical collection state
+  - stores opaque, device- and collection-scoped SyncKeys separately from
+    namespaced canonical `modseq` fingerprints used only to detect changed
+    projected items; a fingerprint is never a SyncKey
   - returns ActiveSync `Sync` status `3` for unknown, expired, stale, or
     superseded collection sync keys
   - returns ActiveSync `Sync` status `12` when a collection sync key predates a

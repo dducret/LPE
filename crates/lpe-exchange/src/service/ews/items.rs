@@ -269,7 +269,13 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
-            let ids = requested_item_ids(request);
+            self.validate_mutating_item_change_keys(principal, request)
+                .await?;
+            let item_references = requested_item_references(request);
+            let ids = item_references
+                .iter()
+                .map(|reference| reference.id.clone())
+                .collect::<Vec<_>>();
             let contact_ids = ids
                 .iter()
                 .filter_map(|id| id.strip_prefix("contact:"))
@@ -321,6 +327,18 @@ where
                     ));
                 };
                 for message_id in message_ids {
+                    let existing = self
+                        .store
+                        .fetch_jmap_emails(principal.account_id, &[message_id])
+                        .await?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow!("message not found"))?;
+                    validate_supplied_item_change_key(
+                        &item_references,
+                        &format!("message:{message_id}"),
+                        &message_change_key(&existing),
+                    )?;
                     let updated = self
                         .store
                         .update_jmap_email_flags(
@@ -346,6 +364,17 @@ where
                     .into_iter()
                     .next()
                     .ok_or_else(|| anyhow!("contact not found"))?;
+                let change_keys = contact_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&existing),
+                )
+                .await?;
+                validate_supplied_item_change_key(
+                    &item_references,
+                    &format!("contact:{contact_id}"),
+                    change_key_for(&change_keys, contact_id, "contact")?,
+                )?;
                 let updated = self
                     .store
                     .update_accessible_contact(
@@ -370,6 +399,17 @@ where
                     .into_iter()
                     .next()
                     .ok_or_else(|| anyhow!("event not found"))?;
+                let change_keys = event_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&existing),
+                )
+                .await?;
+                validate_supplied_item_change_key(
+                    &item_references,
+                    &format!("event:{event_id}"),
+                    change_key_for(&change_keys, event_id, "calendar")?,
+                )?;
                 let updated = self
                     .store
                     .update_accessible_event(
@@ -394,6 +434,17 @@ where
                     .into_iter()
                     .next()
                     .ok_or_else(|| anyhow!("task not found"))?;
+                let change_keys = task_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&existing),
+                )
+                .await?;
+                validate_supplied_item_change_key(
+                    &item_references,
+                    &format!("task:{task_id}"),
+                    change_key_for(&change_keys, task_id, "task")?,
+                )?;
                 let updated = self
                     .store
                     .update_accessible_task(
@@ -422,6 +473,11 @@ where
                 ));
             }
             for existing in public_folder_items {
+                validate_supplied_item_change_key(
+                    &item_references,
+                    &format!("public-folder-item:{}", existing.id),
+                    &public_folder_item_change_key(&existing),
+                )?;
                 let updated = self
                     .store
                     .upsert_public_folder_item(
@@ -637,6 +693,8 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            self.validate_mutating_item_change_keys(principal, request)
+                .await?;
             let draft_ids = requested_item_ids(request)
                 .into_iter()
                 .filter_map(|id| canonical_message_id_from_ews_id(&id))
@@ -727,6 +785,8 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            self.validate_mutating_item_change_keys(principal, request)
+                .await?;
             let ids = requested_item_ids(request);
             let message_ids = ids
                 .iter()
@@ -806,6 +866,8 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            self.validate_mutating_item_change_keys(principal, request)
+                .await?;
             let ids = requested_item_ids(request);
             let message_ids = ids
                 .iter()
@@ -934,6 +996,8 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            self.validate_mutating_item_change_keys(principal, request)
+                .await?;
             let ids = requested_item_ids(request);
             let message_ids = ids
                 .iter()
@@ -1074,6 +1138,8 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
+            self.validate_mutating_item_change_keys(principal, request)
+                .await?;
             let ids = requested_item_ids(request);
             let contact_ids = ids
                 .iter()
@@ -1231,5 +1297,158 @@ where
                 &error.to_string(),
             )
         }))
+    }
+
+    pub(in crate::service) async fn validate_mutating_item_change_keys(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<()> {
+        for reference in requested_item_references(request)
+            .into_iter()
+            .filter(|reference| reference.change_key.is_some())
+        {
+            if let Some(id) = reference.id.strip_prefix("message:") {
+                let Ok(id) = Uuid::parse_str(id) else {
+                    continue;
+                };
+                if let Some(email) = self
+                    .store
+                    .fetch_jmap_emails(principal.account_id, &[id])
+                    .await?
+                    .into_iter()
+                    .next()
+                {
+                    validate_supplied_item_change_key(
+                        std::slice::from_ref(&reference),
+                        &reference.id,
+                        &message_change_key(&email),
+                    )?;
+                }
+            } else if let Some(id) = reference.id.strip_prefix("contact:") {
+                let Ok(id) = Uuid::parse_str(id) else {
+                    continue;
+                };
+                if let Some(contact) = self
+                    .store
+                    .fetch_accessible_contacts_by_ids(principal.account_id, &[id])
+                    .await?
+                    .into_iter()
+                    .next()
+                {
+                    let keys = contact_change_keys(
+                        &self.store,
+                        principal.account_id,
+                        std::slice::from_ref(&contact),
+                    )
+                    .await?;
+                    validate_supplied_item_change_key(
+                        std::slice::from_ref(&reference),
+                        &reference.id,
+                        change_key_for(&keys, id, "contact")?,
+                    )?;
+                }
+            } else if let Some(id) = reference.id.strip_prefix("event:") {
+                let Ok(id) = Uuid::parse_str(id) else {
+                    continue;
+                };
+                if let Some(event) = self
+                    .store
+                    .fetch_accessible_events_by_ids(principal.account_id, &[id])
+                    .await?
+                    .into_iter()
+                    .next()
+                {
+                    let keys = event_change_keys(
+                        &self.store,
+                        principal.account_id,
+                        std::slice::from_ref(&event),
+                    )
+                    .await?;
+                    validate_supplied_item_change_key(
+                        std::slice::from_ref(&reference),
+                        &reference.id,
+                        change_key_for(&keys, id, "calendar")?,
+                    )?;
+                }
+            } else if let Some(id) = reference.id.strip_prefix("task:") {
+                let Ok(id) = Uuid::parse_str(id) else {
+                    continue;
+                };
+                if let Some(task) = self
+                    .store
+                    .fetch_accessible_tasks_by_ids(principal.account_id, &[id])
+                    .await?
+                    .into_iter()
+                    .next()
+                {
+                    let keys = task_change_keys(
+                        &self.store,
+                        principal.account_id,
+                        std::slice::from_ref(&task),
+                    )
+                    .await?;
+                    validate_supplied_item_change_key(
+                        std::slice::from_ref(&reference),
+                        &reference.id,
+                        change_key_for(&keys, id, "task")?,
+                    )?;
+                }
+            } else if let Some(id) = reference.id.strip_prefix("public-folder-item:") {
+                let Ok(id) = Uuid::parse_str(id) else {
+                    continue;
+                };
+                if let Some(item) = self
+                    .store
+                    .fetch_public_folder_items_by_ids(principal.account_id, &[id])
+                    .await?
+                    .into_iter()
+                    .next()
+                {
+                    validate_supplied_item_change_key(
+                        std::slice::from_ref(&reference),
+                        &reference.id,
+                        &public_folder_item_change_key(&item),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_supplied_item_change_key(
+    references: &[RequestedItemReference],
+    id: &str,
+    current_change_key: &str,
+) -> Result<()> {
+    let supplied_change_key = references
+        .iter()
+        .find(|reference| reference.id == id)
+        .and_then(|reference| reference.change_key.as_deref());
+    if matches!(supplied_change_key, Some(change_key) if change_key != current_change_key) {
+        bail!("stale EWS ChangeKey for {id}");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_supplied_item_change_key;
+    use crate::service::ews::request_ids::RequestedItemReference;
+
+    #[test]
+    fn stale_supplied_change_key_is_rejected_before_item_mutation() {
+        let error = validate_supplied_item_change_key(
+            &[RequestedItemReference {
+                id: "message:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string(),
+                change_key: Some("stale".to_string()),
+            }],
+            "message:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "current",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("stale EWS ChangeKey"));
     }
 }
