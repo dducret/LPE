@@ -945,9 +945,16 @@ non-canonical LPE state.
   enriches or replaces an imported client's `IPM.Configuration.*` property bag.
   Inbox associated-content
   sync does not emit broad synthetic or virtual-only rows such as aggregation,
-  sharing, EAS, ELC, rule organizer, account preferences, message-list
-  settings, or extended-rule messages during broad Inbox associated-table
-  scans. Exact, bounded lookups may expose persisted backed rows with valid
+  sharing, EAS, ELC, account preferences, message-list settings, or
+  extended-rule messages during broad Inbox associated-table scans. The one
+  trace-backed exception is the Inbox `IPM.RuleOrganizer` FAI: Exchange 2016
+  returns it from the associated-table startup query
+  (`test1_202608031300.saz`, raw/551). LPE therefore enumerates the
+  bounded virtual row only for that exact `PidTagMessageClass` restriction,
+  with the required `Outlook Rules Organizer` subject; any non-empty
+  client-owned `PidTagRwRulesStream` remains opaque and takes precedence over
+  that empty projection. This follows `[MS-OXORULE]` section 3.1.4.2.4. Exact,
+  bounded lookups may expose persisted backed rows with valid
   payloads, and the Inbox `IPM.Configuration.UMOLK.UserOptions` exact lookup
   exposes a non-empty modeled roaming-dictionary row because Outlook 2016/2019
   startup traces abandon the Inbox normal contents table after a missing exact

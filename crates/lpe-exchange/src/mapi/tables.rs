@@ -313,10 +313,11 @@ pub(in crate::mapi) fn rop_find_row_response(
             } else if *associated
                 && should_use_associated_config_table(*folder_id, snapshot, Some(&restriction))
             {
-                let mut rows = associated_table_rows(
+                let mut rows = associated_table_rows_for_find_row(
                     *folder_id,
                     snapshot,
                     table_restriction.as_ref(),
+                    &restriction,
                     mailbox_guid,
                 );
                 sort_associated_table_rows(&mut rows, sort_orders, mailbox_guid);

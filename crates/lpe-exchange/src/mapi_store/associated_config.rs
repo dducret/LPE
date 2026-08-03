@@ -80,6 +80,7 @@ pub(super) const OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_ID: u64 =
 pub(super) const OUTLOOK_MINIMAL_USER_OPTIONS_DICTIONARY_HEX: &str = "3c3f786d6c2076657273696f6e3d22312e302220656e636f64696e673d227574662d38223f3e3c55736572436f6e66696775726174696f6e20786d6c6e733d2264696374696f6e6172792e787364223e3c496e666f2076657273696f6e3d224f75746c6f6f6b2e3136222f3e3c446174613e3c65206b3d2231382d4f4c507265667356657273696f6e2220763d22392d31222f3e3c2f446174613e3c2f55736572436f6e66696775726174696f6e3e";
 const OUTLOOK_STALE_USER_OPTIONS_XML_PLACEHOLDER_HEX: &str = "3c786d6c2f3e";
 pub(crate) const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS: &str = "IPM.RuleOrganizer";
+const OUTLOOK_INBOX_RULE_ORGANIZER_SUBJECT: &str = "Outlook Rules Organizer";
 pub(super) const OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFED);
 pub(super) const OUTLOOK_RULE_ORGANIZER_BINARY_6802_JSON_KEY: &str = "0x68020102";
@@ -296,7 +297,7 @@ pub(super) fn outlook_inbox_associated_config_defaults(
             folder_id,
             canonical_id: Uuid::from_u128(0x6d617069_7275_6c65_8000_000000000001),
             message_class: OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
-            subject: OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
+            subject: OUTLOOK_INBOX_RULE_ORGANIZER_SUBJECT.to_string(),
             properties_json: serde_json::json!({}),
         },
         MapiAssociatedConfigMessage {
@@ -349,6 +350,7 @@ pub(crate) fn outlook_inbox_exact_virtual_associated_config_for_message_class(
         OUTLOOK_INBOX_ELC_CONFIG_CLASS
             | OUTLOOK_INBOX_MRM_CONFIG_CLASS
             | OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS
+            | OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
             | OUTLOOK_INBOX_SHARING_CONFIGURATION_CLASS
             | OUTLOOK_INBOX_SHARING_INDEX_CLASS
             | OUTLOOK_INBOX_AGGREGATION_CLASS

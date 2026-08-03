@@ -5416,8 +5416,12 @@ fn inbox_associated_exact_virtual_find_row_does_not_inject_a_row() {
 }
 
 #[test]
-fn inbox_associated_find_row_does_not_return_empty_virtual_rule_organizer() {
-    assert_inbox_associated_find_row_no_match_for_message_class("IPM.RuleOrganizer");
+fn inbox_associated_find_row_returns_virtual_rule_organizer() {
+    let response = inbox_associated_find_row_response_for_message_class("IPM.RuleOrganizer");
+
+    assert_eq!(response[0], RopId::FindRow.as_u8());
+    assert_eq!(u32::from_le_bytes(response[2..6].try_into().unwrap()), 0);
+    assert_response_contains_utf16(&response, "IPM.RuleOrganizer");
 }
 
 #[test]
@@ -7466,7 +7470,7 @@ fn inbox_associated_query_rows_does_not_create_virtual_mrm_configuration() {
 }
 
 #[test]
-fn inbox_associated_query_rows_does_not_return_empty_virtual_rule_organizer() {
+fn inbox_associated_query_rows_returns_virtual_rule_organizer() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let mut table = MapiObject::ContentsTable {
         folder_id: INBOX_FOLDER_ID,
@@ -7507,7 +7511,8 @@ fn inbox_associated_query_rows_does_not_return_empty_virtual_rule_organizer() {
         rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
     assert_eq!(response[0], RopId::QueryRows.as_u8());
-    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 0);
+    assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+    assert_response_contains_utf16(&response, "IPM.RuleOrganizer");
 }
 
 #[test]
@@ -7517,7 +7522,7 @@ fn rule_organizer_without_client_payload_has_no_synthetic_stream_property() {
         folder_id: INBOX_FOLDER_ID,
         canonical_id: Uuid::from_u128(0x6d617069_7275_6c65_8000_000000000001),
         message_class: crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
-        subject: crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS.to_string(),
+        subject: "Outlook Rules Organizer".to_string(),
         properties_json: serde_json::json!({}),
     };
 

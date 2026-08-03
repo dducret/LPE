@@ -14,6 +14,7 @@ mod permissions;
 mod properties;
 mod public_folders;
 mod recoverable_items;
+mod rule_organizer;
 mod save_changes_handles;
 mod submission;
 mod sync;

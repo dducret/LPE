@@ -162,34 +162,101 @@ pub(super) fn has_associated_table_rows(folder_id: u64, snapshot: &MapiMailStore
 pub(super) fn should_use_associated_config_table(
     folder_id: u64,
     snapshot: &MapiMailStoreSnapshot,
-    _restriction: Option<&MapiRestriction>,
+    restriction: Option<&MapiRestriction>,
 ) -> bool {
     has_associated_table_rows(folder_id, snapshot)
+        || is_inbox_exact_rule_organizer_restriction(folder_id, restriction)
 }
 
 pub(super) fn associated_table_rows(
     folder_id: u64,
     snapshot: &MapiMailStoreSnapshot,
     restriction: Option<&MapiRestriction>,
+    mailbox_guid: Uuid,
+) -> Vec<AssociatedTableRow> {
+    associated_table_rows_with_lookup_restriction(
+        folder_id,
+        snapshot,
+        restriction,
+        None,
+        mailbox_guid,
+    )
+}
+
+pub(super) fn associated_table_rows_for_find_row(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    find_row_restriction: &MapiRestriction,
+    mailbox_guid: Uuid,
+) -> Vec<AssociatedTableRow> {
+    associated_table_rows_with_lookup_restriction(
+        folder_id,
+        snapshot,
+        restriction,
+        Some(find_row_restriction),
+        mailbox_guid,
+    )
+}
+
+fn associated_table_rows_with_lookup_restriction(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    find_row_restriction: Option<&MapiRestriction>,
     _mailbox_guid: Uuid,
 ) -> Vec<AssociatedTableRow> {
-    snapshot
-        .associated_config_messages_for_folder(folder_id)
+    let mut messages = snapshot.associated_config_messages_for_folder(folder_id);
+    let virtual_restriction = restriction.or(find_row_restriction);
+    // [MS-OXORULE] section 3.1.4.2.4; Exchange 2016 raw/551 returns this FAI
+    // for the captured exact Inbox Rule Organizer table restriction.
+    if is_inbox_exact_rule_organizer_restriction(folder_id, virtual_restriction)
+        && !messages.iter().any(|message| {
+            message.message_class == crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
+        })
+    {
+        messages.extend(
+            crate::mapi_store::outlook_inbox_exact_virtual_associated_config_for_message_class(
+                crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
+            ),
+        );
+    }
+    messages
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
-                && associated_config_visible_in_table(folder_id, restriction, message)
+                && associated_config_visible_in_table(folder_id, virtual_restriction, message)
         })
         .map(AssociatedTableRow::Config)
         .collect()
 }
 
 pub(in crate::mapi) fn associated_config_visible_in_table(
-    _folder_id: u64,
-    _restriction: Option<&MapiRestriction>,
+    folder_id: u64,
+    restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
     !crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
+        || (message.message_class == crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
+            && is_inbox_exact_rule_organizer_restriction(folder_id, restriction))
+}
+
+fn is_inbox_exact_rule_organizer_restriction(
+    folder_id: u64,
+    restriction: Option<&MapiRestriction>,
+) -> bool {
+    matches!(
+        restriction,
+        Some(MapiRestriction::Property {
+            relop: 0x04,
+            property_tag,
+            value: MapiValue::String(message_class),
+        }) if folder_id == crate::mapi::identity::INBOX_FOLDER_ID
+            && canonical_property_storage_tag(*property_tag) == PID_TAG_MESSAGE_CLASS_W
+            && message_class.eq_ignore_ascii_case(
+                crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
+            )
+    )
 }
 
 #[cfg(test)]
