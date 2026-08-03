@@ -8,6 +8,7 @@ pub(in crate::mapi) fn rop_expand_row_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     let Some(category_id) = request.category_id() else {
         return rop_error_response(0x59, request.response_handle_index(), 0x8004_0102);
@@ -40,6 +41,7 @@ pub(in crate::mapi) fn rop_expand_row_response(
         mailboxes,
         emails,
         snapshot,
+        mailbox_guid,
         restriction.as_ref(),
         &columns,
         sort_orders,
@@ -73,6 +75,7 @@ pub(in crate::mapi) fn rop_collapse_row_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     let Some(category_id) = request.category_id() else {
         return rop_error_response(0x5A, request.response_handle_index(), 0x8004_0102);
@@ -105,6 +108,7 @@ pub(in crate::mapi) fn rop_collapse_row_response(
         mailboxes,
         emails,
         snapshot,
+        mailbox_guid,
         restriction.as_ref(),
         &columns,
         sort_orders,
@@ -236,6 +240,7 @@ fn expanded_categorized_rows(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
     restriction: Option<&MapiRestriction>,
     columns: &[u32],
     sort_orders: &[MapiSortOrder],
@@ -246,6 +251,7 @@ fn expanded_categorized_rows(
         return categorized_deleted_items_content_rows(
             rows,
             snapshot,
+            mailbox_guid,
             columns,
             sort_orders,
             1,
@@ -260,6 +266,7 @@ fn expanded_categorized_rows(
     sort_emails(&mut rows, sort_orders);
     categorized_email_rows(
         Some(snapshot),
+        mailbox_guid,
         folder_id,
         rows,
         columns,

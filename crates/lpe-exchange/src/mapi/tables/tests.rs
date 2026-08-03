@@ -2852,6 +2852,7 @@ fn categorized_keywords_project_multivalue_instances_and_table_row_metadata() {
 
     let rows = categorized_email_rows(
         None,
+        mailbox_id,
         INBOX_FOLDER_ID,
         vec![&email],
         &columns,
@@ -8685,7 +8686,12 @@ fn message_table_row_flags_absent_deadline_expiry_and_recall_times() {
         0x8549_0040,
     ];
 
-    let row = serialize_message_property_row(&email, &columns);
+    let row = serialize_message_property_row_in_snapshot_with_mailbox_guid(
+        &email,
+        &MapiMailStoreSnapshot::empty(),
+        email.mailbox_id,
+        &columns,
+    );
 
     assert_eq!(row[0], 1);
     let mut cursor = Cursor::new(&row[1..]);
@@ -8863,7 +8869,12 @@ fn normal_contents_property_row_uses_durable_message_identity() {
         PID_TAG_LOCAL_COMMIT_TIME,
     ];
 
-    let row = serialize_message_property_row_in_snapshot(&email, &snapshot, &columns);
+    let row = serialize_message_property_row_in_snapshot_with_mailbox_guid(
+        &email,
+        &snapshot,
+        email.mailbox_id,
+        &columns,
+    );
     let mut cursor = Cursor::new(row.as_slice());
 
     assert_eq!(cursor.read_u8().unwrap(), 0);
@@ -8964,6 +8975,10 @@ fn message_row_client_submit_time_falls_back_to_received_time() {
 #[test]
 fn normal_message_row_projects_outlook_inbox_view_columns() {
     let email_id = Uuid::from_u128(0x7172);
+    crate::mapi::identity::remember_mapi_identity(
+        email_id,
+        crate::mapi::identity::mapi_store_id(0x82),
+    );
     let mut email = test_table_email(email_id, Uuid::from_u128(0x8182), "Inbox row");
     email.received_at = "2026-06-20T16:28:38Z".to_string();
     email.from_display = Some("Denis Ducret".to_string());
@@ -9092,6 +9107,189 @@ fn normal_message_row_projects_outlook_inbox_view_columns() {
         parse_mapi_property_value(&mut cursor, PID_NAME_CONTENT_CLASS_W_TAG).unwrap(),
         MapiValue::String("urn:content-classes:message".to_string())
     );
+}
+
+#[test]
+fn normal_inbox_query_rows_projects_sender_and_delivery_time() {
+    let mailbox_id = Uuid::from_u128(0x8184);
+    let email_id = Uuid::from_u128(0x7174);
+    crate::mapi::identity::remember_mapi_identity(
+        email_id,
+        crate::mapi::identity::mapi_store_id(0x84),
+    );
+    let mailbox = JmapMailbox {
+        id: mailbox_id,
+        parent_id: None,
+        role: "inbox".to_string(),
+        name: "Inbox".to_string(),
+        sort_order: 0,
+        modseq: 1,
+        total_emails: 1,
+        unread_emails: 1,
+        size_octets: 0,
+        is_subscribed: true,
+    };
+    let mut email = test_table_email(email_id, mailbox_id, "Inbox row");
+    email.received_at = "2026-08-02T13:50:50Z".to_string();
+    email.from_display = None;
+    email.from_address = "denis.ducret@sdic.ch".to_string();
+    email.sender_display = None;
+    email.sender_address = None;
+    let sent_representing_name_a = (PID_TAG_SENT_REPRESENTING_NAME_W & 0xFFFF_0000) | 0x001E;
+    let expected_delivery_time = mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at);
+    let expected_message_id = mapi_message_id(&email);
+    let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        mailbox_id,
+        INBOX_FOLDER_ID,
+        expected_message_id,
+    )
+    .unwrap();
+    let expected_instance_key =
+        crate::mapi::identity::instance_key_for_object_id(expected_message_id);
+    let mut table = MapiObject::ContentsTable {
+        folder_id: INBOX_FOLDER_ID,
+        associated: false,
+        columns: vec![
+            PID_TAG_ENTRY_ID,
+            PID_TAG_INSTANCE_KEY,
+            sent_representing_name_a,
+            PID_TAG_SENT_REPRESENTING_NAME_W,
+            PID_TAG_SENDER_NAME_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+        ],
+        columns_set: true,
+        sort_orders: Vec::new(),
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        restriction: None,
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+    let request = RopRequest {
+        rop_id: RopId::QueryRows.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: vec![0, 1, 1, 0],
+    };
+
+    let response = rop_query_rows_response(
+        &request,
+        Some(&mut table),
+        std::slice::from_ref(&mailbox),
+        std::slice::from_ref(&email),
+        &MapiMailStoreSnapshot::empty(),
+        mailbox_id,
+    );
+
+    assert_eq!(&response[..6], &[RopId::QueryRows.as_u8(), 0, 0, 0, 0, 0]);
+    assert_eq!(response[6], 0x02);
+    assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
+    let mut cursor = Cursor::new(&response[9..]);
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+    let entry_id = parse_mapi_property_value(&mut cursor, PID_TAG_ENTRY_ID).unwrap();
+    let instance_key = parse_mapi_property_value(&mut cursor, PID_TAG_INSTANCE_KEY).unwrap();
+    assert_eq!(entry_id, MapiValue::Binary(expected_entry_id));
+    assert_eq!(instance_key, MapiValue::Binary(expected_instance_key));
+    assert_ne!(entry_id, instance_key);
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, sent_representing_name_a).unwrap(),
+        MapiValue::String("denis.ducret@sdic.ch".to_string())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_SENT_REPRESENTING_NAME_W).unwrap(),
+        MapiValue::String("denis.ducret@sdic.ch".to_string())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_SENDER_NAME_W).unwrap(),
+        MapiValue::String("denis.ducret@sdic.ch".to_string())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_DELIVERY_TIME).unwrap(),
+        MapiValue::I64(expected_delivery_time as i64)
+    );
+    assert_eq!(cursor.position() as usize, response.len() - 9);
+}
+
+#[test]
+fn categorized_and_deleted_message_rows_keep_long_term_entry_ids() {
+    let mailbox_id = Uuid::from_u128(0x8185);
+    let email_id = Uuid::from_u128(0x7175);
+    let message_id = crate::mapi::identity::mapi_store_id(0x85);
+    crate::mapi::identity::remember_mapi_identity(email_id, message_id);
+    let email = test_table_email(email_id, mailbox_id, "Table identity");
+    let columns = [PID_TAG_ENTRY_ID, PID_TAG_INSTANCE_KEY];
+    let expected_instance_key = crate::mapi::identity::instance_key_for_object_id(message_id);
+
+    let categorized = categorized_email_rows(
+        None,
+        mailbox_id,
+        INBOX_FOLDER_ID,
+        vec![&email],
+        &columns,
+        &[MapiSortOrder {
+            property_tag: PID_TAG_SUBJECT_W,
+            order: 0,
+        }],
+        1,
+        &HashSet::new(),
+    );
+    let categorized_leaf = categorized
+        .iter()
+        .find(|row| row.leaf)
+        .expect("categorized message leaf");
+    let mut cursor = Cursor::new(categorized_leaf.row.as_slice());
+    let categorized_entry_id = parse_mapi_property_value(&mut cursor, PID_TAG_ENTRY_ID).unwrap();
+    let categorized_instance_key =
+        parse_mapi_property_value(&mut cursor, PID_TAG_INSTANCE_KEY).unwrap();
+    assert_eq!(
+        categorized_entry_id,
+        MapiValue::Binary(
+            crate::mapi::identity::message_entry_id_from_object_ids(
+                mailbox_id,
+                INBOX_FOLDER_ID,
+                message_id,
+            )
+            .unwrap(),
+        )
+    );
+    assert_eq!(
+        categorized_instance_key,
+        MapiValue::Binary(expected_instance_key.clone())
+    );
+    assert_ne!(categorized_entry_id, categorized_instance_key);
+
+    let mut deleted = email.clone();
+    deleted.mailbox_role = "trash".to_string();
+    let row = serialize_deleted_items_content_property_row(
+        DeletedItemsContentRow::Message(&deleted),
+        &MapiMailStoreSnapshot::empty(),
+        mailbox_id,
+        &columns,
+    );
+    let mut cursor = Cursor::new(row.as_slice());
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+    let deleted_entry_id = parse_mapi_property_value(&mut cursor, PID_TAG_ENTRY_ID).unwrap();
+    let deleted_instance_key =
+        parse_mapi_property_value(&mut cursor, PID_TAG_INSTANCE_KEY).unwrap();
+    assert_eq!(
+        deleted_entry_id,
+        MapiValue::Binary(
+            crate::mapi::identity::message_entry_id_from_object_ids(
+                mailbox_id,
+                TRASH_FOLDER_ID,
+                message_id,
+            )
+            .unwrap(),
+        )
+    );
+    assert_eq!(
+        deleted_instance_key,
+        MapiValue::Binary(expected_instance_key)
+    );
+    assert_ne!(deleted_entry_id, deleted_instance_key);
+    assert_eq!(cursor.remaining(), 0);
 }
 
 #[test]
@@ -9705,6 +9903,7 @@ fn categorized_table_expand_collapse_require_set_columns() {
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
+        Uuid::nil(),
     );
     assert_eq!(expand[0], RopId::ExpandRow.as_u8());
     assert_eq!(
@@ -9723,6 +9922,7 @@ fn categorized_table_expand_collapse_require_set_columns() {
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
+        Uuid::nil(),
     );
     assert_eq!(collapse[0], RopId::CollapseRow.as_u8());
     assert_eq!(
@@ -9786,6 +9986,7 @@ fn microsoft_categorized_expand_collapse_report_current_state_errors() {
         &mailboxes,
         &emails,
         &MapiMailStoreSnapshot::empty(),
+        mailbox_id,
     );
     assert_eq!(expand[0], RopId::ExpandRow.as_u8());
     assert_eq!(
@@ -9823,6 +10024,7 @@ fn microsoft_categorized_expand_collapse_report_current_state_errors() {
         &mailboxes,
         &emails,
         &MapiMailStoreSnapshot::empty(),
+        mailbox_id,
     );
     assert_eq!(collapse[0], RopId::CollapseRow.as_u8());
     assert_eq!(
@@ -10025,6 +10227,7 @@ fn microsoft_contents_table_query_find_and_expand_require_set_columns() {
         &[],
         &[],
         &MapiMailStoreSnapshot::empty(),
+        Uuid::nil(),
     );
     assert_eq!(expand[0], RopId::ExpandRow.as_u8());
     assert_eq!(

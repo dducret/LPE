@@ -1110,7 +1110,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 ));
                 return;
             }
-            let (message_id, preserved_import_source_key, identity_fallback_reason) =
+            let (message_identity, preserved_import_source_key, identity_fallback_reason) =
                 match remember_created_message_mapi_identity(
                     store,
                     principal,
@@ -1151,6 +1151,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         return;
                     }
                 };
+            let message_id = message_identity.object_id;
             if upsert_custom_property_values_from_map(
                 store,
                 principal,
@@ -1175,6 +1176,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                     message_id,
                     saved_email: Some(MapiSavedEmail {
                         email: email.clone(),
+                        durable_identity: Some(message_identity.clone()),
                     }),
                     pending_properties: HashMap::new(),
                 },
@@ -1211,7 +1213,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 session,
                 folder_id,
                 message_id,
-                mapi_mailstore::canonical_message_change_number(&email),
+                message_identity.change_number,
                 associated,
                 // [MS-OXCFXICS] sections 2.2.1.1.4 and 3.2.5.9.4.6:
                 // saving a Message advances its appropriate seen set; a

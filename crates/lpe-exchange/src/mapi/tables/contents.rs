@@ -95,16 +95,37 @@ fn category_value_to_string(value: &MapiValue) -> String {
 }
 
 pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32]) -> Vec<u8> {
-    serialize_message_row_with_table_instance(email, None, columns, 0, 0, None)
+    serialize_message_row_with_durable_identity(email, None, columns)
+}
+
+pub(in crate::mapi) fn serialize_message_row_with_durable_identity(
+    email: &JmapEmail,
+    durable_identity: Option<&crate::store::MapiIdentityRecord>,
+    columns: &[u32],
+) -> Vec<u8> {
+    serialize_message_row_with_table_instance(email, durable_identity, None, columns, 0, 0, None)
 }
 
 pub(in crate::mapi) fn serialize_mapi_message_row(
     message: &MapiMessage,
     columns: &[u32],
 ) -> Vec<u8> {
+    serialize_message_row_with_durable_identity(
+        &message.email,
+        message.durable_identity.as_ref(),
+        columns,
+    )
+}
+
+pub(in crate::mapi) fn serialize_mapi_message_row_with_mailbox_guid(
+    message: &MapiMessage,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
     serialize_message_row_with_table_instance(
         &message.email,
         message.durable_identity.as_ref(),
+        Some(mailbox_guid),
         columns,
         0,
         0,
@@ -112,38 +133,52 @@ pub(in crate::mapi) fn serialize_mapi_message_row(
     )
 }
 
-pub(in crate::mapi) fn serialize_message_property_row(
+pub(in crate::mapi) fn serialize_message_row_with_mailbox_guid(
     email: &JmapEmail,
+    mailbox_guid: Uuid,
     columns: &[u32],
 ) -> Vec<u8> {
-    serialize_message_property_row_with_durable_identity(email, None, columns)
+    serialize_message_row_with_table_instance(email, None, Some(mailbox_guid), columns, 0, 0, None)
 }
 
-pub(in crate::mapi) fn serialize_mapi_message_property_row(
+pub(in crate::mapi) fn serialize_mapi_message_property_row_with_mailbox_guid(
     message: &MapiMessage,
+    mailbox_guid: Uuid,
     columns: &[u32],
 ) -> Vec<u8> {
-    serialize_message_property_row_with_durable_identity(
+    serialize_message_property_row_with_durable_identity_and_mailbox_guid(
         &message.email,
         message.durable_identity.as_ref(),
+        Some(mailbox_guid),
         columns,
     )
 }
 
-pub(in crate::mapi) fn serialize_message_property_row_in_snapshot(
+pub(in crate::mapi) fn serialize_message_property_row_in_snapshot_with_mailbox_guid(
     email: &JmapEmail,
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
     columns: &[u32],
 ) -> Vec<u8> {
     snapshot
         .message_for_canonical_id(email.id)
-        .map(|message| serialize_mapi_message_property_row(message, columns))
-        .unwrap_or_else(|| serialize_message_property_row(email, columns))
+        .map(|message| {
+            serialize_mapi_message_property_row_with_mailbox_guid(message, mailbox_guid, columns)
+        })
+        .unwrap_or_else(|| {
+            serialize_message_property_row_with_durable_identity_and_mailbox_guid(
+                email,
+                None,
+                Some(mailbox_guid),
+                columns,
+            )
+        })
 }
 
-fn serialize_message_property_row_with_durable_identity(
+fn serialize_message_property_row_with_durable_identity_and_mailbox_guid(
     email: &JmapEmail,
     durable_identity: Option<&crate::store::MapiIdentityRecord>,
+    mailbox_guid: Option<Uuid>,
     columns: &[u32],
 ) -> Vec<u8> {
     let present = columns
@@ -151,8 +186,15 @@ fn serialize_message_property_row_with_durable_identity(
         .map(|column| message_table_property_is_present(email, durable_identity, *column))
         .collect::<Vec<_>>();
     if present.iter().all(|present| *present) {
-        let values =
-            serialize_message_row_with_table_instance(email, durable_identity, columns, 0, 0, None);
+        let values = serialize_message_row_with_table_instance(
+            email,
+            durable_identity,
+            mailbox_guid,
+            columns,
+            0,
+            0,
+            None,
+        );
         let mut row = Vec::new();
         write_query_rows_property_row(&mut row, columns, &values);
         return row;
@@ -165,6 +207,7 @@ fn serialize_message_property_row_with_durable_identity(
             let value = serialize_message_row_with_table_instance(
                 email,
                 durable_identity,
+                mailbox_guid,
                 &[*column],
                 0,
                 0,
@@ -195,6 +238,7 @@ fn message_table_property_is_present(
 pub(super) fn serialize_categorized_message_row(
     email: &JmapEmail,
     durable_identity: Option<&crate::store::MapiIdentityRecord>,
+    mailbox_guid: Uuid,
     columns: &[u32],
     category_property_tag: u32,
     category_value: &str,
@@ -203,6 +247,7 @@ pub(super) fn serialize_categorized_message_row(
     serialize_message_row_with_table_instance(
         email,
         durable_identity,
+        Some(mailbox_guid),
         columns,
         instance_num,
         1,
@@ -213,6 +258,7 @@ pub(super) fn serialize_categorized_message_row(
 fn serialize_message_row_with_table_instance(
     email: &JmapEmail,
     durable_identity: Option<&crate::store::MapiIdentityRecord>,
+    mailbox_guid: Option<Uuid>,
     columns: &[u32],
     instance_num: u32,
     depth: u32,
@@ -299,7 +345,21 @@ fn serialize_message_row_with_table_instance(
             PID_TAG_NATIVE_BODY => write_u32(&mut row, native_body_format(email)),
             PID_TAG_INTERNET_CODEPAGE => write_u32(&mut row, 65001),
             PID_TAG_MESSAGE_LOCALE_ID => write_u32(&mut row, 0x0409),
-            PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
+            PID_TAG_ENTRY_ID => write_u16_prefixed_bytes(
+                &mut row,
+                &mailbox_guid
+                    .and_then(|mailbox_guid| {
+                        crate::mapi::identity::message_entry_id_from_object_ids(
+                            mailbox_guid,
+                            mapi_folder_id_for_email(email),
+                            message_id,
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        crate::mapi::identity::instance_key_for_object_id(message_id)
+                    }),
+            ),
+            PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
                 &mut row,
                 &crate::mapi::identity::instance_key_for_object_id(message_id),
             ),
@@ -319,6 +379,7 @@ fn serialize_message_row_with_table_instance(
 
 pub(super) fn categorized_email_rows(
     snapshot: Option<&MapiMailStoreSnapshot>,
+    mailbox_guid: Uuid,
     folder_id: u64,
     emails: Vec<&JmapEmail>,
     columns: &[u32],
@@ -334,8 +395,20 @@ pub(super) fn categorized_email_rows(
                 leaf_count: 1,
                 row: snapshot
                     .and_then(|snapshot| snapshot.message_for_canonical_id(email.id))
-                    .map(|message| serialize_mapi_message_row(message, columns))
-                    .unwrap_or_else(|| serialize_message_row(email, columns)),
+                    .map(|message| {
+                        serialize_mapi_message_row_with_mailbox_guid(message, mailbox_guid, columns)
+                    })
+                    .unwrap_or_else(|| {
+                        serialize_message_row_with_table_instance(
+                            email,
+                            None,
+                            Some(mailbox_guid),
+                            columns,
+                            0,
+                            0,
+                            None,
+                        )
+                    }),
                 leaf: true,
             })
             .collect();
@@ -390,6 +463,7 @@ pub(super) fn categorized_email_rows(
                         snapshot
                             .and_then(|snapshot| snapshot.message_for_canonical_id(email.id))
                             .and_then(|message| message.durable_identity.as_ref()),
+                        mailbox_guid,
                         columns,
                         category_sort.property_tag,
                         &value,

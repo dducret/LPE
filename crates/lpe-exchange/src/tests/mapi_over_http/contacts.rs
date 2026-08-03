@@ -361,6 +361,9 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
     let identity_predecessor_change_lists = store.mapi_identity_predecessor_change_lists.clone();
     let identity_last_modification_times = store.mapi_identity_last_modification_times.clone();
     let restart_store = store.clone();
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -372,16 +375,21 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let mut collector_rops = Vec::new();
-    append_rop_open_folder(
-        &mut collector_rops,
-        0,
-        1,
-        crate::mapi::identity::CONTACTS_FOLDER_ID,
-    );
-    collector_rops.extend_from_slice(&[
-        0x7e, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
-    ]);
+    let collector_rops =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+            let mut collector_rops = Vec::new();
+            append_rop_open_folder(
+                &mut collector_rops,
+                0,
+                1,
+                crate::mapi::identity::CONTACTS_FOLDER_ID,
+            );
+            collector_rops.extend_from_slice(&[
+                0x7e, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector, contents.
+            ]);
+            collector_rops
+        })
+        .await;
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -662,12 +670,17 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
     // Rebuild the MAPI snapshot as a fresh Outlook connection would. The
     // imported identity must survive outside the session handle and remain
     // the identity advertised by the next content synchronization.
-    let response_rops = content_sync_response_rops_for_store(
-        restart_store,
-        crate::mapi::identity::CONTACTS_FOLDER_ID,
-        &[],
-    )
-    .await;
+    let restart_identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&restart_store, account.account_id)
+            .await
+            .unwrap();
+    let rops =
+        crate::mapi::identity::with_current_mapi_identity_codec(restart_identity_codec, async {
+            outlook_content_sync_request_rops(crate::mapi::identity::CONTACTS_FOLDER_ID, &[])
+        })
+        .await;
+    let response_rops =
+        outlook_content_sync_response_rops_for_store_with_rops(restart_store, rops).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 1, "{response_rops:02x?}");
     let synchronized = &stream.message_changes[0];

@@ -1,6 +1,7 @@
 use super::*;
 use crate::store::{MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest};
 use anyhow::{anyhow, Result};
+use std::sync::Arc;
 
 pub(crate) const STORE_REPLICA_ID: u64 = 1;
 pub(crate) const MAX_PERSISTED_GLOBAL_COUNTER: u64 = 0x7FFF_FFFF_FFFF;
@@ -28,6 +29,10 @@ tokio::task_local! {
     static CURRENT_MAPI_IDENTITY_CODEC: MapiIdentityCodec;
 }
 
+tokio::task_local! {
+    static CURRENT_MAPI_REQUEST_IDENTITIES: MapiRequestIdentityScope;
+}
+
 pub(crate) async fn with_current_mapi_identity_codec<T>(
     codec: MapiIdentityCodec,
     future: impl std::future::Future<Output = T>,
@@ -37,6 +42,12 @@ pub(crate) async fn with_current_mapi_identity_codec<T>(
 
 fn current_mapi_identity_codec<T>(mapper: impl FnOnce(&MapiIdentityCodec) -> T) -> Option<T> {
     CURRENT_MAPI_IDENTITY_CODEC.try_with(mapper).ok()
+}
+
+fn current_mapi_request_identities<T>(
+    mapper: impl FnOnce(&MapiRequestIdentityScope) -> T,
+) -> Option<T> {
+    CURRENT_MAPI_REQUEST_IDENTITIES.try_with(mapper).ok()
 }
 
 pub(crate) fn current_store_replica_guid() -> [u8; 16] {
@@ -52,6 +63,89 @@ pub(crate) fn durable_object_id(object_id: u64) -> Option<u64> {
 struct MapiIdentityMaterial {
     object_id: u64,
     source_key: Option<Vec<u8>>,
+}
+
+/// The durable IDs visible to one MAPI request. Canonical object UUIDs can
+/// have distinct identities for an owner and a delegate, so the process-wide
+/// cache is only a compatibility fallback and cannot be the request authority.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MapiRequestIdentityScope {
+    identities: Arc<Mutex<HashMap<Uuid, MapiIdentityMaterial>>>,
+}
+
+impl MapiRequestIdentityScope {
+    pub(crate) fn from_identity_records(
+        records: &[MapiIdentityRecord],
+        codec: &MapiIdentityCodec,
+    ) -> Self {
+        let scope = Self::default();
+        scope.seed_from_identity_records(records, codec);
+        scope
+    }
+
+    pub(crate) fn seed_from_identity_records(
+        &self,
+        records: &[MapiIdentityRecord],
+        codec: &MapiIdentityCodec,
+    ) {
+        for record in records {
+            let object_id = if codec.is_special_canonical_id(&record.canonical_id) {
+                codec
+                    .logical_object_id(record.object_id)
+                    .expect("MAPI special folder identity must map to a logical folder ID")
+            } else {
+                record.object_id
+            };
+            self.remember(
+                record.canonical_id,
+                object_id,
+                Some(record.source_key.clone()),
+            );
+        }
+    }
+
+    fn remember(&self, canonical_id: Uuid, object_id: u64, source_key: Option<Vec<u8>>) {
+        self.identities
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                canonical_id,
+                MapiIdentityMaterial {
+                    object_id,
+                    source_key,
+                },
+            );
+    }
+
+    fn forget(&self, canonical_id: &Uuid) {
+        self.identities
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(canonical_id);
+    }
+
+    fn object_id(&self, canonical_id: &Uuid) -> Option<u64> {
+        self.identities
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(canonical_id)
+            .map(|identity| identity.object_id)
+    }
+
+    fn source_key(&self, canonical_id: &Uuid) -> Option<Vec<u8>> {
+        self.identities
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(canonical_id)
+            .and_then(|identity| identity.source_key.clone())
+    }
+}
+
+pub(crate) async fn with_current_mapi_request_identity_scope<'a, T: Send + 'a>(
+    scope: MapiRequestIdentityScope,
+    future: std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>,
+) -> T {
+    CURRENT_MAPI_REQUEST_IDENTITIES.scope(scope, future).await
 }
 
 /// Translates the stable logical special-folder IDs used by the mailbox model
@@ -190,11 +284,15 @@ impl MapiIdentityCodec {
     }
 
     pub(crate) fn object_id_from_wire_id(&self, bytes: &[u8]) -> Option<u64> {
-        self.logical_object_id(raw_object_id_from_wire_id(bytes)?)
+        let object_id = raw_object_id_from_wire_id(bytes)?;
+        self.logical_object_id(object_id)
+            .or_else(|| is_advertised_special_folder_id(object_id).then_some(object_id))
     }
 
     pub(crate) fn object_id_from_trailing_replid_wire_id(&self, bytes: &[u8]) -> Option<u64> {
-        self.logical_object_id(raw_object_id_from_trailing_replid_wire_id(bytes)?)
+        let object_id = raw_object_id_from_trailing_replid_wire_id(bytes)?;
+        self.logical_object_id(object_id)
+            .or_else(|| is_advertised_special_folder_id(object_id).then_some(object_id))
     }
 
     pub(crate) fn wire_id_bytes_from_object_id(&self, object_id: u64) -> Option<[u8; 8]> {
@@ -576,6 +674,9 @@ pub(crate) fn remember_mapi_identity_with_source_key(
     object_id: u64,
     source_key: Option<Vec<u8>>,
 ) {
+    let _ = current_mapi_request_identities(|scope| {
+        scope.remember(canonical_id, object_id, source_key.clone());
+    });
     let mut ids = MAPI_OBJECT_IDS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
@@ -590,6 +691,7 @@ pub(crate) fn remember_mapi_identity_with_source_key(
 }
 
 pub(crate) fn forget_mapi_identity(canonical_id: &Uuid) {
+    let _ = current_mapi_request_identities(|scope| scope.forget(canonical_id));
     MAPI_OBJECT_IDS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
@@ -598,6 +700,10 @@ pub(crate) fn forget_mapi_identity(canonical_id: &Uuid) {
 }
 
 pub(crate) fn mapped_mapi_object_id(canonical_id: &Uuid) -> Option<u64> {
+    if let Some(object_id) = current_mapi_request_identities(|scope| scope.object_id(canonical_id))
+    {
+        return object_id;
+    }
     MAPI_OBJECT_IDS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
@@ -612,6 +718,11 @@ pub(crate) fn object_id_matches(canonical_id: &Uuid, object_id: u64) -> bool {
 }
 
 pub(crate) fn mapped_mapi_source_key(canonical_id: &Uuid) -> Option<Vec<u8>> {
+    if let Some(source_key) =
+        current_mapi_request_identities(|scope| scope.source_key(canonical_id))
+    {
+        return source_key;
+    }
     MAPI_OBJECT_IDS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
@@ -1221,6 +1332,42 @@ mod tests {
     }
 
     #[test]
+    fn scoped_codec_accepts_legacy_logical_special_folder_wire_ids() {
+        let durable_inbox_id = mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER + 1);
+        let codec = MapiIdentityCodec {
+            replica_guid: STORE_REPLICA_GUID,
+            logical_to_actual: HashMap::from([(INBOX_FOLDER_ID, durable_inbox_id)]),
+            actual_to_logical: HashMap::from([(durable_inbox_id, INBOX_FOLDER_ID)]),
+            special_canonical_ids: HashSet::new(),
+        };
+        let logical_wire_id = raw_wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap();
+        let mut logical_trailing_wire_id = globcnt_bytes(INBOX_FOLDER_COUNTER).to_vec();
+        logical_trailing_wire_id.extend_from_slice(&(STORE_REPLICA_ID as u16).to_le_bytes());
+
+        assert_eq!(
+            codec.object_id_from_wire_id(&logical_wire_id),
+            Some(INBOX_FOLDER_ID)
+        );
+        assert_eq!(
+            codec.object_id_from_trailing_replid_wire_id(&logical_trailing_wire_id),
+            Some(INBOX_FOLDER_ID)
+        );
+        assert_eq!(
+            codec.object_id_from_wire_id(
+                &raw_wire_id_bytes_from_object_id(CONVERSATION_HISTORY_FOLDER_ID).unwrap()
+            ),
+            None,
+            "unadvertised logical special folders are never accepted as wire IDs"
+        );
+        assert_eq!(
+            codec.object_id_from_wire_id(
+                &raw_wire_id_bytes_from_object_id(durable_inbox_id).unwrap()
+            ),
+            Some(INBOX_FOLDER_ID)
+        );
+    }
+
+    #[test]
     fn source_change_and_instance_keys_are_replica_scoped() {
         let object_id = mapi_store_id(42);
         assert_eq!(
@@ -1261,6 +1408,202 @@ mod tests {
         );
         assert!(FIRST_DYNAMIC_GLOBAL_COUNTER > QUICK_STEP_SETTINGS_FOLDER_COUNTER);
         assert!(FIRST_DYNAMIC_GLOBAL_COUNTER > RECOVERABLE_ITEMS_PURGES_FOLDER_COUNTER);
+    }
+
+    #[tokio::test]
+    async fn request_scope_keeps_special_folder_parent_identity_logical_and_durable() {
+        let replica_guid = Uuid::from_u128(0x01234567_89ab_cdef_0123_456789abcdef);
+        let inbox_canonical_id = Uuid::from_u128(0x1001);
+        let inbox_object_id = mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER + 0x100);
+        let mut inbox_source_key = replica_guid.as_bytes().to_vec();
+        inbox_source_key.extend_from_slice(&globcnt_bytes(
+            global_counter_from_store_id(inbox_object_id).unwrap(),
+        ));
+        let codec = MapiIdentityCodec {
+            replica_guid: *replica_guid.as_bytes(),
+            logical_to_actual: HashMap::from([(INBOX_FOLDER_ID, inbox_object_id)]),
+            actual_to_logical: HashMap::from([(inbox_object_id, INBOX_FOLDER_ID)]),
+            special_canonical_ids: HashSet::from([inbox_canonical_id]),
+        };
+        let custom_canonical_id = Uuid::from_u128(0x2001);
+        let custom_object_id = mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER + 0x400);
+        let records = vec![
+            MapiIdentityRecord {
+                object_kind: MapiIdentityObjectKind::Mailbox,
+                canonical_id: inbox_canonical_id,
+                object_id: inbox_object_id,
+                change_number: 1,
+                source_key: inbox_source_key.clone(),
+                change_key: Vec::new(),
+                predecessor_change_list: Vec::new(),
+                last_modification_time: 0,
+            },
+            MapiIdentityRecord {
+                object_kind: MapiIdentityObjectKind::Mailbox,
+                canonical_id: custom_canonical_id,
+                object_id: custom_object_id,
+                change_number: 1,
+                source_key: Vec::new(),
+                change_key: Vec::new(),
+                predecessor_change_list: Vec::new(),
+                last_modification_time: 0,
+            },
+        ];
+        let scope = MapiRequestIdentityScope::from_identity_records(&records, &codec);
+        let custom_mailbox = JmapMailbox {
+            id: custom_canonical_id,
+            parent_id: Some(inbox_canonical_id),
+            role: "custom".to_string(),
+            name: "Under Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 0,
+            unread_emails: 0,
+            size_octets: 0,
+            is_subscribed: true,
+        };
+        let codec_for_request = codec.clone();
+        let (parent_wire_id, parent_source_key) = with_current_mapi_request_identity_scope(
+            scope,
+            Box::pin(async move {
+                with_current_mapi_identity_codec(codec_for_request, async move {
+                    (
+                        crate::mapi::tables::serialize_folder_row_with_context(
+                            &custom_mailbox,
+                            &[],
+                            &[crate::mapi::properties::PID_TAG_PARENT_FOLDER_ID],
+                            Uuid::nil(),
+                        ),
+                        crate::mapi_mailstore::source_key_for_uuid(&inbox_canonical_id),
+                    )
+                })
+                .await
+            }),
+        )
+        .await;
+
+        assert_eq!(
+            codec.object_id_from_wire_id(&parent_wire_id),
+            Some(INBOX_FOLDER_ID)
+        );
+        assert_eq!(parent_source_key, inbox_source_key);
+    }
+
+    #[tokio::test]
+    async fn owner_and_grantee_scopes_keep_hierarchy_folder_wire_ids_separate() {
+        let canonical_id = Uuid::parse_str("83838383-8383-4383-9383-838383838383").unwrap();
+        let owner_id = mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER + 0x311);
+        let grantee_id = mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER + 0x322);
+        let mailbox = JmapMailbox {
+            id: canonical_id,
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "Shared Projects".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 0,
+            unread_emails: 0,
+            size_octets: 0,
+            is_subscribed: true,
+        };
+        let record = |object_id| MapiIdentityRecord {
+            object_kind: MapiIdentityObjectKind::Mailbox,
+            canonical_id,
+            object_id,
+            change_number: 1,
+            source_key: source_key_for_object_id(object_id),
+            change_key: change_key_for_change_number(1),
+            predecessor_change_list: Vec::new(),
+            last_modification_time: 0,
+        };
+        let owner = record(owner_id);
+        let grantee = record(grantee_id);
+        let codec = MapiIdentityCodec::legacy_for_tests();
+        let owner_scope = MapiRequestIdentityScope::default();
+        owner_scope.seed_from_identity_records(std::slice::from_ref(&owner), &codec);
+        let grantee_scope = MapiRequestIdentityScope::default();
+        grantee_scope.seed_from_identity_records(std::slice::from_ref(&grantee), &codec);
+
+        remember_mapi_identity_with_source_key(
+            canonical_id,
+            owner.object_id,
+            Some(owner.source_key.clone()),
+        );
+        remember_mapi_identity_with_source_key(
+            canonical_id,
+            grantee.object_id,
+            Some(grantee.source_key.clone()),
+        );
+        let unscoped_row = crate::mapi::tables::serialize_folder_row_with_context(
+            &mailbox,
+            &[],
+            &[crate::mapi::properties::PID_TAG_FOLDER_ID],
+            Uuid::nil(),
+        );
+        assert_eq!(
+            object_id_from_wire_id(&unscoped_row[..8]),
+            Some(grantee_id),
+            "the process-wide fallback demonstrates the owner/grantee collision"
+        );
+
+        let owner_row = with_current_mapi_request_identity_scope(
+            owner_scope.clone(),
+            Box::pin(async {
+                crate::mapi::tables::serialize_folder_row_with_context(
+                    &mailbox,
+                    &[],
+                    &[crate::mapi::properties::PID_TAG_FOLDER_ID],
+                    Uuid::nil(),
+                )
+            }),
+        )
+        .await;
+        assert_eq!(object_id_from_wire_id(&owner_row[..8]), Some(owner_id));
+
+        remember_mapi_identity_with_source_key(
+            canonical_id,
+            owner.object_id,
+            Some(owner.source_key.clone()),
+        );
+        let grantee_row = with_current_mapi_request_identity_scope(
+            grantee_scope,
+            Box::pin(async {
+                crate::mapi::tables::serialize_folder_row_with_context(
+                    &mailbox,
+                    &[],
+                    &[crate::mapi::properties::PID_TAG_FOLDER_ID],
+                    Uuid::nil(),
+                )
+            }),
+        )
+        .await;
+        assert_eq!(object_id_from_wire_id(&grantee_row[..8]), Some(grantee_id));
+
+        let absent_canonical_id = Uuid::parse_str("84848484-8484-4484-9484-848484848484").unwrap();
+        let absent_global_id = mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER + 0x333);
+        let absent_mailbox = JmapMailbox {
+            id: absent_canonical_id,
+            ..mailbox.clone()
+        };
+        remember_mapi_identity(absent_canonical_id, absent_global_id);
+        let absent_mapping = with_current_mapi_request_identity_scope(
+            owner_scope.clone(),
+            Box::pin(async { crate::mapi::tables::try_mapi_folder_id(&absent_mailbox) }),
+        )
+        .await;
+        assert_eq!(
+            absent_mapping, None,
+            "an active request scope must not borrow an owner or grantee identity from another request"
+        );
+        let absent_source_key = with_current_mapi_request_identity_scope(
+            owner_scope,
+            Box::pin(async { mapped_mapi_source_key(&absent_canonical_id) }),
+        )
+        .await;
+        assert_eq!(absent_source_key, None);
+
+        forget_mapi_identity(&canonical_id);
+        forget_mapi_identity(&absent_canonical_id);
     }
 
     #[test]

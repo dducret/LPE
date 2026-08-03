@@ -33,6 +33,7 @@ use folder_versions::MapiFolderVersions;
 pub(crate) struct MapiMailStoreSnapshot {
     folders: Vec<MapiFolder>,
     identity_codec: crate::mapi::identity::MapiIdentityCodec,
+    durable_identity_records: Vec<MapiIdentityRecord>,
     folder_versions: MapiFolderVersions,
     mailbox_content_commit_times: HashMap<Uuid, u64>,
     contact_commit_times: HashMap<Uuid, u64>,
@@ -421,12 +422,15 @@ impl<T: ExchangeStore> MapiStore for T {
     fn load_mapi_mail_store<'a>(
         &'a self,
         account_id: Uuid,
-        message_limit: u64,
+        _message_limit: u64,
     ) -> StoreFuture<'a, MapiMailStoreSnapshot> {
         Box::pin(async move {
             let mailboxes = self.ensure_jmap_system_mailboxes(account_id).await?;
-            let mut message_ids = self.fetch_all_jmap_email_ids(account_id).await?;
-            message_ids.truncate(message_limit.min(usize::MAX as u64) as usize);
+            // [MS-OXCFXICS] section 3.2.5.3 requires the transfer state to
+            // describe the complete synchronization scope. Truncating a
+            // UUID-ordered mailbox here permanently hid messages outside an
+            // arbitrary prefix from Outlook's contents synchronization.
+            let message_ids = self.fetch_all_jmap_email_ids(account_id).await?;
             let emails = self.fetch_jmap_emails(account_id, &message_ids).await?;
             let mut attachments = Vec::with_capacity(emails.len());
             for email in &emails {

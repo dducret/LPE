@@ -4266,6 +4266,7 @@ async fn mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests
         emails: Arc::new(Mutex::new(vec![email])),
         ..Default::default()
     };
+    let identity_store = store.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4282,9 +4283,20 @@ async fn mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests
         .unwrap()
         .to_string();
 
-    let mut first_rops = Vec::new();
-    append_rop_open_folder(&mut first_rops, 0, 1, test_mapi_folder_id(5));
-    append_rop_sync_manifest_get_buffer(&mut first_rops, 1, 2, 32);
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(
+        &identity_store,
+        FakeStore::account().account_id,
+    )
+    .await
+    .unwrap();
+    let first_rops =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+            let mut rops = Vec::new();
+            append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+            append_rop_sync_manifest_get_buffer(&mut rops, 1, 2, 32);
+            rops
+        })
+        .await;
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let first_request = execute_body(&rop_buffer(&first_rops, &[1, u32::MAX, u32::MAX]));

@@ -613,6 +613,38 @@ fn sync_manifest_serializes_content_message_header_in_fixed_order() {
     assert_eq!(change_facts[0].object_id, durable_object_id);
     assert_eq!(change_facts[0].change_number, durable_change_number);
     assert_eq!(change_facts[0].source_key, durable_source_key);
+
+    // [MS-OXCFXICS] sections 3.2.5.1 and 3.2.5.3: the final state advances
+    // exactly by the differences emitted in this download.
+    let (selected, final_state) = select_download_manifest_for_client_state(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        &buffer,
+        &initial_sync_state_stream(SYNC_TYPE_CONTENTS),
+        &change_facts,
+        &[],
+    )
+    .expect("select the unseen durable message version");
+    assert_change_number_property(&selected, PID_TAG_CHANGE_NUMBER, durable_change_number);
+    assert_variable_property(
+        &final_state,
+        META_TAG_CNSET_SEEN,
+        &replguid_idset_from_counters(&[durable_change_number]),
+    );
+
+    let (selected_again, final_state_again) = select_download_manifest_for_client_state(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        &buffer,
+        &final_state,
+        &change_facts,
+        &[],
+    )
+    .expect("recognize the durable message version from the returned state");
+    let mut state_only = final_state.clone();
+    state_only.extend_from_slice(&INCR_SYNC_END.to_le_bytes());
+    assert_eq!(selected_again, state_only);
+    assert_eq!(final_state_again, final_state);
 }
 
 #[test]

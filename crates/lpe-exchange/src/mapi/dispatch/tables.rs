@@ -1874,6 +1874,7 @@ pub(super) fn append_table_control_response(
             mailboxes,
             emails,
             snapshot,
+            principal.account_id,
         )),
         Some(RopId::CollapseRow) => responses.extend_from_slice(&collapse_row_response(
             request,
@@ -1881,6 +1882,7 @@ pub(super) fn append_table_control_response(
             mailboxes,
             emails,
             snapshot,
+            principal.account_id,
         )),
         Some(RopId::GetCollapseState) => responses.extend_from_slice(&get_collapse_state_response(
             request,
@@ -1922,8 +1924,9 @@ pub(super) fn collapse_row_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
-    rop_collapse_row_response(request, object, mailboxes, emails, snapshot)
+    rop_collapse_row_response(request, object, mailboxes, emails, snapshot, mailbox_guid)
 }
 
 pub(super) fn get_collapse_state_response(
@@ -1946,8 +1949,9 @@ pub(super) fn expand_row_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
-    rop_expand_row_response(request, object, mailboxes, emails, snapshot)
+    rop_expand_row_response(request, object, mailboxes, emails, snapshot, mailbox_guid)
 }
 
 pub(super) fn query_position_response(

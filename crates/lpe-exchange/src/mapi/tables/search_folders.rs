@@ -127,11 +127,14 @@ fn search_content_row_time(row: &SearchContentRow<'_>) -> String {
 pub(super) fn serialize_search_content_row(
     row: SearchContentRow<'_>,
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
     columns: &[u32],
     reminder_projection: bool,
 ) -> Vec<u8> {
     match row {
-        SearchContentRow::Message(message) => serialize_mapi_message_row(message, columns),
+        SearchContentRow::Message(message) => {
+            serialize_mapi_message_row_with_mailbox_guid(message, mailbox_guid, columns)
+        }
         SearchContentRow::Task(task) if reminder_projection => serialize_reminder_task_row(
             task,
             snapshot.reminder_for_source("task", task.canonical_id),

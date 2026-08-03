@@ -356,7 +356,12 @@ pub(in crate::mapi) fn rop_find_row_response(
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_deleted_items_content_row(*row, snapshot, &columns),
+                        &serialize_deleted_items_content_row(
+                            *row,
+                            snapshot,
+                            mailbox_guid,
+                            &columns,
+                        ),
                     );
                 } else {
                     return rop_find_row_no_match_response(request);
@@ -502,7 +507,13 @@ pub(in crate::mapi) fn rop_find_row_response(
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_search_content_row(*row, snapshot, &columns, false),
+                        &serialize_search_content_row(
+                            *row,
+                            snapshot,
+                            mailbox_guid,
+                            &columns,
+                            false,
+                        ),
                     );
                 } else {
                     return rop_find_row_no_match_response(request);
@@ -534,8 +545,13 @@ pub(in crate::mapi) fn rop_find_row_response(
                 {
                     *position = index;
                     response.push(1);
-                    response
-                        .extend_from_slice(&serialize_mapi_message_property_row(message, &columns));
+                    response.extend_from_slice(
+                        &serialize_mapi_message_property_row_with_mailbox_guid(
+                            message,
+                            mailbox_guid,
+                            &columns,
+                        ),
+                    );
                 } else {
                     return rop_find_row_no_match_response(request);
                 }
@@ -552,7 +568,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_search_content_row(*row, snapshot, &columns, true),
+                        &serialize_search_content_row(*row, snapshot, mailbox_guid, &columns, true),
                     );
                 } else {
                     return rop_find_row_no_match_response(request);
@@ -661,9 +677,14 @@ pub(in crate::mapi) fn rop_find_row_response(
                     {
                         *position = offset.saturating_add(index);
                         response.push(1);
-                        response.extend_from_slice(&serialize_message_property_row_in_snapshot(
-                            email, snapshot, &columns,
-                        ));
+                        response.extend_from_slice(
+                            &serialize_message_property_row_in_snapshot_with_mailbox_guid(
+                                email,
+                                snapshot,
+                                mailbox_guid,
+                                &columns,
+                            ),
+                        );
                     } else {
                         let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
                         retain_rows_by_restriction(
@@ -698,8 +719,11 @@ pub(in crate::mapi) fn rop_find_row_response(
                             *position = index;
                             response.push(1);
                             response.extend_from_slice(
-                                &serialize_message_property_row_in_snapshot(
-                                    email, snapshot, &columns,
+                                &serialize_message_property_row_in_snapshot_with_mailbox_guid(
+                                    email,
+                                    snapshot,
+                                    mailbox_guid,
+                                    &columns,
                                 ),
                             );
                         } else {
@@ -733,9 +757,14 @@ pub(in crate::mapi) fn rop_find_row_response(
                     {
                         *position = index;
                         response.push(1);
-                        response.extend_from_slice(&serialize_message_property_row_in_snapshot(
-                            email, snapshot, &columns,
-                        ));
+                        response.extend_from_slice(
+                            &serialize_message_property_row_in_snapshot_with_mailbox_guid(
+                                email,
+                                snapshot,
+                                mailbox_guid,
+                                &columns,
+                            ),
+                        );
                     } else {
                         return rop_find_row_no_match_response(request);
                     }

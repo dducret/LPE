@@ -1119,7 +1119,9 @@ async fn mapi_over_http_deleted_items_mixed_categorized_sort_query_rows() {
     let trash_id = Uuid::parse_str("70707070-7070-4070-8070-707070707071").unwrap();
     let mail_id = Uuid::parse_str("71717171-7171-4171-8171-717171717172").unwrap();
     let event_id = Uuid::parse_str("72727272-7272-4272-8272-727272727273").unwrap();
-    let event_mapi_id = 0x0000_0000_0050_0001;
+    let event_mapi_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 0x1000,
+    );
     let mut trash = FakeStore::mailbox(&trash_id.to_string(), "trash", "Deleted Items");
     trash.total_emails = 1;
     let store = FakeStore {

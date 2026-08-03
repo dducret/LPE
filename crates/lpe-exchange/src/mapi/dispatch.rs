@@ -468,6 +468,7 @@ where
             );
         }
     };
+    let request_identity_scope = identity_scope.request_identity_scope();
     session.store_replica_guid = Some(Uuid::from_bytes(identity_scope.codec.replica_guid()));
     if let Err(error) =
         refresh_persisted_special_folder_aliases(store, principal, &mut session).await
@@ -486,12 +487,16 @@ where
     )
     .await;
     log_execute_store_access_debug(endpoint, principal, headers, request_id, &access_plan);
-    let mut snapshot = match load_mapi_store_for_access_plan(
-        store,
-        principal.account_id,
-        &identity_scope,
-        &access_plan,
-        500,
+    let mut snapshot = match crate::mapi::identity::with_current_mapi_request_identity_scope(
+        request_identity_scope.clone(),
+        Box::pin(load_mapi_store_for_access_plan(
+            store,
+            principal.account_id,
+            &identity_scope,
+            &request_identity_scope,
+            &access_plan,
+            500,
+        )),
     )
     .await
     {
@@ -512,12 +517,16 @@ where
                     full_snapshot_error = %format!("{error:#}"),
                     "rca debug mapi full snapshot fallback to hierarchy store view"
                 );
-                match load_mapi_store_for_access_plan(
-                    store,
-                    principal.account_id,
-                    &identity_scope,
-                    &fallback_plan,
-                    500,
+                match crate::mapi::identity::with_current_mapi_request_identity_scope(
+                    request_identity_scope.clone(),
+                    Box::pin(load_mapi_store_for_access_plan(
+                        store,
+                        principal.account_id,
+                        &identity_scope,
+                        &request_identity_scope,
+                        &fallback_plan,
+                        500,
+                    )),
                 )
                 .await
                 {
@@ -555,26 +564,29 @@ where
         mailboxes.len(),
         emails.len(),
     );
-    let rop_buffer = crate::mapi::identity::with_current_mapi_identity_codec(
-        snapshot.identity_codec().clone(),
-        execute_rops(
-            store,
-            principal,
-            request_id,
-            &mut session,
-            &mailboxes,
-            &emails,
-            &mut snapshot,
-            validator,
-            &execute.rop_buffer,
-            execute.max_rop_out,
-            request_debug.all_release,
-            request_debug.handle_count,
-            &request_debug.handle_table_summary,
-            &request_debug.ids_csv,
-            &request_debug.names_csv,
-            &request_debug.non_release_rops,
-        ),
+    let rop_buffer = crate::mapi::identity::with_current_mapi_request_identity_scope(
+        request_identity_scope,
+        Box::pin(crate::mapi::identity::with_current_mapi_identity_codec(
+            snapshot.identity_codec().clone(),
+            execute_rops(
+                store,
+                principal,
+                request_id,
+                &mut session,
+                &mailboxes,
+                &emails,
+                &mut snapshot,
+                validator,
+                &execute.rop_buffer,
+                execute.max_rop_out,
+                request_debug.all_release,
+                request_debug.handle_count,
+                &request_debug.handle_table_summary,
+                &request_debug.ids_csv,
+                &request_debug.names_csv,
+                &request_debug.non_release_rops,
+            ),
+        )),
     )
     .await;
     let post_hierarchy_observation = if endpoint == MapiEndpoint::Emsmdb
@@ -1387,6 +1399,10 @@ where
             break;
         }
     }
+    let deferred_save_changes_response_indexes = deferred_save_changes_response_handles
+        .iter()
+        .map(|(request, _, _)| request.response_handle_index())
+        .collect::<HashSet<_>>();
     for (request, input_handle, target) in deferred_save_changes_response_handles {
         if handle_slots
             .get(usize::from(request.response_handle_index()))
@@ -1394,6 +1410,15 @@ where
             == Some(input_handle)
         {
             restore_save_changes_response_handle(session, &mut handle_slots, &request, target);
+        }
+    }
+    for released_handle_index in &released_handle_indexes {
+        if deferred_save_changes_response_indexes.contains(released_handle_index) {
+            if let Some(handle_slot) = handle_slots.get_mut(usize::from(*released_handle_index)) {
+                if *handle_slot == u32::MAX {
+                    *handle_slot = 0;
+                }
+            }
         }
     }
     if let Some(cursor) = session.notification_cursor {

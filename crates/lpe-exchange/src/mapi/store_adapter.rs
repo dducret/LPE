@@ -28,6 +28,17 @@ pub(in crate::mapi) struct MapiIdentityScope {
     pub(in crate::mapi) codec: crate::mapi::identity::MapiIdentityCodec,
 }
 
+impl MapiIdentityScope {
+    pub(in crate::mapi) fn request_identity_scope(
+        &self,
+    ) -> crate::mapi::identity::MapiRequestIdentityScope {
+        crate::mapi::identity::MapiRequestIdentityScope::from_identity_records(
+            &self.mailbox_identity_records,
+            &self.codec,
+        )
+    }
+}
+
 pub(in crate::mapi) async fn load_mapi_identity_scope<S>(
     store: &S,
     account_id: Uuid,
@@ -85,6 +96,7 @@ pub(in crate::mapi) async fn load_mapi_store_for_access_plan<S>(
     store: &S,
     account_id: Uuid,
     identity_scope: &MapiIdentityScope,
+    request_identity_scope: &crate::mapi::identity::MapiRequestIdentityScope,
     plan: &MapiAccessPlan,
     full_message_limit: u64,
 ) -> Result<MapiMailStoreSnapshot>
@@ -93,11 +105,15 @@ where
 {
     if plan.requires_full_snapshot {
         log_mapi_store_full_snapshot(account_id, plan);
-        return store
+        let snapshot = store
             .load_mapi_mail_store(account_id, full_message_limit)
             .await
-            .context("load full MAPI mail store snapshot")
-            .map(|snapshot| snapshot.with_identity_codec(identity_scope.codec.clone()));
+            .context("load full MAPI mail store snapshot")?;
+        return Ok(finalize_mapi_store_snapshot(
+            snapshot,
+            identity_scope,
+            request_identity_scope,
+        ));
     }
 
     let mut mailboxes = identity_scope.mailboxes.clone();
@@ -777,10 +793,16 @@ where
         "fetch durable MAPI event versions",
         loaded_event_ids.len(),
     );
-    let event_versions = store
-        .fetch_mapi_event_versions(account_id, &loaded_event_ids)
-        .await
-        .context("fetch durable MAPI Event versions")?;
+    let event_versions = if calendar_event_versions_required(plan, &identities) {
+        Some(
+            store
+                .fetch_mapi_event_versions(account_id, &loaded_event_ids)
+                .await
+                .context("fetch durable MAPI Event versions")?,
+        )
+    } else {
+        None
+    };
     let mailbox_ids = mailboxes
         .iter()
         .map(|mailbox| mailbox.id)
@@ -830,7 +852,7 @@ where
             .filter(|event| matches!(event.collection_id.as_str(), "default" | "calendar"))
             .count(),
     );
-    let snapshot = MapiMailStoreSnapshot::new_with_scoped_calendar_identities(
+    let mut snapshot = MapiMailStoreSnapshot::new_with_scoped_calendar_identities(
         mailboxes,
         emails,
         attachments,
@@ -846,25 +868,68 @@ where
         &identity_scope.codec,
     )?
     .with_contact_identities(&snapshot_identities)?
-    .with_contact_sync_versions(contact_sync_versions)
-    .with_event_versions(event_versions)
-    .context("apply durable MAPI Event versions to selective snapshot")?
-    .with_notes_and_journal(notes, journal_entries)
-    .with_search_folder_definitions(search_folder_definitions)
-    .with_conversation_actions(conversation_actions)
-    .with_navigation_shortcuts(navigation_shortcuts)
-    .with_navigation_shortcut_identities(&snapshot_identities)?
-    .with_named_property_mappings(named_property_mappings)
-    .with_associated_configs(associated_configs)
-    .with_associated_config_identity_ids(associated_config_identity_ids)
-    .with_delegate_freebusy_messages(delegate_freebusy_messages)
-    .with_recoverable_items(recoverable_items)
-    .with_reminders(reminders)
-    .with_content_windows(content_windows)
-    .with_calendar_attachments(calendar_attachments)
-    .with_mailbox_content_commit_times(mailbox_content_commit_times)
-    .with_identity_codec(identity_scope.codec.clone());
-    Ok(snapshot)
+    .with_contact_sync_versions(contact_sync_versions);
+    if let Some(event_versions) = event_versions {
+        snapshot = snapshot
+            .with_event_versions(event_versions)
+            .context("apply durable MAPI Event versions to selective snapshot")?;
+    }
+    let snapshot = snapshot
+        .with_notes_and_journal(notes, journal_entries)
+        .with_search_folder_definitions(search_folder_definitions)
+        .with_conversation_actions(conversation_actions)
+        .with_navigation_shortcuts(navigation_shortcuts)
+        .with_navigation_shortcut_identities(&snapshot_identities)?
+        .with_named_property_mappings(named_property_mappings)
+        .with_associated_configs(associated_configs)
+        .with_associated_config_identity_ids(associated_config_identity_ids)
+        .with_delegate_freebusy_messages(delegate_freebusy_messages)
+        .with_recoverable_items(recoverable_items)
+        .with_reminders(reminders)
+        .with_content_windows(content_windows)
+        .with_calendar_attachments(calendar_attachments)
+        .with_mailbox_content_commit_times(mailbox_content_commit_times)
+        .with_identity_codec(identity_scope.codec.clone());
+    Ok(finalize_mapi_store_snapshot(
+        snapshot,
+        identity_scope,
+        request_identity_scope,
+    ))
+}
+
+fn finalize_mapi_store_snapshot(
+    snapshot: MapiMailStoreSnapshot,
+    identity_scope: &MapiIdentityScope,
+    request_identity_scope: &crate::mapi::identity::MapiRequestIdentityScope,
+) -> MapiMailStoreSnapshot {
+    let snapshot = snapshot.with_identity_codec(identity_scope.codec.clone());
+    request_identity_scope.seed_from_identity_records(
+        snapshot.durable_identity_records(),
+        snapshot.identity_codec(),
+    );
+    snapshot
+}
+
+fn calendar_event_versions_required(
+    plan: &MapiAccessPlan,
+    identities: &[MapiIdentityLookupRecord],
+) -> bool {
+    plan.object_ids.iter().any(|object_id| {
+        matches!(
+            *object_id,
+            CALENDAR_FOLDER_ID | REMINDERS_FOLDER_ID | TRASH_FOLDER_ID
+        )
+    }) || plan.content_queries.iter().any(|query| {
+        matches!(
+            query.folder_id,
+            CALENDAR_FOLDER_ID | REMINDERS_FOLDER_ID | TRASH_FOLDER_ID
+        )
+    }) || identities.iter().any(|identity| {
+        matches!(
+            identity.object_kind,
+            MapiIdentityObjectKind::CalendarEvent | MapiIdentityObjectKind::DeletedCalendarEvent
+        )
+    })
 }
 
 fn requested_identity_has_backing_row(

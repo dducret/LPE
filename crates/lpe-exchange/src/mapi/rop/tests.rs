@@ -2950,7 +2950,7 @@ fn microsoft_oxcdata_property_row_example_streams_oversized_body() {
 }
 
 #[test]
-fn saved_message_handle_getprops_uses_same_batch_email() {
+fn saved_message_handle_getprops_keeps_batch_email_and_durable_identity() {
     let account_id = Uuid::parse_str("10101010-1010-1010-1010-101010101010").unwrap();
     let email_id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();
     let message_id = crate::mapi::identity::mapi_store_id(0x99);
@@ -2999,10 +2999,59 @@ fn saved_message_handle_getprops_uses_same_batch_email() {
         mime_blob_ref: None,
         delivery_status: "delivered".to_string(),
     };
+    let identity = crate::store::MapiIdentityRecord {
+        object_kind: crate::store::MapiIdentityObjectKind::Message,
+        canonical_id: email_id,
+        object_id: message_id,
+        change_number: 0x44_0000_0001,
+        source_key: vec![0x11; 22],
+        change_key: vec![0x22; 22],
+        predecessor_change_list: vec![0x33; 44],
+        last_modification_time: 133_936_000_000_000_000,
+    };
+    crate::mapi::identity::remember_mapi_identity_with_source_key(
+        email_id,
+        message_id,
+        Some(identity.source_key.clone()),
+    );
+    let mut stale_email = email.clone();
+    stale_email.subject = "Stale snapshot".to_string();
+    stale_email.preview = "Stale body".to_string();
+    stale_email.body_text = "Stale body".to_string();
+    let stale_identity = crate::store::MapiIdentityRecord {
+        object_kind: crate::store::MapiIdentityObjectKind::Message,
+        canonical_id: email_id,
+        object_id: message_id,
+        change_number: 0x44_0000_0000,
+        source_key: vec![0xAA; 22],
+        change_key: vec![0xBB; 22],
+        predecessor_change_list: vec![0xCC; 44],
+        last_modification_time: 133_935_999_000_000_000,
+    };
+    let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
+    let snapshot = MapiMailStoreSnapshot::new_with_scoped_calendar_identities(
+        Vec::new(),
+        vec![stale_email],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &[stale_identity],
+        &identity_codec,
+    )
+    .unwrap();
     let object = MapiObject::Message {
         folder_id: INBOX_FOLDER_ID,
         message_id,
-        saved_email: Some(MapiSavedEmail { email }),
+        saved_email: Some(MapiSavedEmail {
+            email,
+            durable_identity: Some(identity.clone()),
+        }),
         pending_properties: HashMap::new(),
     };
     let principal = AccountPrincipal {
@@ -3015,9 +3064,19 @@ fn saved_message_handle_getprops_uses_same_batch_email() {
     };
     let mut payload = Vec::new();
     payload.extend_from_slice(&4096u16.to_le_bytes());
-    payload.extend_from_slice(&2u16.to_le_bytes());
-    payload.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
-    payload.extend_from_slice(&PID_TAG_BODY_W.to_le_bytes());
+    payload.extend_from_slice(&8u16.to_le_bytes());
+    for property_tag in [
+        PID_TAG_SUBJECT_W,
+        PID_TAG_BODY_W,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+    ] {
+        payload.extend_from_slice(&property_tag.to_le_bytes());
+    }
     let request = RopRequest {
         rop_id: RopId::GetPropertiesSpecific as u8,
         input_handle_index: Some(1),
@@ -3031,7 +3090,7 @@ fn saved_message_handle_getprops_uses_same_batch_email() {
         &principal,
         &[],
         &[],
-        &MapiMailStoreSnapshot::empty(),
+        &snapshot,
     );
 
     assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
@@ -3041,6 +3100,65 @@ fn saved_message_handle_getprops_uses_same_batch_email() {
     assert!(response
         .windows(utf16z_bytes("Saved body").len())
         .any(|window| window == utf16z_bytes("Saved body").as_slice()));
+    let mut cursor = Cursor::new(&response[7..]);
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_SUBJECT_W).unwrap(),
+        MapiValue::String("Saved batch".to_string())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_BODY_W).unwrap(),
+        MapiValue::String("Saved body".to_string())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_SOURCE_KEY).unwrap(),
+        MapiValue::Binary(identity.source_key.clone())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_CHANGE_KEY).unwrap(),
+        MapiValue::Binary(identity.change_key.clone())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_PREDECESSOR_CHANGE_LIST).unwrap(),
+        MapiValue::Binary(identity.predecessor_change_list.clone())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_CHANGE_NUMBER).unwrap(),
+        MapiValue::I64(u64::from_le_bytes(
+            crate::mapi::identity::wire_id_bytes_from_object_id(
+                crate::mapi::identity::mapi_store_id(identity.change_number),
+            )
+            .unwrap(),
+        ) as i64)
+    );
+    let MapiValue::Binary(entry_id) =
+        parse_mapi_property_value(&mut cursor, PID_TAG_ENTRY_ID).unwrap()
+    else {
+        panic!("Message EntryId must be binary");
+    };
+    let MapiValue::Binary(instance_key) =
+        parse_mapi_property_value(&mut cursor, PID_TAG_INSTANCE_KEY).unwrap()
+    else {
+        panic!("Message InstanceKey must be binary");
+    };
+    assert_eq!(
+        entry_id,
+        crate::mapi::identity::message_entry_id_from_object_ids(
+            principal.account_id,
+            INBOX_FOLDER_ID,
+            message_id,
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        crate::mapi::identity::object_ids_from_message_entry_id(principal.account_id, &entry_id),
+        Some((INBOX_FOLDER_ID, message_id))
+    );
+    assert_eq!(
+        instance_key,
+        crate::mapi::identity::instance_key_for_object_id(message_id)
+    );
+    assert_ne!(entry_id, instance_key);
+    assert_eq!(cursor.remaining(), 0);
 }
 
 #[test]

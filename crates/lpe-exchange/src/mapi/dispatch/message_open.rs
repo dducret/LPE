@@ -22,6 +22,9 @@ pub(super) fn append_open_message_response(
                 message_id,
                 saved_email: Some(MapiSavedEmail {
                     email: email.clone(),
+                    durable_identity: snapshot
+                        .message_for_canonical_id(email.id)
+                        .and_then(|message| message.durable_identity.clone()),
                 }),
                 pending_properties: HashMap::new(),
             },
@@ -60,6 +63,7 @@ pub(super) fn append_open_message_response(
                 message_id,
                 saved_email: Some(MapiSavedEmail {
                     email: message.email.clone(),
+                    durable_identity: message.durable_identity.clone(),
                 }),
                 pending_properties: HashMap::new(),
             },
@@ -108,6 +112,9 @@ pub(super) fn append_open_message_response(
                 message_id,
                 saved_email: Some(MapiSavedEmail {
                     email: email.clone(),
+                    durable_identity: snapshot
+                        .message_for_canonical_id(email.id)
+                        .and_then(|message| message.durable_identity.clone()),
                 }),
                 pending_properties: HashMap::new(),
             },

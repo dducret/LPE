@@ -213,7 +213,7 @@ before it is advertised.
   LPE now obtains the normal-message watermark from one canonical PostgreSQL
   aggregate per mailbox over `mailbox_messages.updated_at` and
   `mail_change_log.created_at` for `mailbox_message` changes. It is independent
-  of both the bounded full-snapshot message window and selective snapshots that
+  of both the complete full-snapshot message scope and selective snapshots that
   load no normal messages. The result is combined only with real persisted FAI,
   collaboration-object, and direct-child-folder modification times; synthetic
   FILETIME values derived from change numbers are never mixed with those real
@@ -1588,6 +1588,10 @@ canonical `from` identity.
   read for diagnostics and completion accounting, but the full current
   canonical scope is compared with the uploaded client ICS sets before any
   FastTransfer bytes are returned.
+- A full content snapshot enumerates every visible canonical email in its
+  synchronization scope. Table-page limits can bound a table response, but
+  must never truncate the source set used to calculate an ICS delta or final
+  state.
 - The durable checkpoint advances only after `RopFastTransferSourceGetBuffer`
   drains the corresponding ICS download stream.
 - Transfer-state handles from download sources retain their checkpoint sequence

@@ -666,13 +666,45 @@ fn fallback_default_specific_property(
     }) = object
     {
         let value_tag = get_properties_specific_value_tag(object, tag);
-        return message_for_id(*folder_id, *message_id, mailboxes, emails)
-            .or_else(|| {
-                search_folder_message_for_id(snapshot, *folder_id, *message_id)
-                    .map(|message| &message.email)
+        if canonical_property_storage_tag(value_tag) == PID_TAG_ENTRY_ID {
+            return crate::mapi::identity::message_entry_id_from_object_ids(
+                principal.account_id,
+                *folder_id,
+                *message_id,
+            )
+            .is_none();
+        }
+        return saved_email
+            .as_ref()
+            .map(|saved| {
+                email_property_value_with_durable_identity(
+                    &saved.email,
+                    saved.durable_identity.as_ref(),
+                    value_tag,
+                )
+                .is_none()
             })
-            .or(saved_email.as_ref().map(|saved| &saved.email))
-            .is_some_and(|email| email_property_value(email, value_tag).is_none());
+            .or_else(|| {
+                snapshot
+                    .message_for_id(*folder_id, *message_id)
+                    .map(|message| {
+                        email_property_value_with_durable_identity(
+                            &message.email,
+                            message.durable_identity.as_ref(),
+                            value_tag,
+                        )
+                        .is_none()
+                    })
+            })
+            .or_else(|| {
+                message_for_id(*folder_id, *message_id, mailboxes, emails)
+                    .or_else(|| {
+                        search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                            .map(|message| &message.email)
+                    })
+                    .map(|email| email_property_value(email, value_tag).is_none())
+            })
+            .unwrap_or(false);
     }
     if !matches!(
         object,
@@ -1131,23 +1163,49 @@ pub(in crate::mapi) fn serialize_object_property(
             message_id,
             saved_email,
             ..
-        }) => snapshot
-            .message_for_id(*folder_id, *message_id)
-            .map(|message| serialize_mapi_message_row(message, &[tag]))
-            .or_else(|| {
-                message_for_id(*folder_id, *message_id, mailboxes, emails)
-                    .or_else(|| {
-                        search_folder_message_for_id(snapshot, *folder_id, *message_id)
-                            .map(|message| &message.email)
-                    })
-                    .or(saved_email.as_ref().map(|saved| &saved.email))
-                    .map(|email| serialize_message_row(email, &[tag]))
-            })
-            .unwrap_or_else(|| {
+        }) => {
+            if canonical_property_storage_tag(tag) == PID_TAG_ENTRY_ID {
                 let mut value = Vec::new();
-                write_property_default(&mut value, tag);
+                if let Some(entry_id) = crate::mapi::identity::message_entry_id_from_object_ids(
+                    principal.account_id,
+                    *folder_id,
+                    *message_id,
+                ) {
+                    write_mapi_value(&mut value, tag, &MapiValue::Binary(entry_id));
+                } else {
+                    write_property_default(&mut value, tag);
+                }
                 value
-            }),
+            } else {
+                saved_email
+                    .as_ref()
+                    .map(|saved| {
+                        serialize_message_row_with_durable_identity(
+                            &saved.email,
+                            saved.durable_identity.as_ref(),
+                            &[tag],
+                        )
+                    })
+                    .or_else(|| {
+                        snapshot
+                            .message_for_id(*folder_id, *message_id)
+                            .map(|message| serialize_mapi_message_row(message, &[tag]))
+                    })
+                    .or_else(|| {
+                        message_for_id(*folder_id, *message_id, mailboxes, emails)
+                            .or_else(|| {
+                                search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                                    .map(|message| &message.email)
+                            })
+                            .map(|email| serialize_message_row(email, &[tag]))
+                    })
+                    .unwrap_or_else(|| {
+                        let mut value = Vec::new();
+                        write_property_default(&mut value, tag);
+                        value
+                    })
+            }
+        }
         Some(MapiObject::PendingMessage {
             properties,
             recipients,

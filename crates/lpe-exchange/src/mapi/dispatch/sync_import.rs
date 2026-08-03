@@ -1390,7 +1390,7 @@ pub(super) async fn remember_created_message_mapi_identity<S>(
     principal: &AccountPrincipal,
     canonical_id: Uuid,
     source_key: Option<Vec<u8>>,
-) -> Result<(u64, bool, String)>
+) -> Result<(crate::store::MapiIdentityRecord, bool, String)>
 where
     S: ExchangeStore,
 {
@@ -1404,7 +1404,7 @@ where
             .map(import_source_key_identity_scope)
             .filter(|scope| *scope != "persistable_dynamic")
             .unwrap_or("");
-        let object_id = remember_created_mapi_identity(
+        let identity = remember_created_mapi_identity_record(
             store,
             principal,
             MapiIdentityObjectKind::Message,
@@ -1413,10 +1413,10 @@ where
             None,
         )
         .await?;
-        return Ok((object_id, false, identity_fallback_reason.to_string()));
+        return Ok((identity, false, identity_fallback_reason.to_string()));
     }
 
-    match remember_created_mapi_identity(
+    match remember_created_mapi_identity_record(
         store,
         principal,
         MapiIdentityObjectKind::Message,
@@ -1426,9 +1426,9 @@ where
     )
     .await
     {
-        Ok(object_id) => Ok((object_id, true, String::new())),
+        Ok(identity) => Ok((identity, true, String::new())),
         Err(error) => {
-            let object_id = remember_created_mapi_identity(
+            let identity = remember_created_mapi_identity_record(
                 store,
                 principal,
                 MapiIdentityObjectKind::Message,
@@ -1437,7 +1437,7 @@ where
                 None,
             )
             .await?;
-            Ok((object_id, false, error.to_string()))
+            Ok((identity, false, error.to_string()))
         }
     }
 }

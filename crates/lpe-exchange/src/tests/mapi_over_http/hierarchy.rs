@@ -695,6 +695,10 @@ async fn mapi_over_http_microsoft_oxcfold_create_delete_and_move_use_canonical_m
         updated_mailboxes: updated_mailboxes.clone(),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -706,43 +710,47 @@ async fn mapi_over_http_microsoft_oxcfold_create_delete_and_move_use_canonical_m
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let mut rops = Vec::new();
-    append_rop_open_folder(
-        &mut rops,
-        0,
-        1,
-        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
-    );
-    append_rop_open_folder(&mut rops, 0, 2, target_parent_mapi_id);
-    rops.extend_from_slice(&[
-        0x1C, 0x00, 0x01, 0x03, // RopCreateFolder
-        0x01, // generic folder
-        0x01, // Unicode names
-        0x00, // fail if the folder already exists
-        0x00, // reserved
-    ]);
-    rops.extend_from_slice(&utf16z("Folder1"));
-    rops.extend_from_slice(&utf16z(""));
-    rops.extend_from_slice(&[
-        0x1D, 0x00, 0x01, // RopDeleteFolder
-        0x05, // DEL_MESSAGES | DEL_FOLDERS
-    ]);
-    append_mapi_wire_id(&mut rops, delete_mapi_id);
-    rops.extend_from_slice(&[
-        0x35, 0x00, 0x01, 0x02, // RopMoveFolder
-        0x01, // asynchronous requested; LPE completes synchronously
-        0x01, // Unicode name
-    ]);
-    append_mapi_wire_id(&mut rops, source_mapi_id);
-    rops.extend_from_slice(&utf16z("Folder1"));
-    rops.extend_from_slice(&[
-        0x36, 0x00, 0x01, 0x02, // RopCopyFolder
-        0x01, // asynchronous requested; LPE completes synchronously
-        0x01, // recursive copy
-        0x01, // Unicode name
-    ]);
-    append_mapi_wire_id(&mut rops, source_mapi_id);
-    rops.extend_from_slice(&utf16z("Folder1"));
+    let rops = crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+        let mut rops = Vec::new();
+        append_rop_open_folder(
+            &mut rops,
+            0,
+            1,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        );
+        append_rop_open_folder(&mut rops, 0, 2, target_parent_mapi_id);
+        rops.extend_from_slice(&[
+            0x1C, 0x00, 0x01, 0x03, // RopCreateFolder
+            0x01, // generic folder
+            0x01, // Unicode names
+            0x00, // fail if the folder already exists
+            0x00, // reserved
+        ]);
+        rops.extend_from_slice(&utf16z("Folder1"));
+        rops.extend_from_slice(&utf16z(""));
+        rops.extend_from_slice(&[
+            0x1D, 0x00, 0x01, // RopDeleteFolder
+            0x05, // DEL_MESSAGES | DEL_FOLDERS
+        ]);
+        append_mapi_wire_id(&mut rops, delete_mapi_id);
+        rops.extend_from_slice(&[
+            0x35, 0x00, 0x01, 0x02, // RopMoveFolder
+            0x01, // asynchronous requested; LPE completes synchronously
+            0x01, // Unicode name
+        ]);
+        append_mapi_wire_id(&mut rops, source_mapi_id);
+        rops.extend_from_slice(&utf16z("Folder1"));
+        rops.extend_from_slice(&[
+            0x36, 0x00, 0x01, 0x02, // RopCopyFolder
+            0x01, // asynchronous requested; LPE completes synchronously
+            0x01, // recursive copy
+            0x01, // Unicode name
+        ]);
+        append_mapi_wire_id(&mut rops, source_mapi_id);
+        rops.extend_from_slice(&utf16z("Folder1"));
+        rops
+    })
+    .await;
 
     let response = service
         .handle_mapi(
@@ -1774,6 +1782,10 @@ async fn mapi_over_http_move_folder_rejects_wrong_source_parent_without_side_eff
         updated_mailboxes: updated_mailboxes.clone(),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -1785,21 +1797,25 @@ async fn mapi_over_http_move_folder_rejects_wrong_source_parent_without_side_eff
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, wrong_parent_mapi_id);
-    append_rop_open_folder(
-        &mut rops,
-        0,
-        2,
-        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
-    );
-    rops.extend_from_slice(&[
-        0x35, 0x00, 0x01, 0x02, // RopMoveFolder
-        0x00, // synchronous
-        0x01, // Unicode name
-    ]);
-    append_mapi_wire_id(&mut rops, source_mapi_id);
-    rops.extend_from_slice(&utf16z("Moved Projects"));
+    let rops = crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+        let mut rops = Vec::new();
+        append_rop_open_folder(&mut rops, 0, 1, wrong_parent_mapi_id);
+        append_rop_open_folder(
+            &mut rops,
+            0,
+            2,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        );
+        rops.extend_from_slice(&[
+            0x35, 0x00, 0x01, 0x02, // RopMoveFolder
+            0x00, // synchronous
+            0x01, // Unicode name
+        ]);
+        append_mapi_wire_id(&mut rops, source_mapi_id);
+        rops.extend_from_slice(&utf16z("Moved Projects"));
+        rops
+    })
+    .await;
 
     let response = service
         .handle_mapi(
@@ -1843,6 +1859,10 @@ async fn mapi_over_http_microsoft_folder_move_accepts_nonzero_boolean_fields_and
         created_mailboxes: created_mailboxes.clone(),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -1858,18 +1878,25 @@ async fn mapi_over_http_microsoft_folder_move_accepts_nonzero_boolean_fields_and
         (0x35, vec![0x02, 0x02], utf16z("Moved Projects")),
         (0x36, vec![0x02, 0x02, 0x02], utf16z("Copied Projects")),
     ] {
-        let mut rops = Vec::new();
-        append_rop_open_folder(
-            &mut rops,
-            0,
-            1,
-            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
-        );
-        append_rop_open_folder(&mut rops, 0, 2, target_parent_mapi_id);
-        rops.extend_from_slice(&[rop_id, 0x00, 0x01, 0x02]);
-        rops.extend_from_slice(&booleans);
-        append_mapi_wire_id(&mut rops, source_mapi_id);
-        rops.extend_from_slice(&name);
+        let rops = crate::mapi::identity::with_current_mapi_identity_codec(
+            identity_codec.clone(),
+            async move {
+                let mut rops = Vec::new();
+                append_rop_open_folder(
+                    &mut rops,
+                    0,
+                    1,
+                    crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                );
+                append_rop_open_folder(&mut rops, 0, 2, target_parent_mapi_id);
+                rops.extend_from_slice(&[rop_id, 0x00, 0x01, 0x02]);
+                rops.extend_from_slice(&booleans);
+                append_mapi_wire_id(&mut rops, source_mapi_id);
+                rops.extend_from_slice(&name);
+                rops
+            },
+        )
+        .await;
 
         let response = service
             .handle_mapi(
@@ -1885,7 +1912,10 @@ async fn mapi_over_http_microsoft_folder_move_accepts_nonzero_boolean_fields_and
         } else {
             vec![rop_id, 0x01, 0x02, 0x01, 0x04, 0x80]
         };
-        assert!(contains_bytes(&response_rops, &expected_response));
+        assert!(
+            contains_bytes(&response_rops, &expected_response),
+            "unexpected {rop_id:#04x} response: {response_rops:02x?}"
+        );
         renew_mapi_request_id(&mut execute_headers);
     }
 

@@ -121,6 +121,44 @@ mod tests {
             .folder_id(&calendar_collection("82828282-8282-4282-9282-828282828282"))
             .is_err());
     }
+
+    #[test]
+    fn scoped_snapshot_retains_all_durable_identity_records() {
+        let record = MapiIdentityRecord {
+            object_kind: MapiIdentityObjectKind::Task,
+            canonical_id: Uuid::from_u128(0x202608021503),
+            object_id: crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 1,
+            ),
+            change_number: 1,
+            source_key: Vec::new(),
+            change_key: Vec::new(),
+            predecessor_change_list: Vec::new(),
+            last_modification_time: 0,
+        };
+        let snapshot = MapiMailStoreSnapshot::new_with_scoped_calendar_identities(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            std::slice::from_ref(&record),
+            &crate::mapi::identity::MapiIdentityCodec::legacy_for_tests(),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.durable_identity_records().len(), 1);
+        assert_eq!(
+            snapshot.durable_identity_records()[0].canonical_id,
+            record.canonical_id
+        );
+    }
 }
 
 impl MapiMailStoreSnapshot {
@@ -186,7 +224,7 @@ impl MapiMailStoreSnapshot {
     ) -> Result<Self> {
         let calendar_identities =
             ScopedCalendarIdentities::from_records(identity_records, identity_codec);
-        Self::build(
+        let mut snapshot = Self::build(
             mailboxes,
             emails,
             attachments,
@@ -199,7 +237,9 @@ impl MapiMailStoreSnapshot {
             tasks,
             folder_permissions,
             Some(&calendar_identities),
-        )
+        )?;
+        snapshot.durable_identity_records = identity_records.to_vec();
+        Ok(snapshot)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -413,6 +453,7 @@ impl MapiMailStoreSnapshot {
         Ok(Self {
             folders,
             identity_codec: crate::mapi::identity::MapiIdentityCodec::legacy_for_tests(),
+            durable_identity_records: Vec::new(),
             folder_versions: calendar_identities
                 .map(|identities| identities.folder_versions.clone())
                 .unwrap_or_default(),

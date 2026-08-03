@@ -2343,6 +2343,41 @@ async fn mapi_full_snapshot_loads_messages_without_search_index_query() {
 }
 
 #[tokio::test]
+async fn mapi_full_snapshot_never_truncates_mailbox_contents_for_ics() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..FakeStore::default()
+    };
+    let mailbox = FakeStore::mailbox("44444444-4444-4444-4444-444444444444", "inbox", "Inbox");
+    let first = FakeStore::email(
+        "00000000-0000-0000-0000-000000000001",
+        &mailbox.id.to_string(),
+        "inbox",
+        "First message",
+    );
+    let latest = FakeStore::email(
+        "ffffffff-ffff-ffff-ffff-ffffffffffff",
+        &mailbox.id.to_string(),
+        "inbox",
+        "Latest delivered message",
+    );
+    store.mailboxes.lock().unwrap().push(mailbox);
+    store.emails.lock().unwrap().extend([first, latest]);
+
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 1)
+        .await
+        .unwrap();
+
+    assert_eq!(snapshot.messages().len(), 2);
+    assert!(snapshot
+        .messages()
+        .iter()
+        .any(|message| message.email.subject == "Latest delivered message"));
+}
+
+#[tokio::test]
 async fn mapi_full_snapshot_persists_virtual_special_folder_version_identity() {
     let account = FakeStore::account();
     let store = FakeStore {
@@ -14753,6 +14788,21 @@ fn append_mapi_wire_id(buffer: &mut Vec<u8>, object_id: u64) {
     );
 }
 
+async fn durable_special_folder_id_for_test<S>(
+    store: &S,
+    account_id: Uuid,
+    logical_folder_id: u64,
+) -> u64
+where
+    S: ExchangeStore,
+{
+    crate::mapi::load_mapi_identity_codec_for_test(store, account_id)
+        .await
+        .expect("test MAPI special-folder identities allocate")
+        .actual_object_id(logical_folder_id)
+        .expect("test MAPI special-folder identity resolves")
+}
+
 fn append_mapi_trailing_replid_wire_id(buffer: &mut Vec<u8>, global_counter: u64) {
     buffer.extend_from_slice(&globcnt_bytes(global_counter));
     buffer.extend_from_slice(&1u16.to_le_bytes());
@@ -15201,12 +15251,17 @@ async fn outlook_content_sync_response_rops_for_store<S>(
 where
     S: ExchangeStore + Clone + Send + Sync + 'static,
 {
-    let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    outlook_content_sync_response_rops_for_store_with_rops(
+        store,
+        outlook_content_sync_request_rops(folder_id, state_properties),
+    )
+    .await
+}
+
+fn outlook_content_sync_request_rops(
+    folder_id: u64,
+    state_properties: &[(u32, Vec<u8>)],
+) -> Vec<u8> {
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, folder_id);
     append_rop_outlook_content_sync_manifest_get_buffer_with_state(
@@ -15216,6 +15271,22 @@ where
         31_680,
         state_properties,
     );
+    rops
+}
+
+async fn outlook_content_sync_response_rops_for_store_with_rops<S>(
+    store: S,
+    rops: Vec<u8>,
+) -> Vec<u8>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+{
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service

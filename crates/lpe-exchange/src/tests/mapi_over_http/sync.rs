@@ -5804,15 +5804,37 @@ async fn mapi_over_http_content_sync_incremental_after_client_state_exports_delt
     );
     changed.modseq = 41;
     changed.mailbox_states[0].modseq = 41;
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         emails: Arc::new(Mutex::new(vec![unchanged, changed])),
         ..Default::default()
     };
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let unchanged_identity = snapshot
+        .messages()
+        .iter()
+        .find(|message| message.canonical_id == unchanged_id)
+        .and_then(|message| message.durable_identity.as_ref())
+        .cloned()
+        .unwrap();
+    let changed_identity = snapshot
+        .messages()
+        .iter()
+        .find(|message| message.canonical_id == changed_id)
+        .and_then(|message| message.durable_identity.as_ref())
+        .cloned()
+        .unwrap();
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     store
         .store_mapi_sync_checkpoint(
-            FakeStore::account().account_id,
+            account.account_id,
             Some(inbox_id),
             MapiCheckpointKind::Content,
             20,
@@ -5830,31 +5852,43 @@ async fn mapi_over_http_content_sync_incremental_after_client_state_exports_delt
 
     let client_state = outlook_content_sync_state_properties(
         &[
-            mapi_message_global_counter(&unchanged_id),
-            mapi_message_global_counter(&changed_id),
+            unchanged_identity.object_id >> 16,
+            changed_identity.object_id >> 16,
         ],
-        &[40],
+        &[unchanged_identity.change_number],
         &[],
-        &[40],
+        &[unchanged_identity.change_number],
     );
-    let response_rops = outlook_content_sync_response_rops_for_store(
-        store,
-        crate::mapi::identity::INBOX_FOLDER_ID,
-        &client_state,
-    )
+    let rops = crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+        outlook_content_sync_request_rops(crate::mapi::identity::INBOX_FOLDER_ID, &client_state)
+    })
     .await;
+    let response_rops = outlook_content_sync_response_rops_for_store_with_rops(store, rops).await;
 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 1);
     assert_eq!(
-        stream.message_changes[0].mid.unwrap() >> 16,
-        mapi_message_global_counter(&changed_id)
+        stream.message_changes[0].mid,
+        Some(changed_identity.object_id)
     );
-    assert_eq!(stream.message_changes[0].change_number, Some(41));
+    assert_eq!(
+        stream.message_changes[0].change_number,
+        Some(changed_identity.change_number)
+    );
     assert!(stream.read_idset.is_none());
     assert!(stream.unread_idset.is_none());
-    assert_content_final_state_includes(&response_rops, &[unchanged_id, changed_id], &[41]);
+    assert_content_final_state_includes_counters(
+        &response_rops,
+        &[
+            unchanged_identity.object_id >> 16,
+            changed_identity.object_id >> 16,
+        ],
+        &[
+            unchanged_identity.change_number,
+            changed_identity.change_number,
+        ],
+    );
 }
 
 #[tokio::test]
@@ -11110,12 +11144,16 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     // the CopyTo exclusion list and provider-internal download filtering.
     // PidTagEntryId (0x0FFF0102) is outside that internal range; keep LPE's
     // selected direct FAI projection coherent with GetProps and ICS.
-    let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
-        account.account_id,
-        crate::mapi::identity::INBOX_FOLDER_ID,
-        imported_message_id,
-    )
-    .unwrap();
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
+    let expected_entry_id = identity_codec
+        .message_entry_id_from_object_ids(
+            account.account_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            imported_message_id,
+        )
+        .unwrap();
     let entry_ids = properties
         .iter()
         .filter(|property| property.tag == PID_TAG_ENTRY_ID)
@@ -11134,11 +11172,9 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     // Message. The trace's CopyTo exclusion list is empty, so [MS-OXCFXICS]
     // sections 2.2.3.1.1.1.1, 3.2.5.8.1.1, and 3.2.5.12 do not filter this
     // property. Keep the CopyTo projection coherent with GetProps.
-    let expected_parent_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::INBOX_FOLDER_ID,
-    )
-    .unwrap();
+    let expected_parent_entry_id = identity_codec
+        .folder_entry_id_from_object_id(account.account_id, crate::mapi::identity::INBOX_FOLDER_ID)
+        .unwrap();
     let parent_entry_ids = properties
         .iter()
         .filter(|property| property.tag == 0x0E09_0102) // PidTagParentEntryId.
@@ -11243,9 +11279,25 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert!(!properties
         .iter()
         .any(|property| property.tag == 0x7C08_0102));
-    assert!(!properties
+    let config_binary = properties
         .iter()
-        .any(|property| property.tag == 0x0E0B_0102));
+        .filter(|property| property.tag == 0x0E0B_0102)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        config_binary.len(),
+        1,
+        "direct CopyTo must project exactly one MessageListSettings 0x0E0B value: {transfer:02x?}"
+    );
+    assert_eq!(
+        config_binary[0].value,
+        identity_codec
+            .outlook_message_list_settings_entry_id(
+                account.account_id,
+                crate::mapi::identity::INBOX_FOLDER_ID,
+            )
+            .unwrap(),
+        "direct CopyTo must match the account-scoped MessageListSettings 0x0E0B projection"
+    );
     // Exchange advertises named properties when opening this MList FAI. LPE's
     // configuration projection supplies its canonical content-class/type
     // values, so direct CopyTo must carry the same defined properties.
@@ -11390,11 +11442,12 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
             .unwrap(),
     ) as usize;
     value_offset += 2;
-    let expected_private_entry_id = crate::mapi::identity::outlook_message_list_settings_entry_id(
-        account.account_id,
-        crate::mapi::identity::INBOX_FOLDER_ID,
-    )
-    .unwrap();
+    let expected_private_entry_id = identity_codec
+        .outlook_message_list_settings_entry_id(
+            account.account_id,
+            crate::mapi::identity::INBOX_FOLDER_ID,
+        )
+        .unwrap();
     assert_eq!(private_entry_id_len, expected_private_entry_id.len());
     assert_eq!(
         &direct_get_response_rops[value_offset..value_offset + private_entry_id_len],

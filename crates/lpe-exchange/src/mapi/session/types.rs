@@ -302,6 +302,7 @@ pub(in crate::mapi) struct TableBookmark {
 #[derive(Clone, Debug)]
 pub(in crate::mapi) struct MapiSavedEmail {
     pub(in crate::mapi) email: JmapEmail,
+    pub(in crate::mapi) durable_identity: Option<crate::store::MapiIdentityRecord>,
 }
 
 impl PartialEq for MapiSavedEmail {

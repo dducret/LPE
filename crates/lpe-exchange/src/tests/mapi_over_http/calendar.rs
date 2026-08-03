@@ -60,6 +60,12 @@ async fn mapi_over_http_calendar_same_folder_move_is_idempotent() {
         events: events.clone(),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -71,7 +77,6 @@ async fn mapi_over_http_calendar_same_folder_move_is_idempotent() {
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let calendar_folder_id = test_mapi_folder_id(16);
     let mut open_rops = Vec::new();
     append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
     let response = service
@@ -204,6 +209,18 @@ async fn mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canon
         mapi_notification_cursor: Arc::new(Mutex::new(Some(1))),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
+    let trash_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::TRASH_FOLDER_ID,
+    )
+    .await;
     let events = store.events.clone();
     let deleted_events = store.deleted_events.clone();
     let deleted_calendar_events = store.deleted_calendar_events.clone();
@@ -237,25 +254,20 @@ async fn mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canon
     );
 
     let mut open_rops = Vec::new();
-    append_rop_open_folder(
-        &mut open_rops,
-        0,
-        1,
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-    );
-    append_rop_open_folder(&mut open_rops, 0, 2, crate::mapi::identity::TRASH_FOLDER_ID);
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
+    append_rop_open_folder(&mut open_rops, 0, 2, trash_folder_id);
     // The source and destination subscriptions make the regression exercise
     // the ObjectDeleted/ObjectMoved wire identities used by cached Outlook.
     // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2.
     open_rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x03]);
     open_rops.extend_from_slice(&0x0108u16.to_le_bytes());
     open_rops.push(0);
-    append_mapi_wire_id(&mut open_rops, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    append_mapi_wire_id(&mut open_rops, calendar_folder_id);
     open_rops.extend_from_slice(&0u64.to_le_bytes());
     open_rops.extend_from_slice(&[0x29, 0x00, 0x02, 0x04]);
     open_rops.extend_from_slice(&0x0124u16.to_le_bytes());
     open_rops.push(0);
-    append_mapi_wire_id(&mut open_rops, crate::mapi::identity::TRASH_FOLDER_ID);
+    append_mapi_wire_id(&mut open_rops, trash_folder_id);
     open_rops.extend_from_slice(&0u64.to_le_bytes());
     let response = service
         .handle_mapi(
@@ -503,6 +515,12 @@ async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session
         }])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let custom_tag = 0x8001_001F;
     let service = ExchangeService::new(store.clone());
     let connect = service
@@ -522,12 +540,12 @@ async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session
         "calendar restart opaque value",
     );
     let mut set_rops = Vec::new();
-    append_rop_open_folder(&mut set_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut set_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut set_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -565,12 +583,12 @@ async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
     let mut get_rops = Vec::new();
-    append_rop_open_folder(&mut get_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut get_rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut get_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     append_rop_get_properties_specific(&mut get_rops, 2, &[custom_tag]);
@@ -644,6 +662,12 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_f
         )
         .await
         .unwrap();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store.clone());
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -656,12 +680,12 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_f
     );
 
     let mut open_rops = Vec::new();
-    append_rop_open_folder(&mut open_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut open_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -761,7 +785,7 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_f
         &mut reopen_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -859,6 +883,12 @@ async fn mapi_over_http_calendar_delete_reminder_delta_reports_problem_without_h
         }])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -870,12 +900,12 @@ async fn mapi_over_http_calendar_delete_reminder_delta_reports_problem_without_h
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
     let mut open_rops = Vec::new();
-    append_rop_open_folder(&mut open_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut open_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -926,7 +956,7 @@ async fn mapi_over_http_calendar_delete_reminder_delta_reports_problem_without_h
         &mut reopen_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -988,7 +1018,7 @@ async fn mapi_over_http_calendar_delete_reminder_delta_reports_problem_without_h
         &mut absent_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -1054,6 +1084,12 @@ async fn mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition
         event_versions: event_versions.clone(),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -1065,12 +1101,12 @@ async fn mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
     let mut open_rops = Vec::new();
-    append_rop_open_folder(&mut open_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut open_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x00,
     );
@@ -1136,6 +1172,12 @@ async fn mapi_over_http_calendar_create_save_maps_store_outcomes_and_preserves_p
             fail_mapi_event_create: fail,
             ..Default::default()
         };
+        let calendar_folder_id = durable_special_folder_id_for_test(
+            &store,
+            FakeStore::account().account_id,
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .await;
         let service = ExchangeService::new(store);
         let connect = service
             .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -1160,7 +1202,7 @@ async fn mapi_over_http_calendar_create_save_maps_store_outcomes_and_preserves_p
             test_filetime("2026-07-15", "13:30"),
         );
         let mut stage_rops = Vec::new();
-        append_rop_create_message(&mut stage_rops, 0, 1, test_mapi_folder_id(16));
+        append_rop_create_message(&mut stage_rops, 0, 1, calendar_folder_id);
         append_rop_set_properties(&mut stage_rops, 1, 3, &properties);
         let response = service
             .handle_mapi(
@@ -1263,6 +1305,12 @@ async fn mapi_over_http_calendar_custom_property_get_uses_same_handle_transactio
         )
         .await
         .unwrap();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store.clone());
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -1275,12 +1323,12 @@ async fn mapi_over_http_calendar_custom_property_get_uses_same_handle_transactio
     );
 
     let mut open_rops = Vec::new();
-    append_rop_open_folder(&mut open_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut open_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -1364,6 +1412,12 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
         )])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let events = store.events.clone();
     let reminders = store.reminders.clone();
     let mapi_identities = store.mapi_identities.clone();
@@ -1412,8 +1466,8 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
         mapi_mailstore::filetime_from_rfc3339_utc(reminder_at) as i64,
     );
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 2, test_mapi_folder_id(16));
-    append_rop_create_message(&mut rops, 2, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 2, calendar_folder_id);
+    append_rop_create_message(&mut rops, 2, 1, calendar_folder_id);
     append_rop_set_properties(&mut rops, 1, 11, &property_values);
     // [MS-OXCFXICS] section 3.3.5.11 requires the post-save state properties to
     // remain readable when RopSaveChangesMessage keeps the message open; see
@@ -1641,7 +1695,7 @@ async fn mapi_over_http_calendar_keep_open_handle_accepts_second_update_save() {
     drop(stored);
 
     let mut reopen_rops = Vec::new();
-    append_rop_open_message(&mut reopen_rops, 1, 2, test_mapi_folder_id(16), event_id);
+    append_rop_open_message(&mut reopen_rops, 1, 2, calendar_folder_id, event_id);
     append_rop_get_properties_specific(&mut reopen_rops, 2, &[0x6709_0040]);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
@@ -1700,6 +1754,12 @@ async fn mapi_over_http_calendar_default_save_closes_created_updated_and_noop_ha
         events: events.clone(),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -1724,8 +1784,8 @@ async fn mapi_over_http_calendar_default_save_closes_created_updated_and_noop_ha
         test_filetime("2026-07-16", "09:05"),
     );
     let mut create_rops = Vec::new();
-    append_rop_open_folder(&mut create_rops, 0, 2, test_mapi_folder_id(16));
-    append_rop_create_message(&mut create_rops, 2, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut create_rops, 0, 2, calendar_folder_id);
+    append_rop_create_message(&mut create_rops, 2, 1, calendar_folder_id);
     append_rop_set_properties(&mut create_rops, 1, 1, &create_values);
     append_rop_save_changes_message(&mut create_rops, 2, 1);
     append_rop_get_properties_specific(&mut create_rops, 1, &[0x0037_001F]);
@@ -1750,12 +1810,12 @@ async fn mapi_over_http_calendar_default_save_closes_created_updated_and_noop_ha
     let mut update_values = Vec::new();
     append_mapi_utf16_property(&mut update_values, 0x0037_001F, "Updated then closed");
     let mut update_rops = Vec::new();
-    append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut update_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut update_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&existing_event_id),
         0x01,
     );
@@ -1777,12 +1837,12 @@ async fn mapi_over_http_calendar_default_save_closes_created_updated_and_noop_ha
     assert_eq!(events.lock().unwrap()[0].title, "Updated then closed");
 
     let mut noop_rops = Vec::new();
-    append_rop_open_folder(&mut noop_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut noop_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut noop_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&existing_event_id),
         0x01,
     );
@@ -1842,6 +1902,12 @@ async fn mapi_over_http_calendar_save_projects_committed_far_future_reminder_wit
         omitted_reminder_query_source_ids: Arc::new(Mutex::new(vec![event_id])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let reminders = store.reminders.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -1860,12 +1926,12 @@ async fn mapi_over_http_calendar_save_projects_committed_far_future_reminder_wit
     append_mapi_bool_property(&mut property_values, 0x8503_000B, true);
     append_mapi_i64_property(&mut property_values, 0x8560_0040, reminder_filetime as i64);
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -1936,6 +2002,12 @@ async fn mapi_over_http_calendar_event_handle_stages_until_save_and_release_disc
         }])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let events = store.events.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -1949,12 +2021,12 @@ async fn mapi_over_http_calendar_event_handle_stages_until_save_and_release_disc
     );
 
     let mut open_rops = Vec::new();
-    append_rop_open_folder(&mut open_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut open_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -2039,7 +2111,7 @@ async fn mapi_over_http_calendar_event_handle_stages_until_save_and_release_disc
         &mut second_open_rops,
         0,
         1,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     append_rop_get_properties_specific(&mut second_open_rops, 1, &[0x0037_001F]);
@@ -2112,6 +2184,12 @@ async fn mapi_over_http_existing_calendar_body_stream_uses_parent_event_transact
         events: events.clone(),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -2124,12 +2202,12 @@ async fn mapi_over_http_existing_calendar_body_stream_uses_parent_event_transact
     );
 
     let mut open_rops = Vec::new();
-    append_rop_open_folder(&mut open_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut open_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -2137,7 +2215,7 @@ async fn mapi_over_http_existing_calendar_body_stream_uses_parent_event_transact
         &mut open_rops,
         1,
         3,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     let response = service
@@ -2248,7 +2326,7 @@ async fn mapi_over_http_existing_calendar_body_stream_uses_parent_event_transact
         &mut reopen_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -2346,6 +2424,12 @@ async fn mapi_over_http_calendar_large_getprops_uses_flagged_html_and_open_strea
         }])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -2358,12 +2442,12 @@ async fn mapi_over_http_calendar_large_getprops_uses_flagged_html_and_open_strea
     );
 
     let mut open_rops = Vec::new();
-    append_rop_open_folder(&mut open_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut open_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     let response = service
@@ -2556,6 +2640,23 @@ async fn mapi_over_http_calendar_selective_reopen_uses_durable_event_modseq() {
         event_versions: event_versions.clone(),
         ..Default::default()
     };
+    let event_identity = store
+        .fetch_or_allocate_mapi_identities(
+            FakeStore::account().account_id,
+            &[crate::store::MapiIdentityRequest {
+                object_kind: crate::store::MapiIdentityObjectKind::CalendarEvent,
+                canonical_id: event_id,
+                reserved_global_counter: None,
+                source_key: None,
+            }],
+        )
+        .await
+        .unwrap()
+        .remove(0);
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -2573,21 +2674,25 @@ async fn mapi_over_http_calendar_selective_reopen_uses_durable_event_modseq() {
         0x0037_001F,
         "Durable version saved after reopen",
     );
-    let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
-    append_rop_open_message_with_flags(
-        &mut rops,
-        1,
-        2,
-        test_mapi_folder_id(16),
-        test_mapi_uuid_id(&event_id),
-        0x01,
-    );
-    append_rop_set_properties(&mut rops, 2, 1, &updated_values);
-    // [MS-OXCMSG] section 3.2.5.3 reserves ecObjectModified for a change made
-    // through another transaction after this handle was opened. Reopening the
-    // current durable modseq and saving it is not a conflict.
-    append_rop_save_changes_message_with_flags(&mut rops, 1, 2, 0x02);
+    let rops = crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+        let mut rops = Vec::new();
+        append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
+        append_rop_open_message_with_flags(
+            &mut rops,
+            1,
+            2,
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+            event_identity.object_id,
+            0x01,
+        );
+        append_rop_set_properties(&mut rops, 2, 1, &updated_values);
+        // [MS-OXCMSG] section 3.2.5.3 reserves ecObjectModified for a change made
+        // through another transaction after this handle was opened. Reopening the
+        // current durable modseq and saving it is not a conflict.
+        append_rop_save_changes_message_with_flags(&mut rops, 1, 2, 0x02);
+        rops
+    })
+    .await;
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -2652,6 +2757,12 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
         events: events.clone(),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let event_versions = store.event_versions.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -2665,12 +2776,12 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
     );
 
     let mut open_rops = Vec::new();
-    append_rop_open_folder(&mut open_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut open_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -2678,7 +2789,7 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
         &mut open_rops,
         1,
         3,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -2904,6 +3015,12 @@ async fn mapi_over_http_calendar_second_save_without_global_object_id_uses_disti
         return Ok(());
     };
     let storage = fixture.storage.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &storage,
+        fixture.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     storage
         .upsert_client_event(UpsertClientEventInput {
             id: Some(Uuid::parse_str("81818181-8181-4181-9181-818181818181").unwrap()),
@@ -2958,8 +3075,8 @@ async fn mapi_over_http_calendar_second_save_without_global_object_id_uses_disti
         test_filetime("2026-07-14", "22:22"),
     );
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 2, test_mapi_folder_id(16));
-    append_rop_create_message(&mut rops, 2, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 2, calendar_folder_id);
+    append_rop_create_message(&mut rops, 2, 1, calendar_folder_id);
     append_rop_set_properties(&mut rops, 1, 4, &property_values);
     // Outlook batch 202607142154 omitted both GOID properties. [MS-OXOCAL]
     // sections 2.2.1.27-28 require a Calendar object's resulting GOID identity
@@ -3007,6 +3124,12 @@ async fn mapi_over_http_outlook_calendar_create_accepts_html_stream_and_object_i
         )])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let events = store.events.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -3045,7 +3168,7 @@ async fn mapi_over_http_outlook_calendar_create_accepts_html_stream_and_object_i
     append_mapi_binary_property(&mut property_values, 0x8002_0102, &global_object_id);
 
     let mut rops = Vec::new();
-    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_create_message(&mut rops, 0, 1, calendar_folder_id);
     rops.extend_from_slice(&[0x2B, 0x00, 0x01, 0x02]); // RopOpenStream, PidTagHtml.
     rops.extend_from_slice(&0x1013_0102u32.to_le_bytes());
     rops.push(0x02);
@@ -3096,6 +3219,12 @@ async fn mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_
         )])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let events = store.events.clone();
     let reminders = store.reminders.clone();
     let mapi_identities = store.mapi_identities.clone();
@@ -3191,7 +3320,7 @@ async fn mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_
     );
 
     let mut rops = Vec::new();
-    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_create_message(&mut rops, 0, 1, calendar_folder_id);
     let recurrence = test_daily_calendar_recur_blob();
     rops.extend_from_slice(&[0x2B, 0x00, 0x01, 0x02]); // RopOpenStream.
     rops.extend_from_slice(&tag(7, 0x0102).to_le_bytes());
@@ -3242,12 +3371,12 @@ async fn mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_
     }));
 
     let mut get_rops = Vec::new();
-    append_rop_open_folder(&mut get_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut get_rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut get_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         event_mapi_object_id,
     );
     append_rop_get_properties_specific(
@@ -3354,6 +3483,12 @@ async fn mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_
                 .insert((account.account_id, property_id), property);
         }
     }
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -3397,7 +3532,7 @@ async fn mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_
     // 2.2.2.3.1, 2.2.2.5.2, and 3.2.5.3, every subsequent QueryRows result has
     // to honor the accepted named-property sort order.
     let mut table_rops = Vec::new();
-    append_rop_open_folder(&mut table_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut table_rops, 0, 1, calendar_folder_id);
     table_rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]);
     table_rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
     table_rops.extend_from_slice(&4u16.to_le_bytes());
@@ -3447,6 +3582,12 @@ async fn mapi_over_http_empty_advertised_calendar_create_uses_default_collection
         session: Some(FakeStore::account()),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let events = store.events.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -3480,7 +3621,7 @@ async fn mapi_over_http_empty_advertised_calendar_create_uses_default_collection
     );
 
     let mut rops = Vec::new();
-    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_create_message(&mut rops, 0, 1, calendar_folder_id);
     append_rop_set_properties(&mut rops, 1, 3, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 1);
     let mut execute_headers = mapi_headers("Execute");
@@ -3549,6 +3690,12 @@ async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collectio
     };
     let events = store.events.clone();
     let deleted_events = store.deleted_events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -3589,12 +3736,12 @@ async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collectio
     append_mapi_utf16_property(&mut update_values, 0x0037_001F, "Updated implicit calendar");
     append_mapi_utf16_property(&mut update_values, location_tag, "Room 2");
     let mut update_rops = Vec::new();
-    append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut update_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut update_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -3622,7 +3769,7 @@ async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collectio
     }
 
     let mut delete_rops = Vec::new();
-    append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut delete_rops, 0, 1, calendar_folder_id);
     append_rop_delete_messages(&mut delete_rops, 1, &[test_mapi_uuid_id(&event_id)]);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
@@ -3653,6 +3800,12 @@ async fn mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_v
         )])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let events = store.events.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -3681,7 +3834,7 @@ async fn mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_v
     );
     append_mapi_binary_property(&mut property_values, 0x8216_0102, &[1, 2, 3]);
     let mut rops = Vec::new();
-    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_create_message(&mut rops, 0, 1, calendar_folder_id);
     append_rop_set_properties(&mut rops, 1, 3, &property_values);
     append_rop_get_properties_specific(&mut rops, 1, &[0x0037_001F, 0x0060_0040, 0x8216_0102]);
     append_rop_save_changes_message(&mut rops, 1, 1);
@@ -3762,6 +3915,12 @@ async fn mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_
         reminders: reminders.clone(),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let events = store.events.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -3785,12 +3944,12 @@ async fn mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_
     append_mapi_binary_property(&mut property_values, 0x8216_0102, &[1, 2, 3]);
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     append_rop_set_properties(&mut rops, 2, 3, &property_values);
@@ -3825,6 +3984,12 @@ async fn mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request() 
         )])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let events = store.events.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -3866,7 +4031,7 @@ async fn mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request() 
     append_mapi_utf16_property(&mut property_values, 0x0E04_001F, "Bob Attendee");
     append_mapi_i32_property(&mut property_values, 0x8217_0003, 0x0000_0001);
     let mut rops = Vec::new();
-    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_create_message(&mut rops, 0, 1, calendar_folder_id);
     append_rop_set_properties(&mut rops, 1, 7, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 1);
     let mut execute_headers = mapi_headers("Execute");
@@ -3933,6 +4098,12 @@ async fn mapi_over_http_calendar_meeting_cancel_save_fails_closed_without_atomic
         }])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let events = store.events.clone();
     let deleted_events = store.deleted_events.clone();
     let service = ExchangeService::new(store);
@@ -3955,12 +4126,12 @@ async fn mapi_over_http_calendar_meeting_cancel_save_fails_closed_without_atomic
     append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Cancelled meeting");
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -4036,6 +4207,12 @@ async fn mapi_over_http_calendar_meeting_cancel_rejects_binary_payload_without_s
     };
     let events = store.events.clone();
     let deleted_events = store.deleted_events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4056,12 +4233,12 @@ async fn mapi_over_http_calendar_meeting_cancel_rejects_binary_payload_without_s
     append_mapi_binary_property(&mut property_values, 0x8216_0102, &[1, 2, 3]);
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     append_rop_set_properties(&mut rops, 2, 2, &property_values);
@@ -4123,6 +4300,12 @@ async fn mapi_over_http_calendar_meeting_response_updates_canonical_attendee_sta
         ..Default::default()
     };
     let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4144,12 +4327,12 @@ async fn mapi_over_http_calendar_meeting_response_updates_canonical_attendee_sta
     append_mapi_utf16_property(&mut property_values, 0x0C1F_001F, "bob@example.test");
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -4226,6 +4409,12 @@ async fn mapi_over_http_calendar_meeting_response_rejects_binary_payload_without
         ..Default::default()
     };
     let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4248,12 +4437,12 @@ async fn mapi_over_http_calendar_meeting_response_rejects_binary_payload_without
     append_mapi_binary_property(&mut property_values, 0x8216_0102, &[1, 2, 3]);
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     append_rop_set_properties(&mut rops, 2, 4, &property_values);
@@ -4317,6 +4506,12 @@ async fn mapi_over_http_calendar_attendee_named_properties_update_canonical_even
         ..Default::default()
     };
     let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4333,12 +4528,12 @@ async fn mapi_over_http_calendar_attendee_named_properties_update_canonical_even
     append_mapi_utf16_property(&mut property_values, 0x823C_001F, "Cara Optional");
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -4412,6 +4607,12 @@ async fn mapi_over_http_calendar_display_cc_updates_optional_attendees() {
         ..Default::default()
     };
     let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4428,12 +4629,12 @@ async fn mapi_over_http_calendar_display_cc_updates_optional_attendees() {
     append_mapi_utf16_property(&mut property_values, 0x0E03_001F, "Cara Optional");
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -4507,6 +4708,12 @@ async fn mapi_over_http_calendar_time_zone_blob_rejects_without_side_effect() {
         ..Default::default()
     };
     let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4522,12 +4729,12 @@ async fn mapi_over_http_calendar_time_zone_blob_rejects_without_side_effect() {
     append_mapi_binary_property(&mut property_values, 0x8233_0102, &[1, 2, 3, 4]);
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     append_rop_set_properties(&mut rops, 2, 1, &property_values);
@@ -4589,6 +4796,12 @@ async fn mapi_over_http_calendar_time_zone_description_updates_canonical_event()
         ..Default::default()
     };
     let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4604,12 +4817,12 @@ async fn mapi_over_http_calendar_time_zone_description_updates_canonical_event()
     append_mapi_utf16_property(&mut property_values, 0x8234_001F, "W. Europe Standard Time");
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -4681,6 +4894,12 @@ async fn mapi_over_http_calendar_whole_start_end_update_canonical_event() {
         ..Default::default()
     };
     let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4705,12 +4924,12 @@ async fn mapi_over_http_calendar_whole_start_end_update_canonical_event() {
     );
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -4789,6 +5008,12 @@ async fn mapi_over_http_calendar_common_start_end_update_canonical_event() {
         ..Default::default()
     };
     let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4813,12 +5038,12 @@ async fn mapi_over_http_calendar_common_start_end_update_canonical_event() {
     );
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -4897,6 +5122,12 @@ async fn mapi_over_http_calendar_state_flags_cancel_updates_canonical_event_stat
         ..Default::default()
     };
     let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4912,12 +5143,12 @@ async fn mapi_over_http_calendar_state_flags_cancel_updates_canonical_event_stat
     append_mapi_i32_property(&mut property_values, 0x8217_0003, 0x5);
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -4989,6 +5220,12 @@ async fn mapi_over_http_calendar_state_flags_reject_unsupported_bits_without_sid
         ..Default::default()
     };
     let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -5004,12 +5241,12 @@ async fn mapi_over_http_calendar_state_flags_reject_unsupported_bits_without_sid
     append_mapi_i32_property(&mut property_values, 0x8217_0003, 0x8);
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     append_rop_set_properties(&mut rops, 2, 1, &property_values);
@@ -5074,6 +5311,12 @@ async fn mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_
         ..Default::default()
     };
     let calendar_attachments = store.calendar_attachments.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service =
         ExchangeService::new_with_validator(store, Validator::new(FakeDetector::pdf(), 0.8));
     let connect = service
@@ -5101,12 +5344,12 @@ async fn mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_
     append_mapi_utf16_property(&mut attachment_properties, 0x370E_001F, "application/pdf");
     append_mapi_binary_property(&mut attachment_properties, 0x3701_0102, b"%PDF-calendar");
     let mut attachment_rops = Vec::new();
-    append_rop_open_folder(&mut attachment_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut attachment_rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut attachment_rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -5135,7 +5378,7 @@ async fn mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_
         &mut attachment_rops,
         1,
         4,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -5256,6 +5499,12 @@ async fn mapi_over_http_calendar_create_commits_event_and_attachment_together() 
     let events = store.events.clone();
     let calendar_attachments = store.calendar_attachments.clone();
     let event_versions = store.event_versions.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service =
         ExchangeService::new_with_validator(store, Validator::new(FakeDetector::pdf(), 0.8));
     let connect = service
@@ -5298,7 +5547,7 @@ async fn mapi_over_http_calendar_create_commits_event_and_attachment_together() 
     );
 
     let mut stage_rops = Vec::new();
-    append_rop_create_message(&mut stage_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_create_message(&mut stage_rops, 0, 1, calendar_folder_id);
     append_rop_set_properties(&mut stage_rops, 1, 3, &event_properties);
     stage_rops.extend_from_slice(&[
         0x23, 0x00, 0x01, 0x02, // RopCreateAttachment on PendingEvent
@@ -5424,6 +5673,12 @@ async fn mapi_over_http_calendar_get_valid_attachments_projects_existing_event()
         )]))),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -5443,12 +5698,12 @@ async fn mapi_over_http_calendar_get_valid_attachments_projects_existing_event()
     .unwrap();
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     rops.extend_from_slice(&[
@@ -5520,6 +5775,12 @@ async fn mapi_over_http_advertised_calendar_open_attachment_projects_existing_ev
         )]))),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -5532,12 +5793,12 @@ async fn mapi_over_http_advertised_calendar_open_attachment_projects_existing_ev
     );
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     rops.extend_from_slice(&[
@@ -5622,6 +5883,12 @@ async fn mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_a
         calendar_attachments: calendar_attachments.clone(),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -5634,12 +5901,12 @@ async fn mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_a
     );
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -5647,7 +5914,7 @@ async fn mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_a
         &mut rops,
         1,
         3,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -5693,7 +5960,7 @@ async fn mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_a
         &mut reopen_rops,
         1,
         4,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
         0x01,
     );
@@ -6725,6 +6992,12 @@ async fn mapi_over_http_advertised_calendar_open_message_projects_default_collec
         }])),
         ..Default::default()
     };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -6737,12 +7010,12 @@ async fn mapi_over_http_advertised_calendar_open_message_projects_default_collec
     );
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_folder(&mut rops, 0, 1, calendar_folder_id);
     append_rop_open_message(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(16),
+        calendar_folder_id,
         test_mapi_uuid_id(&event_id),
     );
     append_rop_get_properties_specific(

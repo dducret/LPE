@@ -290,9 +290,9 @@ async fn mapi_over_http_store_load_failure_after_logon_is_unknown_failure_with_s
         .unwrap();
     assert_eq!(logon.headers().get("x-responsecode").unwrap(), "0");
 
-    let mut open_folder_rops = Vec::new();
+    let mut open_ipm_subtree_rops = Vec::new();
     append_rop_open_folder(
-        &mut open_folder_rops,
+        &mut open_ipm_subtree_rops,
         0,
         1,
         crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
@@ -302,11 +302,34 @@ async fn mapi_over_http_store_load_failure_after_logon_is_unknown_failure_with_s
         "cookie",
         HeaderValue::from_str(&mapi_cookie_header(&logon)).unwrap(),
     );
-    let response = service
+    let ipm_subtree = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &open_folder_headers,
-            &execute_body(&rop_buffer(&open_folder_rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&open_ipm_subtree_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(ipm_subtree.headers().get("x-responsecode").unwrap(), "0");
+
+    let mut open_calendar_rops = Vec::new();
+    append_rop_open_folder(
+        &mut open_calendar_rops,
+        0,
+        1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    let mut open_calendar_headers = mapi_headers("Execute");
+    open_calendar_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&ipm_subtree)).unwrap(),
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &open_calendar_headers,
+            &execute_body(&rop_buffer(&open_calendar_rops, &[1, u32::MAX])),
         )
         .await
         .unwrap();

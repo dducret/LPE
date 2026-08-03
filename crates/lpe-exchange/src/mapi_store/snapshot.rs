@@ -92,6 +92,10 @@ impl MapiMailStoreSnapshot {
         &self.identity_codec
     }
 
+    pub(crate) fn durable_identity_records(&self) -> &[MapiIdentityRecord] {
+        &self.durable_identity_records
+    }
+
     pub(crate) fn with_mailbox_content_commit_times(
         mut self,
         commit_times: Vec<crate::store::MapiMailboxContentCommitTime>,

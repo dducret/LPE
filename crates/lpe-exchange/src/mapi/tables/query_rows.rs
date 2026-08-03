@@ -310,7 +310,12 @@ fn rop_query_rows_response_inner(
                 sort_emails(&mut rows, sort_orders);
                 rows.into_iter()
                     .map(|email| {
-                        serialize_message_property_row_in_snapshot(email, snapshot, &columns)
+                        serialize_message_property_row_in_snapshot_with_mailbox_guid(
+                            email,
+                            snapshot,
+                            mailbox_guid,
+                            &columns,
+                        )
                     })
                     .collect::<Vec<_>>()
             } else if *folder_id == TRASH_FOLDER_ID {
@@ -322,6 +327,7 @@ fn rop_query_rows_response_inner(
                     categorized_deleted_items_content_rows(
                         rows,
                         snapshot,
+                        mailbox_guid,
                         &columns,
                         sort_orders,
                         *expanded_count,
@@ -333,7 +339,12 @@ fn rop_query_rows_response_inner(
                 } else {
                     rows.into_iter()
                         .map(|row| {
-                            serialize_deleted_items_content_property_row(row, snapshot, &columns)
+                            serialize_deleted_items_content_property_row(
+                                row,
+                                snapshot,
+                                mailbox_guid,
+                                &columns,
+                            )
                         })
                         .collect::<Vec<_>>()
                 }
@@ -431,7 +442,9 @@ fn rop_query_rows_response_inner(
                 let mut rows = todo_search_content_rows(snapshot, restriction.as_ref());
                 sort_search_content_rows(&mut rows, sort_orders);
                 rows.into_iter()
-                    .map(|row| serialize_search_content_row(row, snapshot, &columns, false))
+                    .map(|row| {
+                        serialize_search_content_row(row, snapshot, mailbox_guid, &columns, false)
+                    })
                     .collect::<Vec<_>>()
             } else if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
                 rows_are_serialized_property_rows = true;
@@ -450,13 +463,21 @@ fn rop_query_rows_response_inner(
                 );
                 sort_mapi_messages(&mut rows, sort_orders);
                 rows.into_iter()
-                    .map(|message| serialize_mapi_message_property_row(message, &columns))
+                    .map(|message| {
+                        serialize_mapi_message_property_row_with_mailbox_guid(
+                            message,
+                            mailbox_guid,
+                            &columns,
+                        )
+                    })
                     .collect::<Vec<_>>()
             } else if *folder_id == REMINDERS_FOLDER_ID {
                 let mut rows = reminder_search_content_rows(snapshot, restriction.as_ref());
                 sort_search_content_rows(&mut rows, sort_orders);
                 rows.into_iter()
-                    .map(|row| serialize_search_content_row(row, snapshot, &columns, true))
+                    .map(|row| {
+                        serialize_search_content_row(row, snapshot, mailbox_guid, &columns, true)
+                    })
                     .collect::<Vec<_>>()
             } else if *folder_id == NOTES_FOLDER_ID {
                 let mut rows = snapshot.notes_for_folder(*folder_id);
@@ -515,6 +536,7 @@ fn rop_query_rows_response_inner(
                     if *category_count > 0 {
                         categorized_email_rows(
                             Some(snapshot),
+                            mailbox_guid,
                             *folder_id,
                             window_emails,
                             &columns,
@@ -529,8 +551,11 @@ fn rop_query_rows_response_inner(
                         window_emails
                             .into_iter()
                             .map(|email| {
-                                serialize_message_property_row_in_snapshot(
-                                    email, snapshot, &columns,
+                                serialize_message_property_row_in_snapshot_with_mailbox_guid(
+                                    email,
+                                    snapshot,
+                                    mailbox_guid,
+                                    &columns,
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -553,6 +578,7 @@ fn rop_query_rows_response_inner(
                     if *category_count > 0 {
                         categorized_email_rows(
                             Some(snapshot),
+                            mailbox_guid,
                             *folder_id,
                             rows,
                             &columns,
@@ -566,8 +592,11 @@ fn rop_query_rows_response_inner(
                     } else {
                         rows.into_iter()
                             .map(|email| {
-                                serialize_message_property_row_in_snapshot(
-                                    email, snapshot, &columns,
+                                serialize_message_property_row_in_snapshot_with_mailbox_guid(
+                                    email,
+                                    snapshot,
+                                    mailbox_guid,
+                                    &columns,
                                 )
                             })
                             .collect::<Vec<_>>()
