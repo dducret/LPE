@@ -89,6 +89,17 @@ where
         );
     }
 
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        operation = "NotificationWait",
+        account_id = %principal.account_id,
+        mapi_request_id = %request_id,
+        notification_cursor = ?session.notification_cursor,
+        notification_targets_active = session.has_notification_targets(),
+        "mapi notification wait accepted"
+    );
+
     // The Session Context remains available while the long poll is pending.
     store_session(session_id.clone(), session);
     drop(active_request);
@@ -223,10 +234,27 @@ where
                 .await
             {
                 Ok(poll) => {
-                    for event in session.matching_notifications(poll.events) {
+                    let polled_event_count = poll.events.len();
+                    let matching_events = session.matching_notifications(poll.events);
+                    let matching_event_count = matching_events.len();
+                    let next_cursor = poll.cursor.or(Some(cursor));
+                    if next_cursor != Some(cursor) || polled_event_count != 0 {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            operation = "NotificationWait",
+                            account_id = %principal.account_id,
+                            notification_cursor = cursor,
+                            next_notification_cursor = ?next_cursor,
+                            polled_event_count,
+                            matching_event_count,
+                            "mapi notification wait polled changes"
+                        );
+                    }
+                    for event in matching_events {
                         session.record_notification(event);
                     }
-                    session.notification_cursor = poll.cursor.or(Some(cursor));
+                    session.notification_cursor = next_cursor;
                 }
                 Err(error) => {
                     tracing::warn!(
