@@ -10,7 +10,7 @@ pub(in crate::mapi) fn hierarchy_row_count_excluding_deleted(
     if is_queryable_hierarchy_folder(folder_id)
         || snapshot.public_folder_for_id(folder_id).is_some()
     {
-        hierarchy_rows_excluding_deleted(
+        hierarchy_table_rows_excluding_deleted(
             folder_id,
             mailboxes,
             snapshot,

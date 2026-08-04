@@ -309,6 +309,11 @@ pub(in crate::mapi) fn simulate_table_access(
                 request.output_handle_index,
                 MapiObject::HierarchyTable {
                     folder_id,
+                    depth: request
+                        .payload
+                        .first()
+                        .is_some_and(|flags| flags & 0x04 != 0),
+                    depth_folder_ids: HashSet::new(),
                     columns: default_hierarchy_columns(),
                     columns_set: false,
                     sort_orders: Vec::new(),

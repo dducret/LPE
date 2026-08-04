@@ -249,6 +249,8 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
         hierarchy_handle,
         MapiObject::HierarchyTable {
             folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            depth: false,
+            depth_folder_ids: Default::default(),
             columns: Vec::new(),
             columns_set: true,
             sort_orders: Vec::new(),
@@ -385,6 +387,8 @@ fn hierarchy_move_notifies_the_source_subscription_and_refreshes_both_parent_tab
             handle,
             MapiObject::HierarchyTable {
                 folder_id,
+                depth: false,
+                depth_folder_ids: Default::default(),
                 columns: Vec::new(),
                 columns_set: true,
                 sort_orders: Vec::new(),

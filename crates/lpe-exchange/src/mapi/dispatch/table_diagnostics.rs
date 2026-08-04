@@ -668,6 +668,7 @@ pub(super) fn format_inbox_hierarchy_query_context(
 ) -> Option<String> {
     let Some(MapiObject::HierarchyTable {
         folder_id,
+        depth,
         columns,
         position,
         sort_orders,
@@ -686,6 +687,7 @@ pub(super) fn format_inbox_hierarchy_query_context(
         mailboxes,
         snapshot,
         deleted_advertised_special_folders,
+        *depth,
     );
     Some(format!(
         "input_index={};position={};forward={};requested_rows={};columns={};sort={};restriction={};row_count={};expected_subfolders=false",
@@ -779,6 +781,7 @@ pub(super) fn format_post_fai_hierarchy_release_without_inbox_contents_context(
 ) -> Option<String> {
     let Some(MapiObject::HierarchyTable {
         folder_id,
+        depth,
         columns,
         position,
         sort_orders,
@@ -800,6 +803,7 @@ pub(super) fn format_post_fai_hierarchy_release_without_inbox_contents_context(
         mailboxes,
         snapshot,
         deleted_advertised_special_folders,
+        *depth,
     );
     let row_count = computed_row_count.max((*position).min(u32::MAX as usize) as u32);
     Some(format!(

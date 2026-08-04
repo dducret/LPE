@@ -1147,6 +1147,8 @@ fn sync_issues_query_rows_returns_no_children_until_backed() {
     let mailboxes = [inbox];
     let mut table = MapiObject::HierarchyTable {
         folder_id: SYNC_ISSUES_FOLDER_ID,
+        depth: false,
+        depth_folder_ids: Default::default(),
         columns: vec![PID_TAG_DISPLAY_NAME_W, PID_TAG_FOLDER_ID],
         columns_set: true,
         sort_orders: Vec::new(),
@@ -1291,6 +1293,8 @@ fn query_rows_request_validation_matches_microsoft_flags() {
     fn table() -> MapiObject {
         MapiObject::HierarchyTable {
             folder_id: SYNC_ISSUES_FOLDER_ID,
+            depth: false,
+            depth_folder_ids: Default::default(),
             columns: vec![PID_TAG_DISPLAY_NAME_W],
             columns_set: true,
             sort_orders: Vec::new(),
@@ -1387,6 +1391,8 @@ fn query_rows_origin_tracks_cursor_boundary() {
     let mailboxes = [inbox];
     let mut table = MapiObject::HierarchyTable {
         folder_id: IPM_SUBTREE_FOLDER_ID,
+        depth: false,
+        depth_folder_ids: Default::default(),
         columns: vec![PID_TAG_DISPLAY_NAME_W],
         columns_set: false,
         sort_orders: Vec::new(),
@@ -4190,6 +4196,8 @@ fn find_row_request_validation_matches_microsoft_flags() {
     fn table() -> MapiObject {
         MapiObject::HierarchyTable {
             folder_id: SYNC_ISSUES_FOLDER_ID,
+            depth: false,
+            depth_folder_ids: Default::default(),
             columns: vec![PID_TAG_DISPLAY_NAME_W],
             columns_set: true,
             sort_orders: Vec::new(),

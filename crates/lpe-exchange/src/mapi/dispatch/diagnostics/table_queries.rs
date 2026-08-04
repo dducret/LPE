@@ -58,6 +58,7 @@ pub(in crate::mapi::dispatch) fn outlook_bootstrap_query_rows_total_count(
     };
     match object {
         Some(MapiObject::HierarchyTable {
+            depth,
             deleted_advertised_special_folders,
             ..
         }) if matches!(
@@ -70,6 +71,7 @@ pub(in crate::mapi::dispatch) fn outlook_bootstrap_query_rows_total_count(
                 mailboxes,
                 snapshot,
                 deleted_advertised_special_folders,
+                *depth,
             ))
         }
         Some(MapiObject::ContentsTable {

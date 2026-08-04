@@ -326,6 +326,8 @@ fn access_plan_hierarchy_query_ignores_unrelated_live_calendar_handle() {
         1,
         MapiObject::HierarchyTable {
             folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            depth: false,
+            depth_folder_ids: Default::default(),
             columns: vec![
                 PID_TAG_MID,
                 PID_TAG_CONTAINER_CLASS_W,
@@ -377,6 +379,8 @@ fn access_plan_hierarchy_seek_query_ignores_unrelated_live_calendar_handle() {
         1,
         MapiObject::HierarchyTable {
             folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            depth: false,
+            depth_folder_ids: Default::default(),
             columns: default_hierarchy_columns(),
             columns_set: false,
             sort_orders: Vec::new(),

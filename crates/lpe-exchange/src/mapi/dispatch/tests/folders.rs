@@ -1788,6 +1788,8 @@ fn default_folder_entry_id_values_debug_decodes_indexed_special_folder_ids() {
 fn bootstrap_query_rows_total_count_keeps_sync_issues_leaf_until_backed() {
     let object = MapiObject::HierarchyTable {
         folder_id: SYNC_ISSUES_FOLDER_ID,
+        depth: false,
+        depth_folder_ids: Default::default(),
         columns: default_hierarchy_columns(),
         columns_set: false,
         sort_orders: Vec::new(),

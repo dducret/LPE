@@ -4202,6 +4202,128 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change() {
+    let folder_id = crate::mapi::identity::INBOX_FOLDER_ID;
+    let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
+        mapi_notification_polls: Arc::new(Mutex::new(vec![
+            MapiNotificationPoll {
+                event_pending: true,
+                cursor: Some(8),
+                events: vec![
+                    crate::mapi::notifications::MapiNotificationEvent::canonical(
+                        crate::mapi::notifications::MapiNotificationKind::Content,
+                        0x0002,
+                        folder_id,
+                        Some(message_id),
+                        None,
+                        8,
+                        44,
+                        Some(3),
+                        Some(2),
+                        "created".to_string(),
+                        Some("Inbox".to_string()),
+                        None,
+                        Some("Externally received reply".to_string()),
+                        Some("IPM.Note".to_string()),
+                    )
+                    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+                ],
+            },
+            MapiNotificationPoll {
+                event_pending: false,
+                cursor: Some(7),
+                events: Vec::new(),
+            },
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::ROOT_FOLDER_ID,
+    );
+    // 202608041253 :33/:34 matches Exchange 2016 raw/226/:227: a root
+    // hierarchy view uses Depth|SuppressesNotifications (0x84), then QueryRows.
+    // [MS-OXCFOLD] section 2.2.1.13.1; [MS-OXCNOTIF] section 3.1.4.3.
+    rops.extend_from_slice(&[0x04, 0x00, 0x01, 0x02, 0x84]); // RopGetHierarchyTable
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]); // RopSetColumns
+    rops.extend_from_slice(&4u16.to_le_bytes());
+    for tag in [0x6748_0014u32, 0x3001_001F, 0x3602_0003, 0x3603_0003] {
+        rops.extend_from_slice(&tag.to_le_bytes());
+    }
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]); // RopQueryRows
+    rops.extend_from_slice(&64u16.to_le_bytes());
+    rops.extend_from_slice(&[0x29, 0x00, 0x00, 0x03]); // RopRegisterNotification
+    rops.extend_from_slice(&0x0002u16.to_le_bytes());
+    rops.push(1); // WantWholeStore
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    // Exchange raw/753 targets the active root hierarchy table as well as the
+    // whole-store NewMail subscription. The table target is not an Inbox
+    // contents-table notification.
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2A, 0x04, 0, 0, 0, 0, 0x02, 0x80]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_active_table_without_registration_replays_later_change() {
     let folder_id = test_mapi_folder_id(5);
     let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");

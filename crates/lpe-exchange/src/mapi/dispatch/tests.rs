@@ -1785,6 +1785,8 @@ fn post_fai_hierarchy_release_context_reports_stop_before_inbox_contents() {
         .push("GetHierarchyTable(in=0,out=13,row_count=22)".to_string());
     let table = MapiObject::HierarchyTable {
         folder_id: IPM_SUBTREE_FOLDER_ID,
+        depth: false,
+        depth_folder_ids: Default::default(),
         columns: vec![
             PID_TAG_FOLDER_ID,
             PID_TAG_SUBFOLDERS,

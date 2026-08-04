@@ -13,6 +13,7 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
     match object {
         Some(MapiObject::HierarchyTable {
             folder_id,
+            depth,
             sort_orders,
             restriction,
             position,
@@ -31,6 +32,7 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
                 sort_orders,
                 mailbox_guid,
                 deleted_advertised_special_folders,
+                *depth,
             );
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()
