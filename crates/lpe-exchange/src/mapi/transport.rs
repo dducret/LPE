@@ -806,7 +806,11 @@ pub(in crate::mapi) fn finalize_mapi_response(
         "x-expirationinfo",
         &(MAPI_SESSION_MAX_AGE_SECONDS * 1000).to_string(),
     );
-    insert_header(&mut response, "x-pendingperiod", "15000");
+    insert_header(
+        &mut response,
+        "x-pendingperiod",
+        &notification_wait::MAPI_NOTIFICATION_WAIT_PENDING_PERIOD_MILLIS.to_string(),
+    );
     if let Some(client_info) = request_headers.get("x-clientinfo") {
         response
             .headers_mut()

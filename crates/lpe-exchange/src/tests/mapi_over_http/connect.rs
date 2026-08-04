@@ -4255,12 +4255,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change()
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let mut rops = Vec::new();
-    append_rop_open_folder(
-        &mut rops,
-        0,
-        1,
-        crate::mapi::identity::ROOT_FOLDER_ID,
-    );
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::ROOT_FOLDER_ID);
     // 202608041253 :33/:34 matches Exchange 2016 raw/226/:227: a root
     // hierarchy view uses Depth|SuppressesNotifications (0x84), then QueryRows.
     // [MS-OXCFOLD] section 2.2.1.13.1; [MS-OXCNOTIF] section 3.1.4.3.
@@ -4280,10 +4275,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change()
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(
-                &rops,
-                &[1, u32::MAX, u32::MAX, u32::MAX],
-            )),
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -4300,10 +4292,12 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change()
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
 
+    let mut notification_execute_headers = mapi_headers("Execute");
+    notification_execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
-            &execute_headers,
+            &notification_execute_headers,
             &execute_body(&rop_buffer(&[], &[])),
         )
         .await

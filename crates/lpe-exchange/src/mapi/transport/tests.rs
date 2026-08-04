@@ -312,6 +312,10 @@ async fn notification_wait_empty_response_reports_success_with_empty_body() {
         "NotificationWait"
     );
     assert_eq!(response_header(&response, "x-responsecode").unwrap(), "0");
+    assert_eq!(
+        response_header(&response, "x-accel-buffering").as_deref(),
+        Some("no")
+    );
     let set_cookies = response
         .headers()
         .get_all("set-cookie")
@@ -331,6 +335,21 @@ async fn notification_wait_empty_response_reports_success_with_empty_body() {
         .unwrap();
     assert!(body.starts_with(b"PROCESSING\r\nDONE\r\nX-StartTime: "));
     assert!(body.ends_with(&[0; 16]));
+}
+
+#[test]
+fn mapi_responses_advertise_the_default_pending_period() {
+    // [MS-OXCMAPIHTTP] section 2.2.3.3.5: the default period between
+    // PENDING meta-tags is 30 seconds.
+    let response = finalize_mapi_response(
+        mapi_response("PING", "request:43", 0, Vec::new(), None),
+        &HeaderMap::new(),
+    );
+
+    assert_eq!(
+        response_header(&response, "x-pendingperiod").as_deref(),
+        Some("30000")
+    );
 }
 
 #[test]

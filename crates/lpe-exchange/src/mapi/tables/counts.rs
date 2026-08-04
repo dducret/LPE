@@ -10,18 +10,31 @@ pub(in crate::mapi) fn hierarchy_row_count_excluding_deleted(
     if is_queryable_hierarchy_folder(folder_id)
         || snapshot.public_folder_for_id(folder_id).is_some()
     {
-        hierarchy_table_rows_excluding_deleted(
-            folder_id,
-            mailboxes,
-            snapshot,
-            None,
-            &[],
-            Uuid::nil(),
-            deleted_advertised_special_folders,
-            depth,
-        )
-        .len()
-        .min(u32::MAX as usize) as u32
+        let row_count = if depth {
+            hierarchy_table_rows_excluding_deleted(
+                folder_id,
+                mailboxes,
+                snapshot,
+                None,
+                &[],
+                Uuid::nil(),
+                deleted_advertised_special_folders,
+                true,
+            )
+            .len()
+        } else {
+            hierarchy_rows_excluding_deleted(
+                folder_id,
+                mailboxes,
+                snapshot,
+                None,
+                &[],
+                Uuid::nil(),
+                deleted_advertised_special_folders,
+            )
+            .len()
+        };
+        row_count.min(u32::MAX as usize) as u32
     } else {
         0
     }

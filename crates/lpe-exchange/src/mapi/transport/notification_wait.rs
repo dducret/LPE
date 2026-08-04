@@ -10,7 +10,10 @@ use axum::{
 use std::{io, time::Duration};
 use tokio_stream::wrappers::ReceiverStream;
 
-pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_PENDING_PERIOD_MILLIS: u32 = 15_000;
+// [MS-OXCMAPIHTTP] section 2.2.3.3.5 specifies 30 seconds as the default
+// interval between PENDING keep-alives. Outlook uses that default with the
+// current Exchange server baseline.
+pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_PENDING_PERIOD_MILLIS: u32 = 30_000;
 pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_MAXIMUM_WAIT: Duration = Duration::from_secs(300);
 const MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_ATTEMPTS: usize = 200;
 const MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_DELAY_MS: u64 = 10;
@@ -333,6 +336,9 @@ fn decorate_notification_wait_response(
     insert_header(response, "x-responsecode", &response_code.to_string());
     insert_header(response, "x-requestid", request_id);
     insert_header(response, "x-serverapplication", MAPI_SERVER_APPLICATION);
+    // nginx honors this response header even when a deployed location is
+    // missing `proxy_buffering off`; the MAPI frames must flush immediately.
+    insert_header(response, "x-accel-buffering", "no");
     let cookie = session_cookie(endpoint, session_id, false);
     if let Ok(value) = HeaderValue::from_str(&cookie) {
         response.headers_mut().append(SET_COOKIE, value);
@@ -344,13 +350,15 @@ pub(in crate::mapi) fn notification_wait_empty_response(
     request_id: &str,
     session_id: &str,
 ) -> Response {
-    mapi_response_with_cookies(
+    let mut response = mapi_response_with_cookies(
         "NotificationWait",
         request_id,
         0,
         notification_wait_body(false),
         vec![session_cookie(endpoint, session_id, false)],
-    )
+    );
+    insert_header(&mut response, "x-accel-buffering", "no");
+    response
 }
 
 pub(in crate::mapi) async fn acquire_notification_wait_active_session_request(
