@@ -648,6 +648,135 @@ fn sync_manifest_serializes_content_message_header_in_fixed_order() {
 }
 
 #[test]
+fn content_download_selection_emits_unseen_durable_inbox_change_after_completed_sync() {
+    let mut previously_seen = test_email();
+    previously_seen.id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa111").unwrap();
+    previously_seen.thread_id = Uuid::parse_str("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb111").unwrap();
+    previously_seen.subject = "Previously synchronized".to_string();
+    previously_seen.received_at = "2026-08-03T19:00:00Z".to_string();
+
+    let mut arrived_after_sync = test_email();
+    arrived_after_sync.id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa112").unwrap();
+    arrived_after_sync.thread_id = Uuid::parse_str("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb112").unwrap();
+    arrived_after_sync.subject = "Arrived after completed sync".to_string();
+    arrived_after_sync.received_at = "2026-08-03T21:31:00Z".to_string();
+
+    let previously_seen_fact = NormalMessageSyncFact {
+        canonical_id: previously_seen.id,
+        object_id: crate::mapi::identity::mapi_store_id(0x4001),
+        source_key: source_key_for_store_id(crate::mapi::identity::mapi_store_id(0x4001)),
+        change_number: 70_001,
+        change_key: change_key_for_change_number(70_001),
+        predecessor_change_list: predecessor_change_list(70_001),
+        last_modification_time: filetime_from_change_number(70_001),
+    };
+    let arrived_after_sync_fact = NormalMessageSyncFact {
+        canonical_id: arrived_after_sync.id,
+        object_id: crate::mapi::identity::mapi_store_id(0x4002),
+        source_key: source_key_for_store_id(crate::mapi::identity::mapi_store_id(0x4002)),
+        change_number: 70_002,
+        change_key: change_key_for_change_number(70_002),
+        predecessor_change_list: predecessor_change_list(70_002),
+        last_modification_time: filetime_from_change_number(70_002),
+    };
+    let manifest_for = |emails: &[JmapEmail], facts: &[NormalMessageSyncFact]| {
+        sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times_and_normal_message_facts(
+            Uuid::nil(),
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL,
+            SYNC_EXTRA_FLAG_CHANGE_NUMBER,
+            &[],
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[],
+            emails,
+            &[],
+            facts,
+            &[],
+            &[],
+            &[],
+            &[],
+            emails,
+            &[],
+            facts,
+            &[],
+            emails,
+            &[],
+            &[],
+            &[],
+            1,
+        )
+    };
+
+    let previously_seen_manifest = manifest_for(
+        std::slice::from_ref(&previously_seen),
+        std::slice::from_ref(&previously_seen_fact),
+    );
+    let previously_seen_facts = download_change_facts_with_normal_message_sync_facts(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        std::slice::from_ref(&previously_seen),
+        &[],
+        std::slice::from_ref(&previously_seen_fact),
+        &[],
+        &[],
+    );
+    let (_, completed_state) = select_download_manifest_for_client_state(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        &previously_seen_manifest,
+        &initial_sync_state_stream(SYNC_TYPE_CONTENTS),
+        &previously_seen_facts,
+        &[],
+    )
+    .expect("complete the initial Inbox download");
+
+    let emails = [previously_seen, arrived_after_sync];
+    let facts = [previously_seen_fact, arrived_after_sync_fact.clone()];
+    let full_manifest = manifest_for(&emails, &facts);
+    let full_facts = download_change_facts_with_normal_message_sync_facts(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        &[],
+        &emails,
+        &[],
+        &facts,
+        &[],
+        &[],
+    );
+
+    // [MS-OXCFXICS] section 3.2.5.3: only a normal message whose server CN
+    // is absent from the uploaded CnsetSeen is downloaded, and the final
+    // CnsetSeen is the union of that uploaded state and emitted changes.
+    let (selected, final_state) = select_download_manifest_for_client_state(
+        SYNC_TYPE_CONTENTS,
+        SYNC_FLAG_NORMAL,
+        &full_manifest,
+        &completed_state,
+        &full_facts,
+        &[],
+    )
+    .expect("select the Inbox change absent from the completed state");
+
+    assert!(contains_bytes(
+        &selected,
+        &utf16z("Arrived after completed sync")
+    ));
+    assert!(!contains_bytes(
+        &selected,
+        &utf16z("Previously synchronized")
+    ));
+    assert_change_number_property(&selected, PID_TAG_CHANGE_NUMBER, 70_002);
+    assert_variable_property(
+        &final_state,
+        META_TAG_CNSET_SEEN,
+        &replguid_idset_from_counters(&[70_001, 70_002]),
+    );
+}
+
+#[test]
 fn microsoft_oxcfxics_content_sync_emits_sender_and_delivery_identity_properties() {
     let mut email = test_email();
     crate::mapi::identity::remember_mapi_identity(

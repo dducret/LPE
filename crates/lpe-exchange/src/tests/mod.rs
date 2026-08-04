@@ -3892,6 +3892,8 @@ struct FakeStore {
     omitted_reminder_query_source_ids: Arc<Mutex<Vec<Uuid>>>,
     mapi_notification_cursor: Arc<Mutex<Option<i64>>>,
     mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
+    mapi_notification_poll_after_cursors: Arc<Mutex<Vec<i64>>>,
+    mapi_mail_store_load_notification: Arc<Mutex<Option<(i64, MapiNotificationPoll)>>>,
     ews_user_configurations: Arc<Mutex<Vec<EwsUserConfiguration>>>,
     ews_delegates: Arc<Mutex<Vec<EwsDelegate>>>,
     ews_retention_policy_tags: Arc<Mutex<Vec<FakeRetentionPolicyTag>>>,
@@ -7321,8 +7323,12 @@ impl ExchangeStore for FakeStore {
     fn poll_mapi_notifications<'a>(
         &'a self,
         _account_id: Uuid,
-        _after_cursor: i64,
+        after_cursor: i64,
     ) -> StoreFuture<'a, MapiNotificationPoll> {
+        self.mapi_notification_poll_after_cursors
+            .lock()
+            .unwrap()
+            .push(after_cursor);
         let poll = self
             .mapi_notification_polls
             .lock()
@@ -9473,12 +9479,23 @@ impl ExchangeStore for FakeStore {
         let mailboxes = self.mailboxes.lock().unwrap().clone();
         let load_started = self.mapi_mail_store_load_started.clone();
         let load_continue = self.mapi_mail_store_load_continue.clone();
+        let load_notification = self
+            .mapi_mail_store_load_notification
+            .lock()
+            .unwrap()
+            .take();
+        let notification_cursor = self.mapi_notification_cursor.clone();
+        let notification_polls = self.mapi_notification_polls.clone();
         Box::pin(async move {
             if let Some(load_started) = load_started {
                 load_started.notify_one();
             }
             if let Some(load_continue) = load_continue {
                 load_continue.notified().await;
+            }
+            if let Some((cursor, poll)) = load_notification {
+                *notification_cursor.lock().unwrap() = Some(cursor);
+                notification_polls.lock().unwrap().push(poll);
             }
             Ok(mailboxes)
         })

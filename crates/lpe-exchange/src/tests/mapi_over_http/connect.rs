@@ -4171,15 +4171,20 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
         ),
         "response={response_rops:02x?}"
     );
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x2A, 0x04, 0, 0, 0, 0, 0x10, 0xB0]
-    ));
+    let message_object_modified_prefix = [0x2A, 0x04, 0, 0, 0, 0, 0x10, 0xB0];
+    let message_object_modified_offset = response_rops
+        .windows(message_object_modified_prefix.len())
+        .position(|window| window == message_object_modified_prefix)
+        .expect("message object notification should be present");
+    let scoped_inbox_wire_id = response_rops[message_object_modified_offset
+        + message_object_modified_prefix.len()
+        ..message_object_modified_offset + message_object_modified_prefix.len() + 8]
+        .to_vec();
     // [MS-OXCNOTIF] section 2.2.1.4.1.2: a content change that updates
     // folder counts also modifies the folder object. The folder notification
     // carries TotalMessageCount and UnreadMessageCount without the Message bit.
     let mut folder_counts_notification = vec![0x2A, 0x04, 0, 0, 0, 0, 0x10, 0x30];
-    append_mapi_wire_id(&mut folder_counts_notification, folder_id);
+    folder_counts_notification.extend_from_slice(&scoped_inbox_wire_id);
     folder_counts_notification.extend_from_slice(&0u16.to_le_bytes());
     folder_counts_notification.extend_from_slice(&3u32.to_le_bytes());
     folder_counts_notification.extend_from_slice(&2u32.to_le_bytes());
@@ -4191,6 +4196,182 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
     assert!(!contains_bytes(
         &response_rops,
         &[0x2A, 0x05, 0, 0, 0, 0, 0x00, 0x01]
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_active_table_without_registration_replays_later_change() {
+    let folder_id = test_mapi_folder_id(5);
+    let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
+    let notification_polls = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
+        mapi_notification_polls: notification_polls.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder
+    append_mapi_wire_id(&mut rops, folder_id);
+    rops.push(0);
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // RopGetContentsTable
+    rops.extend_from_slice(&[0x17, 0x00, 0x02]); // RopQueryPosition
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x03, 0x10]); // NoNotifications
+    rops.extend_from_slice(&[0x17, 0x00, 0x03]); // RopQueryPosition
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    notification_polls
+        .lock()
+        .unwrap()
+        .push(MapiNotificationPoll {
+            event_pending: true,
+            cursor: Some(8),
+            events: vec![
+                crate::mapi::notifications::MapiNotificationEvent::canonical(
+                    crate::mapi::notifications::MapiNotificationKind::Content,
+                    0x0010,
+                    folder_id,
+                    Some(message_id),
+                    None,
+                    8,
+                    44,
+                    Some(3),
+                    Some(2),
+                    "updated".to_string(),
+                    Some("Inbox".to_string()),
+                    None,
+                    Some("later table change".to_string()),
+                    None,
+                ),
+            ],
+        });
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    let body = tokio::time::timeout(std::time::Duration::from_secs(1), response_bytes(response))
+        .await
+        .expect("notification wait should observe the later table change");
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    // [MS-OXCNOTIF] section 3.1.4.3 activates the normal table after its
+    // view ROP; [MS-OXCFOLD] excludes its NoNotifications counterpart.
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x2A, 0x04, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_active_table_replays_change_committed_during_snapshot() {
+    let folder_id = test_mapi_folder_id(5);
+    let message_id = test_mapi_message_id("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    let poll_after_cursors = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
+        mapi_notification_poll_after_cursors: poll_after_cursors.clone(),
+        mapi_mail_store_load_notification: Arc::new(Mutex::new(Some((
+            8,
+            MapiNotificationPoll {
+                event_pending: true,
+                cursor: Some(8),
+                events: vec![
+                    crate::mapi::notifications::MapiNotificationEvent::canonical(
+                        crate::mapi::notifications::MapiNotificationKind::Content,
+                        0x0010,
+                        folder_id,
+                        Some(message_id),
+                        None,
+                        8,
+                        44,
+                        Some(3),
+                        Some(2),
+                        "updated".to_string(),
+                        Some("Inbox".to_string()),
+                        None,
+                        Some("change during table snapshot".to_string()),
+                        None,
+                    ),
+                ],
+            },
+        )))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder
+    append_mapi_wire_id(&mut rops, folder_id);
+    rops.push(0);
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // RopGetContentsTable
+    rops.extend_from_slice(&[0x17, 0x00, 0x02]); // RopQueryPosition
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    // [MS-OXCNOTIF] section 3.1.4.3: an active table receives the change
+    // committed while the request is loading its mail-store snapshot.
+    assert_eq!(poll_after_cursors.lock().unwrap().as_slice(), &[7]);
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
     ));
 }
 

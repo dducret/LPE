@@ -371,6 +371,7 @@ where
             &mailboxes,
             &emails,
             &mut snapshot,
+            None,
             validator,
             &execute.rop_buffer,
             execute.max_rop_out,
@@ -457,6 +458,32 @@ where
         );
     }
 
+    let notification_cursor_before_snapshot = if session.notification_cursor.is_none()
+        && (session.has_notification_targets()
+            || request_debug.ids.iter().any(|rop_id| {
+                matches!(
+                    RopId::from_u8(*rop_id),
+                    Some(
+                        RopId::CollapseRow
+                            | RopId::ExpandRow
+                            | RopId::FindRow
+                            | RopId::QueryColumnsAll
+                            | RopId::QueryPosition
+                            | RopId::QueryRows
+                            | RopId::SeekRow
+                            | RopId::SeekRowBookmark
+                            | RopId::SeekRowFractional
+                    )
+                )
+            })) {
+        store
+            .fetch_mapi_notification_cursor(principal.account_id)
+            .await
+            .ok()
+            .map(|cursor| cursor.unwrap_or(0))
+    } else {
+        None
+    };
     let identity_scope = match load_mapi_identity_scope(store, principal.account_id).await {
         Ok(identity_scope) => identity_scope,
         Err(error) => {
@@ -577,6 +604,7 @@ where
                 &mailboxes,
                 &emails,
                 &mut snapshot,
+                notification_cursor_before_snapshot,
                 validator,
                 &execute.rop_buffer,
                 execute.max_rop_out,
@@ -905,6 +933,7 @@ pub(in crate::mapi) async fn execute_rops<S, V>(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &mut MapiMailStoreSnapshot,
+    notification_cursor_before_snapshot: Option<i64>,
     validator: &Validator<V>,
     rop_buffer: &[u8],
     max_rop_out: u32,
@@ -1441,6 +1470,12 @@ where
                 }
             }
         }
+    }
+    if session.notification_cursor.is_none() && session.has_notification_targets() {
+        // [MS-OXCNOTIF] section 3.1.4.3 creates an automatic subscription
+        // for an active table view. Adopt the cursor captured before this
+        // request's mail-store snapshot so a concurrent delivery is replayed.
+        session.notification_cursor = notification_cursor_before_snapshot;
     }
     if let Some(cursor) = session.notification_cursor {
         if let Ok(poll) = store

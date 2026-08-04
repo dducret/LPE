@@ -954,7 +954,9 @@ non-canonical LPE state.
   with the required `Outlook Rules Organizer` subject. The matching Exchange
   `RopOpenStream` / `RopReadStream` sequence (`raw/554`) succeeds with a
   66-byte `PidTagRwRulesStream`, so the fresh virtual FAI projects that exact
-  opaque default rather than an empty stream. Any non-empty client-owned
+  opaque default rather than an empty stream. In that same `RopOpenMessage`
+  response, Exchange encodes the lossless ASCII normalized subject as reduced
+  Unicode (String8), rather than UTF-16; LPE preserves that wire shape. Any non-empty client-owned
   `PidTagRwRulesStream` remains opaque and takes precedence over the default.
   This follows `[MS-OXORULE]` section 3.1.4.2.4. Exact,
   bounded lookups may expose persisted backed rows with valid
@@ -1333,11 +1335,18 @@ not by itself authorize broad client publication.
   IDs before replacing the active identity. An incomplete
   movement notification is suppressed rather than guessing a source ID or
   substituting a `TableModified` notification; a separately subscribed table event and
-  ordinary ICS remain independent convergence paths. Registrations and pending
-  event delivery remain session-local; after process restart or movement to a
-  different worker, the session must re-register and resume from canonical
-  sync/checkpoint behavior rather than relying on cross-process notification
-  delivery. Notification FolderId and MessageId fields are serialized through
+  ordinary ICS remain independent convergence paths. An active table without
+  an explicit registration initializes the session-local durable notification
+  cursor before the containing Execute's mail-store snapshot and adopts it when
+  the compatible table becomes active, allowing its automatic subscription to
+  replay a canonical change that arrives during that request; a
+  `NoNotifications` table is excluded. Registrations,
+  automatic table subscriptions, and pending event delivery remain session-local;
+  after process restart or movement to a different worker, the session must
+  re-register and resume from canonical sync/checkpoint behavior rather than
+  relying on cross-process notification delivery. This implements the automatic
+  subscription behavior in [MS-OXCNOTIF] section 3.1.4.3 and the table flags in
+  [MS-OXCFOLD] sections 2.2.1.13.1 and 2.2.1.14.1. Notification FolderId and MessageId fields are serialized through
   the authenticated request's scoped identity codec, including an otherwise
   release-only Execute that has registered notification targets; logical
   default-folder role IDs are never emitted as wire identifiers. The generic

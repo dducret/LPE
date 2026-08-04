@@ -146,6 +146,14 @@ async fn mapi_over_http_exchange_rule_organizer_query_rows_opens_returned_messag
         &open_response_rops,
         &[0x03, 0x02, 0, 0, 0, 0]
     ));
+    // Exchange 2016 test1_202608031300.saz raw/554 serializes the Rules
+    // Organizer normalized subject as the lossless reduced-Unicode form.
+    // Keep this byte shape because it immediately precedes Outlook's normal
+    // Inbox contents-table startup branch.
+    let mut expected_open_message = vec![0x03, 0x02, 0, 0, 0, 0, 0, 0x01, 0x03];
+    expected_open_message.extend_from_slice(b"Outlook Rules Organizer\0");
+    expected_open_message.extend_from_slice(&[0, 0, 0, 0, 0]);
+    assert!(contains_bytes(&open_response_rops, &expected_open_message));
     let property_row_offset =
         mapi_get_properties_specific_standard_row_offset(&open_response_rops, 2).unwrap();
     assert_eq!(open_response_rops[property_row_offset], 0);

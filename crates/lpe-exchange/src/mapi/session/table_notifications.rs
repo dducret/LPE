@@ -89,12 +89,6 @@ impl MapiSession {
                 .any(|handle| self.handles.contains_key(handle))
     }
 
-    pub(in crate::mapi) fn take_pending_notification_deliveries(
-        &mut self,
-    ) -> Vec<(u32, u8, MapiNotificationEvent)> {
-        self.take_pending_notification_delivery_batch().0
-    }
-
     pub(in crate::mapi) fn take_pending_notification_delivery_batch(
         &mut self,
     ) -> (

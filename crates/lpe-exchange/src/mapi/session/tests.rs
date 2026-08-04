@@ -288,7 +288,7 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
     );
 
     assert_eq!(session.pending_notification_count(), 1);
-    let deliveries = session.take_pending_notification_deliveries();
+    let (deliveries, _) = session.take_pending_notification_delivery_batch();
     assert_eq!(deliveries.len(), 1);
     assert_eq!(deliveries[0].0, hierarchy_handle);
     assert_eq!(deliveries[0].1, 1);
@@ -348,7 +348,7 @@ fn session_delivers_only_complete_message_moves_and_copies_to_subscriptions() {
 
         session
             .record_notification(movement_event().with_old_message_id(Some(0x0000_0001_0089_0001)));
-        let deliveries = session.take_pending_notification_deliveries();
+        let (deliveries, _) = session.take_pending_notification_delivery_batch();
         assert_eq!(deliveries.len(), 1);
         assert_eq!(deliveries[0].0, notification_handle);
         assert_eq!(deliveries[0].2.old_message_id, Some(0x0000_0001_0089_0001));
@@ -414,7 +414,7 @@ fn hierarchy_move_notifies_the_source_subscription_and_refreshes_both_parent_tab
         Some(folder_id),
     ));
 
-    let deliveries = session.take_pending_notification_deliveries();
+    let (deliveries, _) = session.take_pending_notification_delivery_batch();
     assert_eq!(deliveries.len(), 3);
     assert!(deliveries.iter().any(|(handle, _, event)| {
         *handle == notification_handle
@@ -472,7 +472,7 @@ fn notification_subscription_preserves_rop_logon_id_through_rop_notify() {
         None,
     ));
 
-    let deliveries = session.take_pending_notification_deliveries();
+    let (deliveries, _) = session.take_pending_notification_delivery_batch();
     assert_eq!(deliveries.len(), 1);
     let (handle, delivery_logon_id, event) = &deliveries[0];
     assert_eq!(*handle, notification_handle);
