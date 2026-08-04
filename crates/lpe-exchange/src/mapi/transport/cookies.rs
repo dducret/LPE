@@ -9,6 +9,11 @@ use super::{
     MAPI_SESSION_MAX_AGE_SECONDS, NSPI_COOKIE, NSPI_COOKIE_PATH, NSPI_SEQUENCE_COOKIE,
 };
 
+const MAPI_ROUTING_COOKIE: &str = "MapiRouting";
+const MAPI_ROUTING_COOKIE_PATH: &str = "/mapi/";
+const MAPI_BACKEND_COOKIE: &str = "X-BackEndCookie";
+const MAPI_BACKEND_COOKIE_PATH: &str = "/mapi";
+
 pub(in crate::mapi) fn request_cookie(
     endpoint: MapiEndpoint,
     headers: &HeaderMap,
@@ -225,9 +230,54 @@ pub(in crate::mapi) fn session_context_cookies(
     expired: bool,
 ) -> Vec<String> {
     vec![
-        session_cookie(endpoint, session_id, expired),
+        routing_cookie(session_id, expired),
         sequence_cookie(endpoint, session_id, expired),
+        session_cookie(endpoint, session_id, expired),
+        backend_cookie(session_id, expired),
     ]
+}
+
+/// Exchange's front end issues routing cookies with regular MAPI responses.
+/// LPE is single-node, so their values are opaque stable identifiers rather
+/// than load-balancer affinity data. The cookie names and paths match the
+/// Exchange 2016 baseline (`202608041727.saz` raw/37_s.txt).
+pub(in crate::mapi) fn notification_wait_context_cookies(
+    endpoint: MapiEndpoint,
+    session_id: &str,
+) -> Vec<String> {
+    vec![
+        session_cookie(endpoint, session_id, false),
+        backend_cookie(session_id, false),
+    ]
+}
+
+fn routing_cookie(session_id: &str, expired: bool) -> String {
+    exchange_topology_cookie(
+        MAPI_ROUTING_COOKIE,
+        MAPI_ROUTING_COOKIE_PATH,
+        session_id,
+        expired,
+    )
+}
+
+fn backend_cookie(session_id: &str, expired: bool) -> String {
+    exchange_topology_cookie(
+        MAPI_BACKEND_COOKIE,
+        MAPI_BACKEND_COOKIE_PATH,
+        session_id,
+        expired,
+    )
+}
+
+fn exchange_topology_cookie(name: &str, path: &str, session_id: &str, expired: bool) -> String {
+    if expired {
+        format!("{name}=; Path={path}; Max-Age=0; HttpOnly; SameSite=Lax; Secure")
+    } else {
+        let token = format!("{:016x}", mapi_payload_fingerprint(session_id.as_bytes()));
+        format!(
+            "{name}=lpe-{token}; Path={path}; Max-Age={MAPI_SESSION_MAX_AGE_SECONDS}; HttpOnly; SameSite=Lax; Secure"
+        )
+    }
 }
 
 /// [MS-OXCMAPIHTTP] sections 3.1.5.1 and 3.2.5.2 require the client to use

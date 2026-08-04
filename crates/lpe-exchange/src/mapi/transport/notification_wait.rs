@@ -401,9 +401,10 @@ fn decorate_notification_wait_response(
     // nginx honors this response header even when a deployed location is
     // missing `proxy_buffering off`; the MAPI frames must flush immediately.
     insert_header(response, "x-accel-buffering", "no");
-    // [MS-OXCMAPIHTTP] section 3.2.5.5 requires every Session Context cookie
-    // on a completed NotificationWait response.
-    for cookie in session_context_cookies(endpoint, session_id, false) {
+    // Exchange 2016 returns MapiContext and X-BackEndCookie after
+    // NotificationWait, without refreshing its routing cookies
+    // (`202608041727.saz` raw/29_s.txt).
+    for cookie in notification_wait_context_cookies(endpoint, session_id) {
         if let Ok(value) = HeaderValue::from_str(&cookie) {
             response.headers_mut().append(SET_COOKIE, value);
         }
@@ -420,7 +421,7 @@ pub(in crate::mapi) fn notification_wait_empty_response(
         request_id,
         0,
         notification_wait_body(false),
-        session_context_cookies(endpoint, session_id, false),
+        notification_wait_context_cookies(endpoint, session_id),
     );
     insert_header(&mut response, "x-accel-buffering", "no");
     response

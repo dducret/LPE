@@ -329,7 +329,7 @@ async fn notification_wait_empty_response_reports_success_with_empty_body() {
         .any(|cookie| cookie.starts_with("MapiContext=abc")));
     assert!(set_cookies
         .iter()
-        .any(|cookie| cookie.starts_with("MapiSequence=")));
+        .any(|cookie| cookie.starts_with("X-BackEndCookie=")));
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -339,7 +339,7 @@ async fn notification_wait_empty_response_reports_success_with_empty_body() {
 }
 
 #[test]
-fn notification_wait_streaming_response_returns_all_session_context_cookies() {
+fn notification_wait_streaming_response_matches_exchange_completion_cookies() {
     let (_sender, receiver) = tokio::sync::mpsc::channel(1);
     let response =
         notification_wait_streaming_response(MapiEndpoint::Emsmdb, "request:43", "abc", receiver);
@@ -356,7 +356,26 @@ fn notification_wait_streaming_response_returns_all_session_context_cookies() {
         .any(|cookie| cookie.starts_with("MapiContext=abc")));
     assert!(set_cookies
         .iter()
+        .any(|cookie| cookie.starts_with("X-BackEndCookie=")));
+}
+
+#[test]
+fn regular_mapi_responses_include_exchange_routing_cookies() {
+    let cookies = session_context_cookies(MapiEndpoint::Emsmdb, "abc", false);
+
+    assert_eq!(cookies.len(), 4);
+    assert!(cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiRouting=")));
+    assert!(cookies
+        .iter()
         .any(|cookie| cookie.starts_with("MapiSequence=")));
+    assert!(cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiContext=abc")));
+    assert!(cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("X-BackEndCookie=")));
 }
 
 #[test]
