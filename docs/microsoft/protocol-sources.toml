@@ -1459,6 +1459,7 @@ sections = [
   "2.2.1.3 Pending Notifications",
   "2.2.1.4.1 RopNotify ROP",
   "2.2.1.4.1.2 NotificationData Structure",
+  "6 Appendix A: Product Behavior, section 2.2.1.4.1.2 footnote 10",
   "3.1.4.2 Sending Notification Details",
   "3.1.4.3 Creating and Sending TableModified Event Notifications",
   "3.2.4.2 Subscribing to TableModified Event Notifications",

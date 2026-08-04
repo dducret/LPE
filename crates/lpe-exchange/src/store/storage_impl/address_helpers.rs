@@ -511,29 +511,11 @@ fn mapi_notification_event_from_change_row(
                 && change_kind == "created"
                 && scope_role.as_deref() == Some("inbox");
             let new_mail_message_class = is_new_mail.then(|| "IPM.Note".to_string());
-            let new_mail_message_flags = if is_new_mail {
-                // A NewMail event can only name a live Inbox membership. Do
-                // not serialize a stale row with fabricated message flags.
-                let is_seen = row
-                    .try_get::<Option<bool>, _>("message_is_seen")
-                    .ok()
-                    .flatten()?;
-                let is_draft = row
-                    .try_get::<Option<bool>, _>("message_is_draft")
-                    .ok()
-                    .flatten()?;
-                let has_attachments = row
-                    .try_get::<Option<bool>, _>("message_has_attachments")
-                    .ok()
-                    .flatten()?;
-                Some(crate::mapi_mailstore::canonical_message_flags_for_state(
-                    !is_seen,
-                    is_draft,
-                    has_attachments,
-                ))
-            } else {
-                None
-            };
+            // [MS-OXCNOTIF] section 2.2.1.4.1.2 defines NewMail MessageFlags,
+            // but Exchange 2016 test1_202608031300.saz raw/753 sends zero
+            // (also documented by implementation note <10>). Keep the
+            // canonical PidTagMessageFlags projection ([MS-OXCMSG] section
+            // 2.2.1.6) out of this notification-only field.
             let event_mask = mapi_notification_event_mask_for_change(&change_kind, is_new_mail);
             let folder_id = mapi_folder_id_from_role_or_identity(
                 scope_role.as_deref(),
@@ -606,10 +588,6 @@ fn mapi_notification_event_from_change_row(
             })
             .map(|event| event.with_parent_folder_id(parent_folder_id))
             .map(|event| event.with_old_message_id(old_message_id))
-            .map(|event| match new_mail_message_flags {
-                Some(message_flags) => event.with_new_mail_message_flags(message_flags),
-                None => event,
-            })
         }
         _ => None,
     }

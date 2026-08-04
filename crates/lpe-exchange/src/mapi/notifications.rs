@@ -365,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn new_mail_notification_without_message_class_defaults_to_ipm_note() {
+    fn new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags() {
         let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
         let event = MapiNotificationEvent::canonical(
             MapiNotificationKind::Content,
@@ -387,6 +387,9 @@ mod tests {
         let response = rop_notify_response(&identity_codec, 3, 0, &event)
             .expect("complete NewMail notification serializes");
 
+        // [MS-OXCNOTIF] section 2.2.1.4.1.2, implementation note <10>:
+        // Exchange 2016 test1_202608031300.saz raw/753 also uses zero here.
+        assert_eq!(&response[24..28], &0u32.to_le_bytes());
         assert_eq!(&response[28..], b"\0IPM.Note\0");
     }
 
