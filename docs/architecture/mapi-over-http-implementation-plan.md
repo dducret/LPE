@@ -954,7 +954,8 @@ non-canonical LPE state.
   with the required `Outlook Rules Organizer` subject. The matching Exchange
   `RopOpenStream` / `RopReadStream` sequence (`raw/554`) succeeds with a
   66-byte `PidTagRwRulesStream`, so the fresh virtual FAI projects that exact
-  opaque default rather than an empty stream. In that same `RopOpenMessage`
+  opaque default (including its leading and trailing zeroes, but excluding the
+  following response-handle bytes) rather than an empty stream. In that same `RopOpenMessage`
   response, Exchange encodes the lossless ASCII normalized subject as reduced
   Unicode (String8), rather than UTF-16; LPE preserves that wire shape. Any non-empty client-owned
   `PidTagRwRulesStream` remains opaque and takes precedence over the default.
