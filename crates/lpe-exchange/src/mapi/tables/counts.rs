@@ -5,6 +5,7 @@ pub(in crate::mapi) fn hierarchy_row_count_excluding_deleted(
     mailboxes: &[JmapMailbox],
     snapshot: &MapiMailStoreSnapshot,
     deleted_advertised_special_folders: &HashSet<u64>,
+    depth: bool,
 ) -> u32 {
     if is_queryable_hierarchy_folder(folder_id)
         || snapshot.public_folder_for_id(folder_id).is_some()
@@ -17,6 +18,7 @@ pub(in crate::mapi) fn hierarchy_row_count_excluding_deleted(
             &[],
             Uuid::nil(),
             deleted_advertised_special_folders,
+            depth,
         )
         .len()
         .min(u32::MAX as usize) as u32
@@ -213,6 +215,7 @@ pub(in crate::mapi) fn table_position_and_count(
     let (position, total) = match object {
         Some(MapiObject::HierarchyTable {
             folder_id,
+            depth,
             position,
             restriction,
             sort_orders,
@@ -227,6 +230,7 @@ pub(in crate::mapi) fn table_position_and_count(
                 sort_orders,
                 mailbox_guid,
                 deleted_advertised_special_folders,
+                *depth,
             )
             .len();
             (*position, total)

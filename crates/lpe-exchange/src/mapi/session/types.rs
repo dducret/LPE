@@ -473,6 +473,8 @@ pub(in crate::mapi) enum MapiObject {
     },
     HierarchyTable {
         folder_id: u64,
+        depth: bool,
+        depth_folder_ids: HashSet<u64>,
         columns: Vec<u32>,
         columns_set: bool,
         sort_orders: Vec<MapiSortOrder>,

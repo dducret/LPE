@@ -68,7 +68,8 @@ pub(in crate::mapi) use folders::*;
 pub(in crate::mapi) use hierarchy::special_folder_property_value_with_change_number;
 use hierarchy::*;
 pub(in crate::mapi) use hierarchy::{
-    mailbox_shadowed_by_active_outlook_special_folder, special_folder_property_value,
+    hierarchy_depth_folder_ids_excluding_deleted, mailbox_shadowed_by_active_outlook_special_folder,
+    special_folder_property_value,
 };
 pub(in crate::mapi) use pending::*;
 pub(in crate::mapi) use public_folders::*;
@@ -117,6 +118,7 @@ pub(in crate::mapi) fn rop_find_row_response(
     match object {
         MapiObject::HierarchyTable {
             folder_id,
+            depth,
             columns,
             sort_orders,
             restriction: table_restriction,
@@ -137,6 +139,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                 sort_orders,
                 mailbox_guid,
                 deleted_advertised_special_folders,
+                *depth,
             );
             if let Some((index, row)) = find_hierarchy_row(
                 rows.as_slice(),

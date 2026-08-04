@@ -140,10 +140,14 @@ fn format_query_position_wire_summary(
 
 pub(super) fn hierarchy_table_object(
     folder_id: u64,
+    depth: bool,
+    depth_folder_ids: HashSet<u64>,
     deleted_advertised_special_folders: HashSet<u64>,
 ) -> MapiObject {
     MapiObject::HierarchyTable {
         folder_id,
+        depth,
+        depth_folder_ids,
         columns: default_hierarchy_columns(),
         columns_set: false,
         sort_orders: Vec::new(),

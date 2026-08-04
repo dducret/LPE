@@ -10,6 +10,7 @@ pub(in crate::mapi) fn table_row_keys(
     match object {
         MapiObject::HierarchyTable {
             folder_id,
+            depth,
             sort_orders,
             restriction,
             deleted_advertised_special_folders,
@@ -22,6 +23,7 @@ pub(in crate::mapi) fn table_row_keys(
             sort_orders,
             mailbox_guid,
             deleted_advertised_special_folders,
+            *depth,
         )
         .into_iter()
         .map(|row| hierarchy_row_id(&row))

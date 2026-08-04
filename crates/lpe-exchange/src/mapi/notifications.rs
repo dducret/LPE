@@ -41,7 +41,6 @@ pub(crate) struct MapiNotificationEvent {
     pub(in crate::mapi) parent_display_name: Option<String>,
     pub(in crate::mapi) message_subject: Option<String>,
     pub(in crate::mapi) message_class: Option<String>,
-    pub(in crate::mapi) new_mail_message_flags: Option<u32>,
 }
 
 impl MapiNotificationEvent {
@@ -67,7 +66,6 @@ impl MapiNotificationEvent {
             parent_display_name: None,
             message_subject: None,
             message_class: None,
-            new_mail_message_flags: None,
         }
     }
 
@@ -93,7 +91,6 @@ impl MapiNotificationEvent {
             parent_display_name: None,
             message_subject: None,
             message_class: None,
-            new_mail_message_flags: None,
         }
     }
 
@@ -137,7 +134,6 @@ impl MapiNotificationEvent {
             parent_display_name,
             message_subject,
             message_class,
-            new_mail_message_flags: None,
         }
     }
 
@@ -153,11 +149,6 @@ impl MapiNotificationEvent {
 
     pub(crate) fn with_parent_folder_id(mut self, parent_folder_id: Option<u64>) -> Self {
         self.parent_folder_id = parent_folder_id;
-        self
-    }
-
-    pub(crate) fn with_new_mail_message_flags(mut self, message_flags: u32) -> Self {
-        self.new_mail_message_flags = Some(message_flags);
         self
     }
 
@@ -210,7 +201,6 @@ impl MapiNotificationEvent {
             parent_display_name: None,
             message_subject: None,
             message_class: None,
-            new_mail_message_flags: None,
         }
     }
 
@@ -266,11 +256,6 @@ impl MapiNotificationEvent {
     }
 
     #[cfg(test)]
-    pub(crate) fn new_mail_message_flags(&self) -> Option<u32> {
-        self.new_mail_message_flags
-    }
-
-    #[cfg(test)]
     pub(crate) fn old_parent_folder_id(&self) -> Option<u64> {
         self.old_parent_folder_id
     }
@@ -322,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn new_mail_notification_with_message_id_encodes_message_notification_data() {
+    fn new_mail_notification_with_message_id_encodes_exchange_zero_message_flags() {
         // [MS-OXCNOTIF] section 4 shows NewMail with both FolderId and MessageId.
         let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
         let folder_id = 0x0000_0000_0005_0001;
@@ -342,8 +327,7 @@ mod tests {
             None,
             None,
             Some("IPM.Appointment".to_string()),
-        )
-        .with_new_mail_message_flags(0x12);
+        );
 
         let response = rop_notify_response(&identity_codec, 3, 0, &event)
             .expect("complete NewMail notification serializes");
@@ -359,7 +343,9 @@ mod tests {
             &response[16..24],
             &wire_id_bytes_from_object_id(message_id).unwrap()
         );
-        assert_eq!(&response[24..28], &0x12u32.to_le_bytes());
+        // [MS-OXCNOTIF] section 2.2.1.4.1.2, implementation note <10>:
+        // Exchange 2016 test1_202608031300.saz raw/753 uses zero here.
+        assert_eq!(&response[24..28], &0u32.to_le_bytes());
         assert_eq!(&response[28..], b"\0IPM.Appointment\0");
         assert_ne!(&response[6..8], &0x0100u16.to_le_bytes());
     }
@@ -728,9 +714,11 @@ fn append_notification_data(
         0x0002 if message_event => {
             write_u16(response, 0x8002);
             append_event_object_ids(response, identity_codec, event, true);
-            // [MS-OXCNOTIF] section 2.2.1.4.1.2 carries PidTagMessageFlags
-            // in every NewMail notification.
-            write_u32(response, event.new_mail_message_flags.unwrap_or_default());
+            // [MS-OXCNOTIF] section 2.2.1.4.1.2 defines this NewMail field.
+            // Its implementation note <10> and Exchange 2016
+            // test1_202608031300.saz raw/753 use zero, independently of the
+            // canonical PidTagMessageFlags projection ([MS-OXCMSG] section 2.2.1.6).
+            write_u32(response, 0);
             // [MS-OXCNOTIF] section 2.2.1.4.1.2 carries the MessageClass
             // after UnicodeFlag. The compatibility default matches the
             // canonical class of ordinary LPE Inbox mail.

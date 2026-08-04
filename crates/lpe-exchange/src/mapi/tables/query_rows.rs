@@ -73,6 +73,7 @@ fn rop_query_rows_response_inner(
     let rows = match object {
         Some(MapiObject::HierarchyTable {
             folder_id,
+            depth,
             columns,
             sort_orders,
             restriction,
@@ -96,6 +97,7 @@ fn rop_query_rows_response_inner(
                 sort_orders,
                 mailbox_guid,
                 deleted_advertised_special_folders,
+                *depth,
             );
             log_sync_issues_hierarchy_query_rows(
                 request,

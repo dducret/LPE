@@ -515,7 +515,7 @@ fn mapi_notification_event_from_change_row(
             // but Exchange 2016 test1_202608031300.saz raw/753 sends zero
             // (also documented by implementation note <10>). Keep the
             // canonical PidTagMessageFlags projection ([MS-OXCMSG] section
-            // 2.2.1.6) out of this notification-only field.
+            // 2.2.1.6) out of NewMail NotificationData.
             let event_mask = mapi_notification_event_mask_for_change(&change_kind, is_new_mail);
             let folder_id = mapi_folder_id_from_role_or_identity(
                 scope_role.as_deref(),

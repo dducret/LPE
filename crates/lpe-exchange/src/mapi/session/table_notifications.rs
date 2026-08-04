@@ -263,9 +263,26 @@ fn folder_counts_hierarchy_table_event(
 
 fn table_matches_event(object: &MapiObject, event: &MapiNotificationEvent) -> bool {
     match (object, event.kind) {
-        (MapiObject::ContentsTable { folder_id, .. }, MapiNotificationKind::Content)
-        | (MapiObject::HierarchyTable { folder_id, .. }, MapiNotificationKind::Hierarchy) => {
+        (MapiObject::ContentsTable { folder_id, .. }, MapiNotificationKind::Content) => {
             *folder_id == event.folder_id
+        }
+        (
+            MapiObject::HierarchyTable {
+                folder_id,
+                depth,
+                depth_folder_ids,
+                ..
+            },
+            MapiNotificationKind::Hierarchy,
+        ) => {
+            *folder_id == event.folder_id
+                // [MS-OXCFOLD] section 2.2.1.13.1: a Depth table includes
+                // descendants, so their changed hierarchy rows are in view.
+                || (*depth
+                    && (depth_folder_ids.contains(&event.folder_id)
+                        || event
+                            .message_id
+                            .is_some_and(|folder_id| depth_folder_ids.contains(&folder_id))))
         }
         _ => false,
     }

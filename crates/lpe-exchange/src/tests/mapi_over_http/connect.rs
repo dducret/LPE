@@ -3661,7 +3661,8 @@ async fn mapi_over_http_register_notification_returns_protocol_success_handles()
 }
 
 #[tokio::test]
-async fn mapi_over_http_register_notification_from_empty_change_log_observes_later_new_mail() {
+async fn mapi_over_http_register_notification_from_empty_change_log_observes_later_new_mail_with_exchange_zero_message_flags(
+) {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let folder_id = test_mapi_folder_id(5);
     let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
@@ -3723,8 +3724,7 @@ async fn mapi_over_http_register_notification_from_empty_change_log_observes_lat
                     None,
                     Some("Later delivery".to_string()),
                     Some("IPM.Note".to_string()),
-                )
-                .with_new_mail_message_flags(0x0002),
+                ),
             ],
         });
 
@@ -3758,9 +3758,11 @@ async fn mapi_over_http_register_notification_from_empty_change_log_observes_lat
     assert_eq!(&response_rops[6..8], &0x8002u16.to_le_bytes());
     assert_ne!(&response_rops[8..16], &[0; 8]);
     assert_eq!(&response_rops[16..24], &mapi_wire_id_bytes(message_id));
+    // [MS-OXCNOTIF] section 2.2.1.4.1.2, implementation note <10>:
+    // Exchange 2016 test1_202608031300.saz raw/753 uses zero MessageFlags.
     assert_eq!(
         &response_rops[24..],
-        &[2, 0, 0, 0, 0, b'I', b'P', b'M', b'.', b'N', b'o', b't', b'e', 0]
+        &[0, 0, 0, 0, 0, b'I', b'P', b'M', b'.', b'N', b'o', b't', b'e', 0]
     );
 }
 

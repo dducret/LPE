@@ -99,14 +99,27 @@ pub(super) async fn append_open_table_response<S>(
             let folder_id = input_object(session, handle_slots, request)
                 .and_then(|object| object.folder_id())
                 .unwrap_or(ROOT_FOLDER_ID);
+            let table_flags = request.payload.first().copied().unwrap_or(0);
+            let depth = table_flags & 0x04 != 0;
+            let depth_folder_ids = if depth {
+                hierarchy_depth_folder_ids_excluding_deleted(
+                    folder_id,
+                    mailboxes,
+                    snapshot,
+                    &session.deleted_advertised_special_folders,
+                )
+            } else {
+                HashSet::new()
+            };
             let handle = session.allocate_output_handle(
                 request.output_handle_index,
                 hierarchy_table_object(
                     folder_id,
+                    depth,
+                    depth_folder_ids,
                     session.deleted_advertised_special_folders.clone(),
                 ),
             );
-            let table_flags = request.payload.first().copied().unwrap_or(0);
             session.remember_table_notification_eligibility(
                 handle,
                 logon_id,
@@ -133,6 +146,7 @@ pub(super) async fn append_open_table_response<S>(
                     mailboxes,
                     snapshot,
                     &session.deleted_advertised_special_folders,
+                    depth,
                 )
             };
             responses.extend_from_slice(&get_hierarchy_table_response(request, row_count));

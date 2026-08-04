@@ -26,6 +26,7 @@ pub(super) fn hierarchy_rows<'a>(
         sort_orders,
         mailbox_guid,
         &HashSet::new(),
+        false,
     )
 }
 
@@ -135,20 +136,70 @@ pub(super) fn hierarchy_table_rows_excluding_deleted<'a>(
     sort_orders: &[MapiSortOrder],
     mailbox_guid: Uuid,
     deleted_advertised_special_folders: &HashSet<u64>,
+    depth: bool,
 ) -> Vec<HierarchyRow<'a>> {
-    let mut rows = hierarchy_rows_excluding_deleted(
-        folder_id,
-        mailboxes,
-        snapshot,
-        restriction,
-        sort_orders,
-        mailbox_guid,
-        deleted_advertised_special_folders,
-    );
+    let mut rows = if depth {
+        // [MS-OXCFOLD] section 2.2.1.13.1: Depth lists every level below the
+        // input folder, while the normal hierarchy table remains direct-only.
+        let mut seen_folder_ids = HashSet::from([folder_id]);
+        let mut parent_folder_ids = vec![folder_id];
+        let mut rows = Vec::new();
+        while let Some(parent_folder_id) = parent_folder_ids.pop() {
+            for row in hierarchy_rows_excluding_deleted(
+                parent_folder_id,
+                mailboxes,
+                snapshot,
+                None,
+                &[],
+                mailbox_guid,
+                deleted_advertised_special_folders,
+            ) {
+                let row_id = hierarchy_row_id(&row);
+                if seen_folder_ids.insert(row_id) {
+                    parent_folder_ids.push(row_id);
+                    rows.push(row);
+                }
+            }
+        }
+        rows.retain(|row| hierarchy_row_matches(row, mailboxes, restriction, mailbox_guid));
+        sort_hierarchy_rows(&mut rows, sort_orders);
+        rows
+    } else {
+        hierarchy_rows_excluding_deleted(
+            folder_id,
+            mailboxes,
+            snapshot,
+            restriction,
+            sort_orders,
+            mailbox_guid,
+            deleted_advertised_special_folders,
+        )
+    };
     if folder_id != IPM_SUBTREE_FOLDER_ID {
         rows.retain(|row| !matches!(row, HierarchyRow::Collaboration(_)));
     }
     rows
+}
+
+pub(in crate::mapi) fn hierarchy_depth_folder_ids_excluding_deleted(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    deleted_advertised_special_folders: &HashSet<u64>,
+) -> HashSet<u64> {
+    hierarchy_table_rows_excluding_deleted(
+        folder_id,
+        mailboxes,
+        snapshot,
+        None,
+        &[],
+        Uuid::nil(),
+        deleted_advertised_special_folders,
+        true,
+    )
+    .into_iter()
+    .map(|row| hierarchy_row_id(&row))
+    .collect()
 }
 
 const ROOT_HIERARCHY_FOLDER_IDS: &[u64] = &[

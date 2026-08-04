@@ -359,10 +359,6 @@ async fn mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_ide
     );
     assert_eq!(poll.events[0].canonical_folder_id(), Some(inbox_id));
     assert_eq!(poll.events[0].canonical_message_id(), Some(imported.id));
-    // [MS-OXCNOTIF] section 2.2.1.4.1.2, implementation note <10>:
-    // Exchange 2016 test1_202608031300.saz raw/753 sends zero for this
-    // notification field. It is not the canonical PidTagMessageFlags value.
-    assert_eq!(poll.events[0].new_mail_message_flags(), None);
 
     fixture.cleanup().await?;
     Ok(())
