@@ -15,6 +15,7 @@ use tokio_stream::wrappers::ReceiverStream;
 // current Exchange server baseline.
 pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_PENDING_PERIOD_MILLIS: u32 = 30_000;
 pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_MAXIMUM_WAIT: Duration = Duration::from_secs(300);
+const MAPI_NOTIFICATION_WAIT_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_ATTEMPTS: usize = 200;
 const MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_DELAY_MS: u64 = 10;
 
@@ -137,6 +138,7 @@ async fn run_notification_wait<S>(
     let deadline = tokio::time::Instant::now() + MAPI_NOTIFICATION_WAIT_MAXIMUM_WAIT;
     let pending_period =
         Duration::from_millis(u64::from(MAPI_NOTIFICATION_WAIT_PENDING_PERIOD_MILLIS));
+    let mut next_pending_at = tokio::time::Instant::now() + pending_period;
 
     loop {
         let outcome =
@@ -171,15 +173,25 @@ async fn run_notification_wait<S>(
             return;
         }
 
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        tokio::time::sleep(remaining.min(pending_period)).await;
-        if tokio::time::Instant::now() < deadline
+        let now = tokio::time::Instant::now();
+        tokio::time::sleep(notification_wait_sleep_duration(
+            now,
+            deadline,
+            next_pending_at,
+        ))
+        .await;
+        let now = tokio::time::Instant::now();
+        if now < deadline
+            && now >= next_pending_at
             && sender
                 .send(Ok(Bytes::from_static(b"PENDING\r\n")))
                 .await
                 .is_err()
         {
             return;
+        }
+        if now >= next_pending_at {
+            next_pending_at = now + pending_period;
         }
     }
 }
@@ -206,14 +218,26 @@ where
 
     if session.pending_notification_count() == 0 {
         if let Some(cursor) = session.notification_cursor {
-            if let Ok(poll) = store
+            match store
                 .poll_mapi_notifications(principal.account_id, cursor)
                 .await
             {
-                for event in session.matching_notifications(poll.events) {
-                    session.record_notification(event);
+                Ok(poll) => {
+                    for event in session.matching_notifications(poll.events) {
+                        session.record_notification(event);
+                    }
+                    session.notification_cursor = poll.cursor.or(Some(cursor));
                 }
-                session.notification_cursor = poll.cursor.or(Some(cursor));
+                Err(error) => {
+                    tracing::warn!(
+                        adapter = "mapi",
+                        operation = "NotificationWait",
+                        account_id = %principal.account_id,
+                        notification_cursor = cursor,
+                        error = %error,
+                        "MAPI notification poll failed; retrying"
+                    );
+                }
             }
         }
     }
@@ -221,6 +245,16 @@ where
     store_session(session_id.to_string(), session);
     drop(active_request);
     Ok(Some(event_pending))
+}
+
+pub(super) fn notification_wait_sleep_duration(
+    now: tokio::time::Instant,
+    deadline: tokio::time::Instant,
+    next_pending_at: tokio::time::Instant,
+) -> Duration {
+    MAPI_NOTIFICATION_WAIT_POLL_INTERVAL
+        .min(deadline.saturating_duration_since(now))
+        .min(next_pending_at.saturating_duration_since(now))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -278,7 +312,7 @@ fn notification_wait_final_frame(
     Bytes::from(frame)
 }
 
-fn notification_wait_streaming_response(
+pub(super) fn notification_wait_streaming_response(
     endpoint: MapiEndpoint,
     request_id: &str,
     session_id: &str,
@@ -339,9 +373,12 @@ fn decorate_notification_wait_response(
     // nginx honors this response header even when a deployed location is
     // missing `proxy_buffering off`; the MAPI frames must flush immediately.
     insert_header(response, "x-accel-buffering", "no");
-    let cookie = session_cookie(endpoint, session_id, false);
-    if let Ok(value) = HeaderValue::from_str(&cookie) {
-        response.headers_mut().append(SET_COOKIE, value);
+    // [MS-OXCMAPIHTTP] section 3.2.5.5 requires every Session Context cookie
+    // on a completed NotificationWait response.
+    for cookie in session_context_cookies(endpoint, session_id, false) {
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            response.headers_mut().append(SET_COOKIE, value);
+        }
     }
 }
 
@@ -355,7 +392,7 @@ pub(in crate::mapi) fn notification_wait_empty_response(
         request_id,
         0,
         notification_wait_body(false),
-        vec![session_cookie(endpoint, session_id, false)],
+        session_context_cookies(endpoint, session_id, false),
     );
     insert_header(&mut response, "x-accel-buffering", "no");
     response

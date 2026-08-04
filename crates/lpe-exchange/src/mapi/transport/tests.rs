@@ -1,6 +1,7 @@
 use super::notification_wait::{
     acquire_notification_wait_active_session_request, notification_wait_empty_response,
-    MAPI_NOTIFICATION_WAIT_MAXIMUM_WAIT,
+    notification_wait_sleep_duration, notification_wait_streaming_response,
+    MAPI_NOTIFICATION_WAIT_MAXIMUM_WAIT, MAPI_NOTIFICATION_WAIT_PENDING_PERIOD_MILLIS,
 };
 use super::*;
 use crate::mapi::transport::diagnostics::{
@@ -322,19 +323,40 @@ async fn notification_wait_empty_response_reports_success_with_empty_body() {
         .iter()
         .map(|value| value.to_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(set_cookies.len(), 1);
+    assert_eq!(set_cookies.len(), 2);
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiContext=abc")));
     assert!(set_cookies
         .iter()
-        .all(|cookie| !cookie.starts_with("MapiSequence=")));
+        .any(|cookie| cookie.starts_with("MapiSequence=")));
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
     assert!(body.starts_with(b"PROCESSING\r\nDONE\r\nX-StartTime: "));
     assert!(body.ends_with(&[0; 16]));
+}
+
+#[test]
+fn notification_wait_streaming_response_returns_all_session_context_cookies() {
+    let (_sender, receiver) = tokio::sync::mpsc::channel(1);
+    let response =
+        notification_wait_streaming_response(MapiEndpoint::Emsmdb, "request:43", "abc", receiver);
+    let set_cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+
+    assert_eq!(set_cookies.len(), 2);
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiContext=abc")));
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiSequence=")));
 }
 
 #[test]
@@ -513,6 +535,22 @@ fn notification_wait_uses_the_microsoft_five_minute_maximum() {
     assert_eq!(
         MAPI_NOTIFICATION_WAIT_MAXIMUM_WAIT,
         Duration::from_secs(300)
+    );
+}
+
+#[test]
+fn notification_wait_polls_before_the_pending_keepalive() {
+    let now = tokio::time::Instant::now();
+    let next_pending_at =
+        now + Duration::from_millis(u64::from(MAPI_NOTIFICATION_WAIT_PENDING_PERIOD_MILLIS));
+
+    assert_eq!(
+        notification_wait_sleep_duration(
+            now,
+            now + MAPI_NOTIFICATION_WAIT_MAXIMUM_WAIT,
+            next_pending_at,
+        ),
+        Duration::from_secs(1)
     );
 }
 
