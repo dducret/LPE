@@ -362,6 +362,7 @@ fn notification_wait_streaming_response_matches_exchange_completion_cookies() {
 #[test]
 fn regular_mapi_responses_include_exchange_routing_cookies() {
     let cookies = session_context_cookies(MapiEndpoint::Emsmdb, "abc", false);
+    let refreshed_cookies = session_context_cookies(MapiEndpoint::Emsmdb, "abc", false);
 
     assert_eq!(cookies.len(), 4);
     assert!(cookies
@@ -376,6 +377,15 @@ fn regular_mapi_responses_include_exchange_routing_cookies() {
     assert!(cookies
         .iter()
         .any(|cookie| cookie.starts_with("X-BackEndCookie=")));
+    let backend_cookie = cookies
+        .iter()
+        .find(|cookie| cookie.starts_with("X-BackEndCookie="))
+        .expect("regular response returns a back-end cookie");
+    let refreshed_backend_cookie = refreshed_cookies
+        .iter()
+        .find(|cookie| cookie.starts_with("X-BackEndCookie="))
+        .expect("later regular response returns a back-end cookie");
+    assert_ne!(backend_cookie, refreshed_backend_cookie);
 }
 
 #[test]

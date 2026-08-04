@@ -2,6 +2,7 @@ use axum::{
     http::{header::SET_COOKIE, HeaderMap, HeaderValue},
     response::Response,
 };
+use uuid::Uuid;
 
 use super::{
     get_session, mapi_payload_fingerprint, rotate_session_request_sequence_token, AccountPrincipal,
@@ -261,11 +262,21 @@ fn routing_cookie(session_id: &str, expired: bool) -> String {
 }
 
 fn backend_cookie(session_id: &str, expired: bool) -> String {
-    exchange_topology_cookie(
-        MAPI_BACKEND_COOKIE,
-        MAPI_BACKEND_COOKIE_PATH,
-        session_id,
-        expired,
+    if expired {
+        return exchange_topology_cookie(
+            MAPI_BACKEND_COOKIE,
+            MAPI_BACKEND_COOKIE_PATH,
+            session_id,
+            true,
+        );
+    }
+
+    // Exchange refreshes X-BackEndCookie on each Execute and
+    // NotificationWait completion while MapiRouting stays stable
+    // (`202608041727.saz` raw/28_s.txt, raw/29_s.txt, raw/37_s.txt).
+    format!(
+        "{MAPI_BACKEND_COOKIE}=lpe-{}; Path={MAPI_BACKEND_COOKIE_PATH}; Max-Age={MAPI_SESSION_MAX_AGE_SECONDS}; HttpOnly; SameSite=Lax; Secure",
+        Uuid::new_v4().simple()
     )
 }
 
