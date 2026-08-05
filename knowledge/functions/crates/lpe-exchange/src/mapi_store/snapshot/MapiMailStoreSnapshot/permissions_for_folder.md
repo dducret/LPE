@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: permissions_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1489-L1515
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1498-L1524
 generated:
   by: okf-rs/0.3.0
 relationships:

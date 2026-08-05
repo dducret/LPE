@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_merges_seek_total_query_with_following_query_rows_window
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L760-L774
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L796-L810
 visibility: private
 generated:
   by: okf-rs/0.3.0

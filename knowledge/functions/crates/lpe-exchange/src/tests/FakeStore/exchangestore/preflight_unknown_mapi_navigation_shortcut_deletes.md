@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: preflight_unknown_mapi_navigation_shortcut_deletes
-resource: crates/lpe-exchange/src/tests/mod.rs#L10027-L10091
+resource: crates/lpe-exchange/src/tests/mod.rs#L10043-L10107
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_event_object_ids
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L746-L760
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L751-L765
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: decode_partial_completion_response
-resource: crates/lpe-exchange/src/tests/mod.rs#L12501-L12506
+resource: crates/lpe-exchange/src/tests/mod.rs#L12517-L12522
 visibility: private
 generated:
   by: okf-rs/0.3.0

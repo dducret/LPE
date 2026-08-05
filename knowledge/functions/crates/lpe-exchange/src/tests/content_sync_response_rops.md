@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_sync_response_rops
-resource: crates/lpe-exchange/src/tests/mod.rs#L15193-L15204
+resource: crates/lpe-exchange/src/tests/mod.rs#L15209-L15220
 visibility: private
 generated:
   by: okf-rs/0.3.0

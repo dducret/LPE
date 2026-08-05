@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_default_named_view_is_materialized_for_the_advertised_entry_id
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1430-L1451
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1470-L1491
 visibility: private
 generated:
   by: okf-rs/0.3.0

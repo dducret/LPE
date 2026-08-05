@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_non_mail_contents_seek_still_requires_full_snapshot
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L896-L923
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L932-L959
 visibility: private
 generated:
   by: okf-rs/0.3.0

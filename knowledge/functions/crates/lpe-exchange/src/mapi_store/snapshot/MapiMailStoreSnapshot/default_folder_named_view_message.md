@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: default_folder_named_view_message
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1319-L1335
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1328-L1344
 generated:
   by: okf-rs/0.3.0
 relationships:

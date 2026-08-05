@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/tests/mod.rs#L1-L15726
+resource: crates/lpe-exchange/src/tests/mod.rs#L1-L15742
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -189,6 +189,7 @@ relationships:
 - [fetch_delegate_freebusy_messages](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_delegate_freebusy_messages.md)
 - [fetch_accessible_contacts_in_collection](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_contacts_in_collection.md)
 - [fetch_contact_sync_versions](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_sync_versions.md)
+- [fetch_contact_commit_times](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_commit_times.md)
 - [fetch_accessible_events_in_collection](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_events_in_collection.md)
 - [fetch_accessible_deleted_events](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_deleted_events.md)
 - [fetch_event_sync_versions](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_event_sync_versions.md)

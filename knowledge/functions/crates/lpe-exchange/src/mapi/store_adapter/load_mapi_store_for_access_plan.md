@@ -27,7 +27,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_store/collaboration_folder_identity_requests
   - functions/crates/lpe-exchange/src/mapi/store_adapter/access_plan/requires_snapshot_backed_contents
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_navigation_shortcuts
-  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_sync_versions
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_commit_times
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_in_collection
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_by_ids
   - functions/crates/lpe-exchange/src/mapi/store_adapter/log_mapi_requested_collaboration_resolution
@@ -40,7 +40,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/store_adapter/log_mapi_store_load_summary
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/new_with_scoped_calendar_identities
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_identities
-  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_sync_versions
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_commit_times
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_event_versions
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_notes_and_journal
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_search_folder_definitions
@@ -89,7 +89,7 @@ relationships:
 - [collaboration_folder_identity_requests](../../../../../../functions/crates/lpe-exchange/src/mapi_store/collaboration_folder_identity_requests.md)
 - [requires_snapshot_backed_contents](../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/access_plan/requires_snapshot_backed_contents.md)
 - [fetch_mapi_navigation_shortcuts](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_navigation_shortcuts.md)
-- [fetch_contact_sync_versions](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_sync_versions.md)
+- [fetch_contact_commit_times](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_commit_times.md)
 - [fetch_accessible_tasks_in_collection](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_in_collection.md)
 - [fetch_accessible_tasks_by_ids](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_by_ids.md)
 - [log_mapi_requested_collaboration_resolution](../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/log_mapi_requested_collaboration_resolution.md)
@@ -102,7 +102,7 @@ relationships:
 - [log_mapi_store_load_summary](../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/log_mapi_store_load_summary.md)
 - [new_with_scoped_calendar_identities](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/new_with_scoped_calendar_identities.md)
 - [with_contact_identities](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_identities.md)
-- [with_contact_sync_versions](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_sync_versions.md)
+- [with_contact_commit_times](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_commit_times.md)
 - [with_event_versions](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_event_versions.md)
 - [with_notes_and_journal](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_notes_and_journal.md)
 - [with_search_folder_definitions](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_search_folder_definitions.md)

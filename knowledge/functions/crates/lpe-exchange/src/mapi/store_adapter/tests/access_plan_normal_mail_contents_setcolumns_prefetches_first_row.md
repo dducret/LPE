@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_normal_mail_contents_setcolumns_prefetches_first_row
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L513-L547
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L549-L583
 visibility: private
 generated:
   by: okf-rs/0.3.0

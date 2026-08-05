@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_normal_mail_contents_seek_uses_content_window_total
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L459-L510
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L495-L546
 visibility: private
 generated:
   by: okf-rs/0.3.0

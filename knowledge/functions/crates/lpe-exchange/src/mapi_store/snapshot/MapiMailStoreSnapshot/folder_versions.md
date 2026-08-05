@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: folder_versions
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L739-L741
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L748-L750
 generated:
   by: okf-rs/0.3.0
 relationships:

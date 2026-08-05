@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_falls_back_when_custom_collaboration_identity_is_not_loaded
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2496-L2537
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2536-L2577
 visibility: private
 generated:
   by: okf-rs/0.3.0

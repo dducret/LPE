@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: registration_matches_event
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L781-L805
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L786-L810
 generated:
   by: okf-rs/0.3.0
 relationships:

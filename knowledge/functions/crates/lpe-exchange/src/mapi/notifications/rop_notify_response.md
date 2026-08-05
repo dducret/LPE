@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rop_notify_response
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L608-L622
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L613-L627
 generated:
   by: okf-rs/0.3.0
 relationships:

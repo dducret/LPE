@@ -234,9 +234,11 @@ fn table_changed_event(event: &MapiNotificationEvent) -> MapiNotificationEvent {
 }
 
 fn folder_counts_modified_event(event: &MapiNotificationEvent) -> Option<MapiNotificationEvent> {
-    if event.kind != MapiNotificationKind::Content
-        || (event.total_messages.is_none() && event.unread_messages.is_none())
-    {
+    // [MS-OXCNOTIF] section 3.1.4.3: a child content change updates the
+    // corresponding row in an automatically subscribed parent hierarchy
+    // table. A TableModified event carries no content counts, so their absence
+    // cannot suppress that parent-table refresh.
+    if event.kind != MapiNotificationKind::Content || event.parent_folder_id.is_none() {
         return None;
     }
     let mut folder_event = event.clone();

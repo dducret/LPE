@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: resolve_names_request
-resource: crates/lpe-exchange/src/tests/mod.rs#L12377-L12397
+resource: crates/lpe-exchange/src/tests/mod.rs#L12393-L12413
 visibility: private
 generated:
   by: okf-rs/0.3.0

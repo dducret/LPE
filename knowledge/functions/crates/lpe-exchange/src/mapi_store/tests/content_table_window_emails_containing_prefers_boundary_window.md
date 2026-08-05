@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_table_window_emails_containing_prefers_boundary_window
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L405-L467
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L445-L507
 visibility: private
 generated:
   by: okf-rs/0.3.0

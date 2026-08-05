@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_merges_content_window_that_bridges_existing_ranges
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L794-L809
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L830-L845
 visibility: private
 generated:
   by: okf-rs/0.3.0

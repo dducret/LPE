@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_table_total_survives_total_only_window_without_rows
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L536-L566
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L576-L606
 visibility: private
 generated:
   by: okf-rs/0.3.0

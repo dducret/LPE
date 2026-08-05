@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_sync_manifest_message_state
-resource: crates/lpe-exchange/src/tests/mod.rs#L14654-L14681
+resource: crates/lpe-exchange/src/tests/mod.rs#L14670-L14697
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: reminder_messages
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1099-L1118
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1108-L1127
 generated:
   by: okf-rs/0.3.0
 relationships:

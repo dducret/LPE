@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_public_folders
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L591-L636
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L600-L645
 generated:
   by: okf-rs/0.3.0
 relationships:

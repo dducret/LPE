@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: insert_mapi_content_length
-resource: crates/lpe-exchange/src/tests/mod.rs#L12092-L12097
+resource: crates/lpe-exchange/src/tests/mod.rs#L12108-L12113
 visibility: private
 generated:
   by: okf-rs/0.3.0

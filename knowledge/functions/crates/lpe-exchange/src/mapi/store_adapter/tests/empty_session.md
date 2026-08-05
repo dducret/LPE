@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_loads_common_views_associated_contents_on_table_open
   - functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_cached_mode_transfer_state_get_buffer_uses_session_state
   - functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_hierarchy_query_ignores_unrelated_live_calendar_handle
+  - functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_root_depth_hierarchy_query_requires_snapshot_backed_contents
   - functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_hierarchy_seek_query_ignores_unrelated_live_calendar_handle
   - functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_contents_seek_from_end_still_requires_full_snapshot
   - functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_normal_mail_contents_seek_uses_content_window_total
@@ -51,6 +52,7 @@ relationships:
 - [access_plan_loads_common_views_associated_contents_on_table_open](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_loads_common_views_associated_contents_on_table_open.md)
 - [access_plan_cached_mode_transfer_state_get_buffer_uses_session_state](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_cached_mode_transfer_state_get_buffer_uses_session_state.md)
 - [access_plan_hierarchy_query_ignores_unrelated_live_calendar_handle](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_hierarchy_query_ignores_unrelated_live_calendar_handle.md)
+- [access_plan_root_depth_hierarchy_query_requires_snapshot_backed_contents](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_root_depth_hierarchy_query_requires_snapshot_backed_contents.md)
 - [access_plan_hierarchy_seek_query_ignores_unrelated_live_calendar_handle](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_hierarchy_seek_query_ignores_unrelated_live_calendar_handle.md)
 - [access_plan_contents_seek_from_end_still_requires_full_snapshot](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_contents_seek_from_end_still_requires_full_snapshot.md)
 - [access_plan_normal_mail_contents_seek_uses_content_window_total](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_normal_mail_contents_seek_uses_content_window_total.md)

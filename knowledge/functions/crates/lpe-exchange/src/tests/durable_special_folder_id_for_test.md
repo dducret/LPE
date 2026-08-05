@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: durable_special_folder_id_for_test
-resource: crates/lpe-exchange/src/tests/mod.rs#L14808-L14821
+resource: crates/lpe-exchange/src/tests/mod.rs#L14824-L14837
 visibility: private
 generated:
   by: okf-rs/0.3.0

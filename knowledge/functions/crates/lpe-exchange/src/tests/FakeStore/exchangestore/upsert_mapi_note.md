@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_mapi_note
-resource: crates/lpe-exchange/src/tests/mod.rs#L9434-L9450
+resource: crates/lpe-exchange/src/tests/mod.rs#L9450-L9466
 visibility: private
 generated:
   by: okf-rs/0.3.0

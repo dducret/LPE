@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: user_saved_search_folder_definition_by_display_name
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1213-L1229
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1222-L1238
 generated:
   by: okf-rs/0.3.0
 relationships:

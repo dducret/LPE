@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: remember_updated_event
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L571-L589
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L580-L598
 generated:
   by: okf-rs/0.3.0
 relationships:

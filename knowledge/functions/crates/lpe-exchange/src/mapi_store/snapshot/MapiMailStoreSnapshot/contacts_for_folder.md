@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: contacts_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L943-L948
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L952-L957
 generated:
   by: okf-rs/0.3.0
 relationships:

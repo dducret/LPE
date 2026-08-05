@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_calendar_attachments_for_events
-resource: crates/lpe-exchange/src/tests/mod.rs#L11036-L11052
+resource: crates/lpe-exchange/src/tests/mod.rs#L11052-L11068
 visibility: private
 generated:
   by: okf-rs/0.3.0

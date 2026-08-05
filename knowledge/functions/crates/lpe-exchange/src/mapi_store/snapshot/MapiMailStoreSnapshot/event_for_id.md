@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: event_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L979-L989
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L988-L998
 generated:
   by: okf-rs/0.3.0
 relationships:

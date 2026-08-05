@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: add_content_query
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L717-L768
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L718-L769
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: requires_snapshot_backed_contents
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L203-L221
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L203-L222
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_body
-resource: crates/lpe-exchange/src/tests/mod.rs#L12252-L12254
+resource: crates/lpe-exchange/src/tests/mod.rs#L12268-L12270
 visibility: private
 generated:
   by: okf-rs/0.3.0

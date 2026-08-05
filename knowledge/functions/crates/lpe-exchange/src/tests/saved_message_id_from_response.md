@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: saved_message_id_from_response
-resource: crates/lpe-exchange/src/tests/mod.rs#L14832-L14840
+resource: crates/lpe-exchange/src/tests/mod.rs#L14848-L14856
 visibility: private
 generated:
   by: okf-rs/0.3.0

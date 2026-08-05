@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: access_plan
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L1-L1022
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L1-L1023
 generated:
   by: okf-rs/0.3.0
 relationships:

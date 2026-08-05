@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_projects_user_saved_search_folder_as_mapi_folder
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2689-L2726
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2729-L2766
 visibility: private
 generated:
   by: okf-rs/0.3.0

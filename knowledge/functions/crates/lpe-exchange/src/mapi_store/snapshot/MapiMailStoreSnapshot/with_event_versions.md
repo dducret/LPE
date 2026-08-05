@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_event_versions
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L446-L465
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L455-L474
 generated:
   by: okf-rs/0.3.0
 relationships:

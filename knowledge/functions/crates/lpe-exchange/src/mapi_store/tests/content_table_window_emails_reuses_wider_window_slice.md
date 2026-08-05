@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_table_window_emails_reuses_wider_window_slice
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L217-L270
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L257-L310
 visibility: private
 generated:
   by: okf-rs/0.3.0

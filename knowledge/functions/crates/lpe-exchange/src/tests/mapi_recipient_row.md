@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_recipient_row
-resource: crates/lpe-exchange/src/tests/mod.rs#L15498-L15504
+resource: crates/lpe-exchange/src/tests/mod.rs#L15514-L15520
 visibility: private
 generated:
   by: okf-rs/0.3.0

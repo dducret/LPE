@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_parse_fast_transfer_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L13002-L13075
+resource: crates/lpe-exchange/src/tests/mod.rs#L13018-L13091
 visibility: private
 generated:
   by: okf-rs/0.3.0

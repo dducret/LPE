@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_folder_version
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L743-L745
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L752-L754
 generated:
   by: okf-rs/0.3.0
 relationships:

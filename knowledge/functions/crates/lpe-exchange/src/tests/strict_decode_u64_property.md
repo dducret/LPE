@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_decode_u64_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L13159-L13169
+resource: crates/lpe-exchange/src/tests/mod.rs#L13175-L13185
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -373,6 +373,42 @@ fn access_plan_hierarchy_query_ignores_unrelated_live_calendar_handle() {
 }
 
 #[test]
+fn access_plan_root_depth_hierarchy_query_requires_snapshot_backed_contents() {
+    let mut session = empty_session();
+    session.handles.insert(
+        1,
+        MapiObject::HierarchyTable {
+            folder_id: ROOT_FOLDER_ID,
+            depth: true,
+            depth_folder_ids: HashSet::from([crate::mapi::identity::IPM_SUBTREE_FOLDER_ID]),
+            columns: default_hierarchy_columns(),
+            columns_set: false,
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            deleted_advertised_special_folders: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        },
+    );
+    session.next_handle = 2;
+    let query_rows = [0x15, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00];
+
+    let plan = plan_mapi_store_access(&session, &single_rop_buffer(&query_rows));
+
+    assert!(!plan.requires_full_snapshot, "plan={plan:?}");
+    assert_eq!(plan.object_ids, vec![ROOT_FOLDER_ID], "plan={plan:?}");
+    assert!(plan.content_queries.is_empty(), "plan={plan:?}");
+    assert!(
+        requires_snapshot_backed_contents(&plan, &[]),
+        "root depth hierarchy rows need Calendar and Contacts item counts: {plan:?}"
+    );
+}
+
+#[test]
 fn access_plan_hierarchy_seek_query_ignores_unrelated_live_calendar_handle() {
     let mut session = empty_session();
     session.handles.insert(

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_modify_recipients
-resource: crates/lpe-exchange/src/tests/mod.rs#L15011-L15018
+resource: crates/lpe-exchange/src/tests/mod.rs#L15027-L15034
 visibility: private
 generated:
   by: okf-rs/0.3.0

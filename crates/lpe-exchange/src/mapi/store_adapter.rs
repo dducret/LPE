@@ -431,7 +431,7 @@ where
         .filter(|identity| identity.object_kind == MapiIdentityObjectKind::JournalEntry)
         .map(|identity| identity.canonical_id)
         .collect::<Vec<_>>();
-    let (contacts, contact_sync_versions) = if snapshot_backed_contents {
+    let (contacts, contact_commit_times) = if snapshot_backed_contents {
         log_mapi_store_load_step(
             account_id,
             plan,
@@ -439,7 +439,7 @@ where
             contact_collections.len(),
         );
         let mut contacts = Vec::new();
-        let mut contact_sync_versions = Vec::new();
+        let mut contact_commit_times = Vec::new();
         for collection in &contact_collections {
             contacts.extend(
                 store
@@ -449,19 +449,19 @@ where
                         format!("fetch MAPI contacts in collection {}", collection.id)
                     })?,
             );
-            contact_sync_versions.extend(
+            contact_commit_times.extend(
                 store
-                    .fetch_contact_sync_versions(account_id, &collection.id)
+                    .fetch_contact_commit_times(account_id, &collection.id)
                     .await
                     .with_context(|| {
                         format!(
-                            "fetch MAPI Contact sync versions in collection {}",
+                            "fetch MAPI Contact commit times in collection {}",
                             collection.id
                         )
                     })?,
             );
         }
-        (contacts, contact_sync_versions)
+        (contacts, contact_commit_times)
     } else {
         log_mapi_store_load_step(account_id, plan, "fetch contacts by id", contact_ids.len());
         let contacts = if contact_ids.is_empty() {
@@ -868,7 +868,7 @@ where
         &identity_scope.codec,
     )?
     .with_contact_identities(&snapshot_identities)?
-    .with_contact_sync_versions(contact_sync_versions);
+    .with_contact_commit_times(contact_commit_times);
     if let Some(event_versions) = event_versions {
         snapshot = snapshot
             .with_event_versions(event_versions)

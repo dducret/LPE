@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_query_calendar_contract_rows
-resource: crates/lpe-exchange/src/tests/mod.rs#L13400-L13437
+resource: crates/lpe-exchange/src/tests/mod.rs#L13416-L13453
 visibility: private
 generated:
   by: okf-rs/0.3.0

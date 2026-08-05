@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_decode_content_sync_stream
-resource: crates/lpe-exchange/src/tests/mod.rs#L13712-L14030
+resource: crates/lpe-exchange/src/tests/mod.rs#L13728-L14046
 visibility: private
 generated:
   by: okf-rs/0.3.0

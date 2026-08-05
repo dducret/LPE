@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_does_not_apply_mail_default_sort_to_contacts_contents_table
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L693-L725
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L729-L761
 visibility: private
 generated:
   by: okf-rs/0.3.0

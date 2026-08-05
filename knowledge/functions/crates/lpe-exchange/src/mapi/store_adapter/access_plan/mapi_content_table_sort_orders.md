@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_content_table_sort_orders
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L808-L836
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L809-L837
 visibility: private
 generated:
   by: okf-rs/0.3.0

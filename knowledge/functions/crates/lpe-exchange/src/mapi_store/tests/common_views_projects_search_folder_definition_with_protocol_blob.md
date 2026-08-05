@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_projects_search_folder_definition_with_protocol_blob
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1525-L1557
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1565-L1597
 visibility: private
 generated:
   by: okf-rs/0.3.0

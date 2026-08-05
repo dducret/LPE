@@ -446,14 +446,14 @@ impl<T: ExchangeStore> MapiStore for T {
                 .await?;
             let task_collections = self.fetch_accessible_task_collections(account_id).await?;
             let mut contacts = Vec::new();
-            let mut contact_sync_versions = Vec::new();
+            let mut contact_commit_times = Vec::new();
             for collection in &contact_collections {
                 contacts.extend(
                     self.fetch_accessible_contacts_in_collection(account_id, &collection.id)
                         .await?,
                 );
-                contact_sync_versions.extend(
-                    self.fetch_contact_sync_versions(account_id, &collection.id)
+                contact_commit_times.extend(
+                    self.fetch_contact_commit_times(account_id, &collection.id)
                         .await?,
                 );
             }
@@ -678,7 +678,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 &identity_codec,
             )
             .and_then(|snapshot| snapshot.with_contact_identities(&identity_records))
-            .map(|snapshot| snapshot.with_contact_sync_versions(contact_sync_versions))
+            .map(|snapshot| snapshot.with_contact_commit_times(contact_commit_times))
             .map(|snapshot| snapshot.with_calendar_attachments(calendar_attachments))
             .and_then(|snapshot| snapshot.with_event_versions(event_versions))
             .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))

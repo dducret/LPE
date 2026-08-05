@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: move_accessible_event_to_deleted_items
-resource: crates/lpe-exchange/src/tests/mod.rs#L8915-L9165
+resource: crates/lpe-exchange/src/tests/mod.rs#L8931-L9181
 visibility: private
 generated:
   by: okf-rs/0.3.0

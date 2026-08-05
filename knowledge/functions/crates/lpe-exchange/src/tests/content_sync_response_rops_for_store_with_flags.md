@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_sync_response_rops_for_store_with_flags
-resource: crates/lpe-exchange/src/tests/mod.rs#L15217-L15261
+resource: crates/lpe-exchange/src/tests/mod.rs#L15233-L15277
 visibility: private
 generated:
   by: okf-rs/0.3.0

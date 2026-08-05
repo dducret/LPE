@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_snapshot_backed_collaboration_folder
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L223-L243
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L224-L244
 visibility: private
 generated:
   by: okf-rs/0.3.0

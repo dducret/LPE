@@ -261,6 +261,11 @@ impl MapiNotificationEvent {
     }
 
     #[cfg(test)]
+    pub(crate) fn parent_folder_id(&self) -> Option<u64> {
+        self.parent_folder_id
+    }
+
+    #[cfg(test)]
     pub(crate) fn notification_test_shape(
         &self,
     ) -> (

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_named_property_mappings
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L423-L432
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L432-L441
 generated:
   by: okf-rs/0.3.0
 relationships:

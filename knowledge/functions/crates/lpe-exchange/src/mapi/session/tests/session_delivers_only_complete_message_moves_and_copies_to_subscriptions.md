@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_delivers_only_complete_message_moves_and_copies_to_subscriptions
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L309-L358
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L380-L429
 visibility: private
 generated:
   by: okf-rs/0.3.0

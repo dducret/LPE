@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rop_requires_full_snapshot
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L245-L263
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L246-L264
 generated:
   by: okf-rs/0.3.0
 relationships:

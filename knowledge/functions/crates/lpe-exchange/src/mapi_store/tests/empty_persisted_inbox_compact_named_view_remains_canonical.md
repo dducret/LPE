@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: empty_persisted_inbox_compact_named_view_remains_canonical
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L698-L741
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L738-L781
 visibility: private
 generated:
   by: okf-rs/0.3.0

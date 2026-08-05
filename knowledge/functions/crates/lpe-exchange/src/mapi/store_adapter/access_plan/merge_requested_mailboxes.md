@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: merge_requested_mailboxes
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L996-L1012
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L997-L1013
 generated:
   by: okf-rs/0.3.0
 relationships:

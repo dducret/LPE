@@ -214,6 +214,46 @@ fn exact_event_mid_wins_over_another_events_foreign_cached_alias() {
 }
 
 #[test]
+fn contact_commit_times_override_the_durable_contact_identity_timestamp() {
+    let contact_id = Uuid::from_u128(0x88000000_0000_4000_8000_000000000001);
+    let identity_commit_time = 134_128_518_000_000_000;
+    let contact_updated_at = "2026-08-05T14:17:11.123456Z";
+    let mut snapshot = MapiMailStoreSnapshot::empty();
+    snapshot.contacts.push(MapiContact {
+        id: crate::mapi::identity::mapi_store_id(0x200),
+        folder_id: crate::mapi::identity::CONTACTS_FOLDER_ID,
+        canonical_id: contact_id,
+        durable_identity: None,
+        contact: AccessibleContact {
+            id: contact_id,
+            ..Default::default()
+        },
+    });
+    let identity = crate::store::MapiIdentityRecord {
+        object_kind: MapiIdentityObjectKind::Contact,
+        canonical_id: contact_id,
+        object_id: crate::mapi::identity::mapi_store_id(0x200),
+        change_number: 0x201,
+        source_key: Vec::new(),
+        change_key: Vec::new(),
+        predecessor_change_list: Vec::new(),
+        last_modification_time: identity_commit_time,
+    };
+
+    let snapshot = snapshot
+        .with_contact_identities(&[identity])
+        .expect("durable Contact identity")
+        .with_contact_commit_times(vec![(contact_id, contact_updated_at.to_string())]);
+
+    assert_eq!(
+        snapshot.folder_local_commit_time_max(crate::mapi::identity::CONTACTS_FOLDER_ID, &[]),
+        Some(crate::mapi_mailstore::filetime_from_rfc3339_utc(
+            contact_updated_at
+        ))
+    );
+}
+
+#[test]
 fn content_table_window_emails_reuses_wider_window_slice() {
     let mailbox_id = Uuid::from_u128(0x44444444_4444_4444_8444_444444444444);
     let first_id = Uuid::from_u128(0x55555555_5555_4555_8555_555555555555);

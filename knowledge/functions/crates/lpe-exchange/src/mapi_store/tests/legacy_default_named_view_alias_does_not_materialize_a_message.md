@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: legacy_default_named_view_alias_does_not_materialize_a_message
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1454-L1463
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1494-L1503
 visibility: private
 generated:
   by: okf-rs/0.3.0

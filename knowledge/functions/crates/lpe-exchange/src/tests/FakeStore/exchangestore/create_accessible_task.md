@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_accessible_task
-resource: crates/lpe-exchange/src/tests/mod.rs#L9278-L9309
+resource: crates/lpe-exchange/src/tests/mod.rs#L9294-L9325
 visibility: private
 generated:
   by: okf-rs/0.3.0

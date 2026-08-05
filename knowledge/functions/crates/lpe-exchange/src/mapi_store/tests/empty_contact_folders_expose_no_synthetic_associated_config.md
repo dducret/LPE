@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: empty_contact_folders_expose_no_synthetic_associated_config
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1032-L1048
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1072-L1088
 visibility: private
 generated:
   by: okf-rs/0.3.0

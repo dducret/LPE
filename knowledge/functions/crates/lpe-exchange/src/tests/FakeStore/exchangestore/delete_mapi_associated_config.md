@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_mapi_associated_config
-resource: crates/lpe-exchange/src/tests/mod.rs#L10560-L10586
+resource: crates/lpe-exchange/src/tests/mod.rs#L10576-L10602
 visibility: private
 generated:
   by: okf-rs/0.3.0

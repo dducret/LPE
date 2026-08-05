@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: contact_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L960-L970
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L969-L979
 generated:
   by: okf-rs/0.3.0
 relationships:

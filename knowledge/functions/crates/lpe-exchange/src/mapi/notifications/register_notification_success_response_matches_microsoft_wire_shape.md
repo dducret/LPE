@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: register_notification_success_response_matches_microsoft_wire_shape
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L298-L307
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L303-L312
 visibility: private
 generated:
   by: okf-rs/0.3.0

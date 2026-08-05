@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_calendar_notification_event
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L722-L773
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L724-L776
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/canonical
   - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_event_mask_for_change
   - functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/with_canonical_ids
+  - functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/with_parent_folder_id
   - functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/with_object_kind
   called_by:
   - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_event_from_change_row
@@ -30,6 +31,7 @@ relationships:
 - [canonical](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/canonical.md)
 - [mapi_notification_event_mask_for_change](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_event_mask_for_change.md)
 - [with_canonical_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/with_canonical_ids.md)
+- [with_parent_folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/with_parent_folder_id.md)
 - [with_object_kind](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/with_object_kind.md)
 
 # Called by

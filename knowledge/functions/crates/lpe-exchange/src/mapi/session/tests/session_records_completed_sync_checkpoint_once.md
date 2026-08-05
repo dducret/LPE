@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_records_completed_sync_checkpoint_once
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L676-L707
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L747-L778
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Trait
 title: ExchangeStore
-resource: crates/lpe-exchange/src/store.rs#L65-L1291
+resource: crates/lpe-exchange/src/store.rs#L65-L1297
 generated:
   by: okf-rs/0.3.0
 ---

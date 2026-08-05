@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_windowable_mail_contents_folder
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L787-L806
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L788-L807
 visibility: private
 generated:
   by: okf-rs/0.3.0

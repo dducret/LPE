@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: tombstone_unknown_mapi_navigation_shortcut
-resource: crates/lpe-exchange/src/tests/mod.rs#L10093-L10191
+resource: crates/lpe-exchange/src/tests/mod.rs#L10109-L10207
 visibility: private
 generated:
   by: okf-rs/0.3.0

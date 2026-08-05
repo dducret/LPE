@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: reminder_events
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1063-L1079
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1072-L1088
 generated:
   by: okf-rs/0.3.0
 relationships:

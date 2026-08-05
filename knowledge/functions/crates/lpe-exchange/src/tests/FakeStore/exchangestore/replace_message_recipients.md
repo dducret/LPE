@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: replace_message_recipients
-resource: crates/lpe-exchange/src/tests/mod.rs#L11646-L11681
+resource: crates/lpe-exchange/src/tests/mod.rs#L11662-L11697
 visibility: private
 generated:
   by: okf-rs/0.3.0

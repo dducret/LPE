@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rpc_proxy_bootstrap_logon_execute_rop
-resource: crates/lpe-exchange/src/tests/mod.rs#L12350-L12358
+resource: crates/lpe-exchange/src/tests/mod.rs#L12366-L12374
 visibility: private
 generated:
   by: okf-rs/0.3.0

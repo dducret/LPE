@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_associated_contents_find_row_stays_selective
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L960-L1005
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L996-L1041
 visibility: private
 generated:
   by: okf-rs/0.3.0

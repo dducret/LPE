@@ -626,6 +626,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/build
   - functions/crates/lpe-exchange/src/mapi_store/tests/event_lookup_rejects_another_principals_cached_mid
   - functions/crates/lpe-exchange/src/mapi_store/tests/exact_event_mid_wins_over_another_events_foreign_cached_alias
+  - functions/crates/lpe-exchange/src/mapi_store/tests/contact_commit_times_override_the_durable_contact_identity_timestamp
   - functions/crates/lpe-exchange/src/mapi_store/tests/common_views_projects_search_folder_definition_with_protocol_blob
   - functions/crates/lpe-exchange/src/service/ExchangeService/requested_mailbox_folder_ids
   - functions/crates/lpe-exchange/src/service/ExchangeService/create_folder_path
@@ -1908,6 +1909,7 @@ relationships:
 - [build](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/build.md)
 - [event_lookup_rejects_another_principals_cached_mid](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/event_lookup_rejects_another_principals_cached_mid.md)
 - [exact_event_mid_wins_over_another_events_foreign_cached_alias](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/exact_event_mid_wins_over_another_events_foreign_cached_alias.md)
+- [contact_commit_times_override_the_durable_contact_identity_timestamp](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/contact_commit_times_override_the_durable_contact_identity_timestamp.md)
 - [common_views_projects_search_folder_definition_with_protocol_blob](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/common_views_projects_search_folder_definition_with_protocol_blob.md)
 - [requested_mailbox_folder_ids](../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/requested_mailbox_folder_ids.md)
 - [create_folder_path](../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/create_folder_path.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_project_exactly_the_persisted_contact_link_fai
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1051-L1112
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1091-L1152
 visibility: private
 generated:
   by: okf-rs/0.3.0

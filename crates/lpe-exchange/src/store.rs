@@ -649,6 +649,12 @@ pub trait ExchangeStore: AccountAuthStore {
         collection_id: &'a str,
     ) -> StoreFuture<'a, Vec<(Uuid, String)>>;
 
+    fn fetch_contact_commit_times<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>>;
+
     fn fetch_accessible_events_in_collection<'a>(
         &'a self,
         principal_account_id: Uuid,

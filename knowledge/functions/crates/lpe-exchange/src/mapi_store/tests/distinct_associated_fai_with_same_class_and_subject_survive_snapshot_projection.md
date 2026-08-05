@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: distinct_associated_fai_with_same_class_and_subject_survive_snapshot_projection
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1254-L1326
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1294-L1366
 visibility: private
 generated:
   by: okf-rs/0.3.0

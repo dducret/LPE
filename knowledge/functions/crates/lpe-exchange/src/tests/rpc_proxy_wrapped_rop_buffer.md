@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rpc_proxy_wrapped_rop_buffer
-resource: crates/lpe-exchange/src/tests/mod.rs#L12360-L12375
+resource: crates/lpe-exchange/src/tests/mod.rs#L12376-L12391
 visibility: private
 generated:
   by: okf-rs/0.3.0

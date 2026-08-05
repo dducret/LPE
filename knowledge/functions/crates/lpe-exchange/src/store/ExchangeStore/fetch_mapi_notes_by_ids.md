@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_notes_by_ids
-resource: crates/lpe-exchange/src/store.rs#L783-L792
+resource: crates/lpe-exchange/src/store.rs#L789-L798
 visibility: private
 generated:
   by: okf-rs/0.3.0

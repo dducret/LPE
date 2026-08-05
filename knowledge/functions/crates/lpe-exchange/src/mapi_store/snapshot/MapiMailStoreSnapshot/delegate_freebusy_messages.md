@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delegate_freebusy_messages
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1456-L1458
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1465-L1467
 generated:
   by: okf-rs/0.3.0
 relationships:

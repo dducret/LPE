@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: common_views_messages
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1275-L1277
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1284-L1286
 generated:
   by: okf-rs/0.3.0
 relationships:

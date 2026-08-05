@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_associated_contents_query_rows_stays_store_selective
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L579-L605
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L615-L641
 visibility: private
 generated:
   by: okf-rs/0.3.0

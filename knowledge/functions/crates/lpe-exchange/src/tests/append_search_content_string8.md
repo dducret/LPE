@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_search_content_string8
-resource: crates/lpe-exchange/src/tests/mod.rs#L14877-L14883
+resource: crates/lpe-exchange/src/tests/mod.rs#L14893-L14899
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_event_sync_versions
-resource: crates/lpe-exchange/src/tests/mod.rs#L7715-L7739
+resource: crates/lpe-exchange/src/tests/mod.rs#L7731-L7755
 visibility: private
 generated:
   by: okf-rs/0.3.0

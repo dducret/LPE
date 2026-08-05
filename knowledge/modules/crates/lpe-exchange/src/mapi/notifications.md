@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: notifications
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L1-L826
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L1-L831
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -35,6 +35,7 @@ relationships:
 - [is_complete_for_wire](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/is_complete_for_wire.md)
 - [source_hierarchy_table_event](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/source_hierarchy_table_event.md)
 - [old_parent_folder_id](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/old_parent_folder_id.md)
+- [parent_folder_id](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/parent_folder_id.md)
 - [notification_test_shape](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/notification_test_shape.md)
 - [rop_register_notification_response](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_register_notification_response.md)
 - [register_notification_success_response_matches_microsoft_wire_shape](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/register_notification_success_response_matches_microsoft_wire_shape.md)

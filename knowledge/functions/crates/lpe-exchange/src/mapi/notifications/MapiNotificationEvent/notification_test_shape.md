@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: notification_test_shape
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L264-L284
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L269-L289
 generated:
   by: okf-rs/0.3.0
 relationships:

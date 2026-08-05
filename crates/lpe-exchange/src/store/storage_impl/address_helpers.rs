@@ -418,6 +418,7 @@ fn mapi_notification_event_from_change_row(
                     None,
                 )
                 .with_canonical_ids(Some(contact_book_id), Some(contact_id))
+                .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID))
                 .with_object_kind("contact"),
             )
         }
@@ -473,6 +474,7 @@ fn mapi_notification_event_from_change_row(
                 )
                 .with_old_message_id(Some(old_message_id))
                 .with_canonical_ids(None, Some(event_id))
+                .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID))
                 .with_object_kind("deleted_calendar_event"),
             )
         }
@@ -768,6 +770,7 @@ fn mapi_calendar_notification_event(
             None,
         )
         .with_canonical_ids(Some(data.calendar_id), Some(data.event_id))
+        .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID))
         .with_object_kind("calendar_event"),
     )
 }
@@ -1196,6 +1199,10 @@ mod notification_tests {
             );
             assert_eq!(notification.canonical_folder_id(), Some(calendar_id));
             assert_eq!(notification.canonical_message_id(), Some(event_id));
+            assert_eq!(
+                notification.parent_folder_id(),
+                Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+            );
         }
     }
 

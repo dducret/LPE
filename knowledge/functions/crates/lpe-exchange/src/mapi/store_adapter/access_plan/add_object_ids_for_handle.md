@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: add_object_ids_for_handle
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L838-L982
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L839-L983
 visibility: private
 generated:
   by: okf-rs/0.3.0

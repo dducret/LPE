@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_query_ranges_can_merge
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L770-L785
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L771-L786
 visibility: private
 generated:
   by: okf-rs/0.3.0

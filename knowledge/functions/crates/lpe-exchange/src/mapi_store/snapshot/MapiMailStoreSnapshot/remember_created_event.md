@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: remember_created_event
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L505-L530
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L514-L539
 generated:
   by: okf-rs/0.3.0
 relationships:

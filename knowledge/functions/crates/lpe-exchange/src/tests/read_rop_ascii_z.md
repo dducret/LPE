@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_rop_ascii_z
-resource: crates/lpe-exchange/src/tests/mod.rs#L13333-L13345
+resource: crates/lpe-exchange/src/tests/mod.rs#L13349-L13361
 visibility: private
 generated:
   by: okf-rs/0.3.0

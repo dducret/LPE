@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_fetches_folder_named_view_identity
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1117-L1137
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1153-L1173
 visibility: private
 generated:
   by: okf-rs/0.3.0

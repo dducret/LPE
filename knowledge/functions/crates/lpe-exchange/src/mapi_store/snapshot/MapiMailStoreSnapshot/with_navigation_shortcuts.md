@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_navigation_shortcuts
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L217-L272
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L222-L277
 generated:
   by: okf-rs/0.3.0
 relationships:

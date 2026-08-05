@@ -57,7 +57,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_mailstore/tests/content_sync_manifest_respects_normal_and_fai_scope_flags
   - functions/crates/lpe-exchange/src/mapi_mailstore/tests/special_message_headers_and_final_cnsets_share_durable_change_numbers
   - functions/crates/lpe-exchange/src/mapi_store/folder_commit_time/MapiMailStoreSnapshot/folder_local_commit_time_max
-  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_sync_versions
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_commit_times
   - functions/crates/lpe-exchange/src/store/storage_impl/associated_config_create/commit_mapi_associated_config_create_in_tx
   - functions/crates/lpe-exchange/src/store/storage_impl/associated_config_import/commit_mapi_associated_config_update_in_tx
   - functions/crates/lpe-exchange/src/store/storage_impl/fai_identity_import/commit_mapi_imported_fai_identity_in_tx
@@ -136,7 +136,7 @@ relationships:
 - [content_sync_manifest_respects_normal_and_fai_scope_flags](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/tests/content_sync_manifest_respects_normal_and_fai_scope_flags.md)
 - [special_message_headers_and_final_cnsets_share_durable_change_numbers](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/tests/special_message_headers_and_final_cnsets_share_durable_change_numbers.md)
 - [folder_local_commit_time_max](../../../../../../functions/crates/lpe-exchange/src/mapi_store/folder_commit_time/MapiMailStoreSnapshot/folder_local_commit_time_max.md)
-- [with_contact_sync_versions](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_sync_versions.md)
+- [with_contact_commit_times](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_commit_times.md)
 - [commit_mapi_associated_config_create_in_tx](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/associated_config_create/commit_mapi_associated_config_create_in_tx.md)
 - [commit_mapi_associated_config_update_in_tx](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/associated_config_import/commit_mapi_associated_config_update_in_tx.md)
 - [commit_mapi_imported_fai_identity_in_tx](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/fai_identity_import/commit_mapi_imported_fai_identity_in_tx.md)

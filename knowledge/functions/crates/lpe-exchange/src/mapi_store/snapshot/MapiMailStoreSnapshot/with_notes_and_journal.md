@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_notes_and_journal
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L659-L683
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L668-L692
 generated:
   by: okf-rs/0.3.0
 relationships:

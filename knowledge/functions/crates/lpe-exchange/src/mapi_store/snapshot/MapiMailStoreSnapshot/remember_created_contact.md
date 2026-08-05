@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: remember_created_contact
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L532-L569
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L541-L578
 generated:
   by: okf-rs/0.3.0
 relationships:

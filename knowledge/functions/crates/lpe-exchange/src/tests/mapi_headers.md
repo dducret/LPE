@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_headers
-resource: crates/lpe-exchange/src/tests/mod.rs#L12069-L12090
+resource: crates/lpe-exchange/src/tests/mod.rs#L12085-L12106
 visibility: private
 generated:
   by: okf-rs/0.3.0

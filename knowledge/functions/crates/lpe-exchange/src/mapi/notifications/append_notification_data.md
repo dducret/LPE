@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_notification_data
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L624-L744
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L629-L749
 visibility: private
 generated:
   by: okf-rs/0.3.0

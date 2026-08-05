@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: public_folder_replica_server_names
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L904-L912
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L913-L921
 generated:
   by: okf-rs/0.3.0
 relationships:

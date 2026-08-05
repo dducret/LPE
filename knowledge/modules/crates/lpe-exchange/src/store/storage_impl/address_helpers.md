@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: address_helpers
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1-L1599
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1-L1606
 generated:
   by: okf-rs/0.3.0
 relationships:

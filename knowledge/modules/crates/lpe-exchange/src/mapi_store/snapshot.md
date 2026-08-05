@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: snapshot
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1-L1568
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1-L1577
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -21,7 +21,7 @@ relationships:
 - [identity_codec](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/identity_codec.md)
 - [durable_identity_records](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/durable_identity_records.md)
 - [with_mailbox_content_commit_times](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_mailbox_content_commit_times.md)
-- [with_contact_sync_versions](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_sync_versions.md)
+- [with_contact_commit_times](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_commit_times.md)
 - [with_search_folder_definitions](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_search_folder_definitions.md)
 - [with_rules](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_rules.md)
 - [with_conversation_actions](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_conversation_actions.md)

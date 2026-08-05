@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_emails
-resource: crates/lpe-exchange/src/tests/mod.rs#L10985-L11003
+resource: crates/lpe-exchange/src/tests/mod.rs#L11001-L11019
 visibility: private
 generated:
   by: okf-rs/0.3.0

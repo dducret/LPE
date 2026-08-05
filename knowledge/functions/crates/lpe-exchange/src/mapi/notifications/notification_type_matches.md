@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notification_type_matches
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L807-L809
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L812-L814
 visibility: private
 generated:
   by: okf-rs/0.3.0

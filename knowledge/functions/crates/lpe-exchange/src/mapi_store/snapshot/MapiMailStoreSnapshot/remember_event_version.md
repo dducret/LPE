@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: remember_event_version
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L467-L475
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L476-L484
 generated:
   by: okf-rs/0.3.0
 relationships:

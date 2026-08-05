@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rop_uses_session_state_only
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L265-L276
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L266-L277
 visibility: private
 generated:
   by: okf-rs/0.3.0

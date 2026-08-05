@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_journal_entries
-resource: crates/lpe-exchange/src/store.rs#L794-L802
+resource: crates/lpe-exchange/src/store.rs#L800-L808
 visibility: private
 generated:
   by: okf-rs/0.3.0

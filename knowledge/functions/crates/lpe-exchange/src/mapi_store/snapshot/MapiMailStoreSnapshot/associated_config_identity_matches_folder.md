@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: associated_config_identity_matches_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1422-L1430
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1431-L1439
 generated:
   by: okf-rs/0.3.0
 relationships:

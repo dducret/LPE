@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_open_folder
-resource: crates/lpe-exchange/src/tests/mod.rs#L14842-L14846
+resource: crates/lpe-exchange/src/tests/mod.rs#L14858-L14862
 visibility: private
 generated:
   by: okf-rs/0.3.0

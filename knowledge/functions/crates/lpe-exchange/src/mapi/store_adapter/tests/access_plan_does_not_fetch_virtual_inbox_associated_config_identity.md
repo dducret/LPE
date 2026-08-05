@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_does_not_fetch_virtual_inbox_associated_config_identity
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1140-L1155
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1176-L1191
 visibility: private
 generated:
   by: okf-rs/0.3.0

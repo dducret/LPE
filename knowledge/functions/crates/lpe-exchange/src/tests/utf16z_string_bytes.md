@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: utf16z_string_bytes
-resource: crates/lpe-exchange/src/tests/mod.rs#L15619-L15629
+resource: crates/lpe-exchange/src/tests/mod.rs#L15635-L15645
 visibility: private
 generated:
   by: okf-rs/0.3.0

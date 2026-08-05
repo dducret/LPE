@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_identity_requests_for_mailboxes
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L990-L994
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L991-L995
 generated:
   by: okf-rs/0.3.0
 relationships:

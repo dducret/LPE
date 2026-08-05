@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_does_not_fetch_default_common_views_shortcut_identity
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1073-L1093
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1109-L1129
 visibility: private
 generated:
   by: okf-rs/0.3.0

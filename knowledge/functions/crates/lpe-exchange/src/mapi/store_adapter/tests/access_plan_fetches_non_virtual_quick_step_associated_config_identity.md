@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_fetches_non_virtual_quick_step_associated_config_identity
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1158-L1174
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1194-L1210
 visibility: private
 generated:
   by: okf-rs/0.3.0

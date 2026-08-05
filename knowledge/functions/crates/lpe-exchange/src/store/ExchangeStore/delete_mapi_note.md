@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_mapi_note
-resource: crates/lpe-exchange/src/store.rs#L836-L843
+resource: crates/lpe-exchange/src/store.rs#L842-L849
 visibility: private
 generated:
   by: okf-rs/0.3.0

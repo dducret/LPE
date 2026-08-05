@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rpc_proxy_conn_a1_request_body
-resource: crates/lpe-exchange/src/tests/mod.rs#L12050-L12067
+resource: crates/lpe-exchange/src/tests/mod.rs#L12066-L12083
 visibility: private
 generated:
   by: okf-rs/0.3.0

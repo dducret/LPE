@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_mapi_journal_entry
-resource: crates/lpe-exchange/src/store.rs#L845-L856
+resource: crates/lpe-exchange/src/store.rs#L851-L862
 visibility: private
 generated:
   by: okf-rs/0.3.0

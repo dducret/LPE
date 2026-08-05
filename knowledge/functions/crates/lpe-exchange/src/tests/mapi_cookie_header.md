@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_cookie_header
-resource: crates/lpe-exchange/src/tests/mod.rs#L12428-L12437
+resource: crates/lpe-exchange/src/tests/mod.rs#L12444-L12453
 visibility: private
 generated:
   by: okf-rs/0.3.0

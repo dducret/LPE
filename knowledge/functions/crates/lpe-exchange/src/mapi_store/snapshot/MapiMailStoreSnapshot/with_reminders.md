@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_reminders
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L441-L444
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L450-L453
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: renew_mapi_request_id
-resource: crates/lpe-exchange/src/tests/mod.rs#L12099-L12104
+resource: crates/lpe-exchange/src/tests/mod.rs#L12115-L12120
 visibility: private
 generated:
   by: okf-rs/0.3.0

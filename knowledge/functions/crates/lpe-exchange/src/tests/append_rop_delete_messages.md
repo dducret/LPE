@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_delete_messages
-resource: crates/lpe-exchange/src/tests/mod.rs#L15578-L15584
+resource: crates/lpe-exchange/src/tests/mod.rs#L15594-L15600
 visibility: private
 generated:
   by: okf-rs/0.3.0

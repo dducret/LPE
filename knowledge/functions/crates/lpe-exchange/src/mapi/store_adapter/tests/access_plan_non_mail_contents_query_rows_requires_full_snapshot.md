@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_non_mail_contents_query_rows_requires_full_snapshot
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L550-L576
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L586-L612
 visibility: private
 generated:
   by: okf-rs/0.3.0

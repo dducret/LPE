@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_unique_uuid
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1278-L1282
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1285-L1289
 visibility: private
 generated:
   by: okf-rs/0.3.0

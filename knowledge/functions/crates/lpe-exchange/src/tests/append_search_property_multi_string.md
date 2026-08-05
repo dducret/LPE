@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_search_property_multi_string
-resource: crates/lpe-exchange/src/tests/mod.rs#L14934-L14947
+resource: crates/lpe-exchange/src/tests/mod.rs#L14950-L14963
 visibility: private
 generated:
   by: okf-rs/0.3.0

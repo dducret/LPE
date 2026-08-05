@@ -9,8 +9,6 @@ relationships:
   calls:
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   called_by:
-  - functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan
-  - functions/crates/lpe-exchange/src/mapi_store/T/mapistore/load_mapi_mail_store
   - functions/crates/lpe-exchange/src/service/ews/sync_state/contact_change_keys
 ---
 
@@ -24,6 +22,4 @@ relationships:
 
 # Called by
 
-- [load_mapi_store_for_access_plan](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan.md)
-- [load_mapi_mail_store](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/T/mapistore/load_mapi_mail_store.md)
 - [contact_change_keys](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/contact_change_keys.md)

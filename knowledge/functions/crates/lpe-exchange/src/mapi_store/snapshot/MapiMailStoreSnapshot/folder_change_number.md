@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: folder_change_number
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L731-L733
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L740-L742
 generated:
   by: okf-rs/0.3.0
 relationships:

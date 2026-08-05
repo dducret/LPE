@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_merges_total_probe_inside_existing_content_window
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L812-L826
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L848-L862
 visibility: private
 generated:
   by: okf-rs/0.3.0

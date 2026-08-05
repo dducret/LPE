@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: events_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L972-L977
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L981-L986
 generated:
   by: okf-rs/0.3.0
 relationships:

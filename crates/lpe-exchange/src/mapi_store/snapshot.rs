@@ -107,14 +107,19 @@ impl MapiMailStoreSnapshot {
         self
     }
 
-    pub(crate) fn with_contact_sync_versions(mut self, versions: Vec<(Uuid, String)>) -> Self {
-        self.contact_commit_times = versions
-            .into_iter()
-            .filter_map(|(contact_id, updated_at)| {
-                let commit_time = crate::mapi_mailstore::filetime_from_rfc3339_utc(&updated_at);
-                (commit_time != 0).then_some((contact_id, commit_time))
-            })
-            .collect();
+    pub(crate) fn with_contact_commit_times(mut self, commit_times: Vec<(Uuid, String)>) -> Self {
+        // Contact sync versions are numeric modseq values. MAPI folder
+        // freshness instead uses the canonical Contact update timestamp.
+        self.contact_commit_times
+            .extend(
+                commit_times
+                    .into_iter()
+                    .filter_map(|(contact_id, updated_at)| {
+                        let commit_time =
+                            crate::mapi_mailstore::filetime_from_rfc3339_utc(&updated_at);
+                        (commit_time != 0).then_some((contact_id, commit_time))
+                    }),
+            );
         self
     }
 
@@ -309,6 +314,10 @@ impl MapiMailStoreSnapshot {
                     contact.canonical_id
                 )
             })?;
+            if identity.last_modification_time != 0 {
+                self.contact_commit_times
+                    .insert(contact.canonical_id, identity.last_modification_time);
+            }
             contact.id = identity.object_id;
             contact.durable_identity = Some((*identity).clone());
         }

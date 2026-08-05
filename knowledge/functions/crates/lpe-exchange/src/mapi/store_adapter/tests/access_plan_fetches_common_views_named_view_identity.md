@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_fetches_common_views_named_view_identity
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1096-L1114
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1132-L1150
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: reminder_for_source
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1126-L1139
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1135-L1148
 generated:
   by: okf-rs/0.3.0
 relationships:

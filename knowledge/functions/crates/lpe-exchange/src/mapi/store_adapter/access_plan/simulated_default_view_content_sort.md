@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: simulated_default_view_content_sort
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L687-L697
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L688-L698
 visibility: private
 generated:
   by: okf-rs/0.3.0

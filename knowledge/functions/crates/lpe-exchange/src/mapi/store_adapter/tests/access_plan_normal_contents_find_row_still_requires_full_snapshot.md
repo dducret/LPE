@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_normal_contents_find_row_still_requires_full_snapshot
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1008-L1052
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L1044-L1088
 visibility: private
 generated:
   by: okf-rs/0.3.0

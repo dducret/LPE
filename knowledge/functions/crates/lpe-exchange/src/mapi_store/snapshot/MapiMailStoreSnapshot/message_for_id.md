@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: message_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L760-L764
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L769-L773
 generated:
   by: okf-rs/0.3.0
 ---

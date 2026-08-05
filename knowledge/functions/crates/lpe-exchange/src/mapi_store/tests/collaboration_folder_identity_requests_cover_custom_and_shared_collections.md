@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_folder_identity_requests_cover_custom_and_shared_collections
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2325-L2401
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2365-L2441
 visibility: private
 generated:
   by: okf-rs/0.3.0

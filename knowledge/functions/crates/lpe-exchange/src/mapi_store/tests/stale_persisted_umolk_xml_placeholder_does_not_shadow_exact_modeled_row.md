@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stale_persisted_umolk_xml_placeholder_does_not_shadow_exact_modeled_row
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L793-L828
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L833-L868
 visibility: private
 generated:
   by: okf-rs/0.3.0

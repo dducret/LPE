@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_mail_app_catalog_id
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1300-L1324
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1307-L1331
 visibility: private
 generated:
   by: okf-rs/0.3.0

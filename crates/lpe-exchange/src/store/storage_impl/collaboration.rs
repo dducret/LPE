@@ -86,6 +86,44 @@ macro_rules! store_impl_collaboration {
         })
     }
 
+    fn fetch_contact_commit_times<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>> {
+        Box::pin(async move {
+            let contacts = self
+                .fetch_accessible_contacts_in_collection(principal_account_id, collection_id)
+                .await?;
+            let ids = contacts
+                .iter()
+                .map(|contact| contact.id)
+                .collect::<Vec<_>>();
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    id,
+                    to_char(
+                        updated_at AT TIME ZONE 'UTC',
+                        'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                    ) AS commit_time
+                FROM contacts
+                WHERE id = ANY($1)
+                "#,
+            )
+            .bind(&ids)
+            .fetch_all(self.pool())
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| (row.get("id"), row.get("commit_time")))
+                .collect())
+        })
+    }
+
     fn fetch_accessible_events_in_collection<'a>(
         &'a self,
         principal_account_id: Uuid,

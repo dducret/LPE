@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: conversation_action_messages
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1432-L1434
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1441-L1443
 generated:
   by: okf-rs/0.3.0
 relationships:

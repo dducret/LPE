@@ -152,6 +152,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/ScopedCalendarIdentities/folder_id
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/new
   - functions/crates/lpe-exchange/src/mapi_store/tests/exact_event_mid_wins_over_another_events_foreign_cached_alias
+  - functions/crates/lpe-exchange/src/mapi_store/tests/contact_commit_times_override_the_durable_contact_identity_timestamp
   - functions/crates/lpe-exchange/src/mapi_store/tests/content_table_window_emails_reuses_wider_window_slice
   - functions/crates/lpe-exchange/src/mapi_store/tests/content_table_window_emails_skips_insufficient_containing_window
   - functions/crates/lpe-exchange/src/mapi_store/tests/content_table_window_emails_containing_skips_incomplete_window
@@ -577,6 +578,7 @@ relationships:
 - [folder_id](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/ScopedCalendarIdentities/folder_id.md)
 - [new](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/new.md)
 - [exact_event_mid_wins_over_another_events_foreign_cached_alias](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/exact_event_mid_wins_over_another_events_foreign_cached_alias.md)
+- [contact_commit_times_override_the_durable_contact_identity_timestamp](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/contact_commit_times_override_the_durable_contact_identity_timestamp.md)
 - [content_table_window_emails_reuses_wider_window_slice](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/content_table_window_emails_reuses_wider_window_slice.md)
 - [content_table_window_emails_skips_insufficient_containing_window](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/content_table_window_emails_skips_insufficient_containing_window.md)
 - [content_table_window_emails_containing_skips_incomplete_window](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/content_table_window_emails_containing_skips_incomplete_window.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_configs_do_not_emit_unpersisted_defaults
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L599-L695
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L639-L735
 visibility: private
 generated:
   by: okf-rs/0.3.0

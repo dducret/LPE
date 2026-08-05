@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_move_is_suppressed_without_a_distinct_old_message_id
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1203-L1237
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1210-L1244
 visibility: private
 generated:
   by: okf-rs/0.3.0

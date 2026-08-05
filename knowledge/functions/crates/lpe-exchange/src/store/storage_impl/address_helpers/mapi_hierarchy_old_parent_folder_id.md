@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_hierarchy_old_parent_folder_id
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L879-L894
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L882-L897
 visibility: private
 generated:
   by: okf-rs/0.3.0

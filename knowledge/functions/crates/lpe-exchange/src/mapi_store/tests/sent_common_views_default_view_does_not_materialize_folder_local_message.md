@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sent_common_views_default_view_does_not_materialize_folder_local_message
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1466-L1479
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1506-L1519
 visibility: private
 generated:
   by: okf-rs/0.3.0

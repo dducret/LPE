@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: access_plan_contents_seek_from_end_still_requires_full_snapshot
-resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L428-L456
+resource: crates/lpe-exchange/src/mapi/store_adapter/tests.rs#L464-L492
 visibility: private
 generated:
   by: okf-rs/0.3.0

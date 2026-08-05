@@ -7688,6 +7688,22 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(contacts) })
     }
 
+    fn fetch_contact_commit_times<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>> {
+        let contacts = self
+            .contacts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|contact| contact.collection_id == collection_id)
+            .map(|contact| (contact.id, "2026-07-15T10:00:07Z".to_string()))
+            .collect();
+        Box::pin(async move { Ok(contacts) })
+    }
+
     fn fetch_accessible_events_in_collection<'a>(
         &'a self,
         _principal_account_id: Uuid,

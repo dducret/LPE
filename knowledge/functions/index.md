@@ -3724,6 +3724,7 @@
 - [is_complete_for_wire](../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/is_complete_for_wire.md) — Rust Method
 - [notification_test_shape](../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/notification_test_shape.md) — Rust Method
 - [old_parent_folder_id](../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/old_parent_folder_id.md) — Rust Method
+- [parent_folder_id](../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/parent_folder_id.md) — Rust Method
 - [source_hierarchy_table_event](../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/source_hierarchy_table_event.md) — Rust Method
 - [with_canonical_ids](../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/with_canonical_ids.md) — Rust Method
 - [with_object_kind](../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/with_object_kind.md) — Rust Method
@@ -5141,6 +5142,7 @@
 - [session_remembers_deleted_advertised_special_folder](../functions/crates/lpe-exchange/src/mapi/session/tests/session_remembers_deleted_advertised_special_folder.md) — Rust Function
 - [session_remembers_deleted_saved_search_folder_definition](../functions/crates/lpe-exchange/src/mapi/session/tests/session_remembers_deleted_saved_search_folder_definition.md) — Rust Function
 - [session_remembers_saved_search_folder_definition](../functions/crates/lpe-exchange/src/mapi/session/tests/session_remembers_saved_search_folder_definition.md) — Rust Function
+- [session_retains_collaboration_content_change_for_active_root_depth_hierarchy_table_without_counts](../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_change_for_active_root_depth_hierarchy_table_without_counts.md) — Rust Function
 - [session_retains_folder_count_change_for_active_parent_hierarchy_table](../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table.md) — Rust Function
 - [new](../functions/crates/lpe-exchange/src/mapi/session/types/MapiEventTransaction/new.md) — Rust Method
 - [eq](../functions/crates/lpe-exchange/src/mapi/session/types/MapiSavedEmail/partialeq/eq.md) — Rust Method
@@ -5226,6 +5228,7 @@
 - [access_plan_preloads_long_term_id_from_id_source](../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_preloads_long_term_id_from_id_source.md) — Rust Function
 - [access_plan_query_position_does_not_window_contacts_contents_table](../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_query_position_does_not_window_contacts_contents_table.md) — Rust Function
 - [access_plan_resolves_learned_special_folder_aliases](../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_resolves_learned_special_folder_aliases.md) — Rust Function
+- [access_plan_root_depth_hierarchy_query_requires_snapshot_backed_contents](../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_root_depth_hierarchy_query_requires_snapshot_backed_contents.md) — Rust Function
 - [common_views_object_id_requires_snapshot_backed_contents](../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/common_views_object_id_requires_snapshot_backed_contents.md) — Rust Function
 - [deduplicate_mapi_identity_requests_keeps_distinct_kinds](../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/deduplicate_mapi_identity_requests_keeps_distinct_kinds.md) — Rust Function
 - [default_contacts_object_id_requires_snapshot_backed_contents](../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/default_contacts_object_id_requires_snapshot_backed_contents.md) — Rust Function
@@ -6562,8 +6565,8 @@
 - [with_associated_configs](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_associated_configs.md) — Rust Method
 - [with_calendar_attachments](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_calendar_attachments.md) — Rust Method
 - [with_collaboration_folder_item_count](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_collaboration_folder_item_count.md) — Rust Method
+- [with_contact_commit_times](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_commit_times.md) — Rust Method
 - [with_contact_identities](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_identities.md) — Rust Method
-- [with_contact_sync_versions](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_sync_versions.md) — Rust Method
 - [with_content_windows](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_content_windows.md) — Rust Method
 - [with_conversation_actions](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_conversation_actions.md) — Rust Method
 - [with_delegate_freebusy_messages](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_delegate_freebusy_messages.md) — Rust Method
@@ -6609,6 +6612,7 @@
 - [common_views_projects_search_folder_definition_with_protocol_blob](../functions/crates/lpe-exchange/src/mapi_store/tests/common_views_projects_search_folder_definition_with_protocol_blob.md) — Rust Function
 - [common_views_skips_search_folder_definition_without_protocol_blob](../functions/crates/lpe-exchange/src/mapi_store/tests/common_views_skips_search_folder_definition_without_protocol_blob.md) — Rust Function
 - [common_views_uses_same_persisted_wlinks_and_durable_ids_for_table_and_ics](../functions/crates/lpe-exchange/src/mapi_store/tests/common_views_uses_same_persisted_wlinks_and_durable_ids_for_table_and_ics.md) — Rust Function
+- [contact_commit_times_override_the_durable_contact_identity_timestamp](../functions/crates/lpe-exchange/src/mapi_store/tests/contact_commit_times_override_the_durable_contact_identity_timestamp.md) — Rust Function
 - [contacts_project_exactly_the_persisted_contact_link_fai](../functions/crates/lpe-exchange/src/mapi_store/tests/contacts_project_exactly_the_persisted_contact_link_fai.md) — Rust Function
 - [content_table_total_survives_total_only_window_without_rows](../functions/crates/lpe-exchange/src/mapi_store/tests/content_table_total_survives_total_only_window_without_rows.md) — Rust Function
 - [content_table_window_emails_containing_prefers_boundary_window](../functions/crates/lpe-exchange/src/mapi_store/tests/content_table_window_emails_containing_prefers_boundary_window.md) — Rust Function
@@ -7532,6 +7536,7 @@
 - [fetch_all_mapi_custom_property_values](../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_all_mapi_custom_property_values.md) — Rust Method
 - [fetch_attachment_content](../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_attachment_content.md) — Rust Method
 - [fetch_calendar_attachments_for_events](../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_calendar_attachments_for_events.md) — Rust Method
+- [fetch_contact_commit_times](../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_commit_times.md) — Rust Method
 - [fetch_contact_sync_versions](../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_sync_versions.md) — Rust Method
 - [fetch_conversation_actions](../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_conversation_actions.md) — Rust Method
 - [fetch_delegate_freebusy_messages](../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_delegate_freebusy_messages.md) — Rust Method

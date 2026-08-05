@@ -18,6 +18,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_restores_deliverable_notification_batch
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_does_not_restore_unmatched_notification
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table
+  - functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_change_for_active_root_depth_hierarchy_table_without_counts
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_delivers_only_complete_message_moves_and_copies_to_subscriptions
   - functions/crates/lpe-exchange/src/mapi/session/tests/hierarchy_move_notifies_the_source_subscription_and_refreshes_both_parent_tables
   - functions/crates/lpe-exchange/src/mapi/session/tests/notification_subscription_preserves_rop_logon_id_through_rop_notify
@@ -43,6 +44,7 @@ relationships:
 - [execute_overflow_restores_deliverable_notification_batch](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_restores_deliverable_notification_batch.md)
 - [execute_overflow_does_not_restore_unmatched_notification](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_does_not_restore_unmatched_notification.md)
 - [session_retains_folder_count_change_for_active_parent_hierarchy_table](../../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table.md)
+- [session_retains_collaboration_content_change_for_active_root_depth_hierarchy_table_without_counts](../../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_change_for_active_root_depth_hierarchy_table_without_counts.md)
 - [session_delivers_only_complete_message_moves_and_copies_to_subscriptions](../../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_delivers_only_complete_message_moves_and_copies_to_subscriptions.md)
 - [hierarchy_move_notifies_the_source_subscription_and_refreshes_both_parent_tables](../../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/hierarchy_move_notifies_the_source_subscription_and_refreshes_both_parent_tables.md)
 - [notification_subscription_preserves_rop_logon_id_through_rop_notify](../../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/notification_subscription_preserves_rop_logon_id_through_rop_notify.md)

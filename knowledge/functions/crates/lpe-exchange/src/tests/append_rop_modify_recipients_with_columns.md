@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_modify_recipients_with_columns
-resource: crates/lpe-exchange/src/tests/mod.rs#L15020-L15038
+resource: crates/lpe-exchange/src/tests/mod.rs#L15036-L15054
 visibility: private
 generated:
   by: okf-rs/0.3.0

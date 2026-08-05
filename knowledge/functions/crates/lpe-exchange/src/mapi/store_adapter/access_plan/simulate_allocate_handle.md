@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: simulate_allocate_handle
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L699-L715
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L700-L716
 visibility: private
 generated:
   by: okf-rs/0.3.0

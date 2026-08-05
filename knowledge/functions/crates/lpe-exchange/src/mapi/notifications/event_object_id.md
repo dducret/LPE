@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: event_object_id
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L762-L767
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L767-L772
 visibility: private
 generated:
   by: okf-rs/0.3.0

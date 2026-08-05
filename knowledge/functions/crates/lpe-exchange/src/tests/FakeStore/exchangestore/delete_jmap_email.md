@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_jmap_email
-resource: crates/lpe-exchange/src/tests/mod.rs#L11614-L11626
+resource: crates/lpe-exchange/src/tests/mod.rs#L11630-L11642
 visibility: private
 generated:
   by: okf-rs/0.3.0

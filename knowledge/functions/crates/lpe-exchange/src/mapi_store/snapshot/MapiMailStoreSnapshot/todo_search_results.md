@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: todo_search_results
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L998-L1006
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1007-L1015
 generated:
   by: okf-rs/0.3.0
 relationships:

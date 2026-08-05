@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: cached_calendar_named_property_keeps_registered_mailbox_id
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L867-L886
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L938-L957
 visibility: private
 generated:
   by: okf-rs/0.3.0

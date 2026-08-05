@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_backed_contact_folder_does_not_invent_osc_contact_sync
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1158-L1188
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1198-L1228
 visibility: private
 generated:
   by: okf-rs/0.3.0

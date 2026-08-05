@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: move_jmap_email
-resource: crates/lpe-exchange/src/tests/mod.rs#L11221-L11260
+resource: crates/lpe-exchange/src/tests/mod.rs#L11237-L11276
 visibility: private
 generated:
   by: okf-rs/0.3.0

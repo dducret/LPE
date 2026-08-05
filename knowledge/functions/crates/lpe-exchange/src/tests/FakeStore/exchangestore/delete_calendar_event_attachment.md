@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_calendar_event_attachment
-resource: crates/lpe-exchange/src/tests/mod.rs#L11148-L11169
+resource: crates/lpe-exchange/src/tests/mod.rs#L11164-L11185
 visibility: private
 generated:
   by: okf-rs/0.3.0

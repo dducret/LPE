@@ -10,7 +10,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/ensure_jmap_system_mailboxes
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_message_attachments
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
-  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_sync_versions
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_commit_times
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_in_collection
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_navigation_shortcuts
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_named_properties
@@ -29,7 +29,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_mailbox_content_commit_times
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/new_with_scoped_calendar_identities
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_identities
-  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_sync_versions
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_commit_times
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_calendar_attachments
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_event_versions
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_notes_and_journal
@@ -101,7 +101,7 @@ relationships:
 - [ensure_jmap_system_mailboxes](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/ensure_jmap_system_mailboxes.md)
 - [fetch_message_attachments](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_message_attachments.md)
 - [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
-- [fetch_contact_sync_versions](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_sync_versions.md)
+- [fetch_contact_commit_times](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_commit_times.md)
 - [fetch_accessible_tasks_in_collection](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_in_collection.md)
 - [fetch_mapi_navigation_shortcuts](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_navigation_shortcuts.md)
 - [fetch_mapi_named_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_named_properties.md)
@@ -120,7 +120,7 @@ relationships:
 - [fetch_mapi_mailbox_content_commit_times](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_mailbox_content_commit_times.md)
 - [new_with_scoped_calendar_identities](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/new_with_scoped_calendar_identities.md)
 - [with_contact_identities](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_identities.md)
-- [with_contact_sync_versions](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_sync_versions.md)
+- [with_contact_commit_times](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_commit_times.md)
 - [with_calendar_attachments](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_calendar_attachments.md)
 - [with_event_versions](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_event_versions.md)
 - [with_notes_and_journal](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_notes_and_journal.md)

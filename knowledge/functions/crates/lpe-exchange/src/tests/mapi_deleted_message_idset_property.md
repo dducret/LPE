@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_deleted_message_idset_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L13599-L13608
+resource: crates/lpe-exchange/src/tests/mod.rs#L13615-L13624
 visibility: private
 generated:
   by: okf-rs/0.3.0

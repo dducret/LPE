@@ -239,6 +239,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_trace_response
   - functions/crates/lpe-exchange/src/mapi_store/tests/event_lookup_rejects_another_principals_cached_mid
   - functions/crates/lpe-exchange/src/mapi_store/tests/exact_event_mid_wins_over_another_events_foreign_cached_alias
+  - functions/crates/lpe-exchange/src/mapi_store/tests/contact_commit_times_override_the_durable_contact_identity_timestamp
   - functions/crates/lpe-exchange/src/mapi_store/tests/inbox_associated_configs_do_not_emit_unpersisted_defaults
   - functions/crates/lpe-exchange/src/mapi_store/tests/empty_persisted_inbox_compact_named_view_remains_canonical
   - functions/crates/lpe-exchange/src/mapi_store/tests/empty_persisted_umolk_placeholder_does_not_shadow_exact_modeled_row
@@ -511,6 +512,7 @@ relationships:
 - [notification_wait_trace_response](../../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_trace_response.md)
 - [event_lookup_rejects_another_principals_cached_mid](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/event_lookup_rejects_another_principals_cached_mid.md)
 - [exact_event_mid_wins_over_another_events_foreign_cached_alias](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/exact_event_mid_wins_over_another_events_foreign_cached_alias.md)
+- [contact_commit_times_override_the_durable_contact_identity_timestamp](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/contact_commit_times_override_the_durable_contact_identity_timestamp.md)
 - [inbox_associated_configs_do_not_emit_unpersisted_defaults](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/inbox_associated_configs_do_not_emit_unpersisted_defaults.md)
 - [empty_persisted_inbox_compact_named_view_remains_canonical](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/empty_persisted_inbox_compact_named_view_remains_canonical.md)
 - [empty_persisted_umolk_placeholder_does_not_shadow_exact_modeled_row](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/empty_persisted_umolk_placeholder_does_not_shadow_exact_modeled_row.md)

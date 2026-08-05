@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_binary_property_value
-resource: crates/lpe-exchange/src/tests/mod.rs#L12622-L12630
+resource: crates/lpe-exchange/src/tests/mod.rs#L12638-L12646
 visibility: private
 generated:
   by: okf-rs/0.3.0

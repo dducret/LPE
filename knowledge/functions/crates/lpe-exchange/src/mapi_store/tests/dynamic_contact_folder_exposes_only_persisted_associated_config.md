@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: dynamic_contact_folder_exposes_only_persisted_associated_config
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1115-L1155
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1155-L1195
 visibility: private
 generated:
   by: okf-rs/0.3.0

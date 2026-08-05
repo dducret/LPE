@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_record_folder_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L13077-L13133
+resource: crates/lpe-exchange/src/tests/mod.rs#L13093-L13149
 visibility: private
 generated:
   by: okf-rs/0.3.0

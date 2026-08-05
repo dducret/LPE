@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: search_folder_definition_for_role
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1189-L1196
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1198-L1205
 generated:
   by: okf-rs/0.3.0
 relationships:

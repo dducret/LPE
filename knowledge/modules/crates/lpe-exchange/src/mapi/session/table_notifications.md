@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: table_notifications
-resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L1-L289
+resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L1-L291
 generated:
   by: okf-rs/0.3.0
 relationships:

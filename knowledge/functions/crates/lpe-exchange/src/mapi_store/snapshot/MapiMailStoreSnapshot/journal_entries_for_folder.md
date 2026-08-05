@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: journal_entries_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1172-L1177
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1181-L1186
 generated:
   by: okf-rs/0.3.0
 relationships:
