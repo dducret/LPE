@@ -601,6 +601,20 @@ async fn notification_wait_active_session_acquire_waits_for_short_outlook_overla
 }
 
 #[test]
+fn notification_wait_keeps_a_valid_session_during_execute_overlap() {
+    let principal = test_principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let active = begin_active_session_request(&session_id).unwrap();
+
+    let session = get_session(&session_id).expect("active Execute must retain its session context");
+
+    assert!(session_matches(&session, MapiEndpoint::Emsmdb, &principal));
+    assert!(session_request_is_active(&session_id));
+    drop(active);
+    remove_session(&session_id);
+}
+
+#[test]
 fn session_cookie_lookup_debug_reports_sanitized_latest_cookie_selection() {
     let principal = test_principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");

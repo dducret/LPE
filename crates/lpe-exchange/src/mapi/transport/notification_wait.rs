@@ -39,10 +39,6 @@ where
     S: ExchangeStore + Send + Sync + 'static,
 {
     log_session_cookie_lookup(endpoint, principal, headers, "NotificationWait");
-    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
-    let client_flow_key = client_flow_key(&client_info);
-    let (request_guid, request_counter) = guid_counter_debug(request_id);
-    let (client_info_guid, client_info_counter) = guid_counter_debug(&client_info);
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return mapi_diagnostic_response(
             "NotificationWait",
@@ -51,28 +47,7 @@ where
             "missing MAPI session cookie",
         );
     };
-    let Some(active_request) = acquire_notification_wait_active_session_request(&session_id).await
-    else {
-        info!(
-            rca_debug = true,
-            adapter = "mapi",
-            operation = "NotificationWait",
-            account_id = %principal.account_id,
-            mailbox = %principal.email,
-            mapi_request_id = %request_id,
-            request_guid = %request_guid,
-            request_counter = %request_counter,
-            client_info = %client_info,
-            client_flow_key = %client_flow_key,
-            client_info_guid = %client_info_guid,
-            client_info_counter = %client_info_counter,
-            session_id_prefix = %session_id_prefix(&session_id),
-            active_session_overlap = true,
-            "notification wait overlap returned an empty response"
-        );
-        return notification_wait_empty_response(endpoint, request_id, &session_id);
-    };
-    let Some(session) = remove_session(&session_id) else {
+    let Some(session) = get_session(&session_id) else {
         return mapi_diagnostic_response(
             "NotificationWait",
             request_id,
@@ -99,10 +74,6 @@ where
         notification_targets_active = session.has_notification_targets(),
         "mapi notification wait accepted"
     );
-
-    // The Session Context remains available while the long poll is pending.
-    store_session(session_id.clone(), session);
-    drop(active_request);
 
     let (sender, receiver) = tokio::sync::mpsc::channel(4);
     if sender
@@ -442,12 +413,4 @@ pub(in crate::mapi) async fn acquire_notification_wait_active_session_request(
         }
     }
     None
-}
-
-fn session_id_prefix(session_id: &str) -> &str {
-    session_id
-        .char_indices()
-        .nth(8)
-        .map(|(index, _)| &session_id[..index])
-        .unwrap_or(session_id)
 }
