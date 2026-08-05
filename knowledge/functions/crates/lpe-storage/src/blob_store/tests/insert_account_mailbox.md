@@ -1,0 +1,23 @@
+---
+type: Rust Function
+title: insert_account_mailbox
+resource: crates/lpe-storage/src/blob_store/tests.rs#L122-L153
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  calls:
+  - functions/crates/lpe-activesync/src/tests/query
+  - functions/crates/lpe-storage/src/core/Storage/pool
+  - functions/crates/lpe-core/src/sieve/Parser/expect
+---
+
+# Signature
+
+`async fn insert_account_mailbox( storage: &Storage, tenant_id: Uuid, domain_id: Uuid, account_id: Uuid, mailbox_id: Uuid, )`
+
+# Calls
+
+- [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [pool](../../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)
+- [expect](../../../../../../functions/crates/lpe-core/src/sieve/Parser/expect.md)

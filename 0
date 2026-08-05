@@ -1,1 +1,0 @@
-select id,subject,received_at,updated_at from messages where position('Test' in subject) order by received_at desc nulls last limit 12; | psql postgres://lpe@192.168.1.28:5432/lpe -At

@@ -1,0 +1,12 @@
+---
+type: Rust Method
+title: create_canonical_change_listener
+resource: crates/lpe-activesync/src/store.rs#L359-L368
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+---
+
+# Signature
+
+`fn create_canonical_change_listener<'a>( &'a self, principal_account_id: Uuid, ) -> StoreFuture<'a, Option<CanonicalChangeListener>>`

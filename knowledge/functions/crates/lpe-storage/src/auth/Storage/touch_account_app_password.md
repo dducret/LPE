@@ -1,0 +1,20 @@
+---
+type: Rust Method
+title: touch_account_app_password
+resource: crates/lpe-storage/src/auth.rs#L776-L798
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  calls:
+  - functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_email
+  - functions/crates/lpe-activesync/src/tests/query
+---
+
+# Signature
+
+`pub async fn touch_account_app_password( &self, account_email: &str, app_password_id: Uuid, ) -> Result<()>`
+
+# Calls
+
+- [tenant_id_for_account_email](../../../../../../functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_email.md)
+- [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)

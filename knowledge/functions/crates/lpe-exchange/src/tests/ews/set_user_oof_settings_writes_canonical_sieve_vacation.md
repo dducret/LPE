@@ -1,0 +1,12 @@
+---
+type: Rust Function
+title: set_user_oof_settings_writes_canonical_sieve_vacation
+resource: crates/lpe-exchange/src/tests/ews.rs#L3769-L3804
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+---
+
+# Signature
+
+`async fn set_user_oof_settings_writes_canonical_sieve_vacation()`

@@ -1,0 +1,12 @@
+---
+type: Rust Method
+title: fetch_mapi_journal_entries
+resource: crates/lpe-exchange/src/tests/mod.rs#L9410-L9416
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+---
+
+# Signature
+
+`fn fetch_mapi_journal_entries<'a>( &'a self, _account_id: Uuid, ) -> StoreFuture<'a, Vec<JournalEntry>>`

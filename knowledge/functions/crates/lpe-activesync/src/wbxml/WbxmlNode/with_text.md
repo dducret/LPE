@@ -1,0 +1,164 @@
+---
+type: Rust Method
+title: with_text
+resource: crates/lpe-activesync/src/wbxml.rs#L25-L33
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  called_by:
+  - functions/crates/lpe-activesync/src/response/sync_status_node
+  - functions/crates/lpe-activesync/src/service/ActiveSyncService/handle_sync
+  - functions/crates/lpe-activesync/src/service/ActiveSyncService/sync_collection
+  - functions/crates/lpe-activesync/src/service/ActiveSyncService/build_commands
+  - functions/crates/lpe-activesync/src/service/ActiveSyncService/apply_mail_sync_commands
+  - functions/crates/lpe-activesync/src/service/ActiveSyncService/apply_draft_sync_commands
+  - functions/crates/lpe-activesync/src/service/ActiveSyncService/apply_contact_sync_commands
+  - functions/crates/lpe-activesync/src/service/ActiveSyncService/apply_calendar_sync_commands
+  - functions/crates/lpe-activesync/src/service/command_status_response
+  - functions/crates/lpe-activesync/src/service/search_status_response
+  - functions/crates/lpe-activesync/src/service/application_data/activesync_contact_narrow_update_omits_unowned_rich_fields
+  - functions/crates/lpe-activesync/src/service/folders/ActiveSyncService/handle_folder_sync
+  - functions/crates/lpe-activesync/src/service/folders/push_folder_metadata
+  - functions/crates/lpe-activesync/src/service/folders/folder_mutation_response
+  - functions/crates/lpe-activesync/src/service/get_item_estimate/ActiveSyncService/handle_get_item_estimate
+  - functions/crates/lpe-activesync/src/service/get_item_estimate/ActiveSyncService/get_item_estimate_response
+  - functions/crates/lpe-activesync/src/service/item_operations/ActiveSyncService/handle_item_operations
+  - functions/crates/lpe-activesync/src/service/item_operations/ActiveSyncService/handle_item_operations_fetch
+  - functions/crates/lpe-activesync/src/service/move_items/ActiveSyncService/handle_move_items
+  - functions/crates/lpe-activesync/src/service/move_items/ActiveSyncService/handle_move_item
+  - functions/crates/lpe-activesync/src/service/ping/ActiveSyncService/ping_status_response
+  - functions/crates/lpe-activesync/src/service/provisioning/ActiveSyncService/handle_provision
+  - functions/crates/lpe-activesync/src/service/provisioning/policy_required_response
+  - functions/crates/lpe-activesync/src/service/search/ActiveSyncService/handle_search
+  - functions/crates/lpe-activesync/src/service/submission/ActiveSyncService/handle_smart_compose
+  - functions/crates/lpe-activesync/src/service/sync_helpers/sync_collection_status_node
+  - functions/crates/lpe-activesync/src/tests/provision_request
+  - functions/crates/lpe-activesync/src/tests/folder_sync_request
+  - functions/crates/lpe-activesync/src/tests/folder_create_request
+  - functions/crates/lpe-activesync/src/tests/folder_update_request
+  - functions/crates/lpe-activesync/src/tests/folder_delete_request
+  - functions/crates/lpe-activesync/src/tests/sync_collection
+  - functions/crates/lpe-activesync/src/tests/folder_sync
+  - functions/crates/lpe-activesync/src/tests/ping_request
+  - functions/crates/lpe-activesync/src/tests/base64_smart_reply_request_dispatches
+  - functions/crates/lpe-activesync/src/tests/base64_smart_forward_request_dispatches
+  - functions/crates/lpe-activesync/src/tests/base64_move_items_request_dispatches
+  - functions/crates/lpe-activesync/src/tests/sync_missing_and_invalid_collection_ids_return_status_nodes
+  - functions/crates/lpe-activesync/src/tests/move_items_invalid_source_and_destination_return_item_statuses
+  - functions/crates/lpe-activesync/src/tests/item_operations_missing_and_unknown_file_reference_return_attachment_status
+  - functions/crates/lpe-activesync/src/tests/search_malformed_range_returns_store_status_2
+  - functions/crates/lpe-activesync/src/tests/unsupported_sync_child_command_returns_protocol_status
+  - functions/crates/lpe-activesync/src/tests/one_collection_sync
+  - functions/crates/lpe-activesync/src/tests/wbxml_roundtrip_preserves_tokens_and_text
+  - functions/crates/lpe-activesync/src/tests/wbxml_roundtrip_preserves_get_item_estimate_tokens
+  - functions/crates/lpe-activesync/src/tests/move_items_moves_message_between_canonical_mail_folders
+  - functions/crates/lpe-activesync/src/tests/sync_delete_moves_message_to_trash_by_default
+  - functions/crates/lpe-activesync/src/tests/sync_change_updates_read_state_and_round_trips
+  - functions/crates/lpe-activesync/src/tests/sync_change_updates_followup_flag_state
+  - functions/crates/lpe-activesync/src/tests/sync_respects_body_preference_for_html_text_and_mime
+  - functions/crates/lpe-activesync/src/tests/sync_add_command_saves_draft_through_canonical_storage
+  - functions/crates/lpe-activesync/src/tests/sync_handles_multiple_collections_and_common_optional_tokens
+  - functions/crates/lpe-activesync/src/tests/sync_key_zero_primes_then_returns_paged_more_available_changes
+  - functions/crates/lpe-activesync/src/tests/get_item_estimate_returns_pending_sync_count
+  - functions/crates/lpe-activesync/src/tests/stable_sync_does_not_reload_full_email_payloads_without_changes
+  - functions/crates/lpe-activesync/src/tests/sync_key_stays_usable_for_new_changes_after_a_stable_round
+  - functions/crates/lpe-activesync/src/tests/stale_sync_key_is_rejected_after_a_completed_round
+  - functions/crates/lpe-activesync/src/tests/superseded_incomplete_sync_key_is_rejected
+  - functions/crates/lpe-activesync/src/tests/basic_authentication_is_accepted
+  - functions/crates/lpe-activesync/src/tests/item_operations_fetch_returns_attachment_bytes
+  - functions/crates/lpe-activesync/src/tests/search_queries_canonical_mail_projection
+  - functions/crates/lpe-activesync/src/tests/ping_reports_changed_collections_after_sync_state_exists
+  - functions/crates/lpe-activesync/src/tests/ping_reconnects_after_service_restart_using_persisted_sync_state
+  - functions/crates/lpe-activesync/src/tests/ping_rejects_unsynchronized_folders
+  - functions/crates/lpe-activesync/src/tests/smart_reply_uses_source_recipients_and_canonical_submission
+  - functions/crates/lpe-activesync/src/tests/smart_forward_reuses_source_message_and_attachments
+  - functions/crates/lpe-activesync/src/tests/sync_contact_and_calendar_mutations_update_canonical_models
+  - functions/crates/lpe-activesync/src/tests/sync_contact_create_update_delete_round_trips_canonical_fields
+  - functions/crates/lpe-activesync/src/tests/sync_calendar_create_update_delete_maps_time_zone_recurrence_and_attendees
+  - functions/crates/lpe-activesync/src/tests/sync_commands_node
+  - functions/crates/lpe-activesync/src/tests/sync_add
+  - functions/crates/lpe-activesync/src/tests/sync_change
+  - functions/crates/lpe-activesync/src/tests/sync_delete
+  - functions/crates/lpe-activesync/src/tests/benchmark_sync_refresh_and_submission_paths
+---
+
+# Signature
+
+`pub(crate) fn with_text(page: u8, name: impl Into<String>, text: impl Into<String>) -> Self`
+
+# Called by
+
+- [sync_status_node](../../../../../../functions/crates/lpe-activesync/src/response/sync_status_node.md)
+- [handle_sync](../../../../../../functions/crates/lpe-activesync/src/service/ActiveSyncService/handle_sync.md)
+- [sync_collection](../../../../../../functions/crates/lpe-activesync/src/service/ActiveSyncService/sync_collection.md)
+- [build_commands](../../../../../../functions/crates/lpe-activesync/src/service/ActiveSyncService/build_commands.md)
+- [apply_mail_sync_commands](../../../../../../functions/crates/lpe-activesync/src/service/ActiveSyncService/apply_mail_sync_commands.md)
+- [apply_draft_sync_commands](../../../../../../functions/crates/lpe-activesync/src/service/ActiveSyncService/apply_draft_sync_commands.md)
+- [apply_contact_sync_commands](../../../../../../functions/crates/lpe-activesync/src/service/ActiveSyncService/apply_contact_sync_commands.md)
+- [apply_calendar_sync_commands](../../../../../../functions/crates/lpe-activesync/src/service/ActiveSyncService/apply_calendar_sync_commands.md)
+- [command_status_response](../../../../../../functions/crates/lpe-activesync/src/service/command_status_response.md)
+- [search_status_response](../../../../../../functions/crates/lpe-activesync/src/service/search_status_response.md)
+- [activesync_contact_narrow_update_omits_unowned_rich_fields](../../../../../../functions/crates/lpe-activesync/src/service/application_data/activesync_contact_narrow_update_omits_unowned_rich_fields.md)
+- [handle_folder_sync](../../../../../../functions/crates/lpe-activesync/src/service/folders/ActiveSyncService/handle_folder_sync.md)
+- [push_folder_metadata](../../../../../../functions/crates/lpe-activesync/src/service/folders/push_folder_metadata.md)
+- [folder_mutation_response](../../../../../../functions/crates/lpe-activesync/src/service/folders/folder_mutation_response.md)
+- [handle_get_item_estimate](../../../../../../functions/crates/lpe-activesync/src/service/get_item_estimate/ActiveSyncService/handle_get_item_estimate.md)
+- [get_item_estimate_response](../../../../../../functions/crates/lpe-activesync/src/service/get_item_estimate/ActiveSyncService/get_item_estimate_response.md)
+- [handle_item_operations](../../../../../../functions/crates/lpe-activesync/src/service/item_operations/ActiveSyncService/handle_item_operations.md)
+- [handle_item_operations_fetch](../../../../../../functions/crates/lpe-activesync/src/service/item_operations/ActiveSyncService/handle_item_operations_fetch.md)
+- [handle_move_items](../../../../../../functions/crates/lpe-activesync/src/service/move_items/ActiveSyncService/handle_move_items.md)
+- [handle_move_item](../../../../../../functions/crates/lpe-activesync/src/service/move_items/ActiveSyncService/handle_move_item.md)
+- [ping_status_response](../../../../../../functions/crates/lpe-activesync/src/service/ping/ActiveSyncService/ping_status_response.md)
+- [handle_provision](../../../../../../functions/crates/lpe-activesync/src/service/provisioning/ActiveSyncService/handle_provision.md)
+- [policy_required_response](../../../../../../functions/crates/lpe-activesync/src/service/provisioning/policy_required_response.md)
+- [handle_search](../../../../../../functions/crates/lpe-activesync/src/service/search/ActiveSyncService/handle_search.md)
+- [handle_smart_compose](../../../../../../functions/crates/lpe-activesync/src/service/submission/ActiveSyncService/handle_smart_compose.md)
+- [sync_collection_status_node](../../../../../../functions/crates/lpe-activesync/src/service/sync_helpers/sync_collection_status_node.md)
+- [provision_request](../../../../../../functions/crates/lpe-activesync/src/tests/provision_request.md)
+- [folder_sync_request](../../../../../../functions/crates/lpe-activesync/src/tests/folder_sync_request.md)
+- [folder_create_request](../../../../../../functions/crates/lpe-activesync/src/tests/folder_create_request.md)
+- [folder_update_request](../../../../../../functions/crates/lpe-activesync/src/tests/folder_update_request.md)
+- [folder_delete_request](../../../../../../functions/crates/lpe-activesync/src/tests/folder_delete_request.md)
+- [sync_collection](../../../../../../functions/crates/lpe-activesync/src/tests/sync_collection.md)
+- [folder_sync](../../../../../../functions/crates/lpe-activesync/src/tests/folder_sync.md)
+- [ping_request](../../../../../../functions/crates/lpe-activesync/src/tests/ping_request.md)
+- [base64_smart_reply_request_dispatches](../../../../../../functions/crates/lpe-activesync/src/tests/base64_smart_reply_request_dispatches.md)
+- [base64_smart_forward_request_dispatches](../../../../../../functions/crates/lpe-activesync/src/tests/base64_smart_forward_request_dispatches.md)
+- [base64_move_items_request_dispatches](../../../../../../functions/crates/lpe-activesync/src/tests/base64_move_items_request_dispatches.md)
+- [sync_missing_and_invalid_collection_ids_return_status_nodes](../../../../../../functions/crates/lpe-activesync/src/tests/sync_missing_and_invalid_collection_ids_return_status_nodes.md)
+- [move_items_invalid_source_and_destination_return_item_statuses](../../../../../../functions/crates/lpe-activesync/src/tests/move_items_invalid_source_and_destination_return_item_statuses.md)
+- [item_operations_missing_and_unknown_file_reference_return_attachment_status](../../../../../../functions/crates/lpe-activesync/src/tests/item_operations_missing_and_unknown_file_reference_return_attachment_status.md)
+- [search_malformed_range_returns_store_status_2](../../../../../../functions/crates/lpe-activesync/src/tests/search_malformed_range_returns_store_status_2.md)
+- [unsupported_sync_child_command_returns_protocol_status](../../../../../../functions/crates/lpe-activesync/src/tests/unsupported_sync_child_command_returns_protocol_status.md)
+- [one_collection_sync](../../../../../../functions/crates/lpe-activesync/src/tests/one_collection_sync.md)
+- [wbxml_roundtrip_preserves_tokens_and_text](../../../../../../functions/crates/lpe-activesync/src/tests/wbxml_roundtrip_preserves_tokens_and_text.md)
+- [wbxml_roundtrip_preserves_get_item_estimate_tokens](../../../../../../functions/crates/lpe-activesync/src/tests/wbxml_roundtrip_preserves_get_item_estimate_tokens.md)
+- [move_items_moves_message_between_canonical_mail_folders](../../../../../../functions/crates/lpe-activesync/src/tests/move_items_moves_message_between_canonical_mail_folders.md)
+- [sync_delete_moves_message_to_trash_by_default](../../../../../../functions/crates/lpe-activesync/src/tests/sync_delete_moves_message_to_trash_by_default.md)
+- [sync_change_updates_read_state_and_round_trips](../../../../../../functions/crates/lpe-activesync/src/tests/sync_change_updates_read_state_and_round_trips.md)
+- [sync_change_updates_followup_flag_state](../../../../../../functions/crates/lpe-activesync/src/tests/sync_change_updates_followup_flag_state.md)
+- [sync_respects_body_preference_for_html_text_and_mime](../../../../../../functions/crates/lpe-activesync/src/tests/sync_respects_body_preference_for_html_text_and_mime.md)
+- [sync_add_command_saves_draft_through_canonical_storage](../../../../../../functions/crates/lpe-activesync/src/tests/sync_add_command_saves_draft_through_canonical_storage.md)
+- [sync_handles_multiple_collections_and_common_optional_tokens](../../../../../../functions/crates/lpe-activesync/src/tests/sync_handles_multiple_collections_and_common_optional_tokens.md)
+- [sync_key_zero_primes_then_returns_paged_more_available_changes](../../../../../../functions/crates/lpe-activesync/src/tests/sync_key_zero_primes_then_returns_paged_more_available_changes.md)
+- [get_item_estimate_returns_pending_sync_count](../../../../../../functions/crates/lpe-activesync/src/tests/get_item_estimate_returns_pending_sync_count.md)
+- [stable_sync_does_not_reload_full_email_payloads_without_changes](../../../../../../functions/crates/lpe-activesync/src/tests/stable_sync_does_not_reload_full_email_payloads_without_changes.md)
+- [sync_key_stays_usable_for_new_changes_after_a_stable_round](../../../../../../functions/crates/lpe-activesync/src/tests/sync_key_stays_usable_for_new_changes_after_a_stable_round.md)
+- [stale_sync_key_is_rejected_after_a_completed_round](../../../../../../functions/crates/lpe-activesync/src/tests/stale_sync_key_is_rejected_after_a_completed_round.md)
+- [superseded_incomplete_sync_key_is_rejected](../../../../../../functions/crates/lpe-activesync/src/tests/superseded_incomplete_sync_key_is_rejected.md)
+- [basic_authentication_is_accepted](../../../../../../functions/crates/lpe-activesync/src/tests/basic_authentication_is_accepted.md)
+- [item_operations_fetch_returns_attachment_bytes](../../../../../../functions/crates/lpe-activesync/src/tests/item_operations_fetch_returns_attachment_bytes.md)
+- [search_queries_canonical_mail_projection](../../../../../../functions/crates/lpe-activesync/src/tests/search_queries_canonical_mail_projection.md)
+- [ping_reports_changed_collections_after_sync_state_exists](../../../../../../functions/crates/lpe-activesync/src/tests/ping_reports_changed_collections_after_sync_state_exists.md)
+- [ping_reconnects_after_service_restart_using_persisted_sync_state](../../../../../../functions/crates/lpe-activesync/src/tests/ping_reconnects_after_service_restart_using_persisted_sync_state.md)
+- [ping_rejects_unsynchronized_folders](../../../../../../functions/crates/lpe-activesync/src/tests/ping_rejects_unsynchronized_folders.md)
+- [smart_reply_uses_source_recipients_and_canonical_submission](../../../../../../functions/crates/lpe-activesync/src/tests/smart_reply_uses_source_recipients_and_canonical_submission.md)
+- [smart_forward_reuses_source_message_and_attachments](../../../../../../functions/crates/lpe-activesync/src/tests/smart_forward_reuses_source_message_and_attachments.md)
+- [sync_contact_and_calendar_mutations_update_canonical_models](../../../../../../functions/crates/lpe-activesync/src/tests/sync_contact_and_calendar_mutations_update_canonical_models.md)
+- [sync_contact_create_update_delete_round_trips_canonical_fields](../../../../../../functions/crates/lpe-activesync/src/tests/sync_contact_create_update_delete_round_trips_canonical_fields.md)
+- [sync_calendar_create_update_delete_maps_time_zone_recurrence_and_attendees](../../../../../../functions/crates/lpe-activesync/src/tests/sync_calendar_create_update_delete_maps_time_zone_recurrence_and_attendees.md)
+- [sync_commands_node](../../../../../../functions/crates/lpe-activesync/src/tests/sync_commands_node.md)
+- [sync_add](../../../../../../functions/crates/lpe-activesync/src/tests/sync_add.md)
+- [sync_change](../../../../../../functions/crates/lpe-activesync/src/tests/sync_change.md)
+- [sync_delete](../../../../../../functions/crates/lpe-activesync/src/tests/sync_delete.md)
+- [benchmark_sync_refresh_and_submission_paths](../../../../../../functions/crates/lpe-activesync/src/tests/benchmark_sync_refresh_and_submission_paths.md)

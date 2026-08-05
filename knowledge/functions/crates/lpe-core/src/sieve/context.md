@@ -1,0 +1,183 @@
+---
+type: Rust Function
+title: context
+resource: crates/lpe-core/src/sieve.rs#L655-L671
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  called_by:
+  - functions/LPE-CT/src/validate_tls_pair_from_pem
+  - functions/LPE-CT/src/parse_certificates_pem
+  - functions/LPE-CT/src/parse_private_key_pem
+  - functions/LPE-CT/src/smtp/dns/SystemDnsResolver/new
+  - functions/LPE-CT/src/system_actions/run_host_action
+  - functions/LPE-CT/src/system_diagnostics/spam_test
+  - functions/crates/lpe-admin-api/src/account_oidc/authorization_url
+  - functions/crates/lpe-admin-api/src/account_oidc/exchange_code_for_claims
+  - functions/crates/lpe-admin-api/src/account_oidc/resolved_endpoints
+  - functions/crates/lpe-admin-api/src/account_oidc/verify_state
+  - functions/crates/lpe-admin-api/src/oidc/authorization_url
+  - functions/crates/lpe-admin-api/src/oidc/exchange_code_for_claims
+  - functions/crates/lpe-admin-api/src/oidc/resolved_endpoints
+  - functions/crates/lpe-admin-api/src/oidc/verify_state
+  - functions/crates/lpe-attachments/src/extraction/extract_docx_text_from_bytes
+  - functions/crates/lpe-attachments/src/extraction/extract_odt_text_from_bytes
+  - functions/crates/lpe-core/src/sieve/evaluates_fileinto_and_stop
+  - functions/crates/lpe-core/src/sieve/evaluates_redirect_and_vacation_without_cancelling_keep
+  - functions/crates/lpe-core/src/sieve/discard_cancels_keep
+  - functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_identity_scope
+  - functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan
+  - functions/crates/lpe-jmap/src/tests/storage_jmap_fixture
+  - functions/crates/lpe-magika/src/record/read_validation_record
+  - functions/crates/lpe-magika/src/system/SystemDetector/run_magika
+  - functions/crates/lpe-storage/src/core/Storage/assert_schema_version
+  - functions/crates/lpe-storage/src/core/startup_rejects_tagged_schema_without_required_mapi_shape
+  - functions/crates/lpe-storage/src/core/startup_uses_canonical_public_schema_when_search_path_has_shadow_schema
+  - functions/crates/lpe-storage/src/core/connect_pins_search_path_to_canonical_public_schema
+  - functions/crates/lpe-storage/src/pst/Storage/import_mailbox_from_pst
+  - functions/crates/lpe-storage/tests/mapi_contact_create/TestSchemaCleanup/drop/drop
+  - functions/crates/lpe-storage/tests/mapi_contact_create/contact_fixture
+  - functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_create_is_atomic_and_preserves_reserved_import_identity
+  - functions/crates/lpe-storage/tests/mapi_event_commit/TestSchemaCleanup/drop/drop
+  - functions/crates/lpe-storage/tests/mapi_event_commit/event_fixture
+  - functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_updated_at_advances_after_waiting_for_a_row_lock
+  - functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/outlook_cache_fidelity_update_runs_twice_and_rolls_back_rejected_shapes
+  - functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/run_update_scenarios
+  - functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/execute_update
+  - functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/execute_update_expect_failure
+  - functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/assert_successful_update
+  - functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/assert_legacy_shape_unchanged
+  - functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/logical_index_is_unique
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/schema_sql_matches_representative_runtime_paths_when_database_is_enabled
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/run_runtime_drift_validation
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/assert_schema_metadata
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/seed_platform_tenant
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_blob_reference_constraints
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_admin_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/seed_mailbox_fixture
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_local_replica_range_constraints
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_outlook_cache_fidelity_constraints
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mailbox_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_inbound_mime_canonical_body_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_notes_journal_reminder_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/seed_reminder_rows
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mailbox_name_policy_storage_guards
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_managed_retention_folder_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_change_log_cursor_constraints
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_special_folder_alias_constraints
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_cancellation_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_jmap_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_index_plan_paths
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_custom_calendar_grant_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_activesync_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_pst_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_admin_dashboard_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mailbox_move_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_cross_protocol_interoperability_gate
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_canonical_identity_allocation
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_canonical_search_folder_and_rule_replay
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_public_folder_replica_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_public_folder_permission_replay_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_public_folder_per_user_replay_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_delete_cross_protocol_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_trash_purge_cross_protocol_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_trash_purge_retention_guard
+  - functions/crates/lpe-storage/tests/schema_051_update/schema_051_update_is_transactional_idempotent_and_version_bounded
+  - functions/crates/lpe-storage/tests/schema_051_update/run_update_scenarios
+  - functions/crates/lpe-storage/tests/schema_051_update/recreate_source_schema
+  - functions/crates/lpe-storage/tests/schema_051_update/execute_update
+  - functions/crates/lpe-storage/tests/schema_051_update/assert_schema_version
+  - functions/crates/lpe-storage/tests/schema_051_update/assert_cache_fidelity_shape
+---
+
+# Signature
+
+`fn context() -> MessageContext`
+
+# Called by
+
+- [validate_tls_pair_from_pem](../../../../../functions/LPE-CT/src/validate_tls_pair_from_pem.md)
+- [parse_certificates_pem](../../../../../functions/LPE-CT/src/parse_certificates_pem.md)
+- [parse_private_key_pem](../../../../../functions/LPE-CT/src/parse_private_key_pem.md)
+- [new](../../../../../functions/LPE-CT/src/smtp/dns/SystemDnsResolver/new.md)
+- [run_host_action](../../../../../functions/LPE-CT/src/system_actions/run_host_action.md)
+- [spam_test](../../../../../functions/LPE-CT/src/system_diagnostics/spam_test.md)
+- [authorization_url](../../../../../functions/crates/lpe-admin-api/src/account_oidc/authorization_url.md)
+- [exchange_code_for_claims](../../../../../functions/crates/lpe-admin-api/src/account_oidc/exchange_code_for_claims.md)
+- [resolved_endpoints](../../../../../functions/crates/lpe-admin-api/src/account_oidc/resolved_endpoints.md)
+- [verify_state](../../../../../functions/crates/lpe-admin-api/src/account_oidc/verify_state.md)
+- [authorization_url](../../../../../functions/crates/lpe-admin-api/src/oidc/authorization_url.md)
+- [exchange_code_for_claims](../../../../../functions/crates/lpe-admin-api/src/oidc/exchange_code_for_claims.md)
+- [resolved_endpoints](../../../../../functions/crates/lpe-admin-api/src/oidc/resolved_endpoints.md)
+- [verify_state](../../../../../functions/crates/lpe-admin-api/src/oidc/verify_state.md)
+- [extract_docx_text_from_bytes](../../../../../functions/crates/lpe-attachments/src/extraction/extract_docx_text_from_bytes.md)
+- [extract_odt_text_from_bytes](../../../../../functions/crates/lpe-attachments/src/extraction/extract_odt_text_from_bytes.md)
+- [evaluates_fileinto_and_stop](../../../../../functions/crates/lpe-core/src/sieve/evaluates_fileinto_and_stop.md)
+- [evaluates_redirect_and_vacation_without_cancelling_keep](../../../../../functions/crates/lpe-core/src/sieve/evaluates_redirect_and_vacation_without_cancelling_keep.md)
+- [discard_cancels_keep](../../../../../functions/crates/lpe-core/src/sieve/discard_cancels_keep.md)
+- [load_mapi_identity_scope](../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_identity_scope.md)
+- [load_mapi_store_for_access_plan](../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan.md)
+- [storage_jmap_fixture](../../../../../functions/crates/lpe-jmap/src/tests/storage_jmap_fixture.md)
+- [read_validation_record](../../../../../functions/crates/lpe-magika/src/record/read_validation_record.md)
+- [run_magika](../../../../../functions/crates/lpe-magika/src/system/SystemDetector/run_magika.md)
+- [assert_schema_version](../../../../../functions/crates/lpe-storage/src/core/Storage/assert_schema_version.md)
+- [startup_rejects_tagged_schema_without_required_mapi_shape](../../../../../functions/crates/lpe-storage/src/core/startup_rejects_tagged_schema_without_required_mapi_shape.md)
+- [startup_uses_canonical_public_schema_when_search_path_has_shadow_schema](../../../../../functions/crates/lpe-storage/src/core/startup_uses_canonical_public_schema_when_search_path_has_shadow_schema.md)
+- [connect_pins_search_path_to_canonical_public_schema](../../../../../functions/crates/lpe-storage/src/core/connect_pins_search_path_to_canonical_public_schema.md)
+- [import_mailbox_from_pst](../../../../../functions/crates/lpe-storage/src/pst/Storage/import_mailbox_from_pst.md)
+- [drop](../../../../../functions/crates/lpe-storage/tests/mapi_contact_create/TestSchemaCleanup/drop/drop.md)
+- [contact_fixture](../../../../../functions/crates/lpe-storage/tests/mapi_contact_create/contact_fixture.md)
+- [mapi_contact_create_is_atomic_and_preserves_reserved_import_identity](../../../../../functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_create_is_atomic_and_preserves_reserved_import_identity.md)
+- [drop](../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/TestSchemaCleanup/drop/drop.md)
+- [event_fixture](../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/event_fixture.md)
+- [mapi_event_commit_updated_at_advances_after_waiting_for_a_row_lock](../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_updated_at_advances_after_waiting_for_a_row_lock.md)
+- [outlook_cache_fidelity_update_runs_twice_and_rolls_back_rejected_shapes](../../../../../functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/outlook_cache_fidelity_update_runs_twice_and_rolls_back_rejected_shapes.md)
+- [run_update_scenarios](../../../../../functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/run_update_scenarios.md)
+- [execute_update](../../../../../functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/execute_update.md)
+- [execute_update_expect_failure](../../../../../functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/execute_update_expect_failure.md)
+- [assert_successful_update](../../../../../functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/assert_successful_update.md)
+- [assert_legacy_shape_unchanged](../../../../../functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/assert_legacy_shape_unchanged.md)
+- [logical_index_is_unique](../../../../../functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/logical_index_is_unique.md)
+- [schema_sql_matches_representative_runtime_paths_when_database_is_enabled](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/schema_sql_matches_representative_runtime_paths_when_database_is_enabled.md)
+- [run_runtime_drift_validation](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/run_runtime_drift_validation.md)
+- [assert_schema_metadata](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/assert_schema_metadata.md)
+- [seed_platform_tenant](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/seed_platform_tenant.md)
+- [exercise_blob_reference_constraints](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_blob_reference_constraints.md)
+- [exercise_admin_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_admin_path.md)
+- [seed_mailbox_fixture](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/seed_mailbox_fixture.md)
+- [exercise_mapi_local_replica_range_constraints](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_local_replica_range_constraints.md)
+- [exercise_mapi_outlook_cache_fidelity_constraints](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_outlook_cache_fidelity_constraints.md)
+- [exercise_mailbox_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mailbox_path.md)
+- [exercise_inbound_mime_canonical_body_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_inbound_mime_canonical_body_path.md)
+- [exercise_notes_journal_reminder_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_notes_journal_reminder_path.md)
+- [seed_reminder_rows](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/seed_reminder_rows.md)
+- [exercise_mailbox_name_policy_storage_guards](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mailbox_name_policy_storage_guards.md)
+- [exercise_managed_retention_folder_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_managed_retention_folder_path.md)
+- [exercise_change_log_cursor_constraints](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_change_log_cursor_constraints.md)
+- [exercise_mapi_special_folder_alias_constraints](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_special_folder_alias_constraints.md)
+- [exercise_submission_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_path.md)
+- [exercise_submission_cancellation_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_cancellation_path.md)
+- [exercise_jmap_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_jmap_path.md)
+- [exercise_index_plan_paths](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_index_plan_paths.md)
+- [exercise_custom_calendar_grant_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_custom_calendar_grant_path.md)
+- [exercise_activesync_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_activesync_path.md)
+- [exercise_pst_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_pst_path.md)
+- [exercise_admin_dashboard_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_admin_dashboard_path.md)
+- [exercise_mailbox_move_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mailbox_move_path.md)
+- [exercise_mapi_cross_protocol_interoperability_gate](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_cross_protocol_interoperability_gate.md)
+- [exercise_canonical_identity_allocation](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_canonical_identity_allocation.md)
+- [exercise_canonical_search_folder_and_rule_replay](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_canonical_search_folder_and_rule_replay.md)
+- [exercise_public_folder_replica_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_public_folder_replica_path.md)
+- [exercise_public_folder_permission_replay_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_public_folder_permission_replay_path.md)
+- [exercise_public_folder_per_user_replay_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_public_folder_per_user_replay_path.md)
+- [exercise_mapi_delete_cross_protocol_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_delete_cross_protocol_path.md)
+- [exercise_mapi_trash_purge_cross_protocol_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_trash_purge_cross_protocol_path.md)
+- [exercise_mapi_trash_purge_retention_guard](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_trash_purge_retention_guard.md)
+- [schema_051_update_is_transactional_idempotent_and_version_bounded](../../../../../functions/crates/lpe-storage/tests/schema_051_update/schema_051_update_is_transactional_idempotent_and_version_bounded.md)
+- [run_update_scenarios](../../../../../functions/crates/lpe-storage/tests/schema_051_update/run_update_scenarios.md)
+- [recreate_source_schema](../../../../../functions/crates/lpe-storage/tests/schema_051_update/recreate_source_schema.md)
+- [execute_update](../../../../../functions/crates/lpe-storage/tests/schema_051_update/execute_update.md)
+- [assert_schema_version](../../../../../functions/crates/lpe-storage/tests/schema_051_update/assert_schema_version.md)
+- [assert_cache_fidelity_shape](../../../../../functions/crates/lpe-storage/tests/schema_051_update/assert_cache_fidelity_shape.md)

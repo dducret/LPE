@@ -1,0 +1,19 @@
+---
+type: Rust Method
+title: move_jmap_email
+resource: crates/lpe-exchange/src/tests/mod.rs#L11221-L11260
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  calls:
+  - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
+---
+
+# Signature
+
+`fn move_jmap_email<'a>( &'a self, _account_id: Uuid, message_id: Uuid, target_mailbox_id: Uuid, _audit: lpe_storage::AuditEntryInput, ) -> StoreFuture<'a, JmapEmail>`
+
+# Calls
+
+- [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)

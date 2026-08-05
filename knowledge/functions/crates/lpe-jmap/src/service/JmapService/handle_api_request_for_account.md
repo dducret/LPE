@@ -1,0 +1,210 @@
+---
+type: Rust Method
+title: handle_api_request_for_account
+resource: crates/lpe-jmap/src/service.rs#L330-L893
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  calls:
+  - functions/crates/lpe-jmap/src/service/helpers/api_request_exceeds_call_limit
+  - functions/crates/lpe-jmap/src/service/helpers/validate_declared_capabilities
+  - functions/crates/lpe-jmap/src/service/helpers/resolve_result_references
+  - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
+  - functions/crates/lpe-jmap/src/service/helpers/method_capability
+  - functions/crates/lpe-jmap/src/service/helpers/method_object_limit_error
+  - functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_get
+  - functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_query
+  - functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_query_changes
+  - functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_changes
+  - functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_set
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_unsupported_write
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_query
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_query_changes
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_get
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_changes
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_set
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_copy
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_import
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_submission_get
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_submission_changes
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_submission_query
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_submission_query_changes
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_email_submission_set
+  - functions/crates/lpe-jmap/src/contacts/JmapService/handle_address_book_get
+  - functions/crates/lpe-jmap/src/contacts/JmapService/handle_address_book_query
+  - functions/crates/lpe-jmap/src/contacts/JmapService/handle_address_book_query_changes
+  - functions/crates/lpe-jmap/src/contacts/JmapService/handle_address_book_changes
+  - functions/crates/lpe-jmap/src/contacts/JmapService/handle_contact_get
+  - functions/crates/lpe-jmap/src/contacts/JmapService/handle_contact_query
+  - functions/crates/lpe-jmap/src/contacts/JmapService/handle_contact_query_changes
+  - functions/crates/lpe-jmap/src/contacts/JmapService/handle_contact_changes
+  - functions/crates/lpe-jmap/src/contacts/JmapService/handle_contact_set
+  - functions/crates/lpe-jmap/src/contacts/JmapService/handle_recipient_suggestion_query
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_get
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_query
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_query_changes
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_changes
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_set
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_import_or_copy
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_get
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_query
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_query_changes
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_changes
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_set
+  - functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_list_get
+  - functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_list_changes
+  - functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_list_set
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query_changes
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_import_or_copy
+  - functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_get
+  - functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_query
+  - functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_query_changes
+  - functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_changes
+  - functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_set
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_note_get
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_note_query
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_note_query_changes
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_note_changes
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_note_set
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_journal_entry_get
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_journal_entry_query
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_journal_entry_query_changes
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_journal_entry_changes
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_journal_entry_set
+  - functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_reminder_query
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_get
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_changes
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_reminder_set
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_reminder_import_or_copy
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_search_folder_set
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_search_folder_import_or_copy
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_identity_get
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_identity_changes
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_thread_query
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_thread_query_changes
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_thread_get
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_thread_changes
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_quota_get
+  - functions/crates/lpe-jmap/src/mail/JmapService/handle_search_snippet_get
+  - functions/crates/lpe-jmap/src/blob/JmapService/handle_blob_upload
+  - functions/crates/lpe-jmap/src/blob/JmapService/handle_blob_get
+  - functions/crates/lpe-jmap/src/blob/JmapService/handle_blob_lookup
+  - functions/crates/lpe-jmap/src/blob/JmapService/handle_blob_copy
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_share_set
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_share_import_or_copy
+  - functions/crates/lpe-jmap/src/vacation/JmapService/handle_vacation_response_get
+  - functions/crates/lpe-jmap/src/vacation/JmapService/handle_vacation_response_set
+  - functions/crates/lpe-jmap/src/error/method_error
+  - functions/crates/lpe-jmap/src/error/method_error_from_error
+  - functions/crates/lpe-jmap/src/service/helpers/is_method_error_payload
+  - functions/crates/lpe-jmap/src/session/session_state
+  called_by:
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_api_request
+  - functions/crates/lpe-jmap/src/websocket/JmapService/handle_websocket_message
+---
+
+# Signature
+
+`pub(crate) async fn handle_api_request_for_account( &self, account: &AuthenticatedAccount, request: JmapApiRequest, ) -> Result<JmapApiResponse>`
+
+# Calls
+
+- [api_request_exceeds_call_limit](../../../../../../functions/crates/lpe-jmap/src/service/helpers/api_request_exceeds_call_limit.md)
+- [validate_declared_capabilities](../../../../../../functions/crates/lpe-jmap/src/service/helpers/validate_declared_capabilities.md)
+- [resolve_result_references](../../../../../../functions/crates/lpe-jmap/src/service/helpers/resolve_result_references.md)
+- [push](../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
+- [method_capability](../../../../../../functions/crates/lpe-jmap/src/service/helpers/method_capability.md)
+- [method_object_limit_error](../../../../../../functions/crates/lpe-jmap/src/service/helpers/method_object_limit_error.md)
+- [handle_mailbox_get](../../../../../../functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_get.md)
+- [handle_mailbox_query](../../../../../../functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_query.md)
+- [handle_mailbox_query_changes](../../../../../../functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_query_changes.md)
+- [handle_mailbox_changes](../../../../../../functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_changes.md)
+- [handle_mailbox_set](../../../../../../functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_set.md)
+- [handle_canonical_unsupported_write](../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_unsupported_write.md)
+- [handle_email_query](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_query.md)
+- [handle_email_query_changes](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_query_changes.md)
+- [handle_email_get](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_get.md)
+- [handle_email_changes](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_changes.md)
+- [handle_email_set](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_set.md)
+- [handle_email_copy](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_copy.md)
+- [handle_email_import](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_import.md)
+- [handle_email_submission_get](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_submission_get.md)
+- [handle_email_submission_changes](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_submission_changes.md)
+- [handle_email_submission_query](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_submission_query.md)
+- [handle_email_submission_query_changes](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_submission_query_changes.md)
+- [handle_email_submission_set](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_email_submission_set.md)
+- [handle_address_book_get](../../../../../../functions/crates/lpe-jmap/src/contacts/JmapService/handle_address_book_get.md)
+- [handle_address_book_query](../../../../../../functions/crates/lpe-jmap/src/contacts/JmapService/handle_address_book_query.md)
+- [handle_address_book_query_changes](../../../../../../functions/crates/lpe-jmap/src/contacts/JmapService/handle_address_book_query_changes.md)
+- [handle_address_book_changes](../../../../../../functions/crates/lpe-jmap/src/contacts/JmapService/handle_address_book_changes.md)
+- [handle_contact_get](../../../../../../functions/crates/lpe-jmap/src/contacts/JmapService/handle_contact_get.md)
+- [handle_contact_query](../../../../../../functions/crates/lpe-jmap/src/contacts/JmapService/handle_contact_query.md)
+- [handle_contact_query_changes](../../../../../../functions/crates/lpe-jmap/src/contacts/JmapService/handle_contact_query_changes.md)
+- [handle_contact_changes](../../../../../../functions/crates/lpe-jmap/src/contacts/JmapService/handle_contact_changes.md)
+- [handle_contact_set](../../../../../../functions/crates/lpe-jmap/src/contacts/JmapService/handle_contact_set.md)
+- [handle_recipient_suggestion_query](../../../../../../functions/crates/lpe-jmap/src/contacts/JmapService/handle_recipient_suggestion_query.md)
+- [handle_calendar_get](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_get.md)
+- [handle_calendar_query](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_query.md)
+- [handle_calendar_query_changes](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_query_changes.md)
+- [handle_calendar_changes](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_changes.md)
+- [handle_calendar_set](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_set.md)
+- [handle_calendar_import_or_copy](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_import_or_copy.md)
+- [handle_calendar_event_get](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_get.md)
+- [handle_calendar_event_query](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_query.md)
+- [handle_calendar_event_query_changes](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_query_changes.md)
+- [handle_calendar_event_changes](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_changes.md)
+- [handle_calendar_event_set](../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_set.md)
+- [handle_task_list_get](../../../../../../functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_list_get.md)
+- [handle_task_list_changes](../../../../../../functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_list_changes.md)
+- [handle_task_list_set](../../../../../../functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_list_set.md)
+- [handle_canonical_query](../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query.md)
+- [handle_canonical_query_changes](../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query_changes.md)
+- [handle_canonical_import_or_copy](../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_import_or_copy.md)
+- [handle_task_get](../../../../../../functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_get.md)
+- [handle_task_query](../../../../../../functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_query.md)
+- [handle_task_query_changes](../../../../../../functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_query_changes.md)
+- [handle_task_changes](../../../../../../functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_changes.md)
+- [handle_task_set](../../../../../../functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_set.md)
+- [handle_note_get](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_note_get.md)
+- [handle_note_query](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_note_query.md)
+- [handle_note_query_changes](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_note_query_changes.md)
+- [handle_note_changes](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_note_changes.md)
+- [handle_note_set](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_note_set.md)
+- [handle_journal_entry_get](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_journal_entry_get.md)
+- [handle_journal_entry_query](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_journal_entry_query.md)
+- [handle_journal_entry_query_changes](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_journal_entry_query_changes.md)
+- [handle_journal_entry_changes](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_journal_entry_changes.md)
+- [handle_journal_entry_set](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_journal_entry_set.md)
+- [handle_reminder_query](../../../../../../functions/crates/lpe-jmap/src/notes_journal/JmapService/handle_reminder_query.md)
+- [handle_canonical_get](../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_get.md)
+- [handle_canonical_changes](../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_changes.md)
+- [handle_reminder_set](../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_reminder_set.md)
+- [handle_reminder_import_or_copy](../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_reminder_import_or_copy.md)
+- [handle_search_folder_set](../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_search_folder_set.md)
+- [handle_search_folder_import_or_copy](../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_search_folder_import_or_copy.md)
+- [handle_identity_get](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_identity_get.md)
+- [handle_identity_changes](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_identity_changes.md)
+- [handle_thread_query](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_thread_query.md)
+- [handle_thread_query_changes](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_thread_query_changes.md)
+- [handle_thread_get](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_thread_get.md)
+- [handle_thread_changes](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_thread_changes.md)
+- [handle_quota_get](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_quota_get.md)
+- [handle_search_snippet_get](../../../../../../functions/crates/lpe-jmap/src/mail/JmapService/handle_search_snippet_get.md)
+- [handle_blob_upload](../../../../../../functions/crates/lpe-jmap/src/blob/JmapService/handle_blob_upload.md)
+- [handle_blob_get](../../../../../../functions/crates/lpe-jmap/src/blob/JmapService/handle_blob_get.md)
+- [handle_blob_lookup](../../../../../../functions/crates/lpe-jmap/src/blob/JmapService/handle_blob_lookup.md)
+- [handle_blob_copy](../../../../../../functions/crates/lpe-jmap/src/blob/JmapService/handle_blob_copy.md)
+- [handle_share_set](../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_share_set.md)
+- [handle_share_import_or_copy](../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_share_import_or_copy.md)
+- [handle_vacation_response_get](../../../../../../functions/crates/lpe-jmap/src/vacation/JmapService/handle_vacation_response_get.md)
+- [handle_vacation_response_set](../../../../../../functions/crates/lpe-jmap/src/vacation/JmapService/handle_vacation_response_set.md)
+- [method_error](../../../../../../functions/crates/lpe-jmap/src/error/method_error.md)
+- [method_error_from_error](../../../../../../functions/crates/lpe-jmap/src/error/method_error_from_error.md)
+- [is_method_error_payload](../../../../../../functions/crates/lpe-jmap/src/service/helpers/is_method_error_payload.md)
+- [session_state](../../../../../../functions/crates/lpe-jmap/src/session/session_state.md)
+
+# Called by
+
+- [handle_api_request](../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_api_request.md)
+- [handle_websocket_message](../../../../../../functions/crates/lpe-jmap/src/websocket/JmapService/handle_websocket_message.md)

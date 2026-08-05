@@ -1,0 +1,266 @@
+---
+type: Rust Method
+title: pool
+resource: crates/lpe-storage/src/core.rs#L36-L38
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  called_by:
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_tenant_id_for_account
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/ews_mail_app_catalog_id
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/ews_update_mail_app_install_status
+  - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_special_object_kind_for_checkpoint_mailbox
+  - functions/crates/lpe-exchange/src/tests/hierarchy_tombstones/postgres_mapi_hierarchy_sync_returns_every_retained_folder_tombstone
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar_identity_scope/insert_calendar_identity_account
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar_identity_scope/mapi_identity_repair_preserves_rotated_calendar_change_key
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_over_http_get_local_replica_ids_reserves_full_outlook_range_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_local_replica_id_reservations_are_atomic_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_store_identity_is_shared_and_allocations_do_not_overlap_across_accounts
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/insert_notification_account
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/navigation_shortcut_notification_cursor
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_nested_folder_delete_replay_uses_historical_parent_and_retained_identity_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_imap_cross_parent_rename_replays_a_hierarchy_move_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_grant
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_online_associated_config_create_is_atomic_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_associated_config_delete_tombstones_identity_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_online_create_ignores_client_source_key_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_online_common_views_wlink_accepts_later_ics_update_without_local_reservation
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_existing_common_views_wlink_entry_id_replacement_is_staged_until_atomic_save_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_set_local_replica_midset_deleted_persists_folder_scoped_ranges
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_import_deletes_retry_ignores_online_unreserved_common_views_wlink
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_import_deletes_tombstones_reserved_unknown_common_views_wlink
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_import_deletes_prevalidates_common_views_batch_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/wlink_properties/mapi_over_http_wlink_client_properties_round_trip_postgresql_table_and_ics_after_reload
+  - functions/crates/lpe-exchange/src/tests/PostgresMapiFixture/cleanup
+  - functions/crates/lpe-exchange/src/tests/mapi_associated_config_storage_is_account_scoped
+  - functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable
+  - functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_create_preserves_distinct_rows_for_same_target
+  - functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_import_commits_content_and_identity_atomically
+  - functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_delete_tombstones_identity_and_replay_is_object_deleted
+  - functions/crates/lpe-exchange/src/tests/postgres_mapi_sync_checkpoint_ignores_and_refreshes_expired_rows
+  - functions/crates/lpe-exchange/src/tests/mapi_identity_allocator_rejects_an_exhausted_global_counter
+  - functions/crates/lpe-exchange/src/tests/mapi_identity_repair_removes_orphaned_checkpoint_and_config_state
+  - functions/crates/lpe-exchange/src/tests/mapi_identity_repair_keeps_delegated_contact_until_read_grant_is_removed
+  - functions/crates/lpe-storage/src/blob_store/tests/insert_tenant_domain
+  - functions/crates/lpe-storage/src/blob_store/tests/insert_s3_storage_pool
+  - functions/crates/lpe-storage/src/blob_store/tests/configure_s3_platform_pool
+  - functions/crates/lpe-storage/src/blob_store/tests/insert_account_mailbox
+  - functions/crates/lpe-storage/src/blob_store/tests/insert_logical_message_with_attachment
+  - functions/crates/lpe-storage/src/blob_store/tests/expire_retiring_placement
+  - functions/crates/lpe-storage/src/blob_store/tests/mark_active_replacement_failed
+  - functions/crates/lpe-storage/src/blob_store/tests/cleanup_blockers
+  - functions/crates/lpe-storage/src/blob_store/tests/placement_status_by_id
+  - functions/crates/lpe-storage/src/blob_store/tests/active_placement_id
+  - functions/crates/lpe-storage/src/blob_store/tests/assert_active_blob_read
+  - functions/crates/lpe-storage/src/blob_store/tests/active_placement_count
+  - functions/crates/lpe-storage/src/blob_store/tests/placement_count_for_pool
+  - functions/crates/lpe-storage/src/blob_store/tests/active_storage_pool_id
+  - functions/crates/lpe-storage/src/blob_store/tests/database_blob_bytes_len
+  - functions/crates/lpe-storage/src/blob_store/tests/insert_secondary_storage_pool
+  - functions/crates/lpe-storage/src/blob_store/tests/put_test_blob
+  - functions/crates/lpe-storage/src/blob_store/tests/create_verified_migration_job
+  - functions/crates/lpe-storage/src/blob_store/tests/create_blob_migration_job_accepts_attachment_and_mime_part_blobs
+  - functions/crates/lpe-storage/src/blob_store/tests/create_blob_migration_job_accepts_s3_compatible_target_pool
+  - functions/crates/lpe-storage/src/blob_store/tests/duplicate_blob_migration_job_create_returns_existing_open_job
+  - functions/crates/lpe-storage/src/blob_store/tests/create_blob_migration_job_rejects_raw_message_kind
+  - functions/crates/lpe-storage/src/blob_store/tests/create_blob_migration_job_rejects_missing_active_source_placement
+  - functions/crates/lpe-storage/src/blob_store/tests/create_blob_migration_job_rejects_same_source_and_target_pool
+  - functions/crates/lpe-storage/src/blob_store/tests/pending_blob_migration_jobs_are_loaded_in_deterministic_retry_order
+  - functions/crates/lpe-storage/src/blob_store/tests/copy_verify_worker_reuses_target_placement_across_repeated_execution
+  - functions/crates/lpe-storage/src/blob_store/tests/copy_verify_worker_leaves_active_source_read_path_unchanged
+  - functions/crates/lpe-storage/src/blob_store/tests/copy_verify_worker_records_retryable_failure_without_switching_source
+  - functions/crates/lpe-storage/src/blob_store/tests/switch_verified_migration_job_leaves_one_active_target_placement
+  - functions/crates/lpe-storage/src/blob_store/tests/repeated_switch_verified_migration_job_is_idempotent
+  - functions/crates/lpe-storage/src/blob_store/tests/switch_preserves_reads_stats_and_verification_across_phases
+  - functions/crates/lpe-storage/src/blob_store/tests/switch_writes_rollback_window_to_retiring_source_placement
+  - functions/crates/lpe-storage/src/blob_store/tests/logical_quota_is_stable_across_deduplicated_blob_migration
+  - functions/crates/lpe-storage/src/blob_store/tests/retiring_placement_cleanup_is_blocked_by_rollback_window
+  - functions/crates/lpe-storage/src/blob_store/tests/retiring_placement_cleanup_is_blocked_when_live_references_need_it
+  - functions/crates/lpe-storage/src/blob_store/tests/retiring_placement_cleanup_is_blocked_by_retention_and_legal_hold
+  - functions/crates/lpe-storage/src/blob_store/tests/cleanup_worker_deletes_old_placement_metadata_and_preserves_active_reads
+  - functions/crates/lpe-storage/src/blob_store/tests/cleanup_worker_refuses_the_only_active_placement
+  - functions/crates/lpe-storage/src/blob_store/tests/cleanup_worker_repeated_execution_is_idempotent
+  - functions/crates/lpe-storage/src/blob_store/tests/cleanup_worker_records_retryable_failure_without_breaking_active_reads
+  - functions/crates/lpe-storage/src/blob_store/tests/cleanup_worker_claims_due_old_placements_deterministically
+  - functions/crates/lpe-storage/src/blob_store/tests/switch_ignores_unverified_migration_jobs
+  - functions/crates/lpe-storage/src/blob_store/tests/durable_blob_store_writes_reads_stats_and_verifies
+  - functions/crates/lpe-storage/src/blob_store/tests/s3_compatible_backend_put_read_stat_and_verify_round_trip
+  - functions/crates/lpe-storage/src/blob_store/tests/s3_compatible_migration_paths_copy_verify_and_switch
+  - functions/crates/lpe-storage/src/blob_store/tests/attachment_content_fetch_reads_through_blob_store_boundary
+  - functions/crates/lpe-storage/src/core/connect_pins_search_path_to_canonical_public_schema
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
+  - functions/crates/lpe-storage/src/pst/insert_account_mailbox
+  - functions/crates/lpe-storage/src/pst/insert_message_with_attachment
+  - functions/crates/lpe-storage/src/pst/insert_secondary_storage_pool
+  - functions/crates/lpe-storage/src/pst/migrate_attachment_and_cleanup_source
+  - functions/crates/lpe-storage/src/storage_policy/insert_tenant_domain_account
+  - functions/crates/lpe-storage/src/storage_policy/policy_changes_do_not_create_migration_jobs
+  - functions/crates/lpe-storage/src/storage_policy/policy_change_records_admin_audit_event
+  - functions/crates/lpe-storage/src/storage_visibility/tests/insert_tenant_domain
+  - functions/crates/lpe-storage/src/storage_visibility/tests/insert_blob
+  - functions/crates/lpe-storage/src/storage_visibility/tests/insert_placement
+  - functions/crates/lpe-storage/src/storage_visibility/tests/insert_external_blob_with_active_placement
+  - functions/crates/lpe-storage/src/storage_visibility/tests/insert_failed_migration
+  - functions/crates/lpe-storage/src/storage_visibility/tests/s3_compatible_pool_health_checks_active_object_placement
+  - functions/crates/lpe-storage/tests/mapi_contact_create/ContactFixture/cleanup
+  - functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_create_is_atomic_and_preserves_reserved_import_identity
+  - functions/crates/lpe-storage/tests/mapi_event_commit/EventFixture/cleanup
+  - functions/crates/lpe-storage/tests/mapi_event_commit/reserve_imported_event_range
+  - functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_persists_one_atomic_version
+  - functions/crates/lpe-storage/tests/mapi_event_commit/mapi_message_mutations_rotate_durable_mapi_version_without_rekeying_identity
+  - functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_updated_at_advances_after_waiting_for_a_row_lock
+  - functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_persists_subject_and_attachment_with_one_change
+  - functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_attachment_failure_rolls_back_parent_and_blob
+  - functions/crates/lpe-storage/tests/mapi_event_commit/canonical_event_writer_advances_the_persisted_mapi_version
+  - functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_rejects_stale_version_unless_force_save
+  - functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_rolls_back_when_change_number_allocation_fails
+  - functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_create_rolls_back_every_artifact_and_retry_creates_one_event
+  - functions/crates/lpe-storage/tests/mapi_event_commit/microsoft_oxcfxics_imported_event_keeps_client_xids_and_allocates_server_cn
+  - functions/crates/lpe-storage/tests/mapi_event_commit/microsoft_oxcfxics_imported_calendar_move_is_atomic_and_keeps_destination_xids
+  - functions/crates/lpe-storage/tests/mapi_event_commit/microsoft_oxcfxics_imported_deleted_event_update_keeps_identity_and_is_atomic
+  - functions/crates/lpe-storage/tests/mapi_event_commit/delegated_mapi_event_create_uses_owner_scope_for_event_and_custom_properties
+  - functions/crates/lpe-storage/tests/mapi_event_commit/calendar_event_move_to_deleted_items_preserves_canonical_content_and_rekeys_identity
+  - functions/crates/lpe-storage/tests/mapi_event_commit/event_delete_preserves_custom_shared_calendar_tombstone_scope
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_admin_path
+---
+
+# Signature
+
+`pub fn pool(&self) -> &Pool<Postgres>`
+
+# Called by
+
+- [mapi_tenant_id_for_account](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_tenant_id_for_account.md)
+- [ews_mail_app_catalog_id](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/ews_mail_app_catalog_id.md)
+- [ews_update_mail_app_install_status](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/ews_update_mail_app_install_status.md)
+- [mapi_special_object_kind_for_checkpoint_mailbox](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_special_object_kind_for_checkpoint_mailbox.md)
+- [postgres_mapi_hierarchy_sync_returns_every_retained_folder_tombstone](../../../../../../functions/crates/lpe-exchange/src/tests/hierarchy_tombstones/postgres_mapi_hierarchy_sync_returns_every_retained_folder_tombstone.md)
+- [insert_calendar_identity_account](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar_identity_scope/insert_calendar_identity_account.md)
+- [mapi_identity_repair_preserves_rotated_calendar_change_key](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar_identity_scope/mapi_identity_repair_preserves_rotated_calendar_change_key.md)
+- [mapi_over_http_get_local_replica_ids_reserves_full_outlook_range_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_over_http_get_local_replica_ids_reserves_full_outlook_range_in_postgresql.md)
+- [mapi_local_replica_id_reservations_are_atomic_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_local_replica_id_reservations_are_atomic_in_postgresql.md)
+- [mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postgresql.md)
+- [mapi_store_identity_is_shared_and_allocations_do_not_overlap_across_accounts](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_store_identity_is_shared_and_allocations_do_not_overlap_across_accounts.md)
+- [insert_notification_account](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/insert_notification_account.md)
+- [navigation_shortcut_notification_cursor](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/navigation_shortcut_notification_cursor.md)
+- [mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql.md)
+- [mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql.md)
+- [mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgresql.md)
+- [mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql.md)
+- [mapi_nested_folder_delete_replay_uses_historical_parent_and_retained_identity_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_nested_folder_delete_replay_uses_historical_parent_and_retained_identity_in_postgresql.md)
+- [mapi_imap_cross_parent_rename_replays_a_hierarchy_move_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_imap_cross_parent_rename_replays_a_hierarchy_move_in_postgresql.md)
+- [mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_grant](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_grant.md)
+- [mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state.md)
+- [mapi_over_http_online_associated_config_create_is_atomic_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_online_associated_config_create_is_atomic_in_postgresql.md)
+- [mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql.md)
+- [mapi_associated_config_delete_tombstones_identity_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_associated_config_delete_tombstones_identity_in_postgresql.md)
+- [mapi_over_http_common_views_online_create_ignores_client_source_key_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_online_create_ignores_client_source_key_in_postgresql.md)
+- [mapi_over_http_online_common_views_wlink_accepts_later_ics_update_without_local_reservation](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_online_common_views_wlink_accepts_later_ics_update_without_local_reservation.md)
+- [mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_postgresql.md)
+- [mapi_over_http_existing_common_views_wlink_entry_id_replacement_is_staged_until_atomic_save_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_existing_common_views_wlink_entry_id_replacement_is_staged_until_atomic_save_in_postgresql.md)
+- [mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql.md)
+- [mapi_over_http_set_local_replica_midset_deleted_persists_folder_scoped_ranges](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_set_local_replica_midset_deleted_persists_folder_scoped_ranges.md)
+- [mapi_over_http_import_deletes_retry_ignores_online_unreserved_common_views_wlink](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_import_deletes_retry_ignores_online_unreserved_common_views_wlink.md)
+- [mapi_over_http_import_deletes_tombstones_reserved_unknown_common_views_wlink](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_import_deletes_tombstones_reserved_unknown_common_views_wlink.md)
+- [mapi_over_http_import_deletes_prevalidates_common_views_batch_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_import_deletes_prevalidates_common_views_batch_in_postgresql.md)
+- [mapi_over_http_wlink_client_properties_round_trip_postgresql_table_and_ics_after_reload](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/wlink_properties/mapi_over_http_wlink_client_properties_round_trip_postgresql_table_and_ics_after_reload.md)
+- [cleanup](../../../../../../functions/crates/lpe-exchange/src/tests/PostgresMapiFixture/cleanup.md)
+- [mapi_associated_config_storage_is_account_scoped](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_storage_is_account_scoped.md)
+- [mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable.md)
+- [mapi_navigation_shortcut_create_preserves_distinct_rows_for_same_target](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_create_preserves_distinct_rows_for_same_target.md)
+- [mapi_navigation_shortcut_import_commits_content_and_identity_atomically](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_import_commits_content_and_identity_atomically.md)
+- [mapi_navigation_shortcut_delete_tombstones_identity_and_replay_is_object_deleted](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_delete_tombstones_identity_and_replay_is_object_deleted.md)
+- [postgres_mapi_sync_checkpoint_ignores_and_refreshes_expired_rows](../../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_sync_checkpoint_ignores_and_refreshes_expired_rows.md)
+- [mapi_identity_allocator_rejects_an_exhausted_global_counter](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_identity_allocator_rejects_an_exhausted_global_counter.md)
+- [mapi_identity_repair_removes_orphaned_checkpoint_and_config_state](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_identity_repair_removes_orphaned_checkpoint_and_config_state.md)
+- [mapi_identity_repair_keeps_delegated_contact_until_read_grant_is_removed](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_identity_repair_keeps_delegated_contact_until_read_grant_is_removed.md)
+- [insert_tenant_domain](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/insert_tenant_domain.md)
+- [insert_s3_storage_pool](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/insert_s3_storage_pool.md)
+- [configure_s3_platform_pool](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/configure_s3_platform_pool.md)
+- [insert_account_mailbox](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/insert_account_mailbox.md)
+- [insert_logical_message_with_attachment](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/insert_logical_message_with_attachment.md)
+- [expire_retiring_placement](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/expire_retiring_placement.md)
+- [mark_active_replacement_failed](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/mark_active_replacement_failed.md)
+- [cleanup_blockers](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/cleanup_blockers.md)
+- [placement_status_by_id](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/placement_status_by_id.md)
+- [active_placement_id](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/active_placement_id.md)
+- [assert_active_blob_read](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/assert_active_blob_read.md)
+- [active_placement_count](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/active_placement_count.md)
+- [placement_count_for_pool](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/placement_count_for_pool.md)
+- [active_storage_pool_id](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/active_storage_pool_id.md)
+- [database_blob_bytes_len](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/database_blob_bytes_len.md)
+- [insert_secondary_storage_pool](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/insert_secondary_storage_pool.md)
+- [put_test_blob](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/put_test_blob.md)
+- [create_verified_migration_job](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/create_verified_migration_job.md)
+- [create_blob_migration_job_accepts_attachment_and_mime_part_blobs](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/create_blob_migration_job_accepts_attachment_and_mime_part_blobs.md)
+- [create_blob_migration_job_accepts_s3_compatible_target_pool](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/create_blob_migration_job_accepts_s3_compatible_target_pool.md)
+- [duplicate_blob_migration_job_create_returns_existing_open_job](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/duplicate_blob_migration_job_create_returns_existing_open_job.md)
+- [create_blob_migration_job_rejects_raw_message_kind](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/create_blob_migration_job_rejects_raw_message_kind.md)
+- [create_blob_migration_job_rejects_missing_active_source_placement](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/create_blob_migration_job_rejects_missing_active_source_placement.md)
+- [create_blob_migration_job_rejects_same_source_and_target_pool](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/create_blob_migration_job_rejects_same_source_and_target_pool.md)
+- [pending_blob_migration_jobs_are_loaded_in_deterministic_retry_order](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/pending_blob_migration_jobs_are_loaded_in_deterministic_retry_order.md)
+- [copy_verify_worker_reuses_target_placement_across_repeated_execution](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/copy_verify_worker_reuses_target_placement_across_repeated_execution.md)
+- [copy_verify_worker_leaves_active_source_read_path_unchanged](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/copy_verify_worker_leaves_active_source_read_path_unchanged.md)
+- [copy_verify_worker_records_retryable_failure_without_switching_source](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/copy_verify_worker_records_retryable_failure_without_switching_source.md)
+- [switch_verified_migration_job_leaves_one_active_target_placement](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/switch_verified_migration_job_leaves_one_active_target_placement.md)
+- [repeated_switch_verified_migration_job_is_idempotent](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/repeated_switch_verified_migration_job_is_idempotent.md)
+- [switch_preserves_reads_stats_and_verification_across_phases](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/switch_preserves_reads_stats_and_verification_across_phases.md)
+- [switch_writes_rollback_window_to_retiring_source_placement](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/switch_writes_rollback_window_to_retiring_source_placement.md)
+- [logical_quota_is_stable_across_deduplicated_blob_migration](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/logical_quota_is_stable_across_deduplicated_blob_migration.md)
+- [retiring_placement_cleanup_is_blocked_by_rollback_window](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/retiring_placement_cleanup_is_blocked_by_rollback_window.md)
+- [retiring_placement_cleanup_is_blocked_when_live_references_need_it](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/retiring_placement_cleanup_is_blocked_when_live_references_need_it.md)
+- [retiring_placement_cleanup_is_blocked_by_retention_and_legal_hold](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/retiring_placement_cleanup_is_blocked_by_retention_and_legal_hold.md)
+- [cleanup_worker_deletes_old_placement_metadata_and_preserves_active_reads](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/cleanup_worker_deletes_old_placement_metadata_and_preserves_active_reads.md)
+- [cleanup_worker_refuses_the_only_active_placement](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/cleanup_worker_refuses_the_only_active_placement.md)
+- [cleanup_worker_repeated_execution_is_idempotent](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/cleanup_worker_repeated_execution_is_idempotent.md)
+- [cleanup_worker_records_retryable_failure_without_breaking_active_reads](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/cleanup_worker_records_retryable_failure_without_breaking_active_reads.md)
+- [cleanup_worker_claims_due_old_placements_deterministically](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/cleanup_worker_claims_due_old_placements_deterministically.md)
+- [switch_ignores_unverified_migration_jobs](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/switch_ignores_unverified_migration_jobs.md)
+- [durable_blob_store_writes_reads_stats_and_verifies](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/durable_blob_store_writes_reads_stats_and_verifies.md)
+- [s3_compatible_backend_put_read_stat_and_verify_round_trip](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/s3_compatible_backend_put_read_stat_and_verify_round_trip.md)
+- [s3_compatible_migration_paths_copy_verify_and_switch](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/s3_compatible_migration_paths_copy_verify_and_switch.md)
+- [attachment_content_fetch_reads_through_blob_store_boundary](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/attachment_content_fetch_reads_through_blob_store_boundary.md)
+- [connect_pins_search_path_to_canonical_public_schema](../../../../../../functions/crates/lpe-storage/src/core/connect_pins_search_path_to_canonical_public_schema.md)
+- [create_mapi_contact](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md)
+- [insert_account_mailbox](../../../../../../functions/crates/lpe-storage/src/pst/insert_account_mailbox.md)
+- [insert_message_with_attachment](../../../../../../functions/crates/lpe-storage/src/pst/insert_message_with_attachment.md)
+- [insert_secondary_storage_pool](../../../../../../functions/crates/lpe-storage/src/pst/insert_secondary_storage_pool.md)
+- [migrate_attachment_and_cleanup_source](../../../../../../functions/crates/lpe-storage/src/pst/migrate_attachment_and_cleanup_source.md)
+- [insert_tenant_domain_account](../../../../../../functions/crates/lpe-storage/src/storage_policy/insert_tenant_domain_account.md)
+- [policy_changes_do_not_create_migration_jobs](../../../../../../functions/crates/lpe-storage/src/storage_policy/policy_changes_do_not_create_migration_jobs.md)
+- [policy_change_records_admin_audit_event](../../../../../../functions/crates/lpe-storage/src/storage_policy/policy_change_records_admin_audit_event.md)
+- [insert_tenant_domain](../../../../../../functions/crates/lpe-storage/src/storage_visibility/tests/insert_tenant_domain.md)
+- [insert_blob](../../../../../../functions/crates/lpe-storage/src/storage_visibility/tests/insert_blob.md)
+- [insert_placement](../../../../../../functions/crates/lpe-storage/src/storage_visibility/tests/insert_placement.md)
+- [insert_external_blob_with_active_placement](../../../../../../functions/crates/lpe-storage/src/storage_visibility/tests/insert_external_blob_with_active_placement.md)
+- [insert_failed_migration](../../../../../../functions/crates/lpe-storage/src/storage_visibility/tests/insert_failed_migration.md)
+- [s3_compatible_pool_health_checks_active_object_placement](../../../../../../functions/crates/lpe-storage/src/storage_visibility/tests/s3_compatible_pool_health_checks_active_object_placement.md)
+- [cleanup](../../../../../../functions/crates/lpe-storage/tests/mapi_contact_create/ContactFixture/cleanup.md)
+- [mapi_contact_create_is_atomic_and_preserves_reserved_import_identity](../../../../../../functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_create_is_atomic_and_preserves_reserved_import_identity.md)
+- [cleanup](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/EventFixture/cleanup.md)
+- [reserve_imported_event_range](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/reserve_imported_event_range.md)
+- [mapi_event_commit_persists_one_atomic_version](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_persists_one_atomic_version.md)
+- [mapi_message_mutations_rotate_durable_mapi_version_without_rekeying_identity](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/mapi_message_mutations_rotate_durable_mapi_version_without_rekeying_identity.md)
+- [mapi_event_commit_updated_at_advances_after_waiting_for_a_row_lock](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_updated_at_advances_after_waiting_for_a_row_lock.md)
+- [mapi_event_commit_persists_subject_and_attachment_with_one_change](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_persists_subject_and_attachment_with_one_change.md)
+- [mapi_event_attachment_failure_rolls_back_parent_and_blob](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_attachment_failure_rolls_back_parent_and_blob.md)
+- [canonical_event_writer_advances_the_persisted_mapi_version](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/canonical_event_writer_advances_the_persisted_mapi_version.md)
+- [mapi_event_commit_rejects_stale_version_unless_force_save](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_rejects_stale_version_unless_force_save.md)
+- [mapi_event_commit_rolls_back_when_change_number_allocation_fails](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_rolls_back_when_change_number_allocation_fails.md)
+- [mapi_event_create_rolls_back_every_artifact_and_retry_creates_one_event](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_create_rolls_back_every_artifact_and_retry_creates_one_event.md)
+- [microsoft_oxcfxics_imported_event_keeps_client_xids_and_allocates_server_cn](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/microsoft_oxcfxics_imported_event_keeps_client_xids_and_allocates_server_cn.md)
+- [microsoft_oxcfxics_imported_calendar_move_is_atomic_and_keeps_destination_xids](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/microsoft_oxcfxics_imported_calendar_move_is_atomic_and_keeps_destination_xids.md)
+- [microsoft_oxcfxics_imported_deleted_event_update_keeps_identity_and_is_atomic](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/microsoft_oxcfxics_imported_deleted_event_update_keeps_identity_and_is_atomic.md)
+- [delegated_mapi_event_create_uses_owner_scope_for_event_and_custom_properties](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/delegated_mapi_event_create_uses_owner_scope_for_event_and_custom_properties.md)
+- [calendar_event_move_to_deleted_items_preserves_canonical_content_and_rekeys_identity](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/calendar_event_move_to_deleted_items_preserves_canonical_content_and_rekeys_identity.md)
+- [event_delete_preserves_custom_shared_calendar_tombstone_scope](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/event_delete_preserves_custom_shared_calendar_tombstone_scope.md)
+- [exercise_admin_path](../../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_admin_path.md)

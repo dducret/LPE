@@ -1,0 +1,366 @@
+---
+type: Rust Method
+title: tenant_id_for_account_id
+resource: crates/lpe-storage/src/shared.rs#L731-L744
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  called_by:
+  - functions/crates/lpe-storage/src/activesync/Storage/store_activesync_sync_state
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_device
+  - functions/crates/lpe-storage/src/activesync/Storage/store_activesync_device_pending_policy
+  - functions/crates/lpe-storage/src/activesync/Storage/acknowledge_activesync_device_policy
+  - functions/crates/lpe-storage/src/activesync/Storage/touch_activesync_device
+  - functions/crates/lpe-storage/src/activesync/Storage/cleanup_expired_activesync_sync_cursors
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_sync_state
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_email_states
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_email_states_by_ids
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_contact_states
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_contact_states_by_ids
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_event_states
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_event_states_by_ids
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_message_attachments
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_attachment_content
+  - functions/crates/lpe-storage/src/activesync/Storage/fetch_message_attachment_content_by_cid
+  - functions/crates/lpe-storage/src/admin/Storage/list_sieve_scripts
+  - functions/crates/lpe-storage/src/admin/Storage/list_mailbox_rules
+  - functions/crates/lpe-storage/src/admin/Storage/fetch_outlook_profile_state
+  - functions/crates/lpe-storage/src/admin/Storage/fetch_mapi_ipm_subtree_ost_id
+  - functions/crates/lpe-storage/src/admin/Storage/store_mapi_ipm_subtree_ost_id
+  - functions/crates/lpe-storage/src/admin/Storage/get_sieve_script
+  - functions/crates/lpe-storage/src/admin/Storage/put_sieve_script
+  - functions/crates/lpe-storage/src/admin/Storage/delete_sieve_script
+  - functions/crates/lpe-storage/src/admin/Storage/rename_sieve_script
+  - functions/crates/lpe-storage/src/admin/Storage/set_active_sieve_script
+  - functions/crates/lpe-storage/src/admin/Storage/fetch_active_sieve_script
+  - functions/crates/lpe-storage/src/admin/provisioning/Storage/update_account
+  - functions/crates/lpe-storage/src/admin/provisioning/Storage/create_mailbox
+  - functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_event_attachments
+  - functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_attachments_for_events
+  - functions/crates/lpe-storage/src/attachments/Storage/add_calendar_event_attachment
+  - functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_attachment_blob
+  - functions/crates/lpe-storage/src/attachments/Storage/delete_calendar_event_attachment
+  - functions/crates/lpe-storage/src/attachments/Storage/add_message_attachment
+  - functions/crates/lpe-storage/src/attachments/Storage/delete_message_attachment
+  - functions/crates/lpe-storage/src/change/Storage/create_canonical_change_listener
+  - functions/crates/lpe-storage/src/change/Storage/fetch_canonical_change_cursor
+  - functions/crates/lpe-storage/src/change/Storage/replay_canonical_changes
+  - functions/crates/lpe-storage/src/collaboration/Storage/fetch_delegate_access_objects
+  - functions/crates/lpe-storage/src/collaboration/Storage/fetch_free_busy_blocks
+  - functions/crates/lpe-storage/src/collaboration/Storage/create_accessible_calendar_collection
+  - functions/crates/lpe-storage/src/collaboration/Storage/update_accessible_calendar_collection
+  - functions/crates/lpe-storage/src/collaboration/Storage/delete_accessible_calendar_collection
+  - functions/crates/lpe-storage/src/collaboration/Storage/update_accessible_event_reminder
+  - functions/crates/lpe-storage/src/collaboration/Storage/fetch_accessible_collections
+  - functions/crates/lpe-storage/src/collaboration/Storage/fetch_accessible_contacts_internal
+  - functions/crates/lpe-storage/src/collaboration/Storage/fetch_accessible_events_internal
+  - functions/crates/lpe-storage/src/collaboration/deleted_events/Storage/move_accessible_event_to_deleted_items
+  - functions/crates/lpe-storage/src/collaboration/grants/Storage/upsert_collaboration_grant
+  - functions/crates/lpe-storage/src/collaboration/grants/Storage/delete_collaboration_grant
+  - functions/crates/lpe-storage/src/collaboration/grants/Storage/delete_calendar_collection_grant
+  - functions/crates/lpe-storage/src/collaboration/grants/Storage/set_calendar_collection_grant
+  - functions/crates/lpe-storage/src/collaboration/grants/Storage/fetch_collaboration_grant
+  - functions/crates/lpe-storage/src/collaboration/grants/Storage/fetch_outgoing_collaboration_grants
+  - functions/crates/lpe-storage/src/conversation_actions/Storage/fetch_conversation_actions
+  - functions/crates/lpe-storage/src/conversation_actions/Storage/fetch_conversation_actions_by_ids
+  - functions/crates/lpe-storage/src/conversation_actions/Storage/upsert_conversation_action
+  - functions/crates/lpe-storage/src/conversation_actions/Storage/delete_conversation_action
+  - functions/crates/lpe-storage/src/imap/Storage/fetch_imap_emails
+  - functions/crates/lpe-storage/src/inbound/Storage/should_send_sieve_vacation
+  - functions/crates/lpe-storage/src/jmap_blobs/Storage/fetch_jmap_quota
+  - functions/crates/lpe-storage/src/jmap_blobs/Storage/fetch_mailbox_logical_quota_used_octets
+  - functions/crates/lpe-storage/src/jmap_blobs/Storage/fetch_jmap_message_blob
+  - functions/crates/lpe-storage/src/jmap_blobs/Storage/fetch_jmap_message_blob_with_protected_headers
+  - functions/crates/lpe-storage/src/jmap_blobs/Storage/save_jmap_upload_blob
+  - functions/crates/lpe-storage/src/jmap_blobs/Storage/fetch_jmap_upload_blob
+  - functions/crates/lpe-storage/src/jmap_queries/Storage/save_jmap_query_state
+  - functions/crates/lpe-storage/src/jmap_queries/Storage/fetch_jmap_query_state
+  - functions/crates/lpe-storage/src/jmap_queries/Storage/fetch_all_jmap_email_ids
+  - functions/crates/lpe-storage/src/jmap_queries/Storage/fetch_all_jmap_thread_ids
+  - functions/crates/lpe-storage/src/mail_items/update_message_flags
+  - functions/crates/lpe-storage/src/mail_items/update_imap_flags
+  - functions/crates/lpe-storage/src/mail_items/expunge_imap_deleted
+  - functions/crates/lpe-storage/src/mail_items/delete_custom_jmap_email
+  - functions/crates/lpe-storage/src/mail_items/delete_jmap_email_memberships
+  - functions/crates/lpe-storage/src/mailboxes/Storage/fetch_jmap_mailboxes
+  - functions/crates/lpe-storage/src/mailboxes/Storage/ensure_imap_mailboxes
+  - functions/crates/lpe-storage/src/mailboxes/Storage/fetch_imap_highest_modseq
+  - functions/crates/lpe-storage/src/mailboxes/Storage/fetch_imap_mailbox_state
+  - functions/crates/lpe-storage/src/mailboxes/Storage/create_jmap_mailbox
+  - functions/crates/lpe-storage/src/mailboxes/Storage/create_managed_retention_folder
+  - functions/crates/lpe-storage/src/mailboxes/Storage/create_imap_mailbox
+  - functions/crates/lpe-storage/src/mailboxes/Storage/update_jmap_mailbox
+  - functions/crates/lpe-storage/src/mailboxes/Storage/rename_imap_mailbox
+  - functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription
+  - functions/crates/lpe-storage/src/mailboxes/Storage/destroy_jmap_mailbox
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
+  - functions/crates/lpe-storage/src/mapi_events/Storage/create_mapi_event
+  - functions/crates/lpe-storage/src/mapi_events/Storage/fetch_mapi_event_versions
+  - functions/crates/lpe-storage/src/mapi_events/Storage/commit_mapi_event_update
+  - functions/crates/lpe-storage/src/message_ops/Storage/delete_client_contact
+  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email
+  - functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership
+  - functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_followup_flags
+  - functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_content
+  - functions/crates/lpe-storage/src/message_ops/Storage/import_jmap_email
+  - functions/crates/lpe-storage/src/message_ops/Storage/fetch_latest_activesync_sync_state
+  - functions/crates/lpe-storage/src/notes_journal/Storage/dismiss_reminder_occurrence
+  - functions/crates/lpe-storage/src/notes_journal/Storage/fetch_client_notes
+  - functions/crates/lpe-storage/src/notes_journal/Storage/fetch_client_notes_by_ids
+  - functions/crates/lpe-storage/src/notes_journal/Storage/upsert_client_note
+  - functions/crates/lpe-storage/src/notes_journal/Storage/delete_client_note
+  - functions/crates/lpe-storage/src/notes_journal/Storage/fetch_journal_entries
+  - functions/crates/lpe-storage/src/notes_journal/Storage/fetch_journal_entries_by_ids
+  - functions/crates/lpe-storage/src/notes_journal/Storage/upsert_journal_entry
+  - functions/crates/lpe-storage/src/notes_journal/Storage/delete_journal_entry
+  - functions/crates/lpe-storage/src/notes_journal/Storage/query_client_reminders
+  - functions/crates/lpe-storage/src/outbound/Storage/fetch_outbound_handoff_batch
+  - functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_mail_change_cursor
+  - functions/crates/lpe-storage/src/protocols/Storage/replay_jmap_mail_object_changes
+  - functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_object_change_cursor
+  - functions/crates/lpe-storage/src/protocols/Storage/replay_jmap_object_changes
+  - functions/crates/lpe-storage/src/protocols/Storage/replay_jmap_string_object_changes
+  - functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_emails
+  - functions/crates/lpe-storage/src/protocols/Storage/fetch_visible_protected_bcc_recipients
+  - functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_email_submissions
+  - functions/crates/lpe-storage/src/pst/Storage/persist_pst_imported_message_in_tx
+  - functions/crates/lpe-storage/src/public_folders/Storage/create_public_folder_tree
+  - functions/crates/lpe-storage/src/public_folders/Storage/fetch_public_folder_trees
+  - functions/crates/lpe-storage/src/public_folders/Storage/fetch_public_folder_items_by_ids
+  - functions/crates/lpe-storage/src/public_folders/Storage/public_folder_access
+  - functions/crates/lpe-storage/src/public_folders/Storage/fetch_public_folder_row
+  - functions/crates/lpe-storage/src/recoverable_items/Storage/list_recoverable_items
+  - functions/crates/lpe-storage/src/recoverable_items/Storage/restore_recoverable_item
+  - functions/crates/lpe-storage/src/recoverable_items/Storage/purge_recoverable_item
+  - functions/crates/lpe-storage/src/search_folders/Storage/fetch_search_folders
+  - functions/crates/lpe-storage/src/search_folders/Storage/fetch_search_folders_by_ids
+  - functions/crates/lpe-storage/src/search_folders/Storage/upsert_search_folder
+  - functions/crates/lpe-storage/src/search_folders/Storage/delete_search_folder
+  - functions/crates/lpe-storage/src/shared/Storage/fetch_account_category_modseq
+  - functions/crates/lpe-storage/src/submission/Storage/replace_message_recipients
+  - functions/crates/lpe-storage/src/submission/Storage/save_draft_message
+  - functions/crates/lpe-storage/src/submission/Storage/submit_message
+  - functions/crates/lpe-storage/src/submission/Storage/submit_draft_message
+  - functions/crates/lpe-storage/src/submission/Storage/cancel_queued_submission
+  - functions/crates/lpe-storage/src/submission/Storage/delete_draft_message
+  - functions/crates/lpe-storage/src/submission/Storage/find_submission_account_by_email_in_same_tenant
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_account_identity
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/upsert_mailbox_delegation_grant
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/set_mailbox_folder_delegation_grant
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/delete_mailbox_delegation_grant
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_mailbox_delegation_grant
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/upsert_sender_delegation_grant
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/delete_sender_delegation_grant
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_sender_delegation_grant
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_outgoing_mailbox_delegation_grants
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_outgoing_sender_delegation_grants
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_accessible_mailbox_accounts
+  - functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_sender_identities
+  - functions/crates/lpe-storage/src/tasks/Storage/upsert_client_task
+  - functions/crates/lpe-storage/src/tasks/Storage/update_accessible_task_reminder
+  - functions/crates/lpe-storage/src/tasks/Storage/upsert_task_list_grant
+  - functions/crates/lpe-storage/src/tasks/Storage/delete_task_list_grant
+  - functions/crates/lpe-storage/src/tasks/Storage/fetch_task_list_grant
+  - functions/crates/lpe-storage/src/tasks/Storage/fetch_outgoing_task_list_grants
+  - functions/crates/lpe-storage/src/tasks/Storage/fetch_task_lists
+  - functions/crates/lpe-storage/src/tasks/Storage/fetch_task_lists_by_ids
+  - functions/crates/lpe-storage/src/tasks/Storage/create_task_list
+  - functions/crates/lpe-storage/src/tasks/Storage/update_task_list
+  - functions/crates/lpe-storage/src/tasks/Storage/delete_task_list
+  - functions/crates/lpe-storage/src/tasks/Storage/delete_client_task
+  - functions/crates/lpe-storage/src/tasks/Storage/fetch_dav_tasks
+  - functions/crates/lpe-storage/src/tasks/Storage/fetch_dav_tasks_by_ids
+  - functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks
+  - functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks_by_ids
+  - functions/crates/lpe-storage/src/workspace/Storage/fetch_client_workspace
+  - functions/crates/lpe-storage/src/workspace/Storage/upsert_client_contact_in_book_role
+  - functions/crates/lpe-storage/src/workspace/Storage/upsert_client_event_in_calendar
+  - functions/crates/lpe-storage/src/workspace/Storage/fetch_client_events
+  - functions/crates/lpe-storage/src/workspace/Storage/fetch_client_events_by_ids
+  - functions/crates/lpe-storage/src/workspace/Storage/fetch_client_contacts
+  - functions/crates/lpe-storage/src/workspace/Storage/fetch_client_contacts_by_ids
+  - functions/crates/lpe-storage/src/workspace/Storage/query_recipient_suggestions
+  - functions/crates/lpe-storage/src/workspace/Storage/dismiss_recipient_suggestion
+---
+
+# Signature
+
+`pub(crate) async fn tenant_id_for_account_id(&self, account_id: Uuid) -> Result<Uuid>`
+
+# Called by
+
+- [store_activesync_sync_state](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/store_activesync_sync_state.md)
+- [fetch_activesync_device](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_device.md)
+- [store_activesync_device_pending_policy](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/store_activesync_device_pending_policy.md)
+- [acknowledge_activesync_device_policy](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/acknowledge_activesync_device_policy.md)
+- [touch_activesync_device](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/touch_activesync_device.md)
+- [cleanup_expired_activesync_sync_cursors](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/cleanup_expired_activesync_sync_cursors.md)
+- [fetch_activesync_sync_state](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_sync_state.md)
+- [fetch_activesync_email_states](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_email_states.md)
+- [fetch_activesync_email_states_by_ids](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_email_states_by_ids.md)
+- [fetch_activesync_contact_states](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_contact_states.md)
+- [fetch_activesync_contact_states_by_ids](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_contact_states_by_ids.md)
+- [fetch_activesync_event_states](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_event_states.md)
+- [fetch_activesync_event_states_by_ids](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_event_states_by_ids.md)
+- [fetch_activesync_message_attachments](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_message_attachments.md)
+- [fetch_activesync_attachment_content](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_activesync_attachment_content.md)
+- [fetch_message_attachment_content_by_cid](../../../../../../functions/crates/lpe-storage/src/activesync/Storage/fetch_message_attachment_content_by_cid.md)
+- [list_sieve_scripts](../../../../../../functions/crates/lpe-storage/src/admin/Storage/list_sieve_scripts.md)
+- [list_mailbox_rules](../../../../../../functions/crates/lpe-storage/src/admin/Storage/list_mailbox_rules.md)
+- [fetch_outlook_profile_state](../../../../../../functions/crates/lpe-storage/src/admin/Storage/fetch_outlook_profile_state.md)
+- [fetch_mapi_ipm_subtree_ost_id](../../../../../../functions/crates/lpe-storage/src/admin/Storage/fetch_mapi_ipm_subtree_ost_id.md)
+- [store_mapi_ipm_subtree_ost_id](../../../../../../functions/crates/lpe-storage/src/admin/Storage/store_mapi_ipm_subtree_ost_id.md)
+- [get_sieve_script](../../../../../../functions/crates/lpe-storage/src/admin/Storage/get_sieve_script.md)
+- [put_sieve_script](../../../../../../functions/crates/lpe-storage/src/admin/Storage/put_sieve_script.md)
+- [delete_sieve_script](../../../../../../functions/crates/lpe-storage/src/admin/Storage/delete_sieve_script.md)
+- [rename_sieve_script](../../../../../../functions/crates/lpe-storage/src/admin/Storage/rename_sieve_script.md)
+- [set_active_sieve_script](../../../../../../functions/crates/lpe-storage/src/admin/Storage/set_active_sieve_script.md)
+- [fetch_active_sieve_script](../../../../../../functions/crates/lpe-storage/src/admin/Storage/fetch_active_sieve_script.md)
+- [update_account](../../../../../../functions/crates/lpe-storage/src/admin/provisioning/Storage/update_account.md)
+- [create_mailbox](../../../../../../functions/crates/lpe-storage/src/admin/provisioning/Storage/create_mailbox.md)
+- [fetch_calendar_event_attachments](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_event_attachments.md)
+- [fetch_calendar_attachments_for_events](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_attachments_for_events.md)
+- [add_calendar_event_attachment](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/add_calendar_event_attachment.md)
+- [fetch_calendar_attachment_blob](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_attachment_blob.md)
+- [delete_calendar_event_attachment](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/delete_calendar_event_attachment.md)
+- [add_message_attachment](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/add_message_attachment.md)
+- [delete_message_attachment](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/delete_message_attachment.md)
+- [create_canonical_change_listener](../../../../../../functions/crates/lpe-storage/src/change/Storage/create_canonical_change_listener.md)
+- [fetch_canonical_change_cursor](../../../../../../functions/crates/lpe-storage/src/change/Storage/fetch_canonical_change_cursor.md)
+- [replay_canonical_changes](../../../../../../functions/crates/lpe-storage/src/change/Storage/replay_canonical_changes.md)
+- [fetch_delegate_access_objects](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/fetch_delegate_access_objects.md)
+- [fetch_free_busy_blocks](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/fetch_free_busy_blocks.md)
+- [create_accessible_calendar_collection](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/create_accessible_calendar_collection.md)
+- [update_accessible_calendar_collection](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/update_accessible_calendar_collection.md)
+- [delete_accessible_calendar_collection](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/delete_accessible_calendar_collection.md)
+- [update_accessible_event_reminder](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/update_accessible_event_reminder.md)
+- [fetch_accessible_collections](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/fetch_accessible_collections.md)
+- [fetch_accessible_contacts_internal](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/fetch_accessible_contacts_internal.md)
+- [fetch_accessible_events_internal](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/fetch_accessible_events_internal.md)
+- [move_accessible_event_to_deleted_items](../../../../../../functions/crates/lpe-storage/src/collaboration/deleted_events/Storage/move_accessible_event_to_deleted_items.md)
+- [upsert_collaboration_grant](../../../../../../functions/crates/lpe-storage/src/collaboration/grants/Storage/upsert_collaboration_grant.md)
+- [delete_collaboration_grant](../../../../../../functions/crates/lpe-storage/src/collaboration/grants/Storage/delete_collaboration_grant.md)
+- [delete_calendar_collection_grant](../../../../../../functions/crates/lpe-storage/src/collaboration/grants/Storage/delete_calendar_collection_grant.md)
+- [set_calendar_collection_grant](../../../../../../functions/crates/lpe-storage/src/collaboration/grants/Storage/set_calendar_collection_grant.md)
+- [fetch_collaboration_grant](../../../../../../functions/crates/lpe-storage/src/collaboration/grants/Storage/fetch_collaboration_grant.md)
+- [fetch_outgoing_collaboration_grants](../../../../../../functions/crates/lpe-storage/src/collaboration/grants/Storage/fetch_outgoing_collaboration_grants.md)
+- [fetch_conversation_actions](../../../../../../functions/crates/lpe-storage/src/conversation_actions/Storage/fetch_conversation_actions.md)
+- [fetch_conversation_actions_by_ids](../../../../../../functions/crates/lpe-storage/src/conversation_actions/Storage/fetch_conversation_actions_by_ids.md)
+- [upsert_conversation_action](../../../../../../functions/crates/lpe-storage/src/conversation_actions/Storage/upsert_conversation_action.md)
+- [delete_conversation_action](../../../../../../functions/crates/lpe-storage/src/conversation_actions/Storage/delete_conversation_action.md)
+- [fetch_imap_emails](../../../../../../functions/crates/lpe-storage/src/imap/Storage/fetch_imap_emails.md)
+- [should_send_sieve_vacation](../../../../../../functions/crates/lpe-storage/src/inbound/Storage/should_send_sieve_vacation.md)
+- [fetch_jmap_quota](../../../../../../functions/crates/lpe-storage/src/jmap_blobs/Storage/fetch_jmap_quota.md)
+- [fetch_mailbox_logical_quota_used_octets](../../../../../../functions/crates/lpe-storage/src/jmap_blobs/Storage/fetch_mailbox_logical_quota_used_octets.md)
+- [fetch_jmap_message_blob](../../../../../../functions/crates/lpe-storage/src/jmap_blobs/Storage/fetch_jmap_message_blob.md)
+- [fetch_jmap_message_blob_with_protected_headers](../../../../../../functions/crates/lpe-storage/src/jmap_blobs/Storage/fetch_jmap_message_blob_with_protected_headers.md)
+- [save_jmap_upload_blob](../../../../../../functions/crates/lpe-storage/src/jmap_blobs/Storage/save_jmap_upload_blob.md)
+- [fetch_jmap_upload_blob](../../../../../../functions/crates/lpe-storage/src/jmap_blobs/Storage/fetch_jmap_upload_blob.md)
+- [save_jmap_query_state](../../../../../../functions/crates/lpe-storage/src/jmap_queries/Storage/save_jmap_query_state.md)
+- [fetch_jmap_query_state](../../../../../../functions/crates/lpe-storage/src/jmap_queries/Storage/fetch_jmap_query_state.md)
+- [fetch_all_jmap_email_ids](../../../../../../functions/crates/lpe-storage/src/jmap_queries/Storage/fetch_all_jmap_email_ids.md)
+- [fetch_all_jmap_thread_ids](../../../../../../functions/crates/lpe-storage/src/jmap_queries/Storage/fetch_all_jmap_thread_ids.md)
+- [update_message_flags](../../../../../../functions/crates/lpe-storage/src/mail_items/update_message_flags.md)
+- [update_imap_flags](../../../../../../functions/crates/lpe-storage/src/mail_items/update_imap_flags.md)
+- [expunge_imap_deleted](../../../../../../functions/crates/lpe-storage/src/mail_items/expunge_imap_deleted.md)
+- [delete_custom_jmap_email](../../../../../../functions/crates/lpe-storage/src/mail_items/delete_custom_jmap_email.md)
+- [delete_jmap_email_memberships](../../../../../../functions/crates/lpe-storage/src/mail_items/delete_jmap_email_memberships.md)
+- [fetch_jmap_mailboxes](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/fetch_jmap_mailboxes.md)
+- [ensure_imap_mailboxes](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/ensure_imap_mailboxes.md)
+- [fetch_imap_highest_modseq](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/fetch_imap_highest_modseq.md)
+- [fetch_imap_mailbox_state](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/fetch_imap_mailbox_state.md)
+- [create_jmap_mailbox](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/create_jmap_mailbox.md)
+- [create_managed_retention_folder](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/create_managed_retention_folder.md)
+- [create_imap_mailbox](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/create_imap_mailbox.md)
+- [update_jmap_mailbox](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/update_jmap_mailbox.md)
+- [rename_imap_mailbox](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/rename_imap_mailbox.md)
+- [set_mailbox_subscription](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription.md)
+- [destroy_jmap_mailbox](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/destroy_jmap_mailbox.md)
+- [create_mapi_contact](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md)
+- [create_mapi_event](../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/create_mapi_event.md)
+- [fetch_mapi_event_versions](../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/fetch_mapi_event_versions.md)
+- [commit_mapi_event_update](../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/commit_mapi_event_update.md)
+- [delete_client_contact](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/delete_client_contact.md)
+- [copy_jmap_email](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email.md)
+- [move_jmap_email_membership](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership.md)
+- [update_jmap_email_followup_flags](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_followup_flags.md)
+- [update_jmap_email_content](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_content.md)
+- [import_jmap_email](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/import_jmap_email.md)
+- [fetch_latest_activesync_sync_state](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/fetch_latest_activesync_sync_state.md)
+- [dismiss_reminder_occurrence](../../../../../../functions/crates/lpe-storage/src/notes_journal/Storage/dismiss_reminder_occurrence.md)
+- [fetch_client_notes](../../../../../../functions/crates/lpe-storage/src/notes_journal/Storage/fetch_client_notes.md)
+- [fetch_client_notes_by_ids](../../../../../../functions/crates/lpe-storage/src/notes_journal/Storage/fetch_client_notes_by_ids.md)
+- [upsert_client_note](../../../../../../functions/crates/lpe-storage/src/notes_journal/Storage/upsert_client_note.md)
+- [delete_client_note](../../../../../../functions/crates/lpe-storage/src/notes_journal/Storage/delete_client_note.md)
+- [fetch_journal_entries](../../../../../../functions/crates/lpe-storage/src/notes_journal/Storage/fetch_journal_entries.md)
+- [fetch_journal_entries_by_ids](../../../../../../functions/crates/lpe-storage/src/notes_journal/Storage/fetch_journal_entries_by_ids.md)
+- [upsert_journal_entry](../../../../../../functions/crates/lpe-storage/src/notes_journal/Storage/upsert_journal_entry.md)
+- [delete_journal_entry](../../../../../../functions/crates/lpe-storage/src/notes_journal/Storage/delete_journal_entry.md)
+- [query_client_reminders](../../../../../../functions/crates/lpe-storage/src/notes_journal/Storage/query_client_reminders.md)
+- [fetch_outbound_handoff_batch](../../../../../../functions/crates/lpe-storage/src/outbound/Storage/fetch_outbound_handoff_batch.md)
+- [fetch_jmap_mail_change_cursor](../../../../../../functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_mail_change_cursor.md)
+- [replay_jmap_mail_object_changes](../../../../../../functions/crates/lpe-storage/src/protocols/Storage/replay_jmap_mail_object_changes.md)
+- [fetch_jmap_object_change_cursor](../../../../../../functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_object_change_cursor.md)
+- [replay_jmap_object_changes](../../../../../../functions/crates/lpe-storage/src/protocols/Storage/replay_jmap_object_changes.md)
+- [replay_jmap_string_object_changes](../../../../../../functions/crates/lpe-storage/src/protocols/Storage/replay_jmap_string_object_changes.md)
+- [fetch_jmap_emails](../../../../../../functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_emails.md)
+- [fetch_visible_protected_bcc_recipients](../../../../../../functions/crates/lpe-storage/src/protocols/Storage/fetch_visible_protected_bcc_recipients.md)
+- [fetch_jmap_email_submissions](../../../../../../functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_email_submissions.md)
+- [persist_pst_imported_message_in_tx](../../../../../../functions/crates/lpe-storage/src/pst/Storage/persist_pst_imported_message_in_tx.md)
+- [create_public_folder_tree](../../../../../../functions/crates/lpe-storage/src/public_folders/Storage/create_public_folder_tree.md)
+- [fetch_public_folder_trees](../../../../../../functions/crates/lpe-storage/src/public_folders/Storage/fetch_public_folder_trees.md)
+- [fetch_public_folder_items_by_ids](../../../../../../functions/crates/lpe-storage/src/public_folders/Storage/fetch_public_folder_items_by_ids.md)
+- [public_folder_access](../../../../../../functions/crates/lpe-storage/src/public_folders/Storage/public_folder_access.md)
+- [fetch_public_folder_row](../../../../../../functions/crates/lpe-storage/src/public_folders/Storage/fetch_public_folder_row.md)
+- [list_recoverable_items](../../../../../../functions/crates/lpe-storage/src/recoverable_items/Storage/list_recoverable_items.md)
+- [restore_recoverable_item](../../../../../../functions/crates/lpe-storage/src/recoverable_items/Storage/restore_recoverable_item.md)
+- [purge_recoverable_item](../../../../../../functions/crates/lpe-storage/src/recoverable_items/Storage/purge_recoverable_item.md)
+- [fetch_search_folders](../../../../../../functions/crates/lpe-storage/src/search_folders/Storage/fetch_search_folders.md)
+- [fetch_search_folders_by_ids](../../../../../../functions/crates/lpe-storage/src/search_folders/Storage/fetch_search_folders_by_ids.md)
+- [upsert_search_folder](../../../../../../functions/crates/lpe-storage/src/search_folders/Storage/upsert_search_folder.md)
+- [delete_search_folder](../../../../../../functions/crates/lpe-storage/src/search_folders/Storage/delete_search_folder.md)
+- [fetch_account_category_modseq](../../../../../../functions/crates/lpe-storage/src/shared/Storage/fetch_account_category_modseq.md)
+- [replace_message_recipients](../../../../../../functions/crates/lpe-storage/src/submission/Storage/replace_message_recipients.md)
+- [save_draft_message](../../../../../../functions/crates/lpe-storage/src/submission/Storage/save_draft_message.md)
+- [submit_message](../../../../../../functions/crates/lpe-storage/src/submission/Storage/submit_message.md)
+- [submit_draft_message](../../../../../../functions/crates/lpe-storage/src/submission/Storage/submit_draft_message.md)
+- [cancel_queued_submission](../../../../../../functions/crates/lpe-storage/src/submission/Storage/cancel_queued_submission.md)
+- [delete_draft_message](../../../../../../functions/crates/lpe-storage/src/submission/Storage/delete_draft_message.md)
+- [find_submission_account_by_email_in_same_tenant](../../../../../../functions/crates/lpe-storage/src/submission/Storage/find_submission_account_by_email_in_same_tenant.md)
+- [fetch_account_identity](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_account_identity.md)
+- [upsert_mailbox_delegation_grant](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/upsert_mailbox_delegation_grant.md)
+- [set_mailbox_folder_delegation_grant](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/set_mailbox_folder_delegation_grant.md)
+- [delete_mailbox_delegation_grant](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/delete_mailbox_delegation_grant.md)
+- [fetch_mailbox_delegation_grant](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_mailbox_delegation_grant.md)
+- [upsert_sender_delegation_grant](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/upsert_sender_delegation_grant.md)
+- [delete_sender_delegation_grant](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/delete_sender_delegation_grant.md)
+- [fetch_sender_delegation_grant](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_sender_delegation_grant.md)
+- [fetch_outgoing_mailbox_delegation_grants](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_outgoing_mailbox_delegation_grants.md)
+- [fetch_outgoing_sender_delegation_grants](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_outgoing_sender_delegation_grants.md)
+- [fetch_accessible_mailbox_accounts](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_accessible_mailbox_accounts.md)
+- [fetch_sender_identities](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_sender_identities.md)
+- [upsert_client_task](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/upsert_client_task.md)
+- [update_accessible_task_reminder](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/update_accessible_task_reminder.md)
+- [upsert_task_list_grant](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/upsert_task_list_grant.md)
+- [delete_task_list_grant](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/delete_task_list_grant.md)
+- [fetch_task_list_grant](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_task_list_grant.md)
+- [fetch_outgoing_task_list_grants](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_outgoing_task_list_grants.md)
+- [fetch_task_lists](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_task_lists.md)
+- [fetch_task_lists_by_ids](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_task_lists_by_ids.md)
+- [create_task_list](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/create_task_list.md)
+- [update_task_list](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/update_task_list.md)
+- [delete_task_list](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/delete_task_list.md)
+- [delete_client_task](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/delete_client_task.md)
+- [fetch_dav_tasks](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_dav_tasks.md)
+- [fetch_dav_tasks_by_ids](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_dav_tasks_by_ids.md)
+- [fetch_client_tasks](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks.md)
+- [fetch_client_tasks_by_ids](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks_by_ids.md)
+- [fetch_client_workspace](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_workspace.md)
+- [upsert_client_contact_in_book_role](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/upsert_client_contact_in_book_role.md)
+- [upsert_client_event_in_calendar](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/upsert_client_event_in_calendar.md)
+- [fetch_client_events](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_events.md)
+- [fetch_client_events_by_ids](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_events_by_ids.md)
+- [fetch_client_contacts](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_contacts.md)
+- [fetch_client_contacts_by_ids](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_contacts_by_ids.md)
+- [query_recipient_suggestions](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/query_recipient_suggestions.md)
+- [dismiss_recipient_suggestion](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/dismiss_recipient_suggestion.md)

@@ -1,0 +1,253 @@
+---
+type: Rust Function
+title: append_rop_set_properties
+resource: crates/lpe-exchange/src/tests/mod.rs#L14991-L15001
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  called_by:
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/mapi_over_http_set_properties_updates_canonical_event_and_task_reminders
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_custom_properties_survive_restart_style_session
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_fields
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_delete_reminder_delta_reports_problem_without_hiding_reminder
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_save_maps_store_outcomes_and_preserves_pending_handle
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_custom_property_get_uses_same_handle_transaction_overlay
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_keep_open_handle_accepts_second_update_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_default_save_closes_created_updated_and_noop_handles
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_save_projects_committed_far_future_reminder_without_query_reread
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_event_handle_stages_until_save_and_release_discards
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_selective_reopen_uses_durable_event_modseq
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_concurrent_rw_handles_require_force_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_second_save_without_global_object_id_uses_distinct_uid
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_create_accepts_html_stream_and_object_ids
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_ids
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_empty_advertised_calendar_create_uses_default_collection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_meeting_cancel_save_fails_closed_without_atomic_delete
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_meeting_cancel_rejects_binary_payload_without_side_effect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_meeting_response_updates_canonical_attendee_status
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_meeting_response_rejects_binary_payload_without_side_effect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_attendee_named_properties_update_canonical_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_display_cc_updates_optional_attendees
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_time_zone_blob_rejects_without_side_effect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_time_zone_description_updates_canonical_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_whole_start_end_update_canonical_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_common_start_end_update_canonical_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_state_flags_cancel_updates_canonical_event_status
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_state_flags_reject_unsupported_bits_without_side_effect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_local
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_commits_event_and_attachment_together
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_abandons
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_task_crud_uses_canonical_tasks
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_shared_calendar_read_only_rights_reject_mutations
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_conversation_action_applies_to_future_matching_message
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_conversation_action_cross_store_keeps_local_message_in_place
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_open_embedded_message_accepts_read_only_mode
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_stale_message_handle_requires_force_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_oxocfg_writing_view_definition_sequence_succeeds
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_common_views_create_group_header_and_link_persists_and_reloads
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_oxocfg_same_target_wlinks_round_trip_distinctly
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_notification_wait_reports_content_event_after_registered_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_same_execute_additional_ren_junk_alias_opens_junk
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_link_copy_to_uses_message_content_root
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_create_resolves_named_email_addresses
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_replays_outlook_contact_sync_import_then_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_sync_import_save_reports_deleted_source_key
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_created_contact_link_config_accepts_outlook_marker_property
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_sequence
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_direct_tombstone_set_is_staged_until_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_rejects_unmodeled_mixed_set_without_partial_stage
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_across_reconnect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_open_folder_accepts_additional_ren_junk_alias_in_a_new_session
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_scalar_calendar_entry_id_alias_survives_a_new_session
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_property_round_trips_on_supported_object
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kinds
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_property_set_before_save_persists_on_created_item
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_oxcmsg_setting_message_properties_preserves_html_cid_body
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_string8_property_tags_round_trip_through_canonical_unicode_property
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_set_properties_accepts_ptyp_server_id_on_pending_message
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_attachment_custom_properties_survive_restart_style_session
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_set_properties_validates_swapped_todo_data
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_common_view_named_view_accepts_microsoft_descriptor_write_stream_batch
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_online_associated_config_create_is_atomic_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_existing_associated_config_save_is_atomic_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_copy_to_copies_custom_values_excluding_tags
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_copy_properties_copies_custom_values_and_reports_missing_tags
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/public_folders/mapi_over_http_public_folder_create_message_rejects_recipients
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/public_folders/mapi_over_http_public_folder_set_properties_updates_canonical_post_item
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/public_folders/mapi_over_http_public_folder_item_custom_named_property_round_trips
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/save_changes_handles/mapi_over_http_calendar_import_save_restores_containing_folder_response_handle
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/save_changes_handles/mapi_over_http_fai_save_then_get_change_key_keeps_same_input_handle_in_buffer
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_x500_rows_save_canonically
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_example_saves_canonically
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_transport_send_uses_canonical_submission
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_transport_send_target_entry_id_uses_outbox_mirror_and_import_move
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_replayed_execute_request_id_does_not_resubmit_message
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_microsoft_oxcmsg_save_message_keep_open_read_write_imports_canonical_email
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_conversation_action_fai_persists_and_moves_existing_conversation
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_microsoft_oxcmsg_insert_html_embedded_image_is_imported_on_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_create_associated_navigation_shortcut_persists
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_rejects_incomplete_wlink_without_synthetic_defaults
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_accepts_outlook_calendar_group_header_without_group_name
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_online_create_ignores_client_source_key_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_online_common_views_wlink_accepts_later_ics_update_without_local_reservation
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_existing_common_views_wlink_entry_id_replacement_is_staged_until_atomic_save_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_import_classifies_non_wlink_fai_at_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_keeps_identical_online_fai_messages_distinct
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_outlook_mail_favorite_import_without_group_properties_persists
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_associated_message_uploads_do_not_create_visible_items
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_associated_message_persists_and_replays_fai
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_message_list_settings_import_preserves_outlook_identity_and_content
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_missing_associated_config_identity_is_not_recreated
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_persisted_associated_config_write_preserves_class_on_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_replays_outlook_calendar_sync_import_then_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/execute_existing_calendar_sync_import
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_replays_outlook_trash_collector_import_then_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_deletes_removes_common_views_wlink_by_source_key_and_reloads
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/wlink_properties/mapi_over_http_wlink_client_properties_round_trip_postgresql_table_and_ics_after_reload
+  - functions/crates/lpe-exchange/src/tests/mapi_submit_execute_body
+---
+
+# Signature
+
+`fn append_rop_set_properties( rops: &mut Vec<u8>, input: u8, property_count: u16, property_values: &[u8], )`
+
+# Called by
+
+- [mapi_over_http_set_properties_updates_canonical_event_and_task_reminders](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/mapi_over_http_set_properties_updates_canonical_event_and_task_reminders.md)
+- [mapi_over_http_calendar_custom_properties_survive_restart_style_session](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_custom_properties_survive_restart_style_session.md)
+- [mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_fields](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_fields.md)
+- [mapi_over_http_calendar_delete_reminder_delta_reports_problem_without_hiding_reminder](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_delete_reminder_delta_reports_problem_without_hiding_reminder.md)
+- [mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition.md)
+- [mapi_over_http_calendar_create_save_maps_store_outcomes_and_preserves_pending_handle](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_save_maps_store_outcomes_and_preserves_pending_handle.md)
+- [mapi_over_http_calendar_custom_property_get_uses_same_handle_transaction_overlay](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_custom_property_get_uses_same_handle_transaction_overlay.md)
+- [mapi_over_http_calendar_keep_open_handle_accepts_second_update_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_keep_open_handle_accepts_second_update_save.md)
+- [mapi_over_http_calendar_default_save_closes_created_updated_and_noop_handles](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_default_save_closes_created_updated_and_noop_handles.md)
+- [mapi_over_http_calendar_save_projects_committed_far_future_reminder_without_query_reread](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_save_projects_committed_far_future_reminder_without_query_reread.md)
+- [mapi_over_http_calendar_event_handle_stages_until_save_and_release_discards](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_event_handle_stages_until_save_and_release_discards.md)
+- [mapi_over_http_calendar_selective_reopen_uses_durable_event_modseq](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_selective_reopen_uses_durable_event_modseq.md)
+- [mapi_over_http_calendar_concurrent_rw_handles_require_force_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_concurrent_rw_handles_require_force_save.md)
+- [mapi_over_http_calendar_second_save_without_global_object_id_uses_distinct_uid](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_second_save_without_global_object_id_uses_distinct_uid.md)
+- [mapi_over_http_outlook_calendar_create_accepts_html_stream_and_object_ids](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_create_accepts_html_stream_and_object_ids.md)
+- [mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_ids](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_ids.md)
+- [mapi_over_http_empty_advertised_calendar_create_uses_default_collection](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_empty_advertised_calendar_create_uses_default_collection.md)
+- [mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event.md)
+- [mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties.md)
+- [mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect.md)
+- [mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request.md)
+- [mapi_over_http_calendar_meeting_cancel_save_fails_closed_without_atomic_delete](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_meeting_cancel_save_fails_closed_without_atomic_delete.md)
+- [mapi_over_http_calendar_meeting_cancel_rejects_binary_payload_without_side_effect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_meeting_cancel_rejects_binary_payload_without_side_effect.md)
+- [mapi_over_http_calendar_meeting_response_updates_canonical_attendee_status](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_meeting_response_updates_canonical_attendee_status.md)
+- [mapi_over_http_calendar_meeting_response_rejects_binary_payload_without_side_effect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_meeting_response_rejects_binary_payload_without_side_effect.md)
+- [mapi_over_http_calendar_attendee_named_properties_update_canonical_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_attendee_named_properties_update_canonical_event.md)
+- [mapi_over_http_calendar_display_cc_updates_optional_attendees](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_display_cc_updates_optional_attendees.md)
+- [mapi_over_http_calendar_time_zone_blob_rejects_without_side_effect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_time_zone_blob_rejects_without_side_effect.md)
+- [mapi_over_http_calendar_time_zone_description_updates_canonical_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_time_zone_description_updates_canonical_event.md)
+- [mapi_over_http_calendar_whole_start_end_update_canonical_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_whole_start_end_update_canonical_event.md)
+- [mapi_over_http_calendar_common_start_end_update_canonical_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_common_start_end_update_canonical_event.md)
+- [mapi_over_http_calendar_state_flags_cancel_updates_canonical_event_status](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_state_flags_cancel_updates_canonical_event_status.md)
+- [mapi_over_http_calendar_state_flags_reject_unsupported_bits_without_side_effect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_state_flags_reject_unsupported_bits_without_side_effect.md)
+- [mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_local](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_local.md)
+- [mapi_over_http_calendar_create_commits_event_and_attachment_together](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_commits_event_and_attachment_together.md)
+- [mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_abandons](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_abandons.md)
+- [mapi_over_http_task_crud_uses_canonical_tasks](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_task_crud_uses_canonical_tasks.md)
+- [mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collection](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collection.md)
+- [mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection.md)
+- [mapi_over_http_shared_calendar_read_only_rights_reject_mutations](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_shared_calendar_read_only_rights_reject_mutations.md)
+- [mapi_over_http_conversation_action_applies_to_future_matching_message](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_conversation_action_applies_to_future_matching_message.md)
+- [mapi_over_http_conversation_action_cross_store_keeps_local_message_in_place](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_conversation_action_cross_store_keeps_local_message_in_place.md)
+- [mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end.md)
+- [mapi_over_http_microsoft_open_embedded_message_accepts_read_only_mode](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_open_embedded_message_accepts_read_only_mode.md)
+- [mapi_over_http_microsoft_stale_message_handle_requires_force_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_stale_message_handle_requires_force_save.md)
+- [mapi_over_http_microsoft_oxocfg_writing_view_definition_sequence_succeeds](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_oxocfg_writing_view_definition_sequence_succeeds.md)
+- [mapi_over_http_common_views_create_group_header_and_link_persists_and_reloads](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_common_views_create_group_header_and_link_persists_and_reloads.md)
+- [mapi_over_http_microsoft_oxocfg_same_target_wlinks_round_trip_distinctly](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_oxocfg_same_target_wlinks_round_trip_distinctly.md)
+- [mapi_over_http_notification_wait_reports_content_event_after_registered_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_notification_wait_reports_content_event_after_registered_save.md)
+- [mapi_over_http_same_execute_additional_ren_junk_alias_opens_junk](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_same_execute_additional_ren_junk_alias_opens_junk.md)
+- [mapi_over_http_contact_link_copy_to_uses_message_content_root](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_link_copy_to_uses_message_content_root.md)
+- [mapi_over_http_outlook_contact_create_resolves_named_email_addresses](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_create_resolves_named_email_addresses.md)
+- [mapi_over_http_replays_outlook_contact_sync_import_then_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_replays_outlook_contact_sync_import_then_save.md)
+- [mapi_over_http_contact_sync_import_save_reports_deleted_source_key](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_sync_import_save_reports_deleted_source_key.md)
+- [mapi_over_http_contact_crud_uses_canonical_contacts](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts.md)
+- [mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property.md)
+- [mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags.md)
+- [mapi_over_http_created_contact_link_config_accepts_outlook_marker_property](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_created_contact_link_config_accepts_outlook_marker_property.md)
+- [mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_sequence](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_sequence.md)
+- [mapi_over_http_local_freebusy_direct_tombstone_set_is_staged_until_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_direct_tombstone_set_is_staged_until_save.md)
+- [mapi_over_http_local_freebusy_rejects_unmodeled_mixed_set_without_partial_stage](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_rejects_unmodeled_mixed_set_without_partial_stage.md)
+- [mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_across_reconnect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_across_reconnect.md)
+- [mapi_over_http_open_folder_accepts_additional_ren_junk_alias_in_a_new_session](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_open_folder_accepts_additional_ren_junk_alias_in_a_new_session.md)
+- [mapi_over_http_scalar_calendar_entry_id_alias_survives_a_new_session](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_scalar_calendar_entry_id_alias_survives_a_new_session.md)
+- [mapi_over_http_custom_named_property_round_trips_on_supported_object](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_property_round_trips_on_supported_object.md)
+- [mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kinds](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kinds.md)
+- [mapi_over_http_custom_named_property_set_before_save_persists_on_created_item](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_property_set_before_save_persists_on_created_item.md)
+- [mapi_over_http_microsoft_oxcmsg_setting_message_properties_preserves_html_cid_body](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_oxcmsg_setting_message_properties_preserves_html_cid_body.md)
+- [mapi_over_http_string8_property_tags_round_trip_through_canonical_unicode_property](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_string8_property_tags_round_trip_through_canonical_unicode_property.md)
+- [mapi_over_http_set_properties_accepts_ptyp_server_id_on_pending_message](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_set_properties_accepts_ptyp_server_id_on_pending_message.md)
+- [mapi_over_http_attachment_custom_properties_survive_restart_style_session](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_attachment_custom_properties_survive_restart_style_session.md)
+- [mapi_over_http_set_properties_validates_swapped_todo_data](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_set_properties_validates_swapped_todo_data.md)
+- [mapi_over_http_common_view_named_view_accepts_microsoft_descriptor_write_stream_batch](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_common_view_named_view_accepts_microsoft_descriptor_write_stream_batch.md)
+- [mapi_over_http_online_associated_config_create_is_atomic_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_online_associated_config_create_is_atomic_in_postgresql.md)
+- [mapi_over_http_existing_associated_config_save_is_atomic_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_existing_associated_config_save_is_atomic_in_postgresql.md)
+- [mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql.md)
+- [mapi_over_http_microsoft_copy_to_copies_custom_values_excluding_tags](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_copy_to_copies_custom_values_excluding_tags.md)
+- [mapi_over_http_microsoft_copy_properties_copies_custom_values_and_reports_missing_tags](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_copy_properties_copies_custom_values_and_reports_missing_tags.md)
+- [mapi_over_http_public_folder_create_message_rejects_recipients](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/public_folders/mapi_over_http_public_folder_create_message_rejects_recipients.md)
+- [mapi_over_http_public_folder_set_properties_updates_canonical_post_item](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/public_folders/mapi_over_http_public_folder_set_properties_updates_canonical_post_item.md)
+- [mapi_over_http_public_folder_item_custom_named_property_round_trips](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/public_folders/mapi_over_http_public_folder_item_custom_named_property_round_trips.md)
+- [mapi_over_http_calendar_import_save_restores_containing_folder_response_handle](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/save_changes_handles/mapi_over_http_calendar_import_save_restores_containing_folder_response_handle.md)
+- [mapi_over_http_fai_save_then_get_change_key_keeps_same_input_handle_in_buffer](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/save_changes_handles/mapi_over_http_fai_save_then_get_change_key_keeps_same_input_handle_in_buffer.md)
+- [mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically.md)
+- [mapi_over_http_modify_recipients_x500_rows_save_canonically](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_x500_rows_save_canonically.md)
+- [mapi_over_http_microsoft_modify_recipients_example_saves_canonically](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_example_saves_canonically.md)
+- [mapi_over_http_transport_send_uses_canonical_submission](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_transport_send_uses_canonical_submission.md)
+- [mapi_over_http_transport_send_target_entry_id_uses_outbox_mirror_and_import_move](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_transport_send_target_entry_id_uses_outbox_mirror_and_import_move.md)
+- [mapi_over_http_replayed_execute_request_id_does_not_resubmit_message](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_replayed_execute_request_id_does_not_resubmit_message.md)
+- [mapi_over_http_microsoft_oxcmsg_save_message_keep_open_read_write_imports_canonical_email](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_microsoft_oxcmsg_save_message_keep_open_read_write_imports_canonical_email.md)
+- [mapi_over_http_conversation_action_fai_persists_and_moves_existing_conversation](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_conversation_action_fai_persists_and_moves_existing_conversation.md)
+- [mapi_over_http_microsoft_oxcmsg_insert_html_embedded_image_is_imported_on_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_microsoft_oxcmsg_insert_html_embedded_image_is_imported_on_save.md)
+- [mapi_over_http_common_views_create_associated_navigation_shortcut_persists](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_create_associated_navigation_shortcut_persists.md)
+- [mapi_over_http_common_views_rejects_incomplete_wlink_without_synthetic_defaults](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_rejects_incomplete_wlink_without_synthetic_defaults.md)
+- [mapi_over_http_common_views_accepts_outlook_calendar_group_header_without_group_name](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_accepts_outlook_calendar_group_header_without_group_name.md)
+- [mapi_over_http_common_views_online_create_ignores_client_source_key_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_online_create_ignores_client_source_key_in_postgresql.md)
+- [mapi_over_http_online_common_views_wlink_accepts_later_ics_update_without_local_reservation](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_online_common_views_wlink_accepts_later_ics_update_without_local_reservation.md)
+- [mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_postgresql.md)
+- [mapi_over_http_existing_common_views_wlink_entry_id_replacement_is_staged_until_atomic_save_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_existing_common_views_wlink_entry_id_replacement_is_staged_until_atomic_save_in_postgresql.md)
+- [mapi_over_http_common_views_import_classifies_non_wlink_fai_at_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_import_classifies_non_wlink_fai_at_save.md)
+- [mapi_over_http_common_views_keeps_identical_online_fai_messages_distinct](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_keeps_identical_online_fai_messages_distinct.md)
+- [mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql.md)
+- [mapi_over_http_outlook_mail_favorite_import_without_group_properties_persists](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_outlook_mail_favorite_import_without_group_properties_persists.md)
+- [mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save.md)
+- [mapi_over_http_associated_message_uploads_do_not_create_visible_items](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_associated_message_uploads_do_not_create_visible_items.md)
+- [mapi_over_http_sync_import_associated_message_persists_and_replays_fai](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_associated_message_persists_and_replays_fai.md)
+- [mapi_over_http_message_list_settings_import_preserves_outlook_identity_and_content](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_message_list_settings_import_preserves_outlook_identity_and_content.md)
+- [mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai.md)
+- [mapi_over_http_missing_associated_config_identity_is_not_recreated](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_missing_associated_config_identity_is_not_recreated.md)
+- [mapi_over_http_persisted_associated_config_write_preserves_class_on_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_persisted_associated_config_write_preserves_class_on_save.md)
+- [mapi_over_http_replays_outlook_calendar_sync_import_then_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_replays_outlook_calendar_sync_import_then_save.md)
+- [mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_event.md)
+- [execute_existing_calendar_sync_import](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/execute_existing_calendar_sync_import.md)
+- [mapi_over_http_replays_outlook_trash_collector_import_then_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_replays_outlook_trash_collector_import_then_save.md)
+- [mapi_over_http_sync_import_deletes_removes_common_views_wlink_by_source_key_and_reloads](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_deletes_removes_common_views_wlink_by_source_key_and_reloads.md)
+- [mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect.md)
+- [mapi_over_http_wlink_client_properties_round_trip_postgresql_table_and_ics_after_reload](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/wlink_properties/mapi_over_http_wlink_client_properties_round_trip_postgresql_table_and_ics_after_reload.md)
+- [mapi_submit_execute_body](../../../../../functions/crates/lpe-exchange/src/tests/mapi_submit_execute_body.md)

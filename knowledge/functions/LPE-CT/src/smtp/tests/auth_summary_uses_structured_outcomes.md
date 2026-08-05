@@ -1,0 +1,12 @@
+---
+type: Rust Function
+title: auth_summary_uses_structured_outcomes
+resource: LPE-CT/src/smtp/tests.rs#L3180-L3205
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+---
+
+# Signature
+
+`fn auth_summary_uses_structured_outcomes()`

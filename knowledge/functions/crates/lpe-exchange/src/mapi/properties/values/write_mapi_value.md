@@ -1,0 +1,172 @@
+---
+type: Rust Function
+title: write_mapi_value
+resource: crates/lpe-exchange/src/mapi/properties/values.rs#L162-L254
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  calls:
+  - functions/crates/lpe-exchange/src/mapi/properties/tags/MapiPropertyTag/property_type
+  - functions/crates/lpe-exchange/src/mapi/rop/buffer/write_u16
+  - functions/crates/lpe-exchange/src/mapi/properties/values/MapiValue/into_u32
+  - functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from
+  - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
+  - functions/crates/lpe-exchange/src/mapi/properties/values/MapiValue/as_bool
+  - functions/crates/lpe-exchange/src/mapi/properties/values/MapiValue/as_i64
+  - functions/crates/lpe-exchange/src/mapi/rop/buffer/write_u64
+  - functions/crates/lpe-exchange/src/mapi/properties/values/write_ascii_z
+  - functions/crates/lpe-exchange/src/mapi/properties/values/MapiValue/into_text
+  - functions/crates/lpe-exchange/src/mapi/rop/buffer/write_utf16z
+  - functions/crates/lpe-exchange/src/mapi/properties/values/write_rop_binary
+  - functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_i16
+  - functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_i32
+  - functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_i64
+  - functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_string8
+  - functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_string
+  - functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_guid
+  - functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_binary
+  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_property_default
+  called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/upsert_custom_property_values
+  - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/mapi_event_custom_property_values_from_map
+  - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/mapi_contact_custom_property_values_from_map
+  - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/fetch_custom_property_values_for_request
+  - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/staged_custom_property_values
+  - functions/crates/lpe-exchange/src/mapi/dispatch/default_folders/additional_ren_entry_ids_profile_bytes
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/staged_event_commit_input
+  - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/rop_content_restriction
+  - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/rop_not_content_restriction
+  - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/rop_property_restriction
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/round_trip
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/object_id_properties_use_mapi_wire_ids
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/change_number_properties_use_replid_and_globcnt_wire_ids
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/binary_property_uses_rop_u16_length_prefix
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/push_property_restriction
+  - functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property
+  - functions/crates/lpe-exchange/src/mapi/rop/serialize_session_folder_row
+  - functions/crates/lpe-exchange/src/mapi/rop/event_properties/serialize_event_object_property
+  - functions/crates/lpe-exchange/src/mapi/rop/receive_folders/rop_get_receive_folder_table_response
+  - functions/crates/lpe-exchange/src/mapi/rop/request_reader/read_rop_request_with_logon_id
+  - functions/crates/lpe-exchange/src/mapi/rop/tests/modify_recipients_accepts_microsoft_message_example_columns
+  - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_getprops_projects_saved_search_definition_metadata
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_navigation_shortcut_row
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_search_folder_definition_row_with_mailbox_guid
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_common_view_named_view_row_with_mailbox_guid
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_conversation_action_row
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_freebusy_row_staged
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_associated_config_row_with_mailbox_guid
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_optional_property_row
+  - functions/crates/lpe-exchange/src/mapi/tables/attachments/serialize_pending_attachment_row
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_contact_row
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_mapi_contact_row
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_event_row_with_reminder_and_attachments
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_versioned_event_row_with_reminder_and_attachments
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_task_row
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_reminder_task_row
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_note_row
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_journal_entry_row
+  - functions/crates/lpe-exchange/src/mapi/tables/contents/serialize_message_row_with_table_instance
+  - functions/crates/lpe-exchange/src/mapi/tables/contents/write_category_instance_value
+  - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/serialize_categorized_deleted_event_row
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_special_folder_row_with_version
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_change_number
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_version
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_root_folder_row
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/write_logon_property_row
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_logon_row
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_folder_row_with_context
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_folder_row_with_context_and_version
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_collaboration_folder_row_with_context
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_collaboration_folder_row_with_context_and_version
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_message_row
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_associated_message_row
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_event_row
+  - functions/crates/lpe-exchange/src/mapi/tables/public_folders/serialize_public_folder_row
+---
+
+# Signature
+
+`pub(in crate::mapi) fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, value: &MapiValue)`
+
+# Calls
+
+- [property_type](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tags/MapiPropertyTag/property_type.md)
+- [write_u16](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/write_u16.md)
+- [into_u32](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/MapiValue/into_u32.md)
+- [try_from](../../../../../../../functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from.md)
+- [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
+- [as_bool](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/MapiValue/as_bool.md)
+- [as_i64](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/MapiValue/as_i64.md)
+- [write_u64](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/write_u64.md)
+- [write_ascii_z](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_ascii_z.md)
+- [into_text](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/MapiValue/into_text.md)
+- [write_utf16z](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/write_utf16z.md)
+- [write_rop_binary](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_rop_binary.md)
+- [write_multi_i16](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_i16.md)
+- [write_multi_i32](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_i32.md)
+- [write_multi_i64](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_i64.md)
+- [write_multi_string8](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_string8.md)
+- [write_multi_string](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_string.md)
+- [write_multi_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_guid.md)
+- [write_multi_binary](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_binary.md)
+- [write_property_default](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_property_default.md)
+
+# Called by
+
+- [upsert_custom_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/upsert_custom_property_values.md)
+- [mapi_event_custom_property_values_from_map](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/mapi_event_custom_property_values_from_map.md)
+- [mapi_contact_custom_property_values_from_map](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/mapi_contact_custom_property_values_from_map.md)
+- [fetch_custom_property_values_for_request](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/fetch_custom_property_values_for_request.md)
+- [staged_custom_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/staged_custom_property_values.md)
+- [additional_ren_entry_ids_profile_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/default_folders/additional_ren_entry_ids_profile_bytes.md)
+- [staged_event_commit_input](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/staged_event_commit_input.md)
+- [rop_content_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/rop_content_restriction.md)
+- [rop_not_content_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/rop_not_content_restriction.md)
+- [rop_property_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/rop_property_restriction.md)
+- [round_trip](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/round_trip.md)
+- [object_id_properties_use_mapi_wire_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/object_id_properties_use_mapi_wire_ids.md)
+- [change_number_properties_use_replid_and_globcnt_wire_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/change_number_properties_use_replid_and_globcnt_wire_ids.md)
+- [binary_property_uses_rop_u16_length_prefix](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/binary_property_uses_rop_u16_length_prefix.md)
+- [push_property_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/push_property_restriction.md)
+- [serialize_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property.md)
+- [serialize_session_folder_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_session_folder_row.md)
+- [serialize_event_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/event_properties/serialize_event_object_property.md)
+- [rop_get_receive_folder_table_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/receive_folders/rop_get_receive_folder_table_response.md)
+- [read_rop_request_with_logon_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/request_reader/read_rop_request_with_logon_id.md)
+- [modify_recipients_accepts_microsoft_message_example_columns](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/modify_recipients_accepts_microsoft_message_example_columns.md)
+- [folder_getprops_projects_saved_search_definition_metadata](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_getprops_projects_saved_search_definition_metadata.md)
+- [serialize_navigation_shortcut_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_navigation_shortcut_row.md)
+- [serialize_search_folder_definition_row_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_search_folder_definition_row_with_mailbox_guid.md)
+- [serialize_common_view_named_view_row_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_common_view_named_view_row_with_mailbox_guid.md)
+- [serialize_conversation_action_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_conversation_action_row.md)
+- [serialize_freebusy_row_staged](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_freebusy_row_staged.md)
+- [serialize_associated_config_row_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_associated_config_row_with_mailbox_guid.md)
+- [serialize_optional_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_optional_property_row.md)
+- [serialize_pending_attachment_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/attachments/serialize_pending_attachment_row.md)
+- [serialize_contact_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_contact_row.md)
+- [serialize_mapi_contact_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_mapi_contact_row.md)
+- [serialize_event_row_with_reminder_and_attachments](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_event_row_with_reminder_and_attachments.md)
+- [serialize_versioned_event_row_with_reminder_and_attachments](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_versioned_event_row_with_reminder_and_attachments.md)
+- [serialize_task_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_task_row.md)
+- [serialize_reminder_task_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_reminder_task_row.md)
+- [serialize_note_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_note_row.md)
+- [serialize_journal_entry_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_journal_entry_row.md)
+- [serialize_message_row_with_table_instance](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/contents/serialize_message_row_with_table_instance.md)
+- [write_category_instance_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/contents/write_category_instance_value.md)
+- [serialize_categorized_deleted_event_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/serialize_categorized_deleted_event_row.md)
+- [serialize_special_folder_row_with_version](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_special_folder_row_with_version.md)
+- [serialize_advertised_special_folder_row_with_counts_and_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_change_number.md)
+- [serialize_advertised_special_folder_row_with_counts_and_version](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_version.md)
+- [serialize_root_folder_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_root_folder_row.md)
+- [write_logon_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/write_logon_property_row.md)
+- [serialize_logon_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_logon_row.md)
+- [serialize_folder_row_with_context](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_folder_row_with_context.md)
+- [serialize_folder_row_with_context_and_version](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_folder_row_with_context_and_version.md)
+- [serialize_collaboration_folder_row_with_context](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_collaboration_folder_row_with_context.md)
+- [serialize_collaboration_folder_row_with_context_and_version](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_collaboration_folder_row_with_context_and_version.md)
+- [serialize_hierarchy_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row.md)
+- [serialize_pending_message_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_message_row.md)
+- [serialize_pending_associated_message_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_associated_message_row.md)
+- [serialize_pending_event_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_event_row.md)
+- [serialize_public_folder_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/public_folders/serialize_public_folder_row.md)

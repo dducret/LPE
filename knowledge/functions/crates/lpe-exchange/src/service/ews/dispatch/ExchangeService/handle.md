@@ -1,0 +1,230 @@
+---
+type: Rust Method
+title: handle
+resource: crates/lpe-exchange/src/service/ews/dispatch.rs#L9-L282
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  calls:
+  - functions/crates/lpe-mail-auth/src/auth/authenticate_account
+  - functions/crates/lpe-exchange/src/service/ews/xml/decode_ews_body
+  - functions/crates/lpe-exchange/src/service/ews/xml/operation_name
+  - functions/crates/lpe-exchange/src/service/ews/dispatch/trace_ews_event
+  - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/sync_folder_hierarchy
+  - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/find_folder
+  - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/get_folder
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/find_item
+  - functions/crates/lpe-exchange/src/service/ews/responses/operation_error_response
+  - functions/crates/lpe-exchange/src/service/ews/responses/ews_error_code_or
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/get_item
+  - functions/crates/lpe-exchange/src/service/ews/responses/get_item_error_response
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items
+  - functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/find_conversation
+  - functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/get_conversation_items
+  - functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/apply_conversation_action
+  - functions/crates/lpe-exchange/src/service/ews/availability/get_server_time_zones_response
+  - functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/resolve_names
+  - functions/crates/lpe-exchange/src/service/ews/availability/ExchangeService/get_user_availability
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/create_item
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/send_item
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/update_item
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/delete_item
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/archive_item
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/move_item
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/copy_item
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/mark_all_items_as_read
+  - functions/crates/lpe-exchange/src/service/ExchangeService/create_folder
+  - functions/crates/lpe-exchange/src/service/ExchangeService/create_folder_path
+  - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/create_managed_folder
+  - functions/crates/lpe-exchange/src/service/ExchangeService/copy_folder
+  - functions/crates/lpe-exchange/src/service/ExchangeService/empty_folder
+  - functions/crates/lpe-exchange/src/service/ExchangeService/move_folder
+  - functions/crates/lpe-exchange/src/service/ExchangeService/update_folder
+  - functions/crates/lpe-exchange/src/service/ExchangeService/delete_folder
+  - functions/crates/lpe-exchange/src/service/ews/attachments/ExchangeService/get_attachment
+  - functions/crates/lpe-exchange/src/service/ews/attachments/ExchangeService/create_attachment
+  - functions/crates/lpe-exchange/src/service/ews/attachments/ExchangeService/delete_attachment
+  - functions/crates/lpe-exchange/src/service/ews/oof/ExchangeService/get_user_oof_settings
+  - functions/crates/lpe-exchange/src/service/ews/oof/ExchangeService/set_user_oof_settings
+  - functions/crates/lpe-exchange/src/service/ews/rules/ExchangeService/get_inbox_rules
+  - functions/crates/lpe-exchange/src/service/ews/rules/ExchangeService/update_inbox_rules
+  - functions/crates/lpe-exchange/src/service/ews/reminders/ExchangeService/get_reminders
+  - functions/crates/lpe-exchange/src/service/ews/reminders/ExchangeService/perform_reminder_action
+  - functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/subscribe
+  - functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/get_events
+  - functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/get_streaming_events
+  - functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/unsubscribe
+  - functions/crates/lpe-exchange/src/service/ews/rooms/ExchangeService/get_rooms
+  - functions/crates/lpe-exchange/src/service/ews/rooms/ExchangeService/get_room_lists
+  - functions/crates/lpe-exchange/src/service/ews/ids/ExchangeService/convert_id
+  - functions/crates/lpe-exchange/src/service/ews/mail_tips/ExchangeService/get_mail_tips
+  - functions/crates/lpe-exchange/src/service/ews/mail_tips/ExchangeService/get_service_configuration
+  - functions/crates/lpe-exchange/src/service/ews/retention/ExchangeService/get_user_retention_policy_tags
+  - functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/get_discovery_search_configuration
+  - functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/get_searchable_mailboxes
+  - functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/search_mailboxes
+  - functions/crates/lpe-exchange/src/service/ews/message_tracking/ExchangeService/find_message_tracking_report
+  - functions/crates/lpe-exchange/src/service/ews/message_tracking/ExchangeService/get_message_tracking_report
+  - functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/get_hold_on_mailboxes
+  - functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/set_hold_on_mailboxes
+  - functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/get_non_indexable_item_details
+  - functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/get_non_indexable_item_statistics
+  - functions/crates/lpe-exchange/src/service/ews/bulk_transfer/ExchangeService/upload_items
+  - functions/crates/lpe-exchange/src/service/ews/bulk_transfer/ExchangeService/export_items
+  - functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/get_app_manifests
+  - functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/get_app_marketplace_url
+  - functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/install_app
+  - functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/disable_app
+  - functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/uninstall_app
+  - functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/get_client_access_token
+  - functions/crates/lpe-exchange/src/service/ews/unified_messaging/ExchangeService/play_on_phone
+  - functions/crates/lpe-exchange/src/service/ews/unified_messaging/ExchangeService/get_phone_call_information
+  - functions/crates/lpe-exchange/src/service/ews/unified_messaging/ExchangeService/disconnect_phone_call
+  - functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/find_people
+  - functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/get_persona
+  - functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/expand_dl
+  - functions/crates/lpe-exchange/src/service/ews/delegation/ExchangeService/add_delegate
+  - functions/crates/lpe-exchange/src/service/ews/delegation/ExchangeService/get_delegate
+  - functions/crates/lpe-exchange/src/service/ews/delegation/ExchangeService/update_delegate
+  - functions/crates/lpe-exchange/src/service/ews/delegation/ExchangeService/remove_delegate
+  - functions/crates/lpe-exchange/src/service/ews/user_configuration/ExchangeService/get_user_configuration
+  - functions/crates/lpe-exchange/src/service/ews/user_configuration/ExchangeService/create_user_configuration
+  - functions/crates/lpe-exchange/src/service/ews/user_configuration/ExchangeService/update_user_configuration
+  - functions/crates/lpe-exchange/src/service/ews/user_configuration/ExchangeService/delete_user_configuration
+  - functions/crates/lpe-exchange/src/service/ews/sharing/ExchangeService/get_sharing_metadata
+  - functions/crates/lpe-exchange/src/service/ews/sharing/ExchangeService/get_sharing_folder
+  - functions/crates/lpe-exchange/src/service/ews/sharing/ExchangeService/refresh_sharing_folder
+  - functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/get_user_photo
+  - functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/get_password_expiration_date
+  - functions/crates/lpe-exchange/src/service/ews/mail/ExchangeService/mark_as_junk
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/get_im_item_list
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/get_im_items
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_im_group
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/set_im_group
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/remove_im_group
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_im_contact_to_group
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_new_im_contact_to_group
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_new_tel_uri_contact_to_group
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/remove_contact_from_im_list
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/remove_im_contact_from_group
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_distribution_group_to_im_list
+  - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/remove_distribution_group_from_im_list
+  - functions/crates/lpe-exchange/src/service/ews/responses/unsupported_operation_response
+  - functions/crates/lpe-exchange/src/service/ews/xml/element_text
+  - functions/crates/lpe-exchange/src/service/ews/diagnostics/ews_payload_debug_detail
+  - functions/crates/lpe-exchange/src/service/ews/xml/soap_response
+---
+
+# Signature
+
+`pub(crate) async fn handle(&self, headers: &HeaderMap, body: &[u8]) -> Result<Response>`
+
+# Calls
+
+- [authenticate_account](../../../../../../../../functions/crates/lpe-mail-auth/src/auth/authenticate_account.md)
+- [decode_ews_body](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/xml/decode_ews_body.md)
+- [operation_name](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/xml/operation_name.md)
+- [trace_ews_event](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/dispatch/trace_ews_event.md)
+- [sync_folder_hierarchy](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/sync_folder_hierarchy.md)
+- [find_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/find_folder.md)
+- [get_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/get_folder.md)
+- [find_item](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/find_item.md)
+- [operation_error_response](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/operation_error_response.md)
+- [ews_error_code_or](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/ews_error_code_or.md)
+- [get_item](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/get_item.md)
+- [get_item_error_response](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/get_item_error_response.md)
+- [sync_folder_items](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items.md)
+- [find_conversation](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/find_conversation.md)
+- [get_conversation_items](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/get_conversation_items.md)
+- [apply_conversation_action](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/apply_conversation_action.md)
+- [get_server_time_zones_response](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/availability/get_server_time_zones_response.md)
+- [resolve_names](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/resolve_names.md)
+- [get_user_availability](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/availability/ExchangeService/get_user_availability.md)
+- [create_item](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/create_item.md)
+- [send_item](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/send_item.md)
+- [update_item](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/update_item.md)
+- [delete_item](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/delete_item.md)
+- [archive_item](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/archive_item.md)
+- [move_item](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/move_item.md)
+- [copy_item](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/copy_item.md)
+- [mark_all_items_as_read](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/mark_all_items_as_read.md)
+- [create_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/create_folder.md)
+- [create_folder_path](../../../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/create_folder_path.md)
+- [create_managed_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/create_managed_folder.md)
+- [copy_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/copy_folder.md)
+- [empty_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/empty_folder.md)
+- [move_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/move_folder.md)
+- [update_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/update_folder.md)
+- [delete_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/delete_folder.md)
+- [get_attachment](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/attachments/ExchangeService/get_attachment.md)
+- [create_attachment](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/attachments/ExchangeService/create_attachment.md)
+- [delete_attachment](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/attachments/ExchangeService/delete_attachment.md)
+- [get_user_oof_settings](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/oof/ExchangeService/get_user_oof_settings.md)
+- [set_user_oof_settings](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/oof/ExchangeService/set_user_oof_settings.md)
+- [get_inbox_rules](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/rules/ExchangeService/get_inbox_rules.md)
+- [update_inbox_rules](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/rules/ExchangeService/update_inbox_rules.md)
+- [get_reminders](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/reminders/ExchangeService/get_reminders.md)
+- [perform_reminder_action](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/reminders/ExchangeService/perform_reminder_action.md)
+- [subscribe](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/subscribe.md)
+- [get_events](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/get_events.md)
+- [get_streaming_events](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/get_streaming_events.md)
+- [unsubscribe](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/unsubscribe.md)
+- [get_rooms](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/rooms/ExchangeService/get_rooms.md)
+- [get_room_lists](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/rooms/ExchangeService/get_room_lists.md)
+- [convert_id](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ids/ExchangeService/convert_id.md)
+- [get_mail_tips](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_tips/ExchangeService/get_mail_tips.md)
+- [get_service_configuration](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_tips/ExchangeService/get_service_configuration.md)
+- [get_user_retention_policy_tags](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/retention/ExchangeService/get_user_retention_policy_tags.md)
+- [get_discovery_search_configuration](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/get_discovery_search_configuration.md)
+- [get_searchable_mailboxes](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/get_searchable_mailboxes.md)
+- [search_mailboxes](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/search_mailboxes.md)
+- [find_message_tracking_report](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/message_tracking/ExchangeService/find_message_tracking_report.md)
+- [get_message_tracking_report](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/message_tracking/ExchangeService/get_message_tracking_report.md)
+- [get_hold_on_mailboxes](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/get_hold_on_mailboxes.md)
+- [set_hold_on_mailboxes](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/set_hold_on_mailboxes.md)
+- [get_non_indexable_item_details](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/get_non_indexable_item_details.md)
+- [get_non_indexable_item_statistics](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/compliance/ExchangeService/get_non_indexable_item_statistics.md)
+- [upload_items](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/bulk_transfer/ExchangeService/upload_items.md)
+- [export_items](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/bulk_transfer/ExchangeService/export_items.md)
+- [get_app_manifests](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/get_app_manifests.md)
+- [get_app_marketplace_url](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/get_app_marketplace_url.md)
+- [install_app](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/install_app.md)
+- [disable_app](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/disable_app.md)
+- [uninstall_app](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/uninstall_app.md)
+- [get_client_access_token](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_apps/ExchangeService/get_client_access_token.md)
+- [play_on_phone](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/unified_messaging/ExchangeService/play_on_phone.md)
+- [get_phone_call_information](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/unified_messaging/ExchangeService/get_phone_call_information.md)
+- [disconnect_phone_call](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/unified_messaging/ExchangeService/disconnect_phone_call.md)
+- [find_people](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/find_people.md)
+- [get_persona](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/get_persona.md)
+- [expand_dl](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/expand_dl.md)
+- [add_delegate](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/delegation/ExchangeService/add_delegate.md)
+- [get_delegate](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/delegation/ExchangeService/get_delegate.md)
+- [update_delegate](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/delegation/ExchangeService/update_delegate.md)
+- [remove_delegate](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/delegation/ExchangeService/remove_delegate.md)
+- [get_user_configuration](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/user_configuration/ExchangeService/get_user_configuration.md)
+- [create_user_configuration](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/user_configuration/ExchangeService/create_user_configuration.md)
+- [update_user_configuration](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/user_configuration/ExchangeService/update_user_configuration.md)
+- [delete_user_configuration](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/user_configuration/ExchangeService/delete_user_configuration.md)
+- [get_sharing_metadata](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sharing/ExchangeService/get_sharing_metadata.md)
+- [get_sharing_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sharing/ExchangeService/get_sharing_folder.md)
+- [refresh_sharing_folder](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sharing/ExchangeService/refresh_sharing_folder.md)
+- [get_user_photo](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/get_user_photo.md)
+- [get_password_expiration_date](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/directory/ExchangeService/get_password_expiration_date.md)
+- [mark_as_junk](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail/ExchangeService/mark_as_junk.md)
+- [get_im_item_list](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/get_im_item_list.md)
+- [get_im_items](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/get_im_items.md)
+- [add_im_group](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_im_group.md)
+- [set_im_group](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/set_im_group.md)
+- [remove_im_group](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/remove_im_group.md)
+- [add_im_contact_to_group](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_im_contact_to_group.md)
+- [add_new_im_contact_to_group](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_new_im_contact_to_group.md)
+- [add_new_tel_uri_contact_to_group](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_new_tel_uri_contact_to_group.md)
+- [remove_contact_from_im_list](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/remove_contact_from_im_list.md)
+- [remove_im_contact_from_group](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/remove_im_contact_from_group.md)
+- [add_distribution_group_to_im_list](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_distribution_group_to_im_list.md)
+- [remove_distribution_group_from_im_list](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/remove_distribution_group_from_im_list.md)
+- [unsupported_operation_response](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/unsupported_operation_response.md)
+- [element_text](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/xml/element_text.md)
+- [ews_payload_debug_detail](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/diagnostics/ews_payload_debug_detail.md)
+- [soap_response](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/xml/soap_response.md)

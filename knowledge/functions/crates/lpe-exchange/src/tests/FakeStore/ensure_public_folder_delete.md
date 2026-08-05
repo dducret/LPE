@@ -1,0 +1,25 @@
+---
+type: Rust Method
+title: ensure_public_folder_delete
+resource: crates/lpe-exchange/src/tests/mod.rs#L4408-L4419
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  calls:
+  - functions/crates/lpe-exchange/src/tests/FakeStore/public_folder_rights_for
+  called_by:
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/delete_public_folder_item
+---
+
+# Signature
+
+`fn ensure_public_folder_delete(&self, account_id: Uuid, folder_id: Uuid) -> anyhow::Result<()>`
+
+# Calls
+
+- [public_folder_rights_for](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/public_folder_rights_for.md)
+
+# Called by
+
+- [delete_public_folder_item](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/delete_public_folder_item.md)

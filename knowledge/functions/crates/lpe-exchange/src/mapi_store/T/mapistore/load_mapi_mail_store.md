@@ -1,0 +1,185 @@
+---
+type: Rust Method
+title: load_mapi_mail_store
+resource: crates/lpe-exchange/src/mapi_store.rs#L422-L720
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  calls:
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/ensure_jmap_system_mailboxes
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_message_attachments
+  - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_sync_versions
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_in_collection
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_navigation_shortcuts
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_named_properties
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_associated_configs
+  - functions/crates/lpe-exchange/src/mapi_store/associated_config/is_empty_synthetic_inbox_associated_config
+  - functions/crates/lpe-exchange/src/mapi_store/associated_config/is_empty_outlook_rule_organizer_placeholder
+  - functions/crates/lpe-exchange/src/mapi_store/associated_config/is_stale_outlook_umolk_user_options_placeholder
+  - functions/crates/lpe-exchange/src/mapi_store/associated_config/log_outlook_inbox_associated_config_bootstrap
+  - functions/crates/lpe-exchange/src/mapi_store/mapi_identity_requests
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_or_allocate_mapi_identities
+  - functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/from_special_folder_identity_records
+  - functions/crates/lpe-exchange/src/mapi_store/folder_versions/mapi_folder_identity_requests
+  - functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/is_special_canonical_id
+  - functions/crates/lpe-exchange/src/mapi/identity/remember_mapi_identity_with_source_key
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_folder_permissions
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_mailbox_content_commit_times
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/new_with_scoped_calendar_identities
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_identities
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_sync_versions
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_calendar_attachments
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_event_versions
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_notes_and_journal
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_search_folder_definitions
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_rules
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_navigation_shortcuts
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_navigation_shortcut_identities
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_named_property_mappings
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_associated_configs
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_associated_config_identity_ids
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_conversation_actions
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_delegate_freebusy_messages
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_recoverable_items
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_reminders
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_public_folders
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_public_folder_replicas
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_mailbox_content_commit_times
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_identity_codec
+  called_by:
+  - functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_sync_projects_postgresql_custom_calendar_collection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_custom_collection_attachment_is_hidden_for_existing_guarded_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_custom_calendar_hierarchy_row_projects_owner_entry_id_identity
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_shared_calendar_hierarchy_sync_projects_owner_entry_id_identity
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_shared_calendar_read_only_rights_reject_mutations
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar_identity_scope/mapi_calendar_snapshot_identity_is_principal_scoped_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_open_folder_defers_property_projection_until_getprops
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_root_ipm_and_inbox_open_batch_returns_all_handles
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_folder_extended_flags_survive_reconnect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/calendar_notification_ids
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_custom_calendar_modify_permissions_maps_acl_rows_to_calendar_grants
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps_acl_rows_to_calendar_grants
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_custom_calendar_modify_permissions_remove_deletes_calendar_grant
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_shared_calendar_without_share_right_rejects_modify_permissions
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_online_associated_config_create_is_atomic_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_existing_associated_config_save_is_atomic_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_associated_config_delete_tombstones_identity_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_keeps_identical_online_fai_messages_distinct
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_outlook_mail_favorite_import_without_group_properties_persists
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_incremental_after_client_state_exports_delta
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_deletes_removes_common_views_wlink_by_source_key_and_reloads
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_hierarchy_change_accepts_existing_deleted_items
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect
+  - functions/crates/lpe-exchange/src/tests/postgres_mapi_contacts_local_commit_time_tracks_canonical_update
+  - functions/crates/lpe-exchange/src/tests/mapi_identity_mapping_survives_restart_style_store_reload
+  - functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_inserts_no_defaults
+  - functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row
+  - functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable
+  - functions/crates/lpe-exchange/src/tests/mapi_default_calendar_folder_identity_is_persisted
+  - functions/crates/lpe-exchange/src/tests/mapi_calendar_event_identity_survives_restart_style_store_reload
+  - functions/crates/lpe-exchange/src/tests/mapi_full_snapshot_loads_messages_without_search_index_query
+  - functions/crates/lpe-exchange/src/tests/mapi_full_snapshot_never_truncates_mailbox_contents_for_ics
+  - functions/crates/lpe-exchange/src/tests/mapi_full_snapshot_persists_virtual_special_folder_version_identity
+---
+
+# Signature
+
+`fn load_mapi_mail_store<'a>( &'a self, account_id: Uuid, _message_limit: u64, ) -> StoreFuture<'a, MapiMailStoreSnapshot>`
+
+# Calls
+
+- [ensure_jmap_system_mailboxes](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/ensure_jmap_system_mailboxes.md)
+- [fetch_message_attachments](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_message_attachments.md)
+- [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
+- [fetch_contact_sync_versions](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_sync_versions.md)
+- [fetch_accessible_tasks_in_collection](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_in_collection.md)
+- [fetch_mapi_navigation_shortcuts](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_navigation_shortcuts.md)
+- [fetch_mapi_named_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_named_properties.md)
+- [fetch_mapi_associated_configs](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_associated_configs.md)
+- [is_empty_synthetic_inbox_associated_config](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/is_empty_synthetic_inbox_associated_config.md)
+- [is_empty_outlook_rule_organizer_placeholder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/is_empty_outlook_rule_organizer_placeholder.md)
+- [is_stale_outlook_umolk_user_options_placeholder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/is_stale_outlook_umolk_user_options_placeholder.md)
+- [log_outlook_inbox_associated_config_bootstrap](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/log_outlook_inbox_associated_config_bootstrap.md)
+- [mapi_identity_requests](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/mapi_identity_requests.md)
+- [fetch_or_allocate_mapi_identities](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_or_allocate_mapi_identities.md)
+- [from_special_folder_identity_records](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/from_special_folder_identity_records.md)
+- [mapi_folder_identity_requests](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/folder_versions/mapi_folder_identity_requests.md)
+- [is_special_canonical_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/is_special_canonical_id.md)
+- [remember_mapi_identity_with_source_key](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/remember_mapi_identity_with_source_key.md)
+- [fetch_mapi_folder_permissions](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_folder_permissions.md)
+- [fetch_mapi_mailbox_content_commit_times](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_mailbox_content_commit_times.md)
+- [new_with_scoped_calendar_identities](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/new_with_scoped_calendar_identities.md)
+- [with_contact_identities](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_identities.md)
+- [with_contact_sync_versions](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_sync_versions.md)
+- [with_calendar_attachments](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_calendar_attachments.md)
+- [with_event_versions](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_event_versions.md)
+- [with_notes_and_journal](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_notes_and_journal.md)
+- [with_search_folder_definitions](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_search_folder_definitions.md)
+- [with_rules](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_rules.md)
+- [with_navigation_shortcuts](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_navigation_shortcuts.md)
+- [with_navigation_shortcut_identities](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_navigation_shortcut_identities.md)
+- [with_named_property_mappings](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_named_property_mappings.md)
+- [with_associated_configs](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_associated_configs.md)
+- [with_associated_config_identity_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_associated_config_identity_ids.md)
+- [with_conversation_actions](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_conversation_actions.md)
+- [with_delegate_freebusy_messages](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_delegate_freebusy_messages.md)
+- [with_recoverable_items](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_recoverable_items.md)
+- [with_reminders](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_reminders.md)
+- [with_public_folders](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_public_folders.md)
+- [with_public_folder_replicas](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_public_folder_replicas.md)
+- [with_mailbox_content_commit_times](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_mailbox_content_commit_times.md)
+- [with_identity_codec](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_identity_codec.md)
+
+# Called by
+
+- [load_mapi_store_for_access_plan](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan.md)
+- [mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event.md)
+- [mapi_over_http_calendar_sync_projects_postgresql_custom_calendar_collection](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_sync_projects_postgresql_custom_calendar_collection.md)
+- [mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collection](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collection.md)
+- [mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection.md)
+- [mapi_over_http_calendar_custom_collection_attachment_is_hidden_for_existing_guarded_event](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_custom_collection_attachment_is_hidden_for_existing_guarded_event.md)
+- [mapi_over_http_custom_calendar_hierarchy_row_projects_owner_entry_id_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_custom_calendar_hierarchy_row_projects_owner_entry_id_identity.md)
+- [mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity.md)
+- [mapi_over_http_shared_calendar_hierarchy_sync_projects_owner_entry_id_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_shared_calendar_hierarchy_sync_projects_owner_entry_id_identity.md)
+- [mapi_over_http_shared_calendar_read_only_rights_reject_mutations](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_shared_calendar_read_only_rights_reject_mutations.md)
+- [mapi_calendar_snapshot_identity_is_principal_scoped_in_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar_identity_scope/mapi_calendar_snapshot_identity_is_principal_scoped_in_postgresql.md)
+- [mapi_over_http_open_folder_defers_property_projection_until_getprops](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_open_folder_defers_property_projection_until_getprops.md)
+- [mapi_over_http_root_ipm_and_inbox_open_batch_returns_all_handles](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_root_ipm_and_inbox_open_batch_returns_all_handles.md)
+- [mapi_over_http_folder_extended_flags_survive_reconnect](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_folder_extended_flags_survive_reconnect.md)
+- [calendar_notification_ids](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/calendar_notification_ids.md)
+- [mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state.md)
+- [mapi_over_http_custom_calendar_modify_permissions_maps_acl_rows_to_calendar_grants](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_custom_calendar_modify_permissions_maps_acl_rows_to_calendar_grants.md)
+- [mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps_acl_rows_to_calendar_grants](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps_acl_rows_to_calendar_grants.md)
+- [mapi_over_http_custom_calendar_modify_permissions_remove_deletes_calendar_grant](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_custom_calendar_modify_permissions_remove_deletes_calendar_grant.md)
+- [mapi_over_http_shared_calendar_without_share_right_rejects_modify_permissions](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_shared_calendar_without_share_right_rejects_modify_permissions.md)
+- [mapi_over_http_online_associated_config_create_is_atomic_in_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_online_associated_config_create_is_atomic_in_postgresql.md)
+- [mapi_over_http_existing_associated_config_save_is_atomic_in_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_existing_associated_config_save_is_atomic_in_postgresql.md)
+- [mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql.md)
+- [mapi_associated_config_delete_tombstones_identity_in_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_associated_config_delete_tombstones_identity_in_postgresql.md)
+- [mapi_over_http_common_views_keeps_identical_online_fai_messages_distinct](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_keeps_identical_online_fai_messages_distinct.md)
+- [mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql.md)
+- [mapi_over_http_outlook_mail_favorite_import_without_group_properties_persists](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_outlook_mail_favorite_import_without_group_properties_persists.md)
+- [mapi_over_http_content_sync_incremental_after_client_state_exports_delta](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_incremental_after_client_state_exports_delta.md)
+- [mapi_over_http_sync_import_deletes_removes_common_views_wlink_by_source_key_and_reloads](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_deletes_removes_common_views_wlink_by_source_key_and_reloads.md)
+- [mapi_over_http_sync_import_hierarchy_change_accepts_existing_deleted_items](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_hierarchy_change_accepts_existing_deleted_items.md)
+- [mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect.md)
+- [postgres_mapi_contacts_local_commit_time_tracks_canonical_update](../../../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_contacts_local_commit_time_tracks_canonical_update.md)
+- [mapi_identity_mapping_survives_restart_style_store_reload](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_identity_mapping_survives_restart_style_store_reload.md)
+- [mapi_inbox_associated_config_bootstrap_inserts_no_defaults](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_inserts_no_defaults.md)
+- [mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row.md)
+- [mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable.md)
+- [mapi_default_calendar_folder_identity_is_persisted](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_default_calendar_folder_identity_is_persisted.md)
+- [mapi_calendar_event_identity_survives_restart_style_store_reload](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_calendar_event_identity_survives_restart_style_store_reload.md)
+- [mapi_full_snapshot_loads_messages_without_search_index_query](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_full_snapshot_loads_messages_without_search_index_query.md)
+- [mapi_full_snapshot_never_truncates_mailbox_contents_for_ics](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_full_snapshot_never_truncates_mailbox_contents_for_ics.md)
+- [mapi_full_snapshot_persists_virtual_special_folder_version_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_full_snapshot_persists_virtual_special_folder_version_identity.md)

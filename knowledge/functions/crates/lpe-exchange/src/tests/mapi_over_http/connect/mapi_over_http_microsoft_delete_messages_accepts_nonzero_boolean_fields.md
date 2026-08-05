@@ -1,0 +1,37 @@
+---
+type: Rust Function
+title: mapi_over_http_microsoft_delete_messages_accepts_nonzero_boolean_fields
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1152-L1229
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  calls:
+  - functions/crates/lpe-exchange/src/tests/mapi_headers
+  - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
+  - functions/crates/lpe-exchange/src/tests/append_rop_open_folder
+  - functions/crates/lpe-exchange/src/tests/test_mapi_folder_id
+  - functions/crates/lpe-exchange/src/tests/append_mapi_wire_id
+  - functions/crates/lpe-exchange/src/tests/test_mapi_message_id
+  - functions/crates/lpe-exchange/src/tests/execute_body
+  - functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response
+  - functions/crates/lpe-exchange/src/tests/renew_mapi_request_id
+---
+
+# Signature
+
+`async fn mapi_over_http_microsoft_delete_messages_accepts_nonzero_boolean_fields()`
+
+# Calls
+
+- [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
+- [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
+- [append_rop_open_folder](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_open_folder.md)
+- [test_mapi_folder_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_folder_id.md)
+- [append_mapi_wire_id](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_wire_id.md)
+- [test_mapi_message_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_message_id.md)
+- [execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/execute_body.md)
+- [response_rops_from_execute_response](../../../../../../../functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response.md)
+- [renew_mapi_request_id](../../../../../../../functions/crates/lpe-exchange/src/tests/renew_mapi_request_id.md)

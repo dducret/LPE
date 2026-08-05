@@ -1,0 +1,387 @@
+---
+type: Rust Module
+title: tests
+resource: crates/lpe-jmap/src/tests.rs#L1-L15023
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  imports:
+  - external/lpe-storage-authenticatedaccount-calendareventattachment-clientnote-clientreminder-clienttask-jmapemail-jmapemailquery-jmapmailbox-jmapuploadblob-journalentry-sievescriptdocument-storage-submitmessageinput-submittedmessage
+  - external/serde-json-json-value
+  - external/sqlx-postgres-pgconnectoptions-pgpooloptions-pgpool-row
+  - external/std-str-fromstr
+  - external/uuid-uuid
+  - external/super
+  - external/crate-protocol-jmapapirequest-jmapmethodcall-state-decode-query-state-decode-state-encode-push-state-encode-state-with-cursor-stateentry-store-jmappushlistener-jmapstore
+  - external/anyhow-anyhow-bail-context-result
+  - external/lpe-magika-detectionsource-detector-magikadetection-validator
+  - external/lpe-storage-mail-parse-rfc822-message
+  - external/lpe-storage-serialize-calendar-participants-metadata-accessiblecontact-accessibleevent-attachmentuploadinput-auditentryinput-calendarorganizermetadata-calendarparticipantmetadata-calendarparticipantsmetadata-canonicalchangecategory-canonicalchangereplay-canonicalpushchangeset-clientcontact-clientevent-clienttasklist-collaborationcollection-collaborationrights-createtasklistinput-jmapemailaddress-jmapemailmailboxstate-jmapemailsubmission-jmapimportedemailinput-jmapmailobjectchange-jmapmailboxcreateinput-jmapmailboxupdateinput-jmapquota-jmapstoredquerystate-jmapstringobjectchange-mailboxaccountaccess-mailboxrule-outlookprofilestate-recipientsuggestion-saveddraftmessage-searchfolderdefinition-senderidentity-updatetasklistinput-upsertclientcontactinput-upsertclienteventinput-upsertclientnoteinput-upsertclienttaskinput-upsertjournalentryinput-upsertsearchfolderinput
+  - external/std-collections-hashmap-hashset-env-sync-arc-mutex-time-instant
+  - external/base64-engine-as
+  - external/sha2-digest-as
+  member_of:
+  - packages/crates/lpe-jmap
+---
+
+# Contains
+
+- [FakeStore](../../../../classes/crates/lpe-jmap/src/tests/FakeStore.md)
+- [FakePushListener](../../../../classes/crates/lpe-jmap/src/tests/FakePushListener.md)
+- [fake_filter_hash](../../../../functions/crates/lpe-jmap/src/tests/fake_filter_hash.md)
+- [fake_sort_hash](../../../../functions/crates/lpe-jmap/src/tests/fake_sort_hash.md)
+- [FakeDetector](../../../../classes/crates/lpe-jmap/src/tests/FakeDetector.md)
+- [parse_rfc822_message_collects_supported_attachment_parts](../../../../functions/crates/lpe-jmap/src/tests/parse_rfc822_message_collects_supported_attachment_parts.md)
+- [detect](../../../../functions/crates/lpe-jmap/src/tests/FakeDetector/detector/detect.md)
+- [validator_ok](../../../../functions/crates/lpe-jmap/src/tests/validator_ok.md)
+- [validator_sequence](../../../../functions/crates/lpe-jmap/src/tests/validator_sequence.md)
+- [validator_error](../../../../functions/crates/lpe-jmap/src/tests/validator_error.md)
+- [strip_bcc_headers_for_test](../../../../functions/crates/lpe-jmap/src/tests/strip_bcc_headers_for_test.md)
+- [email_matches_visible_search](../../../../functions/crates/lpe-jmap/src/tests/email_matches_visible_search.md)
+- [wait_for_change](../../../../functions/crates/lpe-jmap/src/tests/FakePushListener/jmappushlistener/wait_for_change.md)
+- [full_rights](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/full_rights.md)
+- [read_only_rights](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/read_only_rights.md)
+- [contact_collection](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/contact_collection.md)
+- [calendar_collection](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/calendar_collection.md)
+- [accessible_contact](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/accessible_contact.md)
+- [accessible_event](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/accessible_event.md)
+- [account](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/account.md)
+- [tenant_id](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/tenant_id.md)
+- [draft_mailbox](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/draft_mailbox.md)
+- [mailbox_state](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/mailbox_state.md)
+- [draft_email](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/draft_email.md)
+- [inbox_mailbox](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/inbox_mailbox.md)
+- [inbox_email](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/inbox_email.md)
+- [contact](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/contact.md)
+- [event](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/event.md)
+- [task](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/task.md)
+- [note](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/note.md)
+- [journal_entry](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/journal_entry.md)
+- [search_folder](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/search_folder.md)
+- [mailbox_rule](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/mailbox_rule.md)
+- [outlook_profile_state](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/outlook_profile_state.md)
+- [reminder](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/reminder.md)
+- [default_task_list](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/default_task_list.md)
+- [shared_account](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/shared_account.md)
+- [mailbox_access](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/mailbox_access.md)
+- [shared_mailbox_access](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/shared_mailbox_access.md)
+- [shared_mailbox_read_only_access](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/shared_mailbox_read_only_access.md)
+- [sender_identity](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/sender_identity.md)
+- [email_submission](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/email_submission.md)
+- [push_subscription](../../../../functions/crates/lpe-jmap/src/tests/push_subscription.md)
+- [fetch_account_session](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_account_session.md)
+- [create_push_listener](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/create_push_listener.md)
+- [fetch_canonical_change_cursor](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_canonical_change_cursor.md)
+- [fetch_jmap_mail_change_cursor](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_mail_change_cursor.md)
+- [fetch_jmap_object_change_cursor](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_object_change_cursor.md)
+- [replay_jmap_mail_object_changes](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/replay_jmap_mail_object_changes.md)
+- [replay_jmap_object_changes](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/replay_jmap_object_changes.md)
+- [replay_jmap_string_object_changes](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/replay_jmap_string_object_changes.md)
+- [save_jmap_query_state](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/save_jmap_query_state.md)
+- [fetch_jmap_query_state](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_query_state.md)
+- [replay_canonical_changes](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/replay_canonical_changes.md)
+- [fetch_jmap_mailboxes](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_mailboxes.md)
+- [fetch_accessible_mailbox_accounts](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_accessible_mailbox_accounts.md)
+- [fetch_sender_identities](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_sender_identities.md)
+- [fetch_jmap_mailbox_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_mailbox_ids.md)
+- [query_jmap_email_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/query_jmap_email_ids.md)
+- [fetch_all_jmap_email_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_all_jmap_email_ids.md)
+- [fetch_all_jmap_thread_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_all_jmap_thread_ids.md)
+- [query_jmap_thread_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/query_jmap_thread_ids.md)
+- [create_jmap_mailbox](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/create_jmap_mailbox.md)
+- [update_jmap_mailbox](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/update_jmap_mailbox.md)
+- [destroy_jmap_mailbox](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/destroy_jmap_mailbox.md)
+- [fetch_jmap_emails](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_emails.md)
+- [fetch_jmap_emails_with_protected_bcc](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_emails_with_protected_bcc.md)
+- [fetch_jmap_draft](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_draft.md)
+- [fetch_jmap_email_submissions](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_email_submissions.md)
+- [fetch_jmap_quota](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_quota.md)
+- [list_mailbox_rules](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/list_mailbox_rules.md)
+- [fetch_outlook_profile_state](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_outlook_profile_state.md)
+- [fetch_search_folders](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_search_folders.md)
+- [fetch_search_folders_by_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_search_folders_by_ids.md)
+- [upsert_search_folder](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/upsert_search_folder.md)
+- [delete_search_folder](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_search_folder.md)
+- [fetch_active_sieve_script](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_active_sieve_script.md)
+- [put_sieve_script](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/put_sieve_script.md)
+- [set_active_sieve_script](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/set_active_sieve_script.md)
+- [save_jmap_upload_blob](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/save_jmap_upload_blob.md)
+- [fetch_jmap_upload_blob](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_upload_blob.md)
+- [fetch_jmap_message_blob](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_message_blob.md)
+- [save_draft_message](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/save_draft_message.md)
+- [delete_draft_message](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_draft_message.md)
+- [submit_draft_message](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/submit_draft_message.md)
+- [copy_jmap_email](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/copy_jmap_email.md)
+- [import_jmap_email](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/import_jmap_email.md)
+- [fetch_accessible_contact_collections](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_accessible_contact_collections.md)
+- [fetch_accessible_contacts](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_accessible_contacts.md)
+- [fetch_accessible_contacts_by_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_accessible_contacts_by_ids.md)
+- [create_accessible_contact](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/create_accessible_contact.md)
+- [update_accessible_contact](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/update_accessible_contact.md)
+- [delete_accessible_contact](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_accessible_contact.md)
+- [query_recipient_suggestions](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/query_recipient_suggestions.md)
+- [fetch_accessible_calendar_collections](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_accessible_calendar_collections.md)
+- [create_accessible_calendar_collection](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/create_accessible_calendar_collection.md)
+- [update_accessible_calendar_collection](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/update_accessible_calendar_collection.md)
+- [delete_accessible_calendar_collection](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_accessible_calendar_collection.md)
+- [fetch_accessible_events](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_accessible_events.md)
+- [fetch_accessible_events_by_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_accessible_events_by_ids.md)
+- [create_accessible_event](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/create_accessible_event.md)
+- [update_accessible_event](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/update_accessible_event.md)
+- [delete_accessible_event](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_accessible_event.md)
+- [fetch_calendar_attachments_for_events](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_calendar_attachments_for_events.md)
+- [add_calendar_event_attachment](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/add_calendar_event_attachment.md)
+- [fetch_jmap_task_lists](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_task_lists.md)
+- [fetch_jmap_task_lists_by_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_task_lists_by_ids.md)
+- [create_jmap_task_list](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/create_jmap_task_list.md)
+- [update_jmap_task_list](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/update_jmap_task_list.md)
+- [delete_jmap_task_list](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_jmap_task_list.md)
+- [fetch_jmap_tasks](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_tasks.md)
+- [fetch_jmap_tasks_by_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_tasks_by_ids.md)
+- [upsert_jmap_task](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/upsert_jmap_task.md)
+- [delete_jmap_task](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_jmap_task.md)
+- [fetch_jmap_notes](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_notes.md)
+- [fetch_jmap_notes_by_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_notes_by_ids.md)
+- [upsert_jmap_note](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/upsert_jmap_note.md)
+- [delete_jmap_note](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_jmap_note.md)
+- [fetch_jmap_journal_entries](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_journal_entries.md)
+- [fetch_jmap_journal_entries_by_ids](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_journal_entries_by_ids.md)
+- [upsert_jmap_journal_entry](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/upsert_jmap_journal_entry.md)
+- [delete_jmap_journal_entry](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_jmap_journal_entry.md)
+- [query_jmap_reminders](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/query_jmap_reminders.md)
+- [update_jmap_task_reminder](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/update_jmap_task_reminder.md)
+- [update_jmap_event_reminder](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/update_jmap_event_reminder.md)
+- [update_jmap_mail_reminder](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/update_jmap_mail_reminder.md)
+- [dismiss_jmap_reminder_occurrence](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/dismiss_jmap_reminder_occurrence.md)
+- [fetch_jmap_shares](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_shares.md)
+- [upsert_jmap_share](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/upsert_jmap_share.md)
+- [delete_jmap_share](../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_jmap_share.md)
+- [update_fake_reminder](../../../../functions/crates/lpe-jmap/src/tests/update_fake_reminder.md)
+- [session_uses_existing_account_authentication](../../../../functions/crates/lpe-jmap/src/tests/session_uses_existing_account_authentication.md)
+- [session_urls_respect_forwarded_jmap_prefix](../../../../functions/crates/lpe-jmap/src/tests/session_urls_respect_forwarded_jmap_prefix.md)
+- [session_state_tracks_accessible_mailbox_projection](../../../../functions/crates/lpe-jmap/src/tests/session_state_tracks_accessible_mailbox_projection.md)
+- [session_and_identity_include_accessible_shared_mailbox_accounts](../../../../functions/crates/lpe-jmap/src/tests/session_and_identity_include_accessible_shared_mailbox_accounts.md)
+- [session_omits_submission_for_shared_mailbox_without_sender_grant](../../../../functions/crates/lpe-jmap/src/tests/session_omits_submission_for_shared_mailbox_without_sender_grant.md)
+- [email_submission_get_hides_shared_account_without_submit_rights](../../../../functions/crates/lpe-jmap/src/tests/email_submission_get_hides_shared_account_without_submit_rights.md)
+- [session_omits_submission_for_read_only_shared_mailbox_with_sender_grant](../../../../functions/crates/lpe-jmap/src/tests/session_omits_submission_for_read_only_shared_mailbox_with_sender_grant.md)
+- [mailbox_get_projects_delegated_submit_rights_from_sender_grants](../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_projects_delegated_submit_rights_from_sender_grants.md)
+- [mailbox_state_does_not_advertise_submit_for_read_only_sender_grant](../../../../functions/crates/lpe-jmap/src/tests/mailbox_state_does_not_advertise_submit_for_read_only_sender_grant.md)
+- [mailbox_changes_report_delegated_submit_right_changes](../../../../functions/crates/lpe-jmap/src/tests/mailbox_changes_report_delegated_submit_right_changes.md)
+- [email_set_creates_draft_through_canonical_storage](../../../../functions/crates/lpe-jmap/src/tests/email_set_creates_draft_through_canonical_storage.md)
+- [email_set_creates_delegated_shared_mailbox_draft](../../../../functions/crates/lpe-jmap/src/tests/email_set_creates_delegated_shared_mailbox_draft.md)
+- [email_set_rejects_shared_mailbox_draft_without_sender_delegation](../../../../functions/crates/lpe-jmap/src/tests/email_set_rejects_shared_mailbox_draft_without_sender_delegation.md)
+- [email_set_rejects_inaccessible_account_id](../../../../functions/crates/lpe-jmap/src/tests/email_set_rejects_inaccessible_account_id.md)
+- [email_set_rejects_read_only_shared_mailbox_mutations](../../../../functions/crates/lpe-jmap/src/tests/email_set_rejects_read_only_shared_mailbox_mutations.md)
+- [email_set_maps_seen_and_flagged_keywords_to_draft_state](../../../../functions/crates/lpe-jmap/src/tests/email_set_maps_seen_and_flagged_keywords_to_draft_state.md)
+- [email_submission_set_submits_existing_draft_and_returns_queued_state](../../../../functions/crates/lpe-jmap/src/tests/email_submission_set_submits_existing_draft_and_returns_queued_state.md)
+- [email_submission_set_uses_authenticated_submitter_for_delegated_draft](../../../../functions/crates/lpe-jmap/src/tests/email_submission_set_uses_authenticated_submitter_for_delegated_draft.md)
+- [email_submission_set_rejects_delegated_submit_without_sender_grant](../../../../functions/crates/lpe-jmap/src/tests/email_submission_set_rejects_delegated_submit_without_sender_grant.md)
+- [email_submission_set_rejects_read_only_shared_mailbox_draft_submit](../../../../functions/crates/lpe-jmap/src/tests/email_submission_set_rejects_read_only_shared_mailbox_draft_submit.md)
+- [email_get_only_returns_bcc_for_explicit_owner_draft_request](../../../../functions/crates/lpe-jmap/src/tests/email_get_only_returns_bcc_for_explicit_owner_draft_request.md)
+- [email_get_and_query_preserve_multiple_mailbox_ids_for_one_email](../../../../functions/crates/lpe-jmap/src/tests/email_get_and_query_preserve_multiple_mailbox_ids_for_one_email.md)
+- [email_get_projects_private_followup_state_when_requested](../../../../functions/crates/lpe-jmap/src/tests/email_get_projects_private_followup_state_when_requested.md)
+- [email_get_hides_bcc_for_delegated_shared_mailbox_projection](../../../../functions/crates/lpe-jmap/src/tests/email_get_hides_bcc_for_delegated_shared_mailbox_projection.md)
+- [jmap_mail_query_snippet_and_blob_projections_do_not_expose_bcc](../../../../functions/crates/lpe-jmap/src/tests/jmap_mail_query_snippet_and_blob_projections_do_not_expose_bcc.md)
+- [delegated_email_and_thread_states_ignore_bcc_only_changes](../../../../functions/crates/lpe-jmap/src/tests/delegated_email_and_thread_states_ignore_bcc_only_changes.md)
+- [email_state_tokens_do_not_expose_message_or_bcc_content](../../../../functions/crates/lpe-jmap/src/tests/email_state_tokens_do_not_expose_message_or_bcc_content.md)
+- [mailbox_and_email_changes_return_existing_ids_from_initial_state](../../../../functions/crates/lpe-jmap/src/tests/mailbox_and_email_changes_return_existing_ids_from_initial_state.md)
+- [changes_reject_malformed_and_cross_account_state_tokens](../../../../functions/crates/lpe-jmap/src/tests/changes_reject_malformed_and_cross_account_state_tokens.md)
+- [mailbox_and_email_query_changes_replay_snapshot_differences](../../../../functions/crates/lpe-jmap/src/tests/mailbox_and_email_query_changes_replay_snapshot_differences.md)
+- [email_changes_report_updates_for_existing_messages](../../../../functions/crates/lpe-jmap/src/tests/email_changes_report_updates_for_existing_messages.md)
+- [email_changes_use_durable_log_ids_when_state_has_cursor](../../../../functions/crates/lpe-jmap/src/tests/email_changes_use_durable_log_ids_when_state_has_cursor.md)
+- [thread_changes_use_durable_log_ids_when_state_has_cursor](../../../../functions/crates/lpe-jmap/src/tests/thread_changes_use_durable_log_ids_when_state_has_cursor.md)
+- [mailbox_changes_use_durable_log_ids_when_state_has_cursor](../../../../functions/crates/lpe-jmap/src/tests/mailbox_changes_use_durable_log_ids_when_state_has_cursor.md)
+- [paged_query_states_keep_full_mailbox_and_email_snapshots](../../../../functions/crates/lpe-jmap/src/tests/paged_query_states_keep_full_mailbox_and_email_snapshots.md)
+- [stored_email_query_state_keeps_snapshot_out_of_token_and_paginates_changes](../../../../functions/crates/lpe-jmap/src/tests/stored_email_query_state_keeps_snapshot_out_of_token_and_paginates_changes.md)
+- [stored_mailbox_query_state_keeps_snapshot_out_of_token_and_paginates_changes](../../../../functions/crates/lpe-jmap/src/tests/stored_mailbox_query_state_keeps_snapshot_out_of_token_and_paginates_changes.md)
+- [canonical_query_state_tokens_are_scoped_to_each_jmap_surface](../../../../functions/crates/lpe-jmap/src/tests/canonical_query_state_tokens_are_scoped_to_each_jmap_surface.md)
+- [stored_mailbox_query_changes_reloads_filtered_snapshot](../../../../functions/crates/lpe-jmap/src/tests/stored_mailbox_query_changes_reloads_filtered_snapshot.md)
+- [email_query_changes_exact_limit_does_not_report_more_changes](../../../../functions/crates/lpe-jmap/src/tests/email_query_changes_exact_limit_does_not_report_more_changes.md)
+- [query_methods_support_anchor_windows_and_missing_anchor_errors](../../../../functions/crates/lpe-jmap/src/tests/query_methods_support_anchor_windows_and_missing_anchor_errors.md)
+- [email_query_changes_reports_existing_message_reorders](../../../../functions/crates/lpe-jmap/src/tests/email_query_changes_reports_existing_message_reorders.md)
+- [big_three_query_changes_ignore_backend_order_for_equal_sort_keys](../../../../functions/crates/lpe-jmap/src/tests/big_three_query_changes_ignore_backend_order_for_equal_sort_keys.md)
+- [mailbox_query_states_are_bound_to_the_requested_account](../../../../functions/crates/lpe-jmap/src/tests/mailbox_query_states_are_bound_to_the_requested_account.md)
+- [mailbox_query_changes_reject_cross_account_query_state_replay](../../../../functions/crates/lpe-jmap/src/tests/mailbox_query_changes_reject_cross_account_query_state_replay.md)
+- [mailbox_query_changes_report_mailbox_reorders](../../../../functions/crates/lpe-jmap/src/tests/mailbox_query_changes_report_mailbox_reorders.md)
+- [identity_thread_and_submission_reads_are_available](../../../../functions/crates/lpe-jmap/src/tests/identity_thread_and_submission_reads_are_available.md)
+- [identity_get_state_tracks_sender_identity_projection](../../../../functions/crates/lpe-jmap/src/tests/identity_get_state_tracks_sender_identity_projection.md)
+- [identity_changes_tracks_sender_identity_projection](../../../../functions/crates/lpe-jmap/src/tests/identity_changes_tracks_sender_identity_projection.md)
+- [email_submission_get_state_tracks_submission_rows](../../../../functions/crates/lpe-jmap/src/tests/email_submission_get_state_tracks_submission_rows.md)
+- [email_submission_changes_tracks_submission_rows](../../../../functions/crates/lpe-jmap/src/tests/email_submission_changes_tracks_submission_rows.md)
+- [email_submission_changes_use_durable_log_ids_when_state_has_cursor](../../../../functions/crates/lpe-jmap/src/tests/email_submission_changes_use_durable_log_ids_when_state_has_cursor.md)
+- [email_submission_query_filters_sorts_and_reports_query_changes](../../../../functions/crates/lpe-jmap/src/tests/email_submission_query_filters_sorts_and_reports_query_changes.md)
+- [thread_query_returns_distinct_threads_for_filtered_emails](../../../../functions/crates/lpe-jmap/src/tests/thread_query_returns_distinct_threads_for_filtered_emails.md)
+- [thread_query_state_keeps_full_snapshot_when_page_is_limited](../../../../functions/crates/lpe-jmap/src/tests/thread_query_state_keeps_full_snapshot_when_page_is_limited.md)
+- [thread_query_changes_reports_added_threads_from_full_snapshot](../../../../functions/crates/lpe-jmap/src/tests/thread_query_changes_reports_added_threads_from_full_snapshot.md)
+- [search_snippets_return_preview_for_requested_messages](../../../../functions/crates/lpe-jmap/src/tests/search_snippets_return_preview_for_requested_messages.md)
+- [mailbox_set_accepts_unicode_names_and_normalizes_to_nfc](../../../../functions/crates/lpe-jmap/src/tests/mailbox_set_accepts_unicode_names_and_normalizes_to_nfc.md)
+- [mailbox_set_rejects_reserved_role_names_and_aliases](../../../../functions/crates/lpe-jmap/src/tests/mailbox_set_rejects_reserved_role_names_and_aliases.md)
+- [mailbox_set_update_validates_and_normalizes_unicode_names](../../../../functions/crates/lpe-jmap/src/tests/mailbox_set_update_validates_and_normalizes_unicode_names.md)
+- [mailbox_set_rejects_canonical_equivalent_sibling_duplicates](../../../../functions/crates/lpe-jmap/src/tests/mailbox_set_rejects_canonical_equivalent_sibling_duplicates.md)
+- [mailbox_set_rejects_controls_and_delimiters_at_method_level](../../../../functions/crates/lpe-jmap/src/tests/mailbox_set_rejects_controls_and_delimiters_at_method_level.md)
+- [mailbox_set_rejects_invisible_bidi_mixed_script_and_confusable_names](../../../../functions/crates/lpe-jmap/src/tests/mailbox_set_rejects_invisible_bidi_mixed_script_and_confusable_names.md)
+- [mailbox_get_returns_nfc_unicode_names_as_json_strings](../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_returns_nfc_unicode_names_as_json_strings.md)
+- [mailbox_get_returns_canonical_system_names_and_roles](../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_returns_canonical_system_names_and_roles.md)
+- [mailbox_get_exposes_backed_exchange_compatibility_mail_folders](../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_exposes_backed_exchange_compatibility_mail_folders.md)
+- [mailbox_get_advertises_child_creation_for_writable_owned_mailboxes](../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_advertises_child_creation_for_writable_owned_mailboxes.md)
+- [mailbox_get_hides_child_creation_for_read_only_shared_mailboxes](../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_hides_child_creation_for_read_only_shared_mailboxes.md)
+- [mailbox_parent_id_and_subscription_round_trip_through_get_query_and_set](../../../../functions/crates/lpe-jmap/src/tests/mailbox_parent_id_and_subscription_round_trip_through_get_query_and_set.md)
+- [mailbox_set_rejects_parent_cycles_and_unknown_parents](../../../../functions/crates/lpe-jmap/src/tests/mailbox_set_rejects_parent_cycles_and_unknown_parents.md)
+- [mailbox_set_copy_import_and_quota_are_available](../../../../functions/crates/lpe-jmap/src/tests/mailbox_set_copy_import_and_quota_are_available.md)
+- [mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations](../../../../functions/crates/lpe-jmap/src/tests/mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations.md)
+- [email_copy_and_import_reject_shared_drafts_without_sender_delegation](../../../../functions/crates/lpe-jmap/src/tests/email_copy_and_import_reject_shared_drafts_without_sender_delegation.md)
+- [email_import_validates_and_preserves_multipart_attachments](../../../../functions/crates/lpe-jmap/src/tests/email_import_validates_and_preserves_multipart_attachments.md)
+- [email_get_exposes_canonical_blob_ids_and_download_accepts_upload_prefix](../../../../functions/crates/lpe-jmap/src/tests/email_get_exposes_canonical_blob_ids_and_download_accepts_upload_prefix.md)
+- [owned_message_download_prefers_sanitized_stored_raw_mime_blob](../../../../functions/crates/lpe-jmap/src/tests/owned_message_download_prefers_sanitized_stored_raw_mime_blob.md)
+- [message_blob_download_hides_bcc_for_delegated_shared_mailbox](../../../../functions/crates/lpe-jmap/src/tests/message_blob_download_hides_bcc_for_delegated_shared_mailbox.md)
+- [blob_get_hides_bcc_for_delegated_shared_mailbox_message](../../../../functions/crates/lpe-jmap/src/tests/blob_get_hides_bcc_for_delegated_shared_mailbox_message.md)
+- [blob_copy_copies_upload_and_message_blobs_through_canonical_blob_pipeline](../../../../functions/crates/lpe-jmap/src/tests/blob_copy_copies_upload_and_message_blobs_through_canonical_blob_pipeline.md)
+- [blob_copy_to_shared_account_does_not_widen_owner_bcc](../../../../functions/crates/lpe-jmap/src/tests/blob_copy_to_shared_account_does_not_widen_owner_bcc.md)
+- [blob_upload_get_and_copy_resolve_created_blob_references](../../../../functions/crates/lpe-jmap/src/tests/blob_upload_get_and_copy_resolve_created_blob_references.md)
+- [blob_create_paths_reject_read_only_shared_accounts](../../../../functions/crates/lpe-jmap/src/tests/blob_create_paths_reject_read_only_shared_accounts.md)
+- [method_dispatch_requires_declared_capabilities](../../../../functions/crates/lpe-jmap/src/tests/method_dispatch_requires_declared_capabilities.md)
+- [method_errors_use_standard_error_response_name](../../../../functions/crates/lpe-jmap/src/tests/method_errors_use_standard_error_response_name.md)
+- [api_request_rejects_batches_beyond_advertised_call_limit](../../../../functions/crates/lpe-jmap/src/tests/api_request_rejects_batches_beyond_advertised_call_limit.md)
+- [api_request_rejects_unsupported_declared_capabilities](../../../../functions/crates/lpe-jmap/src/tests/api_request_rejects_unsupported_declared_capabilities.md)
+- [api_request_rejects_object_batches_beyond_advertised_limits](../../../../functions/crates/lpe-jmap/src/tests/api_request_rejects_object_batches_beyond_advertised_limits.md)
+- [get_methods_treat_explicit_empty_ids_as_empty_selection](../../../../functions/crates/lpe-jmap/src/tests/get_methods_treat_explicit_empty_ids_as_empty_selection.md)
+- [canonical_jmap_object_families_expose_full_method_matrix_without_mapi_session_objects](../../../../functions/crates/lpe-jmap/src/tests/canonical_jmap_object_families_expose_full_method_matrix_without_mapi_session_objects.md)
+- [import_arguments_for_family](../../../../functions/crates/lpe-jmap/src/tests/import_arguments_for_family.md)
+- [copy_arguments_for_family](../../../../functions/crates/lpe-jmap/src/tests/copy_arguments_for_family.md)
+- [StorageJmapFixture](../../../../classes/crates/lpe-jmap/src/tests/StorageJmapFixture.md)
+- [cleanup](../../../../functions/crates/lpe-jmap/src/tests/StorageJmapFixture/cleanup.md)
+- [storage_jmap_fixture](../../../../functions/crates/lpe-jmap/src/tests/storage_jmap_fixture.md)
+- [storage_backed_jmap_import_copy_get_changes_and_query_changes_round_trip](../../../../functions/crates/lpe-jmap/src/tests/storage_backed_jmap_import_copy_get_changes_and_query_changes_round_trip.md)
+- [storage_backed_calendar_event_lifecycle_updates_canonical_views](../../../../functions/crates/lpe-jmap/src/tests/storage_backed_calendar_event_lifecycle_updates_canonical_views.md)
+- [storage_backed_private_share_reminder_and_durable_change_round_trip](../../../../functions/crates/lpe-jmap/src/tests/storage_backed_private_share_reminder_and_durable_change_round_trip.md)
+- [canonical_import_and_copy_persist_create_payloads_for_writable_families](../../../../functions/crates/lpe-jmap/src/tests/canonical_import_and_copy_persist_create_payloads_for_writable_families.md)
+- [api_request_concurrency_permits_match_advertised_limit](../../../../functions/crates/lpe-jmap/src/tests/api_request_concurrency_permits_match_advertised_limit.md)
+- [upload_concurrency_permits_match_advertised_limit](../../../../functions/crates/lpe-jmap/src/tests/upload_concurrency_permits_match_advertised_limit.md)
+- [jmap_tester_style_big_three_batch_has_stable_json_shapes](../../../../functions/crates/lpe-jmap/src/tests/jmap_tester_style_big_three_batch_has_stable_json_shapes.md)
+- [jmap_tester_style_owned_family_get_fixtures_cover_object_payloads](../../../../functions/crates/lpe-jmap/src/tests/jmap_tester_style_owned_family_get_fixtures_cover_object_payloads.md)
+- [big_three_batches_resolve_query_get_result_references](../../../../functions/crates/lpe-jmap/src/tests/big_three_batches_resolve_query_get_result_references.md)
+- [canonical_end_to_end_batch_chains_import_query_and_get_result_references](../../../../functions/crates/lpe-jmap/src/tests/canonical_end_to_end_batch_chains_import_query_and_get_result_references.md)
+- [email_get_honors_body_fetch_options_and_truncation](../../../../functions/crates/lpe-jmap/src/tests/email_get_honors_body_fetch_options_and_truncation.md)
+- [blob_get_reports_encoding_and_range_edge_cases](../../../../functions/crates/lpe-jmap/src/tests/blob_get_reports_encoding_and_range_edge_cases.md)
+- [blob_get_returns_sha256_digest_for_selected_range](../../../../functions/crates/lpe-jmap/src/tests/blob_get_returns_sha256_digest_for_selected_range.md)
+- [blob_lookup_projects_visible_canonical_message_references](../../../../functions/crates/lpe-jmap/src/tests/blob_lookup_projects_visible_canonical_message_references.md)
+- [blob_lookup_requires_referenced_type_capability](../../../../functions/crates/lpe-jmap/src/tests/blob_lookup_requires_referenced_type_capability.md)
+- [session_exposes_contacts_and_calendars_capabilities](../../../../functions/crates/lpe-jmap/src/tests/session_exposes_contacts_and_calendars_capabilities.md)
+- [vacation_response_get_projects_canonical_active_sieve_vacation](../../../../functions/crates/lpe-jmap/src/tests/vacation_response_get_projects_canonical_active_sieve_vacation.md)
+- [vacation_response_get_returns_disabled_without_active_vacation](../../../../functions/crates/lpe-jmap/src/tests/vacation_response_get_returns_disabled_without_active_vacation.md)
+- [vacation_response_set_writes_canonical_active_sieve_script](../../../../functions/crates/lpe-jmap/src/tests/vacation_response_set_writes_canonical_active_sieve_script.md)
+- [vacation_response_set_destroy_disables_active_sieve_script](../../../../functions/crates/lpe-jmap/src/tests/vacation_response_set_destroy_disables_active_sieve_script.md)
+- [vacation_response_set_update_preserves_omitted_fields](../../../../functions/crates/lpe-jmap/src/tests/vacation_response_set_update_preserves_omitted_fields.md)
+- [websocket_push_states_include_shared_mailbox_accounts](../../../../functions/crates/lpe-jmap/src/tests/websocket_push_states_include_shared_mailbox_accounts.md)
+- [websocket_push_states_include_submission_identity_mail_types](../../../../functions/crates/lpe-jmap/src/tests/websocket_push_states_include_submission_identity_mail_types.md)
+- [websocket_push_enable_sends_full_state_for_missing_or_stale_push_state](../../../../functions/crates/lpe-jmap/src/tests/websocket_push_enable_sends_full_state_for_missing_or_stale_push_state.md)
+- [websocket_push_enable_refreshes_cursor_for_unchanged_states](../../../../functions/crates/lpe-jmap/src/tests/websocket_push_enable_refreshes_cursor_for_unchanged_states.md)
+- [websocket_reconnect_recovers_task_changes_from_canonical_journal](../../../../functions/crates/lpe-jmap/src/tests/websocket_reconnect_recovers_task_changes_from_canonical_journal.md)
+- [websocket_reconnect_recovers_delegated_mailbox_right_changes_from_journal](../../../../functions/crates/lpe-jmap/src/tests/websocket_reconnect_recovers_delegated_mailbox_right_changes_from_journal.md)
+- [websocket_reconnect_falls_back_to_full_snapshot_when_journal_replay_is_truncated](../../../../functions/crates/lpe-jmap/src/tests/websocket_reconnect_falls_back_to_full_snapshot_when_journal_replay_is_truncated.md)
+- [scoped_push_change_is_stable_for_noop_mail_notifications](../../../../functions/crates/lpe-jmap/src/tests/scoped_push_change_is_stable_for_noop_mail_notifications.md)
+- [scoped_push_change_wakes_principal_when_shared_mailbox_visibility_changes](../../../../functions/crates/lpe-jmap/src/tests/scoped_push_change_wakes_principal_when_shared_mailbox_visibility_changes.md)
+- [scoped_push_change_reports_delegated_mailbox_right_changes](../../../../functions/crates/lpe-jmap/src/tests/scoped_push_change_reports_delegated_mailbox_right_changes.md)
+- [scoped_push_change_reports_delegated_identity_right_changes](../../../../functions/crates/lpe-jmap/src/tests/scoped_push_change_reports_delegated_identity_right_changes.md)
+- [scoped_push_change_reports_email_delivery_for_new_messages_only_state](../../../../functions/crates/lpe-jmap/src/tests/scoped_push_change_reports_email_delivery_for_new_messages_only_state.md)
+- [scoped_push_change_limits_recompute_to_requested_categories](../../../../functions/crates/lpe-jmap/src/tests/scoped_push_change_limits_recompute_to_requested_categories.md)
+- [websocket_push_tracks_private_outlook_note_and_journal_types](../../../../functions/crates/lpe-jmap/src/tests/websocket_push_tracks_private_outlook_note_and_journal_types.md)
+- [shared_task_push_change_wakes_grantee_principal](../../../../functions/crates/lpe-jmap/src/tests/shared_task_push_change_wakes_grantee_principal.md)
+- [shared_task_list_rights_push_change_wakes_grantee_principal](../../../../functions/crates/lpe-jmap/src/tests/shared_task_list_rights_push_change_wakes_grantee_principal.md)
+- [deleted_shared_task_list_push_change_wakes_former_grantee_principal](../../../../functions/crates/lpe-jmap/src/tests/deleted_shared_task_list_push_change_wakes_former_grantee_principal.md)
+- [contacts_methods_use_canonical_contact_store](../../../../functions/crates/lpe-jmap/src/tests/contacts_methods_use_canonical_contact_store.md)
+- [recipient_suggestion_query_is_private_and_separate_from_contacts](../../../../functions/crates/lpe-jmap/src/tests/recipient_suggestion_query_is_private_and_separate_from_contacts.md)
+- [calendar_methods_use_canonical_event_store](../../../../functions/crates/lpe-jmap/src/tests/calendar_methods_use_canonical_event_store.md)
+- [calendar_collection_write_methods_manage_custom_calendars](../../../../functions/crates/lpe-jmap/src/tests/calendar_collection_write_methods_manage_custom_calendars.md)
+- [calendar_event_round_trips_schema_backed_fields](../../../../functions/crates/lpe-jmap/src/tests/calendar_event_round_trips_schema_backed_fields.md)
+- [calendar_event_get_projects_mapi_written_canonical_fields](../../../../functions/crates/lpe-jmap/src/tests/calendar_event_get_projects_mapi_written_canonical_fields.md)
+- [calendar_event_links_write_and_project_canonical_attachments](../../../../functions/crates/lpe-jmap/src/tests/calendar_event_links_write_and_project_canonical_attachments.md)
+- [contact_and_calendar_set_support_property_patches](../../../../functions/crates/lpe-jmap/src/tests/contact_and_calendar_set_support_property_patches.md)
+- [collaboration_changes_use_durable_log_ids_when_state_has_cursor](../../../../functions/crates/lpe-jmap/src/tests/collaboration_changes_use_durable_log_ids_when_state_has_cursor.md)
+- [object_changes_with_cursor_do_not_diff_unlogged_current_state](../../../../functions/crates/lpe-jmap/src/tests/object_changes_with_cursor_do_not_diff_unlogged_current_state.md)
+- [contact_and_calendar_query_changes_report_reorders](../../../../functions/crates/lpe-jmap/src/tests/contact_and_calendar_query_changes_report_reorders.md)
+- [address_book_and_calendar_query_changes_report_collection_reorders](../../../../functions/crates/lpe-jmap/src/tests/address_book_and_calendar_query_changes_report_collection_reorders.md)
+- [collection_query_changes_ignore_backend_order_for_equal_sort_keys](../../../../functions/crates/lpe-jmap/src/tests/collection_query_changes_ignore_backend_order_for_equal_sort_keys.md)
+- [calendar_event_get_exposes_owner_and_participation_status](../../../../functions/crates/lpe-jmap/src/tests/calendar_event_get_exposes_owner_and_participation_status.md)
+- [task_methods_use_canonical_task_store](../../../../functions/crates/lpe-jmap/src/tests/task_methods_use_canonical_task_store.md)
+- [private_outlook_methods_use_canonical_note_journal_and_reminder_store](../../../../functions/crates/lpe-jmap/src/tests/private_outlook_methods_use_canonical_note_journal_and_reminder_store.md)
+- [private_outlook_profile_methods_read_canonical_profile_state](../../../../functions/crates/lpe-jmap/src/tests/private_outlook_profile_methods_read_canonical_profile_state.md)
+- [reminder_writes_update_canonical_source_metadata](../../../../functions/crates/lpe-jmap/src/tests/reminder_writes_update_canonical_source_metadata.md)
+- [share_writes_create_copy_import_and_destroy_canonical_grants](../../../../functions/crates/lpe-jmap/src/tests/share_writes_create_copy_import_and_destroy_canonical_grants.md)
+- [durable_change_get_returns_append_only_object_specific_payload](../../../../functions/crates/lpe-jmap/src/tests/durable_change_get_returns_append_only_object_specific_payload.md)
+- [canonical_private_get_and_query_follow_jmap_interop_semantics](../../../../functions/crates/lpe-jmap/src/tests/canonical_private_get_and_query_follow_jmap_interop_semantics.md)
+- [canonical_private_query_changes_use_persisted_query_snapshots](../../../../functions/crates/lpe-jmap/src/tests/canonical_private_query_changes_use_persisted_query_snapshots.md)
+- [reminder_query_changes_use_persisted_query_snapshots_and_filter](../../../../functions/crates/lpe-jmap/src/tests/reminder_query_changes_use_persisted_query_snapshots_and_filter.md)
+- [unsupported_canonical_set_reports_operation_specific_errors](../../../../functions/crates/lpe-jmap/src/tests/unsupported_canonical_set_reports_operation_specific_errors.md)
+- [negative_interop_fixtures_reject_invalid_payloads_and_forbidden_writes](../../../../functions/crates/lpe-jmap/src/tests/negative_interop_fixtures_reject_invalid_payloads_and_forbidden_writes.md)
+- [share_and_reminder_changes_use_string_id_durable_replay](../../../../functions/crates/lpe-jmap/src/tests/share_and_reminder_changes_use_string_id_durable_replay.md)
+- [private_outlook_query_changes_track_note_and_journal_lists](../../../../functions/crates/lpe-jmap/src/tests/private_outlook_query_changes_track_note_and_journal_lists.md)
+- [private_outlook_methods_require_private_capability](../../../../functions/crates/lpe-jmap/src/tests/private_outlook_methods_require_private_capability.md)
+- [task_list_get_projects_shared_task_list_rights](../../../../functions/crates/lpe-jmap/src/tests/task_list_get_projects_shared_task_list_rights.md)
+- [task_list_changes_tracks_shared_rights_updates](../../../../functions/crates/lpe-jmap/src/tests/task_list_changes_tracks_shared_rights_updates.md)
+- [task_query_includes_shared_accessible_tasks](../../../../functions/crates/lpe-jmap/src/tests/task_query_includes_shared_accessible_tasks.md)
+- [task_set_rejects_writes_to_read_only_shared_task_list](../../../../functions/crates/lpe-jmap/src/tests/task_set_rejects_writes_to_read_only_shared_task_list.md)
+- [task_query_changes_tracks_sort_order_and_updates](../../../../functions/crates/lpe-jmap/src/tests/task_query_changes_tracks_sort_order_and_updates.md)
+- [task_list_set_creates_updates_and_destroys_custom_lists](../../../../functions/crates/lpe-jmap/src/tests/task_list_set_creates_updates_and_destroys_custom_lists.md)
+- [task_query_filters_and_reorders_across_task_lists](../../../../functions/crates/lpe-jmap/src/tests/task_query_filters_and_reorders_across_task_lists.md)
+- [upload_and_download_use_authenticated_account](../../../../functions/crates/lpe-jmap/src/tests/upload_and_download_use_authenticated_account.md)
+- [upload_rejects_bodies_larger_than_session_limit](../../../../functions/crates/lpe-jmap/src/tests/upload_rejects_bodies_larger_than_session_limit.md)
+- [upload_accepts_validated_matching_blob](../../../../functions/crates/lpe-jmap/src/tests/upload_accepts_validated_matching_blob.md)
+- [upload_rejects_declared_mime_mismatch](../../../../functions/crates/lpe-jmap/src/tests/upload_rejects_declared_mime_mismatch.md)
+- [upload_rejects_unknown_type](../../../../functions/crates/lpe-jmap/src/tests/upload_rejects_unknown_type.md)
+- [upload_surfaces_magika_failure_mode](../../../../functions/crates/lpe-jmap/src/tests/upload_surfaces_magika_failure_mode.md)
+- [benchmark_mailbox_listing_and_push_paths](../../../../functions/crates/lpe-jmap/src/tests/benchmark_mailbox_listing_and_push_paths.md)
+- [generated_mailbox](../../../../functions/crates/lpe-jmap/src/tests/generated_mailbox.md)
+- [legacy_not_found](../../../../functions/crates/lpe-jmap/src/tests/legacy_not_found.md)
+- [optimized_not_found](../../../../functions/crates/lpe-jmap/src/tests/optimized_not_found.md)
+
+# Imports
+
+- `lpe_storage::{
+    AuthenticatedAccount, CalendarEventAttachment, ClientNote, ClientReminder, ClientTask,
+    JmapEmail, JmapEmailQuery, JmapMailbox, JmapUploadBlob, JournalEntry, SieveScriptDocument,
+    Storage, SubmitMessageInput, SubmittedMessage,
+}`
+- `serde_json::{json, Value}`
+- `sqlx::{
+    postgres::{PgConnectOptions, PgPoolOptions},
+    PgPool, Row,
+}`
+- `std::str::FromStr`
+- `uuid::Uuid`
+- `super::*`
+- `crate::{
+    protocol::{JmapApiRequest, JmapMethodCall},
+    state::{
+        decode_query_state, decode_state, encode_push_state, encode_state_with_cursor, StateEntry,
+    },
+    store::{JmapPushListener, JmapStore},
+}`
+- `anyhow::{anyhow, bail, Context, Result}`
+- `lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator}`
+- `lpe_storage::mail::parse_rfc822_message`
+- `lpe_storage::{
+    serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
+    AttachmentUploadInput, AuditEntryInput, CalendarOrganizerMetadata, CalendarParticipantMetadata,
+    CalendarParticipantsMetadata, CanonicalChangeCategory, CanonicalChangeReplay,
+    CanonicalPushChangeSet, ClientContact, ClientEvent, ClientTaskList, CollaborationCollection,
+    CollaborationRights, CreateTaskListInput, JmapEmailAddress, JmapEmailMailboxState,
+    JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
+    MailboxAccountAccess, MailboxRule, OutlookProfileState, RecipientSuggestion, SavedDraftMessage,
+    SearchFolderDefinition, SenderIdentity, UpdateTaskListInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
+    UpsertSearchFolderInput,
+}`
+- `std::{
+    collections::{HashMap, HashSet},
+    env,
+    sync::{Arc, Mutex},
+    time::Instant,
+}`
+- `base64::Engine as _`
+- `sha2::Digest as _`
+
+# Member of
+
+- [lpe-jmap](../../../../packages/crates/lpe-jmap.md)

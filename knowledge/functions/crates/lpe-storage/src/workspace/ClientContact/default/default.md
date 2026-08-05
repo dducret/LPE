@@ -1,0 +1,12 @@
+---
+type: Rust Method
+title: default
+resource: crates/lpe-storage/src/workspace.rs#L94-L114
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+---
+
+# Signature
+
+`fn default() -> Self`

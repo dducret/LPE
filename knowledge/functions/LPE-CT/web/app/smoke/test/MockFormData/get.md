@@ -1,0 +1,1954 @@
+---
+type: JavaScript Method
+title: get
+resource: LPE-CT/web/app.smoke.test.cjs#L103-L106
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  called_by:
+  - functions/LPE-CT/src/dashboard_config/probe_lpe_core_delivery
+  - functions/LPE-CT/src/router
+  - functions/LPE-CT/src/management_auth/require_management_admin
+  - functions/LPE-CT/src/management_auth/bearer_token
+  - functions/LPE-CT/src/management_auth/require_integration_request
+  - functions/LPE-CT/src/management_auth/required_header
+  - functions/LPE-CT/src/observability/trace_id_from_headers
+  - functions/LPE-CT/src/readiness/check_optional_http_dependency
+  - functions/LPE-CT/src/reporting/policy_tags_from_event
+  - functions/LPE-CT/src/reporting/latest_decision
+  - functions/LPE-CT/src/smtp/audit/postfix_style_mail_log_line
+  - functions/LPE-CT/src/smtp/bayes/bayespam_token_probability
+  - functions/LPE-CT/src/smtp/protocol/read_smtp_reply
+  - functions/LPE-CT/src/smtp/quarantine/list_quarantine_items_from_db
+  - functions/LPE-CT/src/smtp/reputation/load_reputation_score
+  - functions/LPE-CT/src/smtp/reputation/update_reputation
+  - functions/LPE-CT/src/smtp/tests/read_test_smtp_reply
+  - functions/LPE-CT/src/storage/local_db_pool
+  - functions/LPE-CT/src/submission/accept
+  - functions/LPE-CT/src/system_metrics/cpu_utilization_percent
+  - functions/LPE-CT/src/system_metrics/read_dns_servers_from_resolv_conf
+  - functions/LPE-CT/src/system_metrics/parse_ipv6_address_line
+  - functions/LPE-CT/src/system_metrics/parse_ipv4_interface_line
+  - functions/LPE-CT/src/transport_policy/cached_recipient_verdict
+  - functions/LPE-CT/web/app/smoke/test/createContext
+  - functions/LPE-CT/web/modules/app/api/parseError
+  - functions/LPE-CT/web/modules/app/dashboard/countRankedItems
+  - functions/LPE-CT/web/modules/app/dashboard/buildTrafficSeries
+  - functions/LPE-CT/web/modules/pages/activatePageView
+  - functions/crates/lpe-activesync/src/auth/protocol_version
+  - functions/crates/lpe-activesync/src/message/parse_mime_message
+  - functions/crates/lpe-activesync/src/message/parse_message_part
+  - functions/crates/lpe-activesync/src/message/parse_multipart_body
+  - functions/crates/lpe-activesync/src/message/decode_quoted_printable
+  - functions/crates/lpe-activesync/src/response/is_message_rfc822
+  - functions/crates/lpe-activesync/src/service/ActiveSyncService/build_commands
+  - functions/crates/lpe-activesync/src/service/ActiveSyncService/pending_page_is_stable
+  - functions/crates/lpe-activesync/src/service/provisioning/header_policy_key
+  - functions/crates/lpe-activesync/src/service/sync_helpers/decode_sync_state
+  - functions/crates/lpe-activesync/src/snapshot/recurrence_application_data
+  - functions/crates/lpe-activesync/src/snapshot/diff_snapshots
+  - functions/crates/lpe-activesync/src/snapshot/diff_collection_states
+  - functions/crates/lpe-activesync/src/snapshot/snapshot_fingerprints
+  - functions/crates/lpe-activesync/src/snapshot/value_to_node
+  - functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_jmap_mailboxes
+  - functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_latest_activesync_sync_state
+  - functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_activesync_device
+  - functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_jmap_message_blob
+  - functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_activesync_message_attachments
+  - functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_activesync_attachment_content
+  - functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_activesync_sync_state
+  - functions/crates/lpe-activesync/src/tests/provision_returns_policy_key_and_lightweight_policy_document
+  - functions/crates/lpe-activesync/src/tests/provision_acknowledgement_stores_active_policy_key
+  - functions/crates/lpe-activesync/src/wbxml/parse_node
+  - functions/crates/lpe-activesync/src/wbxml/read_multibyte_int
+  - functions/crates/lpe-admin-api/src/account_oidc/exchange_code_for_claims
+  - functions/crates/lpe-admin-api/src/account_oidc/resolved_endpoints
+  - functions/crates/lpe-admin-api/src/account_oidc/claim_string
+  - functions/crates/lpe-admin-api/src/admin_auth/oidc_callback
+  - functions/crates/lpe-admin-api/src/app/router
+  - functions/crates/lpe-admin-api/src/client_auth/client_oidc_callback
+  - functions/crates/lpe-admin-api/src/client_config/router
+  - functions/crates/lpe-admin-api/src/client_config/PublishedEndpoints/from_headers
+  - functions/crates/lpe-admin-api/src/client_config/header_value
+  - functions/crates/lpe-admin-api/src/client_config/safe_header
+  - functions/crates/lpe-admin-api/src/http/bearer_token
+  - functions/crates/lpe-admin-api/src/http/forwarded_header
+  - functions/crates/lpe-admin-api/src/integration/require_integration
+  - functions/crates/lpe-admin-api/src/integration/required_header
+  - functions/crates/lpe-admin-api/src/observability/trace_id_from_headers
+  - functions/crates/lpe-admin-api/src/observability/safe_header
+  - functions/crates/lpe-admin-api/src/oidc/exchange_code_for_claims
+  - functions/crates/lpe-admin-api/src/oidc/resolved_endpoints
+  - functions/crates/lpe-admin-api/src/oidc/claim_string
+  - functions/crates/lpe-admin-api/src/readiness/check_optional_http_dependency
+  - functions/crates/lpe-admin-api/src/totp/generate_code
+  - functions/crates/lpe-cli/src/accept
+  - functions/crates/lpe-core/src/outlook_trace/redact_named_text
+  - functions/crates/lpe-core/src/sieve/evaluate_test
+  - functions/crates/lpe-core/src/sieve/Parser/peek
+  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-dav/src/preconditions/precondition_not_modified
+  - functions/crates/lpe-dav/src/preconditions/check_write_preconditions
+  - functions/crates/lpe-dav/src/preconditions/check_delete_preconditions
+  - functions/crates/lpe-dav/src/service/DavService/handle_propfind
+  - functions/crates/lpe-domain/src/civil_time/month_abbrev
+  - functions/crates/lpe-domain/src/mailbox_name/list_pattern_match_from
+  - functions/crates/lpe-exchange/src/mapi/dispatch/execute_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops
+  - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/persist_associated_config_message
+  - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/normalized_associated_config_persisted_properties
+  - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/associated_config_uuid
+  - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/associated_config_class_and_subject
+  - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_open_attachment_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_create_attachment_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_delete_attachment_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_open_embedded_message_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_save_changes_attachment_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/event_attachments_for_parent_handle
+  - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/next_pending_event_attachment_num
+  - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/open_embedded_message_source
+  - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/copy_custom_property_values_for_request
+  - functions/crates/lpe-exchange/src/mapi/dispatch/default_folders/folder_set_property_problems
+  - functions/crates/lpe-exchange/src/mapi/dispatch/default_folders/default_folder_identification_safe_property_value
+  - functions/crates/lpe-exchange/src/mapi/dispatch/default_folders/indexed_special_folder_aliases
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_request_rop_raw_frames
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_request_rop_buffer
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_response_rop_buffer_with_optional_expected_handles
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/response_rop_frame_end
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/response_rop_fixed_frame_end
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/next_response_rop_start_validated
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/next_response_rop_start_from
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/response_handle_index_matches
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/next_response_rop_start
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/rop_buffer_size_word
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/logon_special_folder_contract_entries
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/read_response_error_code
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_response_rop_frame
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/logon_open_flags
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/logon_store_state
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/associated_config/associated_config_debug_fields
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract/format_calendar_contract_invariant_issues
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_view_handoff_invariant_warnings
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_default_view_table_compatibility_contract
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_view_descriptor_binary_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/view_descriptor_sort_direction_matches_column_flags
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/view_descriptor_column_flags
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/view_descriptor_column_count
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/view_descriptor_column_payload_len
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/default_folders/default_folder_getprops_response_values_for_debug
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/default_folders/indexed_special_folder_entry_ids_for_debug
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/execute/read_le_u32_at
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/fast_transfer/summarize_fast_transfer_get_buffer_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/summarize_message_getprops_materialization
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/named_properties/format_debug_named_property_context
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/open_folder/debug_open_folder_property_shapes
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/post_hierarchy/getprops_contract_response_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/post_hierarchy/set_properties_problem_count
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/post_hierarchy/set_properties_problem_details_for_debug
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/probes/summarize_first_post_hierarchy_probe
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/probes/summarize_open_folder_probe_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/probes/summarize_get_properties_probe_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/probes/summarize_get_properties_probe_response_values
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/probes/summarize_set_properties_probe_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/extract_getprops_binary_value
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/summarize_flagged_getprops_materialization
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/get_properties_specific_response_values_for_debug
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/get_properties_view_response_values_for_debug
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/table_queries/log_outlook_contents_table_find_row
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/table_queries/rop_response_return_value
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/table_queries/log_outlook_contents_table_query_rows_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/table_queries/log_outlook_hierarchy_table_query_rows_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/table_queries/log_mapi_query_position_debug
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_string
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_u32
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_bool
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_binary_decode
+  - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/format_inbox_folder_type_getprops_response_context
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_identity_from_properties
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_last_modification_filetime
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/staged_event_reminder_is_active
+  - functions/crates/lpe-exchange/src/mapi/dispatch/execute/rop_buffer_is_store_independent_special_folder_getprops_probe
+  - functions/crates/lpe-exchange/src/mapi/dispatch/folder_open/append_open_folder_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/folders/append_folder_move_copy_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/folders/hydrate_folder_handle_properties_for_request
+  - functions/crates/lpe-exchange/src/mapi/dispatch/local_replica_sync/append_set_local_replica_midset_deleted_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/local_replica_sync/append_get_local_replica_ids_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/message_move_copy/append_move_copy_messages_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/message_open/append_open_message_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/message_save/append_save_changes_message_route_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_create_message_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_save_changes_message_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/messages/restore_save_changes_containing_folder_response_handle
+  - functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_message_status_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/named_properties/append_get_property_ids_from_names_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/navigation_shortcut_save/navigation_shortcut_property_by_id
+  - functions/crates/lpe-exchange/src/mapi/dispatch/navigation_shortcut_save/required_navigation_shortcut_binary_16
+  - functions/crates/lpe-exchange/src/mapi/dispatch/navigation_shortcut_save/validated_navigation_shortcut_from_mapi_properties
+  - functions/crates/lpe-exchange/src/mapi/dispatch/permissions/append_modify_permissions_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_get_properties_specific_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_get_stream_size_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_open_stream_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_clone_stream_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_stream_region_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_copy_to_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_copy_properties_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_commit_stream_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/property_mutations/restore_requested_property_problem_tags
+  - functions/crates/lpe-exchange/src/mapi/dispatch/public_folders/public_folder_per_user_patches
+  - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_read_recipients_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_modify_recipients_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/rules/append_modify_rules_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/rules/bounded_rule_mutation_from_row
+  - functions/crates/lpe-exchange/src/mapi/dispatch/rules/bounded_rule_sieve_from_json
+  - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/previous_mapi_bounded_restriction_json
+  - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/previous_mapi_bounded_scope_json
+  - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/bounded_search_criteria_to_rop
+  - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/is_message_class_exclusion_clause
+  - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/rop_restriction_from_json_clause
+  - functions/crates/lpe-exchange/src/mapi/dispatch/submission/optimized_send_target
+  - functions/crates/lpe-exchange/src/mapi/dispatch/submission/append_submit_message_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_configure/append_synchronization_configure_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/merge_sync_predecessor_change_lists
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/predecessor_map_includes
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/parse_predecessor_change_list
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/first_fast_transfer_marker
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/append_fast_transfer_destination_configure_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/imported_message_source_key
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/parse_predecessor_change_list_entries
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/source_key_global_counter
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/hierarchy_checkpoint_status
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_fai_identity
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_controls/append_query_rows_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_controls/append_find_row_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/request_restriction_bytes
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_debug_search_criteria_scope
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_inbox_associated_prefix_find_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/inbox_associated_broad_findrow_matched
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/inbox_associated_exact_configuration_findrow_matched
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response_metric_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_validation/sort_table_request_is_valid
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_query_position_wire_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tables/normalize_table_property_tag_for_session
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tables/append_table_control_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/smart_input_variant_resets_inbox_fai_cursor_before_query_rows
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/associated_config_persist_normalizes_stale_configuration_roaming_dictionary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/associated_config_persist_normalizes_stale_umolk_minimal_dictionary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/folders/root_default_folder_properties_canonicalize_additional_ren_client_prefix
+  - functions/crates/lpe-exchange/src/mapi/identity/MapiRequestIdentityScope/object_id
+  - functions/crates/lpe-exchange/src/mapi/identity/MapiRequestIdentityScope/source_key
+  - functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/from_special_folder_identity_records
+  - functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/actual_object_id
+  - functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/logical_object_id
+  - functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/object_id_from_source_key
+  - functions/crates/lpe-exchange/src/mapi/identity/mapped_mapi_object_id
+  - functions/crates/lpe-exchange/src/mapi/identity/mapped_mapi_source_key
+  - functions/crates/lpe-exchange/src/mapi/identity/raw_object_id_from_source_key
+  - functions/crates/lpe-exchange/src/mapi/nspi/nspi_query_rows_explicit_entry_ids
+  - functions/crates/lpe-exchange/src/mapi/nspi/nspi_query_rows_layout_at_offset
+  - functions/crates/lpe-exchange/src/mapi/nspi/public_endpoint_url
+  - functions/crates/lpe-exchange/src/mapi/nspi/property_values/mapped_nspi_object_id
+  - functions/crates/lpe-exchange/src/mapi/nspi/special_tables/nspi_request_flags
+  - functions/crates/lpe-exchange/src/mapi/properties/attachments/pending_attachment_upload
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_input_from_mapi
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_time_zone_from_mapi
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_time_zone_definition_key
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_status_from_mapi
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/organizer_json_from_mapi
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/event_is_meeting
+  - functions/crates/lpe-exchange/src/mapi/properties/contact/contact_labeled_json_values
+  - functions/crates/lpe-exchange/src/mapi/properties/contact/contact_json_values
+  - functions/crates/lpe-exchange/src/mapi/properties/contact/upsert_labeled_value
+  - functions/crates/lpe-exchange/src/mapi/properties/message/conversation_id_from_index
+  - functions/crates/lpe-exchange/src/mapi/properties/message/jmap_import_from_pending_message
+  - functions/crates/lpe-exchange/src/mapi/properties/message/parse_swapped_todo_data
+  - functions/crates/lpe-exchange/src/mapi/properties/message/read_swapped_u32
+  - functions/crates/lpe-exchange/src/mapi/properties/notes/json_from_mapi_multi_string_value
+  - functions/crates/lpe-exchange/src/mapi/properties/notes/note_input_from_mapi
+  - functions/crates/lpe-exchange/src/mapi/properties/notes/journal_entry_input_from_mapi
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_first_date_minutes
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_deleted_dates_from_json
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_modified_exceptions_from_json
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/until_date
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/time_to_minutes
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/read_recur_ansi_string
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/read_recur_wide_string
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/skip_recur_bytes
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/read_recur_u16
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/read_recur_u32
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_minutes_since_1601
+  - functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_datetime_minutes_since_1601
+  - functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_template_id
+  - functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_storage_type
+  - functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_definition_blob
+  - functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_text_search
+  - functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_numerical_search
+  - functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_tag
+  - functions/crates/lpe-exchange/src/mapi/properties/streams/attachment_stream_data
+  - functions/crates/lpe-exchange/src/mapi/properties/streams/property_stream_data
+  - functions/crates/lpe-exchange/src/mapi/properties/streams/message_body_stream_data
+  - functions/crates/lpe-exchange/src/mapi/properties/streams/pending_html_binary_property
+  - functions/crates/lpe-exchange/src/mapi/properties/streams/stream_write_error
+  - functions/crates/lpe-exchange/src/mapi/properties/streams/pending_text_property
+  - functions/crates/lpe-exchange/src/mapi/properties/streams/optional_pending_text_property
+  - functions/crates/lpe-exchange/src/mapi/properties/task/task_input_from_mapi
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/associated_config_missing_binary_property_opens_writable_stream
+  - functions/crates/lpe-exchange/src/mapi/properties/values/mapi_value_from_json
+  - functions/crates/lpe-exchange/src/mapi/properties/views/outlook_folder_view_sort_orders
+  - functions/crates/lpe-exchange/src/mapi/properties/views/view_descriptor_all_property_tags
+  - functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property_row_with_custom
+  - functions/crates/lpe-exchange/src/mapi/rop/write_flagged_property_row
+  - functions/crates/lpe-exchange/src/mapi/rop/request_get_properties_all_want_unicode
+  - functions/crates/lpe-exchange/src/mapi/rop/serialize_session_folder_row
+  - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_bytes
+  - functions/crates/lpe-exchange/src/mapi/rop/buffer/read_u16_prefixed_string
+  - functions/crates/lpe-exchange/src/mapi/rop/debug/format_associated_config_0e0b_debug
+  - functions/crates/lpe-exchange/src/mapi/rop/debug/format_folder_type_getprops_contract
+  - functions/crates/lpe-exchange/src/mapi/rop/event_properties/serialize_event_object_property
+  - functions/crates/lpe-exchange/src/mapi/rop/object_ids/RopRequest/long_term_source_object_id
+  - functions/crates/lpe-exchange/src/mapi/rop/object_ids/RopRequest/long_term_source_id_bytes
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/create_message_associated
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/abort_submit_folder_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/abort_submit_message_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/public_folder_probe_object_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/notification_types
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/notification_want_whole_store
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/notification_folder_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/message_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/row_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/read_recipients_reserved
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/attach_num
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_property_tag
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_open_mode
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/read_byte_count
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_write_data
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_seek_offset
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_size
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/read_flags
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sync_flags
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sync_extra_flags
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sync_property_tags
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/fast_transfer_buffer_size
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/fast_transfer_uses_server_determined_buffer_size
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_data
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/fast_transfer_upload_data
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/upload_state_property_tag
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/upload_state_transfer_size
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/import_property_values
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/fast_transfer_message_ids
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/import_read_state_changes
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/local_replica_deleted_ranges
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/search_criteria_restriction_bytes
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/search_criteria_folder_ids
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/search_criteria_flags
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/get_search_criteria_include_restriction
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/get_search_criteria_include_folders
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/set_receive_folder_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/set_receive_folder_message_class
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/local_replica_id_count
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/long_term_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/per_user_folder_object_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/per_user_data_offset
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/per_user_max_data_size
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/per_user_has_finished
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/per_user_write_data
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/message_ids
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/delete_messages_notify_non_read
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/status_message_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/message_status_flags
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/message_status_mask
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/reload_cached_information_reserved
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/create_folder_open_existing
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/create_folder_reserved
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/delete_folder_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/move_copy_message_ids
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/move_copy_want_copy
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/move_copy_want_asynchronous
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/move_copy_want_copy_raw
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_move_copy_folder_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_move_copy_want_recursive
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_move_copy_use_unicode
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_move_copy_display_name
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/empty_folder_want_delete_associated
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/move_copy_target_handle
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/copy_to_want_subobjects
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/copy_to_excluded_property_tags
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/copy_properties_property_tags
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/query_row_count
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/query_forward_read
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/restriction
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/find_origin
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/bookmark
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/bookmark_row_count
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/bookmark_want_row_moved_count
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/seek_row_count
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/want_row_moved_count
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/fractional_position
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sort_orders
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sort_category_count
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sort_expanded_count
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/category_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/expand_max_row_count
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/collapse_state
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/collapse_state_row_id
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/collapse_state_row_instance_number
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/property_ids
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/named_property_names
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/named_property_query_guid
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/property_values
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/typed
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/sync_request_options/RopRequest/sync_send_options
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/sync_request_options/RopRequest/fast_transfer_source_send_options
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/sync_request_options/RopRequest/fast_transfer_source_property_tags
+  - functions/crates/lpe-exchange/src/mapi/rop/property_limits/size_limited_specific_properties
+  - functions/crates/lpe-exchange/src/mapi/rop/property_limits/request_property_size_limit
+  - functions/crates/lpe-exchange/src/mapi/rop/property_rows/RopRequest/modify_permissions_count
+  - functions/crates/lpe-exchange/src/mapi/rop/property_rows/RopRequest/modify_rules_count
+  - functions/crates/lpe-exchange/src/mapi/rop/property_rows/RopRequest/modify_rules_rows
+  - functions/crates/lpe-exchange/src/mapi/rop/property_rows/RopRequest/modify_permissions_rows
+  - functions/crates/lpe-exchange/src/mapi/rop/receive_folders/receive_folder_entry_matches
+  - functions/crates/lpe-exchange/src/mapi/rop/recipients/RopRequest/modify_recipients
+  - functions/crates/lpe-exchange/src/mapi/rop/recipients/parse_simple_pending_recipient_row
+  - functions/crates/lpe-exchange/src/mapi/rop/recipients/parse_wrapped_pending_recipient_row
+  - functions/crates/lpe-exchange/src/mapi/rop/recipients/optional_mapi_value_text
+  - functions/crates/lpe-exchange/src/mapi/session/MapiSession/message_save_generation
+  - functions/crates/lpe-exchange/src/mapi/session/MapiSession/message_handle_generation
+  - functions/crates/lpe-exchange/src/mapi/session/MapiSession/record_default_view_advertised
+  - functions/crates/lpe-exchange/src/mapi/session/MapiSession/default_view_advertisement_state_for_folder
+  - functions/crates/lpe-exchange/src/mapi/session/MapiSession/default_view_folder_open_match_state
+  - functions/crates/lpe-exchange/src/mapi/session/MapiSession/search_folder_definition
+  - functions/crates/lpe-exchange/src/mapi/session/MapiSession/resolve_special_folder_alias
+  - functions/crates/lpe-exchange/src/mapi/session/input_object
+  - functions/crates/lpe-exchange/src/mapi/session/input_handle
+  - functions/crates/lpe-exchange/src/mapi/session/lifecycle/get_session
+  - functions/crates/lpe-exchange/src/mapi/session/named_properties/MapiSession/property_id_for_name
+  - functions/crates/lpe-exchange/src/mapi/session/named_properties/MapiSession/cache_named_property
+  - functions/crates/lpe-exchange/src/mapi/session/named_properties/MapiSession/property_name_for_id
+  - functions/crates/lpe-exchange/src/mapi/session/named_properties/MapiSession/normalize_named_property_tag
+  - functions/crates/lpe-exchange/src/mapi/session/named_properties/MapiSession/named_properties_for_query
+  - functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/take_pending_notification_delivery_batch
+  - functions/crates/lpe-exchange/src/mapi/store_adapter/access_plan/extend_access_plan_for_request
+  - functions/crates/lpe-exchange/src/mapi/store_adapter/access_plan/rop_uses_session_state_only
+  - functions/crates/lpe-exchange/src/mapi/store_adapter/access_plan/simulate_table_access
+  - functions/crates/lpe-exchange/src/mapi/sync/associated_config/associated_config_sync_object
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_property_value_with_mailbox_guid
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_last_modified_filetime
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_creation_filetime
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_last_modifier_name
+  - functions/crates/lpe-exchange/src/mapi/tables/attachments/serialize_pending_attachment_row
+  - functions/crates/lpe-exchange/src/mapi/tables/attachments/pending_attachment_hidden
+  - functions/crates/lpe-exchange/src/mapi/tables/collapse/rop_set_collapse_state_response
+  - functions/crates/lpe-exchange/src/mapi/tables/collapse/read_u16_from
+  - functions/crates/lpe-exchange/src/mapi/tables/collapse/read_u32_from
+  - functions/crates/lpe-exchange/src/mapi/tables/collapse/read_u64_from
+  - functions/crates/lpe-exchange/src/mapi/tables/controls/seek_row_request_is_valid
+  - functions/crates/lpe-exchange/src/mapi/tables/controls/rop_create_bookmark_response
+  - functions/crates/lpe-exchange/src/mapi/tables/controls/rop_seek_row_bookmark_response
+  - functions/crates/lpe-exchange/src/mapi/tables/controls/seek_row_bookmark_request_is_valid
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/navigation_shortcut_from_mapi_properties
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/navigation_shortcut_property_by_id
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_note_row
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_journal_entry_row
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_conversation_action_row
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/conversation_action_from_mapi_properties
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/pending_message_property_value
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/pending_associated_message_property_value
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/pending_message_search_key
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/pending_message_change_number
+  - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_event_row
+  - functions/crates/lpe-exchange/src/mapi/tables/query/query_rows_request_is_valid
+  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_property_row
+  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_fixed_query_rows_property_value
+  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_string8_value
+  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_utf16_value
+  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_binary_value
+  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_counted_fixed_query_rows_property_values
+  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_counted_query_rows_string_values
+  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_counted_query_rows_binary_values
+  - functions/crates/lpe-exchange/src/mapi/tables/time/date_time_to_filetime
+  - functions/crates/lpe-exchange/src/mapi/tables/time/date_time_to_filetime_in_time_zone
+  - functions/crates/lpe-exchange/src/mapi/transport/finalize_mapi_response
+  - functions/crates/lpe-exchange/src/mapi/transport/execute_response_rop_buffer_for_trace
+  - functions/crates/lpe-exchange/src/mapi/transport/cookies/refresh_accepted_session_response_cookies
+  - functions/crates/lpe-exchange/src/mapi/transport/diagnostics/recent_execute_debug_summaries
+  - functions/crates/lpe-exchange/src/mapi/transport/headers/request_type
+  - functions/crates/lpe-exchange/src/mapi/transport/headers/request_id
+  - functions/crates/lpe-exchange/src/mapi/transport/headers/client_info
+  - functions/crates/lpe-exchange/src/mapi/transport/headers/host_header
+  - functions/crates/lpe-exchange/src/mapi/transport/headers/content_length_header
+  - functions/crates/lpe-exchange/src/mapi/transport/headers/is_mapi_content_type
+  - functions/crates/lpe-exchange/src/mapi/transport/headers/response_header
+  - functions/crates/lpe-exchange/src/mapi/transport/headers/safe_header
+  - functions/crates/lpe-exchange/src/mapi_mailstore/read_sync_state_u32
+  - functions/crates/lpe-exchange/src/mapi_mailstore/fast_transfer_property_value_start
+  - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/ReplicaCounterSets/local
+  - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/source_key_replica_counter
+  - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/select_download_manifest_for_client_state
+  - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/decode_replguid_set
+  - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/decode_replid_set
+  - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/decode_globset_range_prefix
+  - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/parse_property
+  - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/read_u32
+  - functions/crates/lpe-exchange/src/mapi_mailstore/diagnostics/codec/read_debug_slice
+  - functions/crates/lpe-exchange/src/mapi_mailstore/diagnostics/codec/format_replguid_globset_debug
+  - functions/crates/lpe-exchange/src/mapi_mailstore/diagnostics/codec/decode_globset_ranges
+  - functions/crates/lpe-exchange/src/mapi_mailstore/diagnostics/codec/counter_from_xid
+  - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/parse_rfc3339_utc_filetime
+  - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/write_fast_transfer_property_info
+  - functions/crates/lpe-exchange/src/mapi_store/associated_config_source_key
+  - functions/crates/lpe-exchange/src/mapi_store/user_saved_search_folder_is_projectable
+  - functions/crates/lpe-exchange/src/mapi_store/common_views_search_folder_definition_is_projectable
+  - functions/crates/lpe-exchange/src/mapi_store/search_folder_definition_blob_has_required_blocks
+  - functions/crates/lpe-exchange/src/mapi_store/associated_config/copy_associated_config_server_metadata
+  - functions/crates/lpe-exchange/src/mapi_store/associated_config/is_empty_outlook_rule_organizer_placeholder
+  - functions/crates/lpe-exchange/src/mapi_store/associated_config/is_stale_outlook_umolk_user_options_placeholder
+  - functions/crates/lpe-exchange/src/mapi_store/associated_config/is_outlook_configuration_message_class
+  - functions/crates/lpe-exchange/src/mapi_store/folder_commit_time/MapiMailStoreSnapshot/folder_local_commit_time_max
+  - functions/crates/lpe-exchange/src/mapi_store/folder_versions/MapiFolderVersions/version
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_navigation_shortcut_identities
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_identities
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/apply_associated_config_identities
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/named_property_for_id
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/reminder_for_source
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/ScopedCalendarIdentities/folder_id
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/ScopedCalendarIdentities/event
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/ScopedCalendarIdentities/message_identity
+  - functions/crates/lpe-exchange/src/service/ews/calendar/rrule_to_ews_recurrence
+  - functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_parts
+  - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_email_entries_xml
+  - functions/crates/lpe-exchange/src/service/ews/contacts/contact_labeled_string
+  - functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/durable_events_response
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/change_key_for
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/change_key_version
+  - functions/crates/lpe-exchange/src/service/ews/xml/decode_ews_body
+  - functions/crates/lpe-exchange/src/service/http_utils/response_header
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_channels/send_rpc_proxy_out_channel
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_codec/read_le_u32
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_bound_dce_context_interface
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_remember_dce_bind_contexts
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_dce_bind_context_count
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_dce_bind_context_results
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_dce_auth_trailer_candidate
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_dce_request_auth
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_endpoints/rpc_proxy_emsmdb_rpc_ext2_request
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_requests/is_rpc_proxy_zero_length_request
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_rts/parse_rpc_proxy_conn_a1_rts_pdu
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_rts/rpc_proxy_conn_b1_virtual_connection_cookie
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_rts/parse_rpc_rts_cookie_command
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_stream/rpc_proxy_in_channel_response_for_endpoint_query
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_stream/rpc_proxy_last_dce_request_call_id
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_stream/rpc_proxy_in_channel_response_for_endpoint_query_with_store_response
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_stream/rpc_proxy_endpoint_response_for_fragment
+  - functions/crates/lpe-exchange/src/service/rpc_proxy_stream/rpc_proxy_endpoint_response_for_fragment_with_store
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/contact_labeled_json_values
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/contact_address_value
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_identity_lookup_from_row
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_event_from_change_row
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_message_object_id
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_event_object_id
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_notification_folder_id
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_folder_id
+  - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_sync_checkpoint_from_row
+  - functions/crates/lpe-exchange/src/store/storage_impl/fai_identity_import/commit_mapi_imported_fai_identity_in_tx
+  - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/ews_user_configuration_from_row
+  - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_named_property_mapping_from_row
+  - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_custom_property_value_from_row
+  - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_folder_profile_property_value_from_row
+  - functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/parse_mapi_predecessor_change_list
+  - functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/mapi_predecessors_contain_change_key
+  - functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/mapi_predecessors_include
+  - functions/crates/lpe-exchange/src/store/storage_impl/navigation_shortcut_import/preflight_unknown_mapi_navigation_shortcut_delete_in_tx
+  - functions/crates/lpe-exchange/src/tests/ews/ews_catalog_gate_covers_documented_operations_and_unsupported_gaps
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/open_embedded_message_response_contains_subject
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/mapi_over_http_set_properties_updates_canonical_event_and_task_reminders
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/mapi_over_http_reminders_folder_open_uses_canonical_search_projection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/mapi_over_http_root_rem_online_entry_id_projects_reminders_folder
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/mapi_over_http_reminders_table_projects_canonical_mixed_rows
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_keep_open_handle_accepts_second_update_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_empty_advertised_calendar_create_uses_default_collection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_local
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_get_valid_attachments_projects_existing_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_task_crud_uses_canonical_tasks
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_execute_opens_freebusy_data_folder
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_properties_updates_canonical_mail_reminder_state
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_accepts_canonical_calendar_mapping
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_accepts_canonical_custom_calendar_mapping
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_rejects_noncanonical_calendar_mapping
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_execute_accepts_release_rop
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_execute_sets_columns_and_queries_empty_rows
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_conversation_action_applies_to_future_matching_message
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_conversation_action_cross_store_keeps_local_message_in_place
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_reload_cached_information_returns_pending_message_summary
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_move_copy_messages_uses_canonical_store
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_delete_messages_uses_trash_and_hard_delete
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_open_message_uses_targeted_store_lookup
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_delete_attachment_is_committed_by_save_message
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_open_embedded_message_accepts_read_only_mode
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_valid_attachments_lists_canonical_attachment_numbers
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_stale_message_handle_requires_force_save
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_local_replica_ids_returns_replica_guid
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_execute_opens_compat_shortcuts_folder
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_query_columns_all_folder_columns_omit_note_geometry
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_ipm_subtree_reports_distinct_folder_identity
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_advertised_special_folder_reports_own_identity
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_creates_canonical_mailbox
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_advertised_special_folder_opens_existing_even_without_flag
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_quick_step_settings_opens_advertised_special_folder
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_invalid_type_returns_invalid_parameter
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_duplicate_name_returns_duplicate_name
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_under_custom_parent_preserves_parent
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_delete_folder_removes_custom_canonical_mailbox
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_delete_folder_rejects_system_mailbox
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_ipm_subtree_ost_identity_retains_client_session_blob
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_ipm_subtree_ost_identity_survives_reconnect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_folder_extended_flags_survive_reconnect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_across_reconnect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_execute_returns_private_mailbox_logon
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_spooler_logon_does_not_echo_request_only_flag
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootstrap
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_execute_handles_mailbox_store_bootstrap_rops
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_execute_returns_receive_folder_and_store_state
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_get_receive_folder_uses_message_class_matching
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_get_receive_folder_empty_class_returns_empty_explicit_message_class
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_bind_reestablishes_nspi_session_cookie
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_unbind_consumes_nspi_session
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_property_round_trips_on_supported_object
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kinds
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_property_set_before_save_persists_on_created_item
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_accepts_outlook_octet_stream_bind_probe
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_get_properties_sees_message_saved_in_same_execute
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_string8_property_tags_round_trip_through_canonical_unicode_property
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_delete_properties_no_replicate_clears_pending_message_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_named_property_bootstrap_maps_session_property_ids
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_named_property_mapping_survives_restart_style_session
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_message_status_is_session_local
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_open_message_then_gets_canonical_message_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_oxcdata_property_row_example_streams_oversized_body
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_get_properties_all_returns_message_projection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_open_attachment_returns_canonical_attachment_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_stream_region_rops_succeed_on_stream_handles
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_reads_canonical_message_body_stream
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_string8_body_stream_writes_canonical_message_body
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_copy_to_stream_saves_canonical_message_body
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_create_attachment_initializes_documented_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_create_attachment_saves_canonical_attachment_from_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_write_stream_saves_canonical_attachment
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_copy_to_stream_saves_canonical_attachment
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_outlook_set_read_flags_updates_state_and_notifies_table
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_set_read_flags_rejects_invalid_parameters
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_set_message_read_flag_updates_open_message_state
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_outlook_set_message_read_flag_accepts_default_flag
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_outlook_set_message_read_flag_accepts_clear_read_flag
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_message_properties_commit_on_save_changes
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_set_properties_validates_swapped_todo_data
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_cached_mode_properties_include_canonical_change_keys
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_get_properties_specific_returns_folder_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_set_properties_rejects_protocol_local_values
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids_ex
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_open_stream_reads_computed_binary_property
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_open_stream_returns_empty_missing_binary_property
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_set_properties_accepts_additional_ren_entry_ids_as_cache_write
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_set_properties_do_not_survive_as_protocol_state
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_default_folder_set_properties_do_not_override_computed_defaults
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_default_folder_set_properties_reject_invalid_entry_ids
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_default_folder_set_properties_accept_valid_entry_ids
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_default_folder_set_properties_accepts_cached_rem_online_entry_id
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_default_folder_get_properties_returns_canonical_entry_ids
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_get_properties_specific_flags_unknown_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_get_properties_ignores_stale_protocol_local_folder_state
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_microsoft_table_bookmarks_restore_contents_cursor_and_free
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_string8_rows_save_canonically
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_x500_rows_save_canonically
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_remove_all_recipients_clears_pending_message_recipients
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_pending_message_uses_canonical_submission
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_replayed_execute_request_id_does_not_resubmit_message
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_opened_draft_uses_source_draft_id
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_open_message_returns_visible_recipient_rows
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_read_recipients_returns_canonical_message_recipients
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_read_recipients_hides_sent_message_bcc_by_default
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_connect_reestablishes_session_context_with_open_sync_handle
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_set_columns_rejects_invalid_microsoft_async_flags
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_create_set_save_message_imports_canonical_email
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_conversation_action_fai_persists_and_moves_existing_conversation
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_conversation_action_fai_is_listed_and_openable
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_modify_recipients_imports_pending_message_recipients
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_ipm_subtree_ost_identity_write_survives_store_failure
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_configure_returns_canonical_manifest_buffer
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_partial_item_uses_microsoft_full_item_fallback
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_only_specified_properties_limits_message_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_only_specified_body_returns_body_property
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_property_tags_exclude_message_properties_by_default
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_sync_suppresses_lpe_search_definition_fai
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_fai_table_open_and_ics_share_canonical_identity
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_conversation_action_content_sync_exports_fai_rows
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_uses_mailbox_state_membership
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_tell_version_accepts_fast_transfer_sync_context
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_manifest_includes_attachment_change_facts_without_bcc
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_manifest_includes_visible_recipient_facts_without_bcc
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_manifest_includes_canonical_read_flag_state
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_manifest_includes_stable_change_key_facts_without_bcc
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_upload_state_returns_server_transfer_state
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_upload_state_does_not_echo_multiple_streams
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_message_change_updates_canonical_flags
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_new_message_saves_canonical_email
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_delete_and_read_state_use_canonical_store
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_soft_delete_moves_to_trash
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_move_uses_canonical_store
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_microsoft_oxcfxics_4_1_1_hierarchy_upload_returns_transfer_state
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_hierarchy_change_keeps_hidden_system_folder_alias_in_cnset
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_table
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_query_columns_all_reports_canonical_table_columns
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_query_rows_lists_root_hierarchy_without_ipm_children
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_query_rows_rejects_invalid_microsoft_forward_read_value
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_seek_row_rejects_invalid_microsoft_origin_value
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_contents_table_lists_canonical_messages
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_reset_table_requires_new_set_columns
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_query_position_reports_table_cursor
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_seek_row_fractional_moves_table_cursor
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_seek_row_fractional_rejects_zero_denominator_without_batch_drift
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_query_rows_no_advance_preserves_table_position
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_sort_table_orders_contents_rows
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_query_rows_reads_backward_from_table_position
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_restrict_filters_contents_table_rows
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_find_row_returns_matching_contents_row
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_seek_row_moves_contents_table_cursor
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_oxcmsg_get_attachment_table_lists_canonical_attachments
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_get_attachment_table_rejects_invalid_microsoft_table_flags
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_saved_embedded_message_reopens_from_attachment_table
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_ipm_subtree_returns_stable_ost_identity
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_table_control_rops_require_table_handles
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_connect_creates_emsmdb_session
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_transport_maps_response_code_to_header_and_envelope
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_response_content_length_covers_full_mapi_envelope
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_disconnect_consumes_emsmdb_session
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_replays_duplicate_execute_request_without_rerunning_rops
+  - functions/crates/lpe-exchange/src/tests/mapi_default_calendar_folder_identity_is_persisted
+  - functions/crates/lpe-exchange/src/tests/fake_contact_phone_values_by_label
+  - functions/crates/lpe-exchange/src/tests/fake_contact_address_value
+  - functions/crates/lpe-exchange/src/tests/FakeStore/fake_mapi_identity_lookup_for_object_id
+  - functions/crates/lpe-exchange/src/tests/test_mapi_pcl_includes_change_key
+  - functions/crates/lpe-exchange/src/tests/test_merge_mapi_predecessor_change_lists
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_folder_hierarchy_change
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_ews_message_tracking_report_detail
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_or_allocate_mapi_identities
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/upsert_mapi_special_folder_aliases
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_object_ids_for_deleted_changes
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_identities_by_source_keys
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_or_allocate_mapi_named_property_ids
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_named_properties_by_ids
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_sync_checkpoint
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/store_mapi_sync_checkpoint
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_address_book_entries
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_sync_versions
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_event_sync_versions
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_event_versions
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/create_mapi_contact
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_event_update
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_task_sync_versions
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/update_accessible_contact
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/update_accessible_event
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/move_accessible_event_to_deleted_items
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/update_accessible_task
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_navigation_shortcut_update
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_navigation_shortcut_import
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_associated_config_import
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_associated_config_update
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_message_attachments
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_calendar_attachments_for_events
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_attachment_content
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/move_jmap_email_from_mailbox_with_mapi_identity
+  - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/cancel_queued_submission
+  - functions/crates/lpe-exchange/src/tests/read_rop_binary_u16
+  - functions/crates/lpe-exchange/src/tests/hierarchy_query_display_container_rows
+  - functions/crates/lpe-exchange/src/tests/hierarchy_query_calendar_contract_rows
+  - functions/crates/lpe-exchange/src/tests/strict_replguid_globset_ranges
+  - functions/crates/lpe-exchange/src/tests/read_strict_slice
+  - functions/crates/lpe-exchange/src/tests/strict_replid_globset_ranges
+  - functions/crates/lpe-exchange/src/tests/mapi_last_binary_property
+  - functions/crates/lpe-exchange/src/tests/mapi_get_properties_specific_standard_row_offset
+  - functions/crates/lpe-exchange/src/tests/mapi_sync_manifest_message_state
+  - functions/crates/lpe-exchange/src/tests/mapi_fast_transfer_chunks
+  - functions/crates/lpe-exchange/src/tests/saved_message_id_from_response
+  - functions/crates/lpe-exchange/src/tests/response_rops_and_handles_from_execute_body
+  - functions/crates/lpe-exchange/src/tests/test_filetime
+  - functions/crates/lpe-imap/src/render/resolve_body_part
+  - functions/crates/lpe-imap/src/render/format_rfc5322_date
+  - functions/crates/lpe-imap/src/search/parse_search_key
+  - functions/crates/lpe-imap/src/search/next_search_argument
+  - functions/crates/lpe-imap/src/tests/FakeStore/allocate_uid_validity
+  - functions/crates/lpe-imap/src/tests/FakeStore/imapstore/fetch_imap_mailbox_state
+  - functions/crates/lpe-jmap/src/blob/JmapService/handle_blob_lookup
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_import_or_copy
+  - functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_get
+  - functions/crates/lpe-jmap/src/calendar/JmapService/calendar_event_update_input
+  - functions/crates/lpe-jmap/src/calendar/parse_calendar_collection_name
+  - functions/crates/lpe-jmap/src/calendar/parse_calendar_event_input
+  - functions/crates/lpe-jmap/src/calendar/parse_calendar_attachment_inputs
+  - functions/crates/lpe-jmap/src/calendar/parse_jmap_calendar_participants
+  - functions/crates/lpe-jmap/src/calendar/participant_email
+  - functions/crates/lpe-jmap/src/contacts/parse_contact_input
+  - functions/crates/lpe-jmap/src/contacts/parse_contact_name
+  - functions/crates/lpe-jmap/src/contacts/contact_object_string
+  - functions/crates/lpe-jmap/src/contacts/parse_contact_property_string
+  - functions/crates/lpe-jmap/src/contacts/parse_contact_property_array
+  - functions/crates/lpe-jmap/src/convert/resolve_creation_reference
+  - functions/crates/lpe-jmap/src/drafts/parse_draft_mutation
+  - functions/crates/lpe-jmap/src/drafts/parse_email_copy
+  - functions/crates/lpe-jmap/src/mail/imports/JmapService/parse_email_import
+  - functions/crates/lpe-jmap/src/mailboxes/parse_mailbox_create
+  - functions/crates/lpe-jmap/src/mailboxes/parse_mailbox_update
+  - functions/crates/lpe-jmap/src/mailboxes/filter_mailboxes
+  - functions/crates/lpe-jmap/src/mailboxes/validate_mailbox_set_names
+  - functions/crates/lpe-jmap/src/mailboxes/mailbox_parent_chain_contains
+  - functions/crates/lpe-jmap/src/mailboxes/mailbox_name_field
+  - functions/crates/lpe-jmap/src/notes_journal/parse_note_input
+  - functions/crates/lpe-jmap/src/notes_journal/parse_journal_entry_input
+  - functions/crates/lpe-jmap/src/parse/parse_submission_email_id
+  - functions/crates/lpe-jmap/src/parse/parse_first_property_object_string
+  - functions/crates/lpe-jmap/src/service/router
+  - functions/crates/lpe-jmap/src/service/upload_handler
+  - functions/crates/lpe-jmap/src/service/event_source_handler
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_reminder_set
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_reminder_import_or_copy
+  - functions/crates/lpe-jmap/src/service/JmapService/apply_reminder_mutation
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_share_set
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_share_import_or_copy
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_search_folder_set
+  - functions/crates/lpe-jmap/src/service/JmapService/handle_search_folder_import_or_copy
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_get
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query_changes
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_changes
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_import_or_copy
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/canonical_object_state
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/canonical_query_ids
+  - functions/crates/lpe-jmap/src/service/helpers/requested_account_id_from_arguments
+  - functions/crates/lpe-jmap/src/service/helpers/string_ids_from_arguments
+  - functions/crates/lpe-jmap/src/service/helpers/property_names_from_arguments
+  - functions/crates/lpe-jmap/src/service/helpers/project_get_properties
+  - functions/crates/lpe-jmap/src/service/helpers/object_keys
+  - functions/crates/lpe-jmap/src/service/helpers/parse_reminder_id
+  - functions/crates/lpe-jmap/src/service/helpers/parse_share_input
+  - functions/crates/lpe-jmap/src/service/helpers/search_folder_input_from_value
+  - functions/crates/lpe-jmap/src/service/helpers/is_method_error_payload
+  - functions/crates/lpe-jmap/src/service/helpers/resolve_result_references
+  - functions/crates/lpe-jmap/src/service/helpers/object_array_len
+  - functions/crates/lpe-jmap/src/service/helpers/object_map_len
+  - functions/crates/lpe-jmap/src/service/helpers/authorization_header
+  - functions/crates/lpe-jmap/src/session/public_base_url
+  - functions/crates/lpe-jmap/src/session/public_base_path
+  - functions/crates/lpe-jmap/src/session/websocket_url
+  - functions/crates/lpe-jmap/src/session/session_account_capabilities
+  - functions/crates/lpe-jmap/src/state/changes_response_from_durable_with_cursor
+  - functions/crates/lpe-jmap/src/state/changes_response_with_cursor
+  - functions/crates/lpe-jmap/src/state/apply_state_changes
+  - functions/crates/lpe-jmap/src/state/apply_query_changes
+  - functions/crates/lpe-jmap/src/state/compute_query_diff_with_reorders
+  - functions/crates/lpe-jmap/src/store/Storage/jmapstore/delete_jmap_share
+  - functions/crates/lpe-jmap/src/store/shares/project_share
+  - functions/crates/lpe-jmap/src/store/shares/copy_share_field_as
+  - functions/crates/lpe-jmap/src/store/shares/share_rights
+  - functions/crates/lpe-jmap/src/store/shares/share_type
+  - functions/crates/lpe-jmap/src/store/shares/share_uuid
+  - functions/crates/lpe-jmap/src/tasks/parse_task_input
+  - functions/crates/lpe-jmap/src/tasks/parse_task_list_create
+  - functions/crates/lpe-jmap/src/tasks/parse_task_list_update
+  - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_query_state
+  - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_message_blob
+  - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_calendar_attachments_for_events
+  - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_jmap_share
+  - functions/crates/lpe-jmap/src/vacation/save_vacation_response
+  - functions/crates/lpe-jmap/src/websocket/JmapService/handle_websocket_message
+  - functions/crates/lpe-jmap/src/websocket/JmapService/compute_push_changes
+  - functions/crates/lpe-jmap/src/websocket/websocket_request_id
+  - functions/crates/lpe-magika/src/detection/parse_detection_json
+  - functions/crates/lpe-magika/src/mime/parse_rfc822_header_value
+  - functions/crates/lpe-magika/src/mime/extract_visible_body_parts
+  - functions/crates/lpe-magika/src/mime/collect_attachment_parts
+  - functions/crates/lpe-magika/src/mime/parse_visible_part
+  - functions/crates/lpe-magika/src/mime/first_html_part
+  - functions/crates/lpe-magika/src/mime/decode_quoted_printable
+  - functions/crates/lpe-mail-auth/src/oauth/bearer_token
+  - functions/crates/lpe-mail-auth/src/oauth/basic_credentials
+  - functions/crates/lpe-storage/src/calendar/parse_calendar_participants_metadata
+  - functions/crates/lpe-storage/src/change/CanonicalPushChangeSet/accounts_for
+  - functions/crates/lpe-storage/src/change/CanonicalPushChangeSet/contains_category
+  - functions/crates/lpe-storage/src/collaboration/Storage/fetch_delegate_access_objects
+  - functions/crates/lpe-storage/src/collaboration/deleted_events/rekey_active_event_identities_in_tx
+  - functions/crates/lpe-storage/src/mail/parse_rfc822_message
+  - functions/crates/lpe-storage/src/mapi_contacts/NormalizedContact/from_input
+  - functions/crates/lpe-storage/src/mapi_contacts/parse_contact_predecessor_change_list
+  - functions/crates/lpe-storage/src/mapi_contacts/contact_predecessors_include
+  - functions/crates/lpe-storage/src/mapi_contacts/contact_predecessors_contain_change_key
+  - functions/crates/lpe-storage/src/mapi_contacts/merge_contact_predecessor_change_lists
+  - functions/crates/lpe-storage/src/mapi_contacts/imported_source_counter
+  - functions/crates/lpe-storage/src/mapi_events/fetch_created_accessible_event_in_tx
+  - functions/crates/lpe-storage/src/mapi_events/fetch_mapi_event_reminder_state_in_tx
+  - functions/crates/lpe-storage/src/mapi_events/mapi_event_version_from_row
+  - functions/crates/lpe-storage/src/mapi_events/merge_predecessor_change_list
+  - functions/crates/lpe-storage/src/mapi_events/parse_predecessor_change_list
+  - functions/crates/lpe-storage/src/mapi_events/imported_identity/imported_source_global_counter
+  - functions/crates/lpe-storage/src/message_ops/rekey_mapi_message_identity_in_tx
+  - functions/crates/lpe-storage/src/protocols/Storage/replay_jmap_mail_object_changes
+  - functions/crates/lpe-storage/src/protocols/Storage/expand_jmap_dependency_change
+  - functions/crates/lpe-storage/src/protocols/Storage/jmap_string_replay_object_id
+  - functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_emails
+  - functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_emails_with_protected_bcc
+  - functions/crates/lpe-storage/src/protocols/is_mapi_only_change
+  - functions/crates/lpe-storage/src/protocols/jmap_replay_object_id
+  - functions/crates/lpe-storage/src/protocols/summary_json_reminder_changed
+  - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
+  - functions/crates/lpe-storage/src/storage_backend/s3_read_object
+  - functions/crates/lpe-storage/src/storage_backend/required_string
+  - functions/crates/lpe-storage/src/storage_backend/optional_string
+  - functions/crates/lpe-storage/src/storage_backend/stat_from_headers
+  - functions/crates/lpe-storage/src/storage_policy/Storage/fetch_storage_policy_overview
+  - functions/crates/lpe-storage/src/storage_policy/assignment_pool
+  - functions/crates/lpe-storage/src/submission/Storage/find_submission_account_by_email_in_same_tenant
+  - functions/crates/lpe-storage/src/workspace/contact_primary_email
+  - functions/crates/lpe-storage/src/workspace/contact_json_with_primary_value
+  - functions/tools/activesync_mobile_lab_preflight/check_options
+  - functions/tools/activesync_mobile_lab_preflight/check_autodiscover_json
+  - functions/tools/jmap_live_shared_delegated_check/env
+  - functions/tools/jmap_live_shared_delegated_check/bool_env
+  - functions/tools/jmap_live_shared_delegated_check/login
+  - functions/tools/jmap_live_shared_delegated_check/jmap
+  - functions/tools/jmap_live_shared_delegated_check/websocket_url
+  - functions/tools/jmap_live_shared_delegated_check/enable_push_snapshot
+  - functions/tools/jmap_live_shared_delegated_check/replay_push
+  - functions/tools/jmap_live_shared_delegated_check/assert_grantee_jmap_visibility
+  - functions/tools/jmap_live_shared_delegated_check/assert_push_replay
+  - functions/tools/operations_benchmark/env
+  - functions/tools/operations_benchmark/login
+  - functions/tools/operations_benchmark/jmap
+  - functions/tools/operations_benchmark/method_response
+  - functions/tools/operations_benchmark/websocket_url
+  - functions/tools/operations_benchmark/encode_wbxml_node
+  - functions/tools/operations_benchmark/benchmark_jmap
+  - functions/tools/operations_benchmark/websocket_push_enable_round_trip
+  - functions/tools/operations_benchmark/jmap_inbox_mailbox_id
+  - functions/tools/operations_benchmark/markdown_report
+  - functions/tools/rca_outlook_connectivity_check/check_json_autodiscover
+  - functions/tools/rca_outlook_connectivity_check/check_jmap_session
+  - functions/tools/rca_outlook_connectivity_check/check_jmap_email_subject_absent
+  - functions/tools/rca_outlook_trace_summary/summarize_rr
+  - functions/tools/rca_outlook_trace_summary/classify_rr_setcolumns_release_response
+  - functions/tools/rca_outlook_trace_summary/parse_rr_response_handle_table
+  - functions/tools/rca_outlook_trace_summary/rr_event_tail_summary
+  - functions/tools/rca_outlook_trace_summary/summarize_log
+  - functions/tools/rca_outlook_trace_summary/record_query_rows_response_frames
+  - functions/tools/rca_outlook_trace_summary/record_visible_inbox_query_rows
+  - functions/tools/rca_outlook_trace_summary/record_broad_ipm_configuration_row_count_gap
+  - functions/tools/rca_outlook_trace_summary/record_folder_local_default_view_visibility
+  - functions/tools/rca_outlook_trace_summary/record_post_visible_release_followup
+  - functions/tools/rca_outlook_trace_summary/int_field
+  - functions/tools/rca_outlook_trace_summary/record_hierarchy_query_window
+  - functions/tools/rca_outlook_trace_summary/field_text
+  - functions/tools/rca_outlook_trace_summary/record_query_position_wire_fields
+  - functions/tools/rca_outlook_trace_summary/record_query_rows_terminal_origin_mismatch
+  - functions/tools/rca_outlook_trace_summary/inspect_contract
+  - functions/tools/rca_outlook_trace_summary/record_resolved_named_property_context
+  - functions/tools/rca_outlook_trace_summary/mismatched_capture_sessions
+  - functions/tools/rca_outlook_trace_summary/print_single_summary
+  - functions/tools/rca_outlook_trace_summary/print_batch_summary
+  - functions/tools/rca_outlook_trace_summary/issue_buckets
+  - functions/tools/rca_outlook_trace_summary/common_views_fai_missing_default_named_view
+  - functions/tools/rca_outlook_trace_summary/visible_release_associated_prefix_issue_buckets
+  - functions/tools/rca_outlook_trace_summary/visible_release_needs_action
+  - functions/web/admin/src/App
+  - functions/web/client/src/App/App
+---
+
+# Signature
+
+`get(name)`
+
+# Called by
+
+- [probe_lpe_core_delivery](../../../../../../../functions/LPE-CT/src/dashboard_config/probe_lpe_core_delivery.md)
+- [router](../../../../../../../functions/LPE-CT/src/router.md)
+- [require_management_admin](../../../../../../../functions/LPE-CT/src/management_auth/require_management_admin.md)
+- [bearer_token](../../../../../../../functions/LPE-CT/src/management_auth/bearer_token.md)
+- [require_integration_request](../../../../../../../functions/LPE-CT/src/management_auth/require_integration_request.md)
+- [required_header](../../../../../../../functions/LPE-CT/src/management_auth/required_header.md)
+- [trace_id_from_headers](../../../../../../../functions/LPE-CT/src/observability/trace_id_from_headers.md)
+- [check_optional_http_dependency](../../../../../../../functions/LPE-CT/src/readiness/check_optional_http_dependency.md)
+- [policy_tags_from_event](../../../../../../../functions/LPE-CT/src/reporting/policy_tags_from_event.md)
+- [latest_decision](../../../../../../../functions/LPE-CT/src/reporting/latest_decision.md)
+- [postfix_style_mail_log_line](../../../../../../../functions/LPE-CT/src/smtp/audit/postfix_style_mail_log_line.md)
+- [bayespam_token_probability](../../../../../../../functions/LPE-CT/src/smtp/bayes/bayespam_token_probability.md)
+- [read_smtp_reply](../../../../../../../functions/LPE-CT/src/smtp/protocol/read_smtp_reply.md)
+- [list_quarantine_items_from_db](../../../../../../../functions/LPE-CT/src/smtp/quarantine/list_quarantine_items_from_db.md)
+- [load_reputation_score](../../../../../../../functions/LPE-CT/src/smtp/reputation/load_reputation_score.md)
+- [update_reputation](../../../../../../../functions/LPE-CT/src/smtp/reputation/update_reputation.md)
+- [read_test_smtp_reply](../../../../../../../functions/LPE-CT/src/smtp/tests/read_test_smtp_reply.md)
+- [local_db_pool](../../../../../../../functions/LPE-CT/src/storage/local_db_pool.md)
+- [accept](../../../../../../../functions/LPE-CT/src/submission/accept.md)
+- [cpu_utilization_percent](../../../../../../../functions/LPE-CT/src/system_metrics/cpu_utilization_percent.md)
+- [read_dns_servers_from_resolv_conf](../../../../../../../functions/LPE-CT/src/system_metrics/read_dns_servers_from_resolv_conf.md)
+- [parse_ipv6_address_line](../../../../../../../functions/LPE-CT/src/system_metrics/parse_ipv6_address_line.md)
+- [parse_ipv4_interface_line](../../../../../../../functions/LPE-CT/src/system_metrics/parse_ipv4_interface_line.md)
+- [cached_recipient_verdict](../../../../../../../functions/LPE-CT/src/transport_policy/cached_recipient_verdict.md)
+- [createContext](../../../../../../../functions/LPE-CT/web/app/smoke/test/createContext.md)
+- [parseError](../../../../../../../functions/LPE-CT/web/modules/app/api/parseError.md)
+- [countRankedItems](../../../../../../../functions/LPE-CT/web/modules/app/dashboard/countRankedItems.md)
+- [buildTrafficSeries](../../../../../../../functions/LPE-CT/web/modules/app/dashboard/buildTrafficSeries.md)
+- [activatePageView](../../../../../../../functions/LPE-CT/web/modules/pages/activatePageView.md)
+- [protocol_version](../../../../../../../functions/crates/lpe-activesync/src/auth/protocol_version.md)
+- [parse_mime_message](../../../../../../../functions/crates/lpe-activesync/src/message/parse_mime_message.md)
+- [parse_message_part](../../../../../../../functions/crates/lpe-activesync/src/message/parse_message_part.md)
+- [parse_multipart_body](../../../../../../../functions/crates/lpe-activesync/src/message/parse_multipart_body.md)
+- [decode_quoted_printable](../../../../../../../functions/crates/lpe-activesync/src/message/decode_quoted_printable.md)
+- [is_message_rfc822](../../../../../../../functions/crates/lpe-activesync/src/response/is_message_rfc822.md)
+- [build_commands](../../../../../../../functions/crates/lpe-activesync/src/service/ActiveSyncService/build_commands.md)
+- [pending_page_is_stable](../../../../../../../functions/crates/lpe-activesync/src/service/ActiveSyncService/pending_page_is_stable.md)
+- [header_policy_key](../../../../../../../functions/crates/lpe-activesync/src/service/provisioning/header_policy_key.md)
+- [decode_sync_state](../../../../../../../functions/crates/lpe-activesync/src/service/sync_helpers/decode_sync_state.md)
+- [recurrence_application_data](../../../../../../../functions/crates/lpe-activesync/src/snapshot/recurrence_application_data.md)
+- [diff_snapshots](../../../../../../../functions/crates/lpe-activesync/src/snapshot/diff_snapshots.md)
+- [diff_collection_states](../../../../../../../functions/crates/lpe-activesync/src/snapshot/diff_collection_states.md)
+- [snapshot_fingerprints](../../../../../../../functions/crates/lpe-activesync/src/snapshot/snapshot_fingerprints.md)
+- [value_to_node](../../../../../../../functions/crates/lpe-activesync/src/snapshot/value_to_node.md)
+- [fetch_jmap_mailboxes](../../../../../../../functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_jmap_mailboxes.md)
+- [fetch_latest_activesync_sync_state](../../../../../../../functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_latest_activesync_sync_state.md)
+- [fetch_activesync_device](../../../../../../../functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_activesync_device.md)
+- [fetch_jmap_message_blob](../../../../../../../functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_jmap_message_blob.md)
+- [fetch_activesync_message_attachments](../../../../../../../functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_activesync_message_attachments.md)
+- [fetch_activesync_attachment_content](../../../../../../../functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_activesync_attachment_content.md)
+- [fetch_activesync_sync_state](../../../../../../../functions/crates/lpe-activesync/src/tests/FakeStore/activesyncstore/fetch_activesync_sync_state.md)
+- [provision_returns_policy_key_and_lightweight_policy_document](../../../../../../../functions/crates/lpe-activesync/src/tests/provision_returns_policy_key_and_lightweight_policy_document.md)
+- [provision_acknowledgement_stores_active_policy_key](../../../../../../../functions/crates/lpe-activesync/src/tests/provision_acknowledgement_stores_active_policy_key.md)
+- [parse_node](../../../../../../../functions/crates/lpe-activesync/src/wbxml/parse_node.md)
+- [read_multibyte_int](../../../../../../../functions/crates/lpe-activesync/src/wbxml/read_multibyte_int.md)
+- [exchange_code_for_claims](../../../../../../../functions/crates/lpe-admin-api/src/account_oidc/exchange_code_for_claims.md)
+- [resolved_endpoints](../../../../../../../functions/crates/lpe-admin-api/src/account_oidc/resolved_endpoints.md)
+- [claim_string](../../../../../../../functions/crates/lpe-admin-api/src/account_oidc/claim_string.md)
+- [oidc_callback](../../../../../../../functions/crates/lpe-admin-api/src/admin_auth/oidc_callback.md)
+- [router](../../../../../../../functions/crates/lpe-admin-api/src/app/router.md)
+- [client_oidc_callback](../../../../../../../functions/crates/lpe-admin-api/src/client_auth/client_oidc_callback.md)
+- [router](../../../../../../../functions/crates/lpe-admin-api/src/client_config/router.md)
+- [from_headers](../../../../../../../functions/crates/lpe-admin-api/src/client_config/PublishedEndpoints/from_headers.md)
+- [header_value](../../../../../../../functions/crates/lpe-admin-api/src/client_config/header_value.md)
+- [safe_header](../../../../../../../functions/crates/lpe-admin-api/src/client_config/safe_header.md)
+- [bearer_token](../../../../../../../functions/crates/lpe-admin-api/src/http/bearer_token.md)
+- [forwarded_header](../../../../../../../functions/crates/lpe-admin-api/src/http/forwarded_header.md)
+- [require_integration](../../../../../../../functions/crates/lpe-admin-api/src/integration/require_integration.md)
+- [required_header](../../../../../../../functions/crates/lpe-admin-api/src/integration/required_header.md)
+- [trace_id_from_headers](../../../../../../../functions/crates/lpe-admin-api/src/observability/trace_id_from_headers.md)
+- [safe_header](../../../../../../../functions/crates/lpe-admin-api/src/observability/safe_header.md)
+- [exchange_code_for_claims](../../../../../../../functions/crates/lpe-admin-api/src/oidc/exchange_code_for_claims.md)
+- [resolved_endpoints](../../../../../../../functions/crates/lpe-admin-api/src/oidc/resolved_endpoints.md)
+- [claim_string](../../../../../../../functions/crates/lpe-admin-api/src/oidc/claim_string.md)
+- [check_optional_http_dependency](../../../../../../../functions/crates/lpe-admin-api/src/readiness/check_optional_http_dependency.md)
+- [generate_code](../../../../../../../functions/crates/lpe-admin-api/src/totp/generate_code.md)
+- [accept](../../../../../../../functions/crates/lpe-cli/src/accept.md)
+- [redact_named_text](../../../../../../../functions/crates/lpe-core/src/outlook_trace/redact_named_text.md)
+- [evaluate_test](../../../../../../../functions/crates/lpe-core/src/sieve/evaluate_test.md)
+- [peek](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/peek.md)
+- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [precondition_not_modified](../../../../../../../functions/crates/lpe-dav/src/preconditions/precondition_not_modified.md)
+- [check_write_preconditions](../../../../../../../functions/crates/lpe-dav/src/preconditions/check_write_preconditions.md)
+- [check_delete_preconditions](../../../../../../../functions/crates/lpe-dav/src/preconditions/check_delete_preconditions.md)
+- [handle_propfind](../../../../../../../functions/crates/lpe-dav/src/service/DavService/handle_propfind.md)
+- [month_abbrev](../../../../../../../functions/crates/lpe-domain/src/civil_time/month_abbrev.md)
+- [list_pattern_match_from](../../../../../../../functions/crates/lpe-domain/src/mailbox_name/list_pattern_match_from.md)
+- [execute_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute_response.md)
+- [execute_rops](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops.md)
+- [persist_associated_config_message](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/persist_associated_config_message.md)
+- [normalized_associated_config_persisted_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/normalized_associated_config_persisted_properties.md)
+- [associated_config_uuid](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/associated_config_uuid.md)
+- [associated_config_class_and_subject](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/associated_config_class_and_subject.md)
+- [append_open_attachment_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_open_attachment_response.md)
+- [append_create_attachment_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_create_attachment_response.md)
+- [append_delete_attachment_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_delete_attachment_response.md)
+- [append_open_embedded_message_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_open_embedded_message_response.md)
+- [append_save_changes_attachment_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_save_changes_attachment_response.md)
+- [event_attachments_for_parent_handle](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/event_attachments_for_parent_handle.md)
+- [next_pending_event_attachment_num](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/next_pending_event_attachment_num.md)
+- [open_embedded_message_source](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/open_embedded_message_source.md)
+- [copy_custom_property_values_for_request](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/copy_custom_property_values_for_request.md)
+- [folder_set_property_problems](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/default_folders/folder_set_property_problems.md)
+- [default_folder_identification_safe_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/default_folders/default_folder_identification_safe_property_value.md)
+- [indexed_special_folder_aliases](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/default_folders/indexed_special_folder_aliases.md)
+- [summarize_request_rop_raw_frames](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_request_rop_raw_frames.md)
+- [summarize_request_rop_buffer](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_request_rop_buffer.md)
+- [summarize_response_rop_buffer_with_optional_expected_handles](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_response_rop_buffer_with_optional_expected_handles.md)
+- [response_rop_frame_end](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/response_rop_frame_end.md)
+- [response_rop_fixed_frame_end](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/response_rop_fixed_frame_end.md)
+- [next_response_rop_start_validated](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/next_response_rop_start_validated.md)
+- [next_response_rop_start_from](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/next_response_rop_start_from.md)
+- [response_handle_index_matches](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/response_handle_index_matches.md)
+- [next_response_rop_start](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/next_response_rop_start.md)
+- [rop_buffer_size_word](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/rop_buffer_size_word.md)
+- [logon_special_folder_contract_entries](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/logon_special_folder_contract_entries.md)
+- [read_response_error_code](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/read_response_error_code.md)
+- [summarize_response_rop_frame](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_response_rop_frame.md)
+- [logon_open_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/logon_open_flags.md)
+- [logon_store_state](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/logon_store_state.md)
+- [associated_config_debug_fields](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/associated_config/associated_config_debug_fields.md)
+- [format_calendar_contract_invariant_issues](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract/format_calendar_contract_invariant_issues.md)
+- [format_view_handoff_invariant_warnings](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_view_handoff_invariant_warnings.md)
+- [format_default_view_table_compatibility_contract](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_default_view_table_compatibility_contract.md)
+- [format_view_descriptor_binary_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_view_descriptor_binary_summary.md)
+- [view_descriptor_sort_direction_matches_column_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/view_descriptor_sort_direction_matches_column_flags.md)
+- [view_descriptor_column_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/view_descriptor_column_flags.md)
+- [view_descriptor_column_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/view_descriptor_column_count.md)
+- [view_descriptor_column_payload_len](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/view_descriptor_column_payload_len.md)
+- [default_folder_getprops_response_values_for_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/default_folders/default_folder_getprops_response_values_for_debug.md)
+- [indexed_special_folder_entry_ids_for_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/default_folders/indexed_special_folder_entry_ids_for_debug.md)
+- [read_le_u32_at](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/execute/read_le_u32_at.md)
+- [summarize_fast_transfer_get_buffer_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/fast_transfer/summarize_fast_transfer_get_buffer_response.md)
+- [summarize_message_getprops_materialization](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/summarize_message_getprops_materialization.md)
+- [format_debug_named_property_context](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/named_properties/format_debug_named_property_context.md)
+- [debug_open_folder_property_shapes](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/open_folder/debug_open_folder_property_shapes.md)
+- [getprops_contract_response_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/post_hierarchy/getprops_contract_response_summary.md)
+- [set_properties_problem_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/post_hierarchy/set_properties_problem_count.md)
+- [set_properties_problem_details_for_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/post_hierarchy/set_properties_problem_details_for_debug.md)
+- [summarize_first_post_hierarchy_probe](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/probes/summarize_first_post_hierarchy_probe.md)
+- [summarize_open_folder_probe_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/probes/summarize_open_folder_probe_response.md)
+- [summarize_get_properties_probe_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/probes/summarize_get_properties_probe_response.md)
+- [summarize_get_properties_probe_response_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/probes/summarize_get_properties_probe_response_values.md)
+- [summarize_set_properties_probe_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/probes/summarize_set_properties_probe_response.md)
+- [extract_getprops_binary_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/extract_getprops_binary_value.md)
+- [summarize_flagged_getprops_materialization](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/summarize_flagged_getprops_materialization.md)
+- [get_properties_specific_response_values_for_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/get_properties_specific_response_values_for_debug.md)
+- [get_properties_view_response_values_for_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/get_properties_view_response_values_for_debug.md)
+- [log_outlook_contents_table_find_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/table_queries/log_outlook_contents_table_find_row.md)
+- [rop_response_return_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/table_queries/rop_response_return_value.md)
+- [log_outlook_contents_table_query_rows_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/table_queries/log_outlook_contents_table_query_rows_response.md)
+- [log_outlook_hierarchy_table_query_rows_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/table_queries/log_outlook_hierarchy_table_query_rows_response.md)
+- [log_mapi_query_position_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/table_queries/log_mapi_query_position_debug.md)
+- [mapi_value_debug_string](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_string.md)
+- [mapi_value_debug_u32](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_u32.md)
+- [mapi_value_debug_bool](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_bool.md)
+- [mapi_value_debug_binary_decode](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_binary_decode.md)
+- [format_inbox_folder_type_getprops_response_context](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/format_inbox_folder_type_getprops_response_context.md)
+- [save_pending_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event.md)
+- [save_existing_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event.md)
+- [imported_event_identity_from_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_identity_from_properties.md)
+- [imported_event_last_modification_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_last_modification_filetime.md)
+- [staged_event_reminder_is_active](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/staged_event_reminder_is_active.md)
+- [rop_buffer_is_store_independent_special_folder_getprops_probe](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute/rop_buffer_is_store_independent_special_folder_getprops_probe.md)
+- [append_open_folder_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/folder_open/append_open_folder_response.md)
+- [append_folder_move_copy_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/folders/append_folder_move_copy_response.md)
+- [hydrate_folder_handle_properties_for_request](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/folders/hydrate_folder_handle_properties_for_request.md)
+- [append_set_local_replica_midset_deleted_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/local_replica_sync/append_set_local_replica_midset_deleted_response.md)
+- [append_get_local_replica_ids_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/local_replica_sync/append_get_local_replica_ids_response.md)
+- [append_move_copy_messages_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/message_move_copy/append_move_copy_messages_response.md)
+- [append_open_message_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/message_open/append_open_message_response.md)
+- [append_save_changes_message_route_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/message_save/append_save_changes_message_route_response.md)
+- [append_create_message_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_create_message_response.md)
+- [append_save_changes_message_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_save_changes_message_response.md)
+- [restore_save_changes_containing_folder_response_handle](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/messages/restore_save_changes_containing_folder_response_handle.md)
+- [append_message_status_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_message_status_response.md)
+- [append_get_property_ids_from_names_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/named_properties/append_get_property_ids_from_names_response.md)
+- [navigation_shortcut_property_by_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/navigation_shortcut_save/navigation_shortcut_property_by_id.md)
+- [required_navigation_shortcut_binary_16](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/navigation_shortcut_save/required_navigation_shortcut_binary_16.md)
+- [validated_navigation_shortcut_from_mapi_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/navigation_shortcut_save/validated_navigation_shortcut_from_mapi_properties.md)
+- [append_modify_permissions_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/permissions/append_modify_permissions_response.md)
+- [append_get_properties_specific_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_get_properties_specific_response.md)
+- [append_get_stream_size_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_get_stream_size_response.md)
+- [append_open_stream_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_open_stream_response.md)
+- [append_clone_stream_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_clone_stream_response.md)
+- [append_stream_region_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_stream_region_response.md)
+- [append_copy_to_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_copy_to_response.md)
+- [append_copy_properties_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_copy_properties_response.md)
+- [append_commit_stream_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_commit_stream_response.md)
+- [restore_requested_property_problem_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/property_mutations/restore_requested_property_problem_tags.md)
+- [public_folder_per_user_patches](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/public_folders/public_folder_per_user_patches.md)
+- [append_read_recipients_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_read_recipients_response.md)
+- [append_modify_recipients_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_modify_recipients_response.md)
+- [append_modify_rules_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/rules/append_modify_rules_response.md)
+- [bounded_rule_mutation_from_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/rules/bounded_rule_mutation_from_row.md)
+- [bounded_rule_sieve_from_json](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/rules/bounded_rule_sieve_from_json.md)
+- [previous_mapi_bounded_restriction_json](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/previous_mapi_bounded_restriction_json.md)
+- [previous_mapi_bounded_scope_json](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/previous_mapi_bounded_scope_json.md)
+- [bounded_search_criteria_to_rop](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/bounded_search_criteria_to_rop.md)
+- [is_message_class_exclusion_clause](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/is_message_class_exclusion_clause.md)
+- [rop_restriction_from_json_clause](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/rop_restriction_from_json_clause.md)
+- [optimized_send_target](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/submission/optimized_send_target.md)
+- [append_submit_message_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/submission/append_submit_message_response.md)
+- [append_synchronization_configure_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_configure/append_synchronization_configure_response.md)
+- [merge_sync_predecessor_change_lists](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/merge_sync_predecessor_change_lists.md)
+- [predecessor_map_includes](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/predecessor_map_includes.md)
+- [parse_predecessor_change_list](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/parse_predecessor_change_list.md)
+- [first_fast_transfer_marker](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/first_fast_transfer_marker.md)
+- [append_fast_transfer_destination_configure_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/append_fast_transfer_destination_configure_response.md)
+- [imported_message_source_key](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/imported_message_source_key.md)
+- [parse_predecessor_change_list_entries](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/parse_predecessor_change_list_entries.md)
+- [source_key_global_counter](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/source_key_global_counter.md)
+- [hierarchy_checkpoint_status](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/hierarchy_checkpoint_status.md)
+- [imported_fai_identity](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_fai_identity.md)
+- [append_query_rows_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_controls/append_query_rows_response.md)
+- [append_find_row_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_controls/append_find_row_response.md)
+- [request_restriction_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/request_restriction_bytes.md)
+- [format_debug_search_criteria_scope](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_debug_search_criteria_scope.md)
+- [format_inbox_associated_prefix_find_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_inbox_associated_prefix_find_summary.md)
+- [inbox_associated_broad_findrow_matched](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/inbox_associated_broad_findrow_matched.md)
+- [inbox_associated_exact_configuration_findrow_matched](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/inbox_associated_exact_configuration_findrow_matched.md)
+- [hierarchy_response_metric_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response_metric_summary.md)
+- [format_hierarchy_query_rows_wire_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary.md)
+- [sort_table_request_is_valid](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_validation/sort_table_request_is_valid.md)
+- [format_query_position_wire_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_query_position_wire_summary.md)
+- [normalize_table_property_tag_for_session](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/normalize_table_property_tag_for_session.md)
+- [append_table_control_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/append_table_control_response.md)
+- [smart_input_variant_resets_inbox_fai_cursor_before_query_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/smart_input_variant_resets_inbox_fai_cursor_before_query_rows.md)
+- [associated_config_persist_normalizes_stale_configuration_roaming_dictionary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/associated_config_persist_normalizes_stale_configuration_roaming_dictionary.md)
+- [associated_config_persist_normalizes_stale_umolk_minimal_dictionary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/associated_config_persist_normalizes_stale_umolk_minimal_dictionary.md)
+- [root_default_folder_properties_canonicalize_additional_ren_client_prefix](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/folders/root_default_folder_properties_canonicalize_additional_ren_client_prefix.md)
+- [object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiRequestIdentityScope/object_id.md)
+- [source_key](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiRequestIdentityScope/source_key.md)
+- [from_special_folder_identity_records](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/from_special_folder_identity_records.md)
+- [actual_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/actual_object_id.md)
+- [logical_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/logical_object_id.md)
+- [object_id_from_source_key](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/object_id_from_source_key.md)
+- [mapped_mapi_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/mapped_mapi_object_id.md)
+- [mapped_mapi_source_key](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/mapped_mapi_source_key.md)
+- [raw_object_id_from_source_key](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/raw_object_id_from_source_key.md)
+- [nspi_query_rows_explicit_entry_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/nspi_query_rows_explicit_entry_ids.md)
+- [nspi_query_rows_layout_at_offset](../../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/nspi_query_rows_layout_at_offset.md)
+- [public_endpoint_url](../../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/public_endpoint_url.md)
+- [mapped_nspi_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/property_values/mapped_nspi_object_id.md)
+- [nspi_request_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/special_tables/nspi_request_flags.md)
+- [pending_attachment_upload](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/attachments/pending_attachment_upload.md)
+- [event_input_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_input_from_mapi.md)
+- [calendar_time_zone_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_time_zone_from_mapi.md)
+- [calendar_time_zone_definition_key](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_time_zone_definition_key.md)
+- [calendar_status_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_status_from_mapi.md)
+- [organizer_json_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/organizer_json_from_mapi.md)
+- [event_is_meeting](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/event_is_meeting.md)
+- [contact_labeled_json_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/contact_labeled_json_values.md)
+- [contact_json_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/contact_json_values.md)
+- [upsert_labeled_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/upsert_labeled_value.md)
+- [conversation_id_from_index](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/conversation_id_from_index.md)
+- [jmap_import_from_pending_message](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/jmap_import_from_pending_message.md)
+- [parse_swapped_todo_data](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/parse_swapped_todo_data.md)
+- [read_swapped_u32](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/read_swapped_u32.md)
+- [json_from_mapi_multi_string_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/notes/json_from_mapi_multi_string_value.md)
+- [note_input_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/notes/note_input_from_mapi.md)
+- [journal_entry_input_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/notes/journal_entry_input_from_mapi.md)
+- [recurrence_first_date_minutes](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_first_date_minutes.md)
+- [recurrence_deleted_dates_from_json](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_deleted_dates_from_json.md)
+- [recurrence_modified_exceptions_from_json](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_modified_exceptions_from_json.md)
+- [until_date](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/until_date.md)
+- [time_to_minutes](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/time_to_minutes.md)
+- [read_recur_ansi_string](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/read_recur_ansi_string.md)
+- [read_recur_wide_string](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/read_recur_wide_string.md)
+- [skip_recur_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/skip_recur_bytes.md)
+- [read_recur_u16](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/read_recur_u16.md)
+- [read_recur_u32](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/read_recur_u32.md)
+- [recurrence_minutes_since_1601](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_minutes_since_1601.md)
+- [recurrence_datetime_minutes_since_1601](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_datetime_minutes_since_1601.md)
+- [search_folder_template_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_template_id.md)
+- [search_folder_storage_type](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_storage_type.md)
+- [search_folder_definition_blob](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_definition_blob.md)
+- [search_folder_text_search](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_text_search.md)
+- [search_folder_numerical_search](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_numerical_search.md)
+- [search_folder_tag](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_tag.md)
+- [attachment_stream_data](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/attachment_stream_data.md)
+- [property_stream_data](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/property_stream_data.md)
+- [message_body_stream_data](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/message_body_stream_data.md)
+- [pending_html_binary_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/pending_html_binary_property.md)
+- [stream_write_error](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/stream_write_error.md)
+- [pending_text_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/pending_text_property.md)
+- [optional_pending_text_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/optional_pending_text_property.md)
+- [task_input_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/task_input_from_mapi.md)
+- [common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence.md)
+- [associated_config_missing_binary_property_opens_writable_stream](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/associated_config_missing_binary_property_opens_writable_stream.md)
+- [mapi_value_from_json](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/mapi_value_from_json.md)
+- [outlook_folder_view_sort_orders](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/outlook_folder_view_sort_orders.md)
+- [view_descriptor_all_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/view_descriptor_all_property_tags.md)
+- [serialize_object_property_row_with_custom](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property_row_with_custom.md)
+- [write_flagged_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/write_flagged_property_row.md)
+- [request_get_properties_all_want_unicode](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/request_get_properties_all_want_unicode.md)
+- [serialize_session_folder_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_session_folder_row.md)
+- [read_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_bytes.md)
+- [read_u16_prefixed_string](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/read_u16_prefixed_string.md)
+- [format_associated_config_0e0b_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/debug/format_associated_config_0e0b_debug.md)
+- [format_folder_type_getprops_contract](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/debug/format_folder_type_getprops_contract.md)
+- [serialize_event_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/event_properties/serialize_event_object_property.md)
+- [long_term_source_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/object_ids/RopRequest/long_term_source_object_id.md)
+- [long_term_source_id_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/object_ids/RopRequest/long_term_source_id_bytes.md)
+- [folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_id.md)
+- [create_message_associated](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/create_message_associated.md)
+- [abort_submit_folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/abort_submit_folder_id.md)
+- [abort_submit_message_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/abort_submit_message_id.md)
+- [public_folder_probe_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/public_folder_probe_object_id.md)
+- [notification_types](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/notification_types.md)
+- [notification_want_whole_store](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/notification_want_whole_store.md)
+- [notification_folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/notification_folder_id.md)
+- [message_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/message_id.md)
+- [row_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/row_id.md)
+- [read_recipients_reserved](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/read_recipients_reserved.md)
+- [attach_num](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/attach_num.md)
+- [stream_property_tag](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_property_tag.md)
+- [stream_open_mode](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_open_mode.md)
+- [read_byte_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/read_byte_count.md)
+- [stream_write_data](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_write_data.md)
+- [stream_seek_offset](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_seek_offset.md)
+- [stream_size](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_size.md)
+- [read_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/read_flags.md)
+- [sync_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sync_flags.md)
+- [sync_extra_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sync_extra_flags.md)
+- [sync_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sync_property_tags.md)
+- [fast_transfer_buffer_size](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/fast_transfer_buffer_size.md)
+- [fast_transfer_uses_server_determined_buffer_size](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/fast_transfer_uses_server_determined_buffer_size.md)
+- [stream_data](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/stream_data.md)
+- [fast_transfer_upload_data](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/fast_transfer_upload_data.md)
+- [upload_state_property_tag](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/upload_state_property_tag.md)
+- [upload_state_transfer_size](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/upload_state_transfer_size.md)
+- [import_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/import_property_values.md)
+- [fast_transfer_message_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/fast_transfer_message_ids.md)
+- [import_read_state_changes](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/import_read_state_changes.md)
+- [local_replica_deleted_ranges](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/local_replica_deleted_ranges.md)
+- [search_criteria_restriction_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/search_criteria_restriction_bytes.md)
+- [search_criteria_folder_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/search_criteria_folder_ids.md)
+- [search_criteria_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/search_criteria_flags.md)
+- [get_search_criteria_include_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/get_search_criteria_include_restriction.md)
+- [get_search_criteria_include_folders](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/get_search_criteria_include_folders.md)
+- [set_receive_folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/set_receive_folder_id.md)
+- [set_receive_folder_message_class](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/set_receive_folder_message_class.md)
+- [local_replica_id_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/local_replica_id_count.md)
+- [long_term_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/long_term_id.md)
+- [per_user_folder_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/per_user_folder_object_id.md)
+- [per_user_data_offset](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/per_user_data_offset.md)
+- [per_user_max_data_size](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/per_user_max_data_size.md)
+- [per_user_has_finished](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/per_user_has_finished.md)
+- [per_user_write_data](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/per_user_write_data.md)
+- [message_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/message_ids.md)
+- [delete_messages_notify_non_read](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/delete_messages_notify_non_read.md)
+- [status_message_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/status_message_id.md)
+- [message_status_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/message_status_flags.md)
+- [message_status_mask](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/message_status_mask.md)
+- [reload_cached_information_reserved](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/reload_cached_information_reserved.md)
+- [create_folder_open_existing](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/create_folder_open_existing.md)
+- [create_folder_reserved](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/create_folder_reserved.md)
+- [delete_folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/delete_folder_id.md)
+- [move_copy_message_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/move_copy_message_ids.md)
+- [move_copy_want_copy](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/move_copy_want_copy.md)
+- [move_copy_want_asynchronous](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/move_copy_want_asynchronous.md)
+- [move_copy_want_copy_raw](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/move_copy_want_copy_raw.md)
+- [folder_move_copy_folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_move_copy_folder_id.md)
+- [folder_move_copy_want_recursive](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_move_copy_want_recursive.md)
+- [folder_move_copy_use_unicode](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_move_copy_use_unicode.md)
+- [folder_move_copy_display_name](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_move_copy_display_name.md)
+- [empty_folder_want_delete_associated](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/empty_folder_want_delete_associated.md)
+- [move_copy_target_handle](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/move_copy_target_handle.md)
+- [copy_to_want_subobjects](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/copy_to_want_subobjects.md)
+- [copy_to_excluded_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/copy_to_excluded_property_tags.md)
+- [copy_properties_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/copy_properties_property_tags.md)
+- [query_row_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/query_row_count.md)
+- [query_forward_read](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/query_forward_read.md)
+- [restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/restriction.md)
+- [find_origin](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/find_origin.md)
+- [bookmark](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/bookmark.md)
+- [bookmark_row_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/bookmark_row_count.md)
+- [bookmark_want_row_moved_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/bookmark_want_row_moved_count.md)
+- [seek_row_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/seek_row_count.md)
+- [want_row_moved_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/want_row_moved_count.md)
+- [fractional_position](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/fractional_position.md)
+- [sort_orders](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sort_orders.md)
+- [sort_category_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sort_category_count.md)
+- [sort_expanded_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/sort_expanded_count.md)
+- [category_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/category_id.md)
+- [expand_max_row_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/expand_max_row_count.md)
+- [collapse_state](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/collapse_state.md)
+- [collapse_state_row_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/collapse_state_row_id.md)
+- [collapse_state_row_instance_number](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/collapse_state_row_instance_number.md)
+- [property_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/property_ids.md)
+- [named_property_names](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/named_property_names.md)
+- [named_property_query_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/named_property_query_guid.md)
+- [property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/property_values.md)
+- [typed](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/typed.md)
+- [sync_send_options](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/sync_request_options/RopRequest/sync_send_options.md)
+- [fast_transfer_source_send_options](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/sync_request_options/RopRequest/fast_transfer_source_send_options.md)
+- [fast_transfer_source_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/sync_request_options/RopRequest/fast_transfer_source_property_tags.md)
+- [size_limited_specific_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/property_limits/size_limited_specific_properties.md)
+- [request_property_size_limit](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/property_limits/request_property_size_limit.md)
+- [modify_permissions_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/property_rows/RopRequest/modify_permissions_count.md)
+- [modify_rules_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/property_rows/RopRequest/modify_rules_count.md)
+- [modify_rules_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/property_rows/RopRequest/modify_rules_rows.md)
+- [modify_permissions_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/property_rows/RopRequest/modify_permissions_rows.md)
+- [receive_folder_entry_matches](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/receive_folders/receive_folder_entry_matches.md)
+- [modify_recipients](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/recipients/RopRequest/modify_recipients.md)
+- [parse_simple_pending_recipient_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/recipients/parse_simple_pending_recipient_row.md)
+- [parse_wrapped_pending_recipient_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/recipients/parse_wrapped_pending_recipient_row.md)
+- [optional_mapi_value_text](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/recipients/optional_mapi_value_text.md)
+- [message_save_generation](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/MapiSession/message_save_generation.md)
+- [message_handle_generation](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/MapiSession/message_handle_generation.md)
+- [record_default_view_advertised](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/MapiSession/record_default_view_advertised.md)
+- [default_view_advertisement_state_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/MapiSession/default_view_advertisement_state_for_folder.md)
+- [default_view_folder_open_match_state](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/MapiSession/default_view_folder_open_match_state.md)
+- [search_folder_definition](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/MapiSession/search_folder_definition.md)
+- [resolve_special_folder_alias](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/MapiSession/resolve_special_folder_alias.md)
+- [input_object](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/input_object.md)
+- [input_handle](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/input_handle.md)
+- [get_session](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/get_session.md)
+- [property_id_for_name](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/named_properties/MapiSession/property_id_for_name.md)
+- [cache_named_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/named_properties/MapiSession/cache_named_property.md)
+- [property_name_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/named_properties/MapiSession/property_name_for_id.md)
+- [normalize_named_property_tag](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/named_properties/MapiSession/normalize_named_property_tag.md)
+- [named_properties_for_query](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/named_properties/MapiSession/named_properties_for_query.md)
+- [take_pending_notification_delivery_batch](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/take_pending_notification_delivery_batch.md)
+- [extend_access_plan_for_request](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/access_plan/extend_access_plan_for_request.md)
+- [rop_uses_session_state_only](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/access_plan/rop_uses_session_state_only.md)
+- [simulate_table_access](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/access_plan/simulate_table_access.md)
+- [associated_config_sync_object](../../../../../../../functions/crates/lpe-exchange/src/mapi/sync/associated_config/associated_config_sync_object.md)
+- [associated_config_property_value_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_property_value_with_mailbox_guid.md)
+- [associated_config_last_modified_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_last_modified_filetime.md)
+- [associated_config_creation_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_creation_filetime.md)
+- [associated_config_last_modifier_name](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_last_modifier_name.md)
+- [serialize_pending_attachment_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/attachments/serialize_pending_attachment_row.md)
+- [pending_attachment_hidden](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/attachments/pending_attachment_hidden.md)
+- [rop_set_collapse_state_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collapse/rop_set_collapse_state_response.md)
+- [read_u16_from](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collapse/read_u16_from.md)
+- [read_u32_from](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collapse/read_u32_from.md)
+- [read_u64_from](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collapse/read_u64_from.md)
+- [seek_row_request_is_valid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/controls/seek_row_request_is_valid.md)
+- [rop_create_bookmark_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/controls/rop_create_bookmark_response.md)
+- [rop_seek_row_bookmark_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/controls/rop_seek_row_bookmark_response.md)
+- [seek_row_bookmark_request_is_valid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/controls/seek_row_bookmark_request_is_valid.md)
+- [navigation_shortcut_from_mapi_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/navigation_shortcut_from_mapi_properties.md)
+- [navigation_shortcut_property_by_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/navigation_shortcut_property_by_id.md)
+- [serialize_pending_note_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_note_row.md)
+- [serialize_pending_journal_entry_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_journal_entry_row.md)
+- [serialize_pending_conversation_action_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_conversation_action_row.md)
+- [conversation_action_from_mapi_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/conversation_action_from_mapi_properties.md)
+- [pending_message_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/pending_message_property_value.md)
+- [pending_associated_message_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/pending_associated_message_property_value.md)
+- [pending_message_search_key](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/pending_message_search_key.md)
+- [pending_message_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/pending_message_change_number.md)
+- [serialize_pending_event_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_event_row.md)
+- [query_rows_request_is_valid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query/query_rows_request_is_valid.md)
+- [write_query_rows_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_property_row.md)
+- [write_fixed_query_rows_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_fixed_query_rows_property_value.md)
+- [write_query_rows_string8_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_string8_value.md)
+- [write_query_rows_utf16_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_utf16_value.md)
+- [write_query_rows_binary_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_binary_value.md)
+- [write_counted_fixed_query_rows_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_counted_fixed_query_rows_property_values.md)
+- [write_counted_query_rows_string_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_counted_query_rows_string_values.md)
+- [write_counted_query_rows_binary_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_counted_query_rows_binary_values.md)
+- [date_time_to_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/time/date_time_to_filetime.md)
+- [date_time_to_filetime_in_time_zone](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/time/date_time_to_filetime_in_time_zone.md)
+- [finalize_mapi_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/finalize_mapi_response.md)
+- [execute_response_rop_buffer_for_trace](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/execute_response_rop_buffer_for_trace.md)
+- [refresh_accepted_session_response_cookies](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/cookies/refresh_accepted_session_response_cookies.md)
+- [recent_execute_debug_summaries](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/diagnostics/recent_execute_debug_summaries.md)
+- [request_type](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/headers/request_type.md)
+- [request_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/headers/request_id.md)
+- [client_info](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/headers/client_info.md)
+- [host_header](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/headers/host_header.md)
+- [content_length_header](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/headers/content_length_header.md)
+- [is_mapi_content_type](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/headers/is_mapi_content_type.md)
+- [response_header](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/headers/response_header.md)
+- [safe_header](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/headers/safe_header.md)
+- [read_sync_state_u32](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/read_sync_state_u32.md)
+- [fast_transfer_property_value_start](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/fast_transfer_property_value_start.md)
+- [local](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/ReplicaCounterSets/local.md)
+- [source_key_replica_counter](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/source_key_replica_counter.md)
+- [select_download_manifest_for_client_state](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/select_download_manifest_for_client_state.md)
+- [decode_replguid_set](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/decode_replguid_set.md)
+- [decode_replid_set](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/decode_replid_set.md)
+- [decode_globset_range_prefix](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/decode_globset_range_prefix.md)
+- [parse_property](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/parse_property.md)
+- [read_u32](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/read_u32.md)
+- [read_debug_slice](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/diagnostics/codec/read_debug_slice.md)
+- [format_replguid_globset_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/diagnostics/codec/format_replguid_globset_debug.md)
+- [decode_globset_ranges](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/diagnostics/codec/decode_globset_ranges.md)
+- [counter_from_xid](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/diagnostics/codec/counter_from_xid.md)
+- [parse_rfc3339_utc_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/parse_rfc3339_utc_filetime.md)
+- [write_fast_transfer_property_info](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/write_fast_transfer_property_info.md)
+- [associated_config_source_key](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config_source_key.md)
+- [user_saved_search_folder_is_projectable](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/user_saved_search_folder_is_projectable.md)
+- [common_views_search_folder_definition_is_projectable](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/common_views_search_folder_definition_is_projectable.md)
+- [search_folder_definition_blob_has_required_blocks](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/search_folder_definition_blob_has_required_blocks.md)
+- [copy_associated_config_server_metadata](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/copy_associated_config_server_metadata.md)
+- [is_empty_outlook_rule_organizer_placeholder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/is_empty_outlook_rule_organizer_placeholder.md)
+- [is_stale_outlook_umolk_user_options_placeholder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/is_stale_outlook_umolk_user_options_placeholder.md)
+- [is_outlook_configuration_message_class](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/is_outlook_configuration_message_class.md)
+- [folder_local_commit_time_max](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/folder_commit_time/MapiMailStoreSnapshot/folder_local_commit_time_max.md)
+- [version](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/folder_versions/MapiFolderVersions/version.md)
+- [with_navigation_shortcut_identities](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_navigation_shortcut_identities.md)
+- [with_contact_identities](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_identities.md)
+- [apply_associated_config_identities](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/apply_associated_config_identities.md)
+- [named_property_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/named_property_for_id.md)
+- [reminder_for_source](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/reminder_for_source.md)
+- [folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/ScopedCalendarIdentities/folder_id.md)
+- [event](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/ScopedCalendarIdentities/event.md)
+- [message_identity](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/ScopedCalendarIdentities/message_identity.md)
+- [rrule_to_ews_recurrence](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/rrule_to_ews_recurrence.md)
+- [ews_datetime_parts](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_parts.md)
+- [ews_contact_email_entries_xml](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_email_entries_xml.md)
+- [contact_labeled_string](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_labeled_string.md)
+- [durable_events_response](../../../../../../../functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/durable_events_response.md)
+- [sync_folder_items](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items.md)
+- [change_key_for](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/change_key_for.md)
+- [change_key_version](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/change_key_version.md)
+- [decode_ews_body](../../../../../../../functions/crates/lpe-exchange/src/service/ews/xml/decode_ews_body.md)
+- [response_header](../../../../../../../functions/crates/lpe-exchange/src/service/http_utils/response_header.md)
+- [send_rpc_proxy_out_channel](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_channels/send_rpc_proxy_out_channel.md)
+- [read_le_u32](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_codec/read_le_u32.md)
+- [rpc_proxy_bound_dce_context_interface](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_bound_dce_context_interface.md)
+- [rpc_proxy_remember_dce_bind_contexts](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_remember_dce_bind_contexts.md)
+- [rpc_proxy_dce_bind_context_count](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_dce_bind_context_count.md)
+- [rpc_proxy_dce_bind_context_results](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_dce_bind_context_results.md)
+- [rpc_proxy_dce_auth_trailer_candidate](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_dce_auth_trailer_candidate.md)
+- [rpc_proxy_dce_request_auth](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_dce/rpc_proxy_dce_request_auth.md)
+- [rpc_proxy_emsmdb_rpc_ext2_request](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_endpoints/rpc_proxy_emsmdb_rpc_ext2_request.md)
+- [is_rpc_proxy_zero_length_request](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_requests/is_rpc_proxy_zero_length_request.md)
+- [parse_rpc_proxy_conn_a1_rts_pdu](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_rts/parse_rpc_proxy_conn_a1_rts_pdu.md)
+- [rpc_proxy_conn_b1_virtual_connection_cookie](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_rts/rpc_proxy_conn_b1_virtual_connection_cookie.md)
+- [parse_rpc_rts_cookie_command](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_rts/parse_rpc_rts_cookie_command.md)
+- [rpc_proxy_in_channel_response_for_endpoint_query](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_stream/rpc_proxy_in_channel_response_for_endpoint_query.md)
+- [rpc_proxy_last_dce_request_call_id](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_stream/rpc_proxy_last_dce_request_call_id.md)
+- [rpc_proxy_in_channel_response_for_endpoint_query_with_store_response](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_stream/rpc_proxy_in_channel_response_for_endpoint_query_with_store_response.md)
+- [rpc_proxy_endpoint_response_for_fragment](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_stream/rpc_proxy_endpoint_response_for_fragment.md)
+- [rpc_proxy_endpoint_response_for_fragment_with_store](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_stream/rpc_proxy_endpoint_response_for_fragment_with_store.md)
+- [contact_labeled_json_values](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/contact_labeled_json_values.md)
+- [contact_address_value](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/contact_address_value.md)
+- [mapi_identity_lookup_from_row](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_identity_lookup_from_row.md)
+- [mapi_notification_event_from_change_row](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_event_from_change_row.md)
+- [mapi_notification_message_object_id](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_message_object_id.md)
+- [mapi_calendar_event_object_id](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_event_object_id.md)
+- [mapi_calendar_notification_folder_id](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_notification_folder_id.md)
+- [mapi_notification_folder_id](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_folder_id.md)
+- [mapi_sync_checkpoint_from_row](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_sync_checkpoint_from_row.md)
+- [commit_mapi_imported_fai_identity_in_tx](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/fai_identity_import/commit_mapi_imported_fai_identity_in_tx.md)
+- [ews_user_configuration_from_row](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/ews_user_configuration_from_row.md)
+- [mapi_named_property_mapping_from_row](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_named_property_mapping_from_row.md)
+- [mapi_custom_property_value_from_row](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_custom_property_value_from_row.md)
+- [mapi_folder_profile_property_value_from_row](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_folder_profile_property_value_from_row.md)
+- [parse_mapi_predecessor_change_list](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/parse_mapi_predecessor_change_list.md)
+- [mapi_predecessors_contain_change_key](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/mapi_predecessors_contain_change_key.md)
+- [mapi_predecessors_include](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/mapi_predecessors_include.md)
+- [preflight_unknown_mapi_navigation_shortcut_delete_in_tx](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/navigation_shortcut_import/preflight_unknown_mapi_navigation_shortcut_delete_in_tx.md)
+- [ews_catalog_gate_covers_documented_operations_and_unsupported_gaps](../../../../../../../functions/crates/lpe-exchange/src/tests/ews/ews_catalog_gate_covers_documented_operations_and_unsupported_gaps.md)
+- [open_embedded_message_response_contains_subject](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/open_embedded_message_response_contains_subject.md)
+- [mapi_over_http_set_properties_updates_canonical_event_and_task_reminders](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/mapi_over_http_set_properties_updates_canonical_event_and_task_reminders.md)
+- [mapi_over_http_reminders_folder_open_uses_canonical_search_projection](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/mapi_over_http_reminders_folder_open_uses_canonical_search_projection.md)
+- [mapi_over_http_root_rem_online_entry_id_projects_reminders_folder](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/mapi_over_http_root_rem_online_entry_id_projects_reminders_folder.md)
+- [mapi_over_http_reminders_table_projects_canonical_mixed_rows](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/mapi_over_http_reminders_table_projects_canonical_mixed_rows.md)
+- [mapi_over_http_calendar_keep_open_handle_accepts_second_update_save](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_keep_open_handle_accepts_second_update_save.md)
+- [mapi_over_http_empty_advertised_calendar_create_uses_default_collection](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_empty_advertised_calendar_create_uses_default_collection.md)
+- [mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties.md)
+- [mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request.md)
+- [mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_local](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_local.md)
+- [mapi_over_http_calendar_get_valid_attachments_projects_existing_event](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_get_valid_attachments_projects_existing_event.md)
+- [mapi_over_http_task_crud_uses_canonical_tasks](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_task_crud_uses_canonical_tasks.md)
+- [mapi_over_http_execute_opens_freebusy_data_folder](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_execute_opens_freebusy_data_folder.md)
+- [mapi_over_http_set_properties_updates_canonical_mail_reminder_state](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_properties_updates_canonical_mail_reminder_state.md)
+- [mapi_over_http_set_receive_folder_accepts_canonical_calendar_mapping](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_accepts_canonical_calendar_mapping.md)
+- [mapi_over_http_set_receive_folder_accepts_canonical_custom_calendar_mapping](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_accepts_canonical_custom_calendar_mapping.md)
+- [mapi_over_http_set_receive_folder_rejects_noncanonical_calendar_mapping](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_rejects_noncanonical_calendar_mapping.md)
+- [mapi_over_http_execute_accepts_release_rop](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_execute_accepts_release_rop.md)
+- [mapi_over_http_execute_sets_columns_and_queries_empty_rows](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_execute_sets_columns_and_queries_empty_rows.md)
+- [mapi_over_http_conversation_action_applies_to_future_matching_message](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_conversation_action_applies_to_future_matching_message.md)
+- [mapi_over_http_conversation_action_cross_store_keeps_local_message_in_place](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_conversation_action_cross_store_keeps_local_message_in_place.md)
+- [mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end.md)
+- [mapi_over_http_reload_cached_information_returns_pending_message_summary](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_reload_cached_information_returns_pending_message_summary.md)
+- [mapi_over_http_move_copy_messages_uses_canonical_store](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_move_copy_messages_uses_canonical_store.md)
+- [mapi_over_http_microsoft_delete_messages_uses_trash_and_hard_delete](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_delete_messages_uses_trash_and_hard_delete.md)
+- [mapi_over_http_open_message_uses_targeted_store_lookup](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_open_message_uses_targeted_store_lookup.md)
+- [mapi_over_http_microsoft_delete_attachment_is_committed_by_save_message](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_delete_attachment_is_committed_by_save_message.md)
+- [mapi_over_http_microsoft_open_embedded_message_accepts_read_only_mode](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_open_embedded_message_accepts_read_only_mode.md)
+- [mapi_over_http_get_valid_attachments_lists_canonical_attachment_numbers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_valid_attachments_lists_canonical_attachment_numbers.md)
+- [mapi_over_http_microsoft_stale_message_handle_requires_force_save](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_stale_message_handle_requires_force_save.md)
+- [mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests.md)
+- [mapi_over_http_get_local_replica_ids_returns_replica_guid](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_local_replica_ids_returns_replica_guid.md)
+- [mapi_over_http_contact_crud_uses_canonical_contacts](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts.md)
+- [mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property.md)
+- [mapi_over_http_execute_opens_compat_shortcuts_folder](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_execute_opens_compat_shortcuts_folder.md)
+- [mapi_over_http_query_columns_all_folder_columns_omit_note_geometry](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_query_columns_all_folder_columns_omit_note_geometry.md)
+- [mapi_over_http_ipm_subtree_reports_distinct_folder_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_ipm_subtree_reports_distinct_folder_identity.md)
+- [mapi_over_http_advertised_special_folder_reports_own_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_advertised_special_folder_reports_own_identity.md)
+- [mapi_over_http_create_folder_creates_canonical_mailbox](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_creates_canonical_mailbox.md)
+- [mapi_over_http_create_folder_advertised_special_folder_opens_existing_even_without_flag](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_advertised_special_folder_opens_existing_even_without_flag.md)
+- [mapi_over_http_create_folder_quick_step_settings_opens_advertised_special_folder](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_quick_step_settings_opens_advertised_special_folder.md)
+- [mapi_over_http_create_folder_invalid_type_returns_invalid_parameter](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_invalid_type_returns_invalid_parameter.md)
+- [mapi_over_http_create_folder_duplicate_name_returns_duplicate_name](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_duplicate_name_returns_duplicate_name.md)
+- [mapi_over_http_create_folder_under_custom_parent_preserves_parent](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_create_folder_under_custom_parent_preserves_parent.md)
+- [mapi_over_http_delete_folder_removes_custom_canonical_mailbox](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_delete_folder_removes_custom_canonical_mailbox.md)
+- [mapi_over_http_delete_folder_rejects_system_mailbox](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_delete_folder_rejects_system_mailbox.md)
+- [mapi_over_http_ipm_subtree_ost_identity_retains_client_session_blob](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_ipm_subtree_ost_identity_retains_client_session_blob.md)
+- [mapi_over_http_ipm_subtree_ost_identity_survives_reconnect](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_ipm_subtree_ost_identity_survives_reconnect.md)
+- [mapi_over_http_folder_extended_flags_survive_reconnect](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_folder_extended_flags_survive_reconnect.md)
+- [mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_across_reconnect](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_across_reconnect.md)
+- [mapi_over_http_execute_returns_private_mailbox_logon](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_execute_returns_private_mailbox_logon.md)
+- [mapi_over_http_spooler_logon_does_not_echo_request_only_flag](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_spooler_logon_does_not_echo_request_only_flag.md)
+- [mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon.md)
+- [mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootstrap](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootstrap.md)
+- [mapi_over_http_execute_handles_mailbox_store_bootstrap_rops](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_execute_handles_mailbox_store_bootstrap_rops.md)
+- [mapi_over_http_execute_returns_receive_folder_and_store_state](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_execute_returns_receive_folder_and_store_state.md)
+- [mapi_over_http_get_receive_folder_uses_message_class_matching](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_get_receive_folder_uses_message_class_matching.md)
+- [mapi_over_http_get_receive_folder_empty_class_returns_empty_explicit_message_class](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/logon_profile/mapi_over_http_get_receive_folder_empty_class_returns_empty_explicit_message_class.md)
+- [mapi_over_http_bind_reestablishes_nspi_session_cookie](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_bind_reestablishes_nspi_session_cookie.md)
+- [mapi_over_http_unbind_consumes_nspi_session](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_unbind_consumes_nspi_session.md)
+- [mapi_over_http_custom_named_property_round_trips_on_supported_object](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_property_round_trips_on_supported_object.md)
+- [mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kinds](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kinds.md)
+- [mapi_over_http_custom_named_property_set_before_save_persists_on_created_item](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_custom_named_property_set_before_save_persists_on_created_item.md)
+- [mapi_over_http_accepts_outlook_octet_stream_bind_probe](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_accepts_outlook_octet_stream_bind_probe.md)
+- [mapi_over_http_get_properties_sees_message_saved_in_same_execute](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_get_properties_sees_message_saved_in_same_execute.md)
+- [mapi_over_http_string8_property_tags_round_trip_through_canonical_unicode_property](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_string8_property_tags_round_trip_through_canonical_unicode_property.md)
+- [mapi_over_http_delete_properties_no_replicate_clears_pending_message_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_delete_properties_no_replicate_clears_pending_message_properties.md)
+- [mapi_over_http_named_property_bootstrap_maps_session_property_ids](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_named_property_bootstrap_maps_session_property_ids.md)
+- [mapi_over_http_named_property_mapping_survives_restart_style_session](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_named_property_mapping_survives_restart_style_session.md)
+- [mapi_over_http_message_status_is_session_local](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_message_status_is_session_local.md)
+- [mapi_over_http_open_message_then_gets_canonical_message_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_open_message_then_gets_canonical_message_properties.md)
+- [mapi_over_http_microsoft_oxcdata_property_row_example_streams_oversized_body](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_oxcdata_property_row_example_streams_oversized_body.md)
+- [mapi_over_http_get_properties_all_returns_message_projection](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_get_properties_all_returns_message_projection.md)
+- [mapi_over_http_open_attachment_returns_canonical_attachment_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_open_attachment_returns_canonical_attachment_properties.md)
+- [mapi_over_http_microsoft_stream_region_rops_succeed_on_stream_handles](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_stream_region_rops_succeed_on_stream_handles.md)
+- [mapi_over_http_reads_canonical_message_body_stream](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_reads_canonical_message_body_stream.md)
+- [mapi_over_http_string8_body_stream_writes_canonical_message_body](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_string8_body_stream_writes_canonical_message_body.md)
+- [mapi_over_http_copy_to_stream_saves_canonical_message_body](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_copy_to_stream_saves_canonical_message_body.md)
+- [mapi_over_http_microsoft_create_attachment_initializes_documented_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_create_attachment_initializes_documented_properties.md)
+- [mapi_over_http_create_attachment_saves_canonical_attachment_from_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_create_attachment_saves_canonical_attachment_from_properties.md)
+- [mapi_over_http_write_stream_saves_canonical_attachment](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_write_stream_saves_canonical_attachment.md)
+- [mapi_over_http_copy_to_stream_saves_canonical_attachment](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_copy_to_stream_saves_canonical_attachment.md)
+- [mapi_over_http_outlook_set_read_flags_updates_state_and_notifies_table](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_outlook_set_read_flags_updates_state_and_notifies_table.md)
+- [mapi_over_http_microsoft_set_read_flags_rejects_invalid_parameters](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_set_read_flags_rejects_invalid_parameters.md)
+- [mapi_over_http_set_message_read_flag_updates_open_message_state](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_set_message_read_flag_updates_open_message_state.md)
+- [mapi_over_http_outlook_set_message_read_flag_accepts_default_flag](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_outlook_set_message_read_flag_accepts_default_flag.md)
+- [mapi_over_http_outlook_set_message_read_flag_accepts_clear_read_flag](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_outlook_set_message_read_flag_accepts_clear_read_flag.md)
+- [mapi_over_http_microsoft_message_properties_commit_on_save_changes](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_microsoft_message_properties_commit_on_save_changes.md)
+- [mapi_over_http_set_properties_validates_swapped_todo_data](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_set_properties_validates_swapped_todo_data.md)
+- [mapi_over_http_cached_mode_properties_include_canonical_change_keys](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_cached_mode_properties_include_canonical_change_keys.md)
+- [mapi_over_http_get_properties_specific_returns_folder_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_get_properties_specific_returns_folder_properties.md)
+- [mapi_over_http_folder_set_properties_rejects_protocol_local_values](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_set_properties_rejects_protocol_local_values.md)
+- [mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids.md)
+- [mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids_ex](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids_ex.md)
+- [mapi_over_http_folder_open_stream_reads_computed_binary_property](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_open_stream_reads_computed_binary_property.md)
+- [mapi_over_http_folder_open_stream_returns_empty_missing_binary_property](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_open_stream_returns_empty_missing_binary_property.md)
+- [mapi_over_http_root_set_properties_accepts_additional_ren_entry_ids_as_cache_write](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_set_properties_accepts_additional_ren_entry_ids_as_cache_write.md)
+- [mapi_over_http_folder_set_properties_do_not_survive_as_protocol_state](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_set_properties_do_not_survive_as_protocol_state.md)
+- [mapi_over_http_root_default_folder_set_properties_do_not_override_computed_defaults](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_default_folder_set_properties_do_not_override_computed_defaults.md)
+- [mapi_over_http_root_default_folder_set_properties_reject_invalid_entry_ids](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_default_folder_set_properties_reject_invalid_entry_ids.md)
+- [mapi_over_http_root_default_folder_set_properties_accept_valid_entry_ids](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_default_folder_set_properties_accept_valid_entry_ids.md)
+- [mapi_over_http_root_default_folder_set_properties_accepts_cached_rem_online_entry_id](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_default_folder_set_properties_accepts_cached_rem_online_entry_id.md)
+- [mapi_over_http_root_default_folder_get_properties_returns_canonical_entry_ids](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_root_default_folder_get_properties_returns_canonical_entry_ids.md)
+- [mapi_over_http_folder_get_properties_specific_flags_unknown_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_get_properties_specific_flags_unknown_properties.md)
+- [mapi_over_http_folder_get_properties_ignores_stale_protocol_local_folder_state](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_folder_get_properties_ignores_stale_protocol_local_folder_state.md)
+- [mapi_over_http_microsoft_table_bookmarks_restore_contents_cursor_and_free](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_microsoft_table_bookmarks_restore_contents_cursor_and_free.md)
+- [mapi_over_http_modify_recipients_string8_rows_save_canonically](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_string8_rows_save_canonically.md)
+- [mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically.md)
+- [mapi_over_http_modify_recipients_x500_rows_save_canonically](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_x500_rows_save_canonically.md)
+- [mapi_over_http_remove_all_recipients_clears_pending_message_recipients](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_remove_all_recipients_clears_pending_message_recipients.md)
+- [mapi_over_http_submit_pending_message_uses_canonical_submission](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_pending_message_uses_canonical_submission.md)
+- [mapi_over_http_replayed_execute_request_id_does_not_resubmit_message](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_replayed_execute_request_id_does_not_resubmit_message.md)
+- [mapi_over_http_submit_opened_draft_uses_source_draft_id](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_opened_draft_uses_source_draft_id.md)
+- [mapi_over_http_open_message_returns_visible_recipient_rows](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_open_message_returns_visible_recipient_rows.md)
+- [mapi_over_http_read_recipients_returns_canonical_message_recipients](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_read_recipients_returns_canonical_message_recipients.md)
+- [mapi_over_http_read_recipients_hides_sent_message_bcc_by_default](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_read_recipients_hides_sent_message_bcc_by_default.md)
+- [mapi_over_http_connect_reestablishes_session_context_with_open_sync_handle](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_connect_reestablishes_session_context_with_open_sync_handle.md)
+- [mapi_over_http_set_columns_rejects_invalid_microsoft_async_flags](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_set_columns_rejects_invalid_microsoft_async_flags.md)
+- [mapi_over_http_create_set_save_message_imports_canonical_email](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_create_set_save_message_imports_canonical_email.md)
+- [mapi_over_http_conversation_action_fai_persists_and_moves_existing_conversation](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_conversation_action_fai_persists_and_moves_existing_conversation.md)
+- [mapi_over_http_conversation_action_fai_is_listed_and_openable](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_conversation_action_fai_is_listed_and_openable.md)
+- [mapi_over_http_modify_recipients_imports_pending_message_recipients](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_modify_recipients_imports_pending_message_recipients.md)
+- [mapi_over_http_ipm_subtree_ost_identity_write_survives_store_failure](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_ipm_subtree_ost_identity_write_survives_store_failure.md)
+- [mapi_over_http_sync_configure_returns_canonical_manifest_buffer](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_configure_returns_canonical_manifest_buffer.md)
+- [mapi_over_http_content_sync_partial_item_uses_microsoft_full_item_fallback](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_partial_item_uses_microsoft_full_item_fallback.md)
+- [mapi_over_http_content_sync_only_specified_properties_limits_message_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_only_specified_properties_limits_message_properties.md)
+- [mapi_over_http_content_sync_only_specified_body_returns_body_property](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_only_specified_body_returns_body_property.md)
+- [mapi_over_http_content_sync_property_tags_exclude_message_properties_by_default](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_property_tags_exclude_message_properties_by_default.md)
+- [mapi_over_http_common_views_sync_suppresses_lpe_search_definition_fai](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_sync_suppresses_lpe_search_definition_fai.md)
+- [mapi_over_http_common_views_fai_table_open_and_ics_share_canonical_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_fai_table_open_and_ics_share_canonical_identity.md)
+- [mapi_over_http_conversation_action_content_sync_exports_fai_rows](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_conversation_action_content_sync_exports_fai_rows.md)
+- [mapi_over_http_content_sync_uses_mailbox_state_membership](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_uses_mailbox_state_membership.md)
+- [mapi_over_http_tell_version_accepts_fast_transfer_sync_context](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_tell_version_accepts_fast_transfer_sync_context.md)
+- [mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests.md)
+- [mapi_over_http_sync_manifest_includes_attachment_change_facts_without_bcc](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_manifest_includes_attachment_change_facts_without_bcc.md)
+- [mapi_over_http_sync_manifest_includes_visible_recipient_facts_without_bcc](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_manifest_includes_visible_recipient_facts_without_bcc.md)
+- [mapi_over_http_sync_manifest_includes_canonical_read_flag_state](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_manifest_includes_canonical_read_flag_state.md)
+- [mapi_over_http_sync_manifest_includes_stable_change_key_facts_without_bcc](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_manifest_includes_stable_change_key_facts_without_bcc.md)
+- [mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts.md)
+- [mapi_over_http_sync_upload_state_returns_server_transfer_state](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_upload_state_returns_server_transfer_state.md)
+- [mapi_over_http_sync_upload_state_does_not_echo_multiple_streams](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_upload_state_does_not_echo_multiple_streams.md)
+- [mapi_over_http_sync_import_message_change_updates_canonical_flags](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_message_change_updates_canonical_flags.md)
+- [mapi_over_http_sync_import_new_message_saves_canonical_email](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_new_message_saves_canonical_email.md)
+- [mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai.md)
+- [mapi_over_http_sync_import_delete_and_read_state_use_canonical_store](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_delete_and_read_state_use_canonical_store.md)
+- [mapi_over_http_sync_import_soft_delete_moves_to_trash](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_soft_delete_moves_to_trash.md)
+- [mapi_over_http_sync_import_move_uses_canonical_store](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_move_uses_canonical_store.md)
+- [mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox.md)
+- [mapi_over_http_microsoft_oxcfxics_4_1_1_hierarchy_upload_returns_transfer_state](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_microsoft_oxcfxics_4_1_1_hierarchy_upload_returns_transfer_state.md)
+- [mapi_over_http_sync_import_hierarchy_change_keeps_hidden_system_folder_alias_in_cnset](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_hierarchy_change_keeps_hidden_system_folder_alias_in_cnset.md)
+- [mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_table](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_table.md)
+- [mapi_over_http_query_columns_all_reports_canonical_table_columns](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_query_columns_all_reports_canonical_table_columns.md)
+- [mapi_over_http_query_rows_lists_root_hierarchy_without_ipm_children](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_query_rows_lists_root_hierarchy_without_ipm_children.md)
+- [mapi_over_http_query_rows_rejects_invalid_microsoft_forward_read_value](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_query_rows_rejects_invalid_microsoft_forward_read_value.md)
+- [mapi_over_http_seek_row_rejects_invalid_microsoft_origin_value](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_seek_row_rejects_invalid_microsoft_origin_value.md)
+- [mapi_over_http_contents_table_lists_canonical_messages](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_contents_table_lists_canonical_messages.md)
+- [mapi_over_http_microsoft_reset_table_requires_new_set_columns](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_reset_table_requires_new_set_columns.md)
+- [mapi_over_http_microsoft_query_position_reports_table_cursor](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_query_position_reports_table_cursor.md)
+- [mapi_over_http_microsoft_seek_row_fractional_moves_table_cursor](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_seek_row_fractional_moves_table_cursor.md)
+- [mapi_over_http_seek_row_fractional_rejects_zero_denominator_without_batch_drift](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_seek_row_fractional_rejects_zero_denominator_without_batch_drift.md)
+- [mapi_over_http_query_rows_no_advance_preserves_table_position](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_query_rows_no_advance_preserves_table_position.md)
+- [mapi_over_http_sort_table_orders_contents_rows](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_sort_table_orders_contents_rows.md)
+- [mapi_over_http_query_rows_reads_backward_from_table_position](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_query_rows_reads_backward_from_table_position.md)
+- [mapi_over_http_restrict_filters_contents_table_rows](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_restrict_filters_contents_table_rows.md)
+- [mapi_over_http_find_row_returns_matching_contents_row](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_find_row_returns_matching_contents_row.md)
+- [mapi_over_http_microsoft_seek_row_moves_contents_table_cursor](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_seek_row_moves_contents_table_cursor.md)
+- [mapi_over_http_microsoft_oxcmsg_get_attachment_table_lists_canonical_attachments](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_oxcmsg_get_attachment_table_lists_canonical_attachments.md)
+- [mapi_over_http_get_attachment_table_rejects_invalid_microsoft_table_flags](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_get_attachment_table_rejects_invalid_microsoft_table_flags.md)
+- [mapi_over_http_microsoft_saved_embedded_message_reopens_from_attachment_table](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_saved_embedded_message_reopens_from_attachment_table.md)
+- [mapi_over_http_ipm_subtree_returns_stable_ost_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_ipm_subtree_returns_stable_ost_identity.md)
+- [mapi_over_http_microsoft_table_control_rops_require_table_handles](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_table_control_rops_require_table_handles.md)
+- [mapi_over_http_connect_creates_emsmdb_session](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_connect_creates_emsmdb_session.md)
+- [mapi_over_http_transport_maps_response_code_to_header_and_envelope](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_transport_maps_response_code_to_header_and_envelope.md)
+- [mapi_over_http_response_content_length_covers_full_mapi_envelope](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_response_content_length_covers_full_mapi_envelope.md)
+- [mapi_over_http_disconnect_consumes_emsmdb_session](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_disconnect_consumes_emsmdb_session.md)
+- [mapi_over_http_replays_duplicate_execute_request_without_rerunning_rops](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_replays_duplicate_execute_request_without_rerunning_rops.md)
+- [mapi_default_calendar_folder_identity_is_persisted](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_default_calendar_folder_identity_is_persisted.md)
+- [fake_contact_phone_values_by_label](../../../../../../../functions/crates/lpe-exchange/src/tests/fake_contact_phone_values_by_label.md)
+- [fake_contact_address_value](../../../../../../../functions/crates/lpe-exchange/src/tests/fake_contact_address_value.md)
+- [fake_mapi_identity_lookup_for_object_id](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/fake_mapi_identity_lookup_for_object_id.md)
+- [test_mapi_pcl_includes_change_key](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_pcl_includes_change_key.md)
+- [test_merge_mapi_predecessor_change_lists](../../../../../../../functions/crates/lpe-exchange/src/tests/test_merge_mapi_predecessor_change_lists.md)
+- [commit_mapi_folder_hierarchy_change](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_folder_hierarchy_change.md)
+- [fetch_ews_message_tracking_report_detail](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_ews_message_tracking_report_detail.md)
+- [fetch_or_allocate_mapi_identities](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_or_allocate_mapi_identities.md)
+- [upsert_mapi_special_folder_aliases](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/upsert_mapi_special_folder_aliases.md)
+- [fetch_mapi_object_ids_for_deleted_changes](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_object_ids_for_deleted_changes.md)
+- [fetch_mapi_identities_by_source_keys](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_identities_by_source_keys.md)
+- [fetch_or_allocate_mapi_named_property_ids](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_or_allocate_mapi_named_property_ids.md)
+- [fetch_mapi_named_properties_by_ids](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_named_properties_by_ids.md)
+- [fetch_mapi_sync_checkpoint](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_sync_checkpoint.md)
+- [store_mapi_sync_checkpoint](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/store_mapi_sync_checkpoint.md)
+- [fetch_address_book_entries](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_address_book_entries.md)
+- [fetch_contact_sync_versions](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_contact_sync_versions.md)
+- [fetch_event_sync_versions](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_event_sync_versions.md)
+- [fetch_mapi_event_versions](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_event_versions.md)
+- [create_mapi_contact](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/create_mapi_contact.md)
+- [commit_mapi_event_update](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_event_update.md)
+- [fetch_task_sync_versions](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_task_sync_versions.md)
+- [update_accessible_contact](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/update_accessible_contact.md)
+- [update_accessible_event](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/update_accessible_event.md)
+- [move_accessible_event_to_deleted_items](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/move_accessible_event_to_deleted_items.md)
+- [update_accessible_task](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/update_accessible_task.md)
+- [commit_mapi_navigation_shortcut_update](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_navigation_shortcut_update.md)
+- [commit_mapi_navigation_shortcut_import](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_navigation_shortcut_import.md)
+- [commit_mapi_associated_config_import](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_associated_config_import.md)
+- [commit_mapi_associated_config_update](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_associated_config_update.md)
+- [fetch_message_attachments](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_message_attachments.md)
+- [fetch_calendar_attachments_for_events](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_calendar_attachments_for_events.md)
+- [fetch_attachment_content](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_attachment_content.md)
+- [move_jmap_email_from_mailbox_with_mapi_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/move_jmap_email_from_mailbox_with_mapi_identity.md)
+- [cancel_queued_submission](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/cancel_queued_submission.md)
+- [read_rop_binary_u16](../../../../../../../functions/crates/lpe-exchange/src/tests/read_rop_binary_u16.md)
+- [hierarchy_query_display_container_rows](../../../../../../../functions/crates/lpe-exchange/src/tests/hierarchy_query_display_container_rows.md)
+- [hierarchy_query_calendar_contract_rows](../../../../../../../functions/crates/lpe-exchange/src/tests/hierarchy_query_calendar_contract_rows.md)
+- [strict_replguid_globset_ranges](../../../../../../../functions/crates/lpe-exchange/src/tests/strict_replguid_globset_ranges.md)
+- [read_strict_slice](../../../../../../../functions/crates/lpe-exchange/src/tests/read_strict_slice.md)
+- [strict_replid_globset_ranges](../../../../../../../functions/crates/lpe-exchange/src/tests/strict_replid_globset_ranges.md)
+- [mapi_last_binary_property](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_last_binary_property.md)
+- [mapi_get_properties_specific_standard_row_offset](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_get_properties_specific_standard_row_offset.md)
+- [mapi_sync_manifest_message_state](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_sync_manifest_message_state.md)
+- [mapi_fast_transfer_chunks](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_fast_transfer_chunks.md)
+- [saved_message_id_from_response](../../../../../../../functions/crates/lpe-exchange/src/tests/saved_message_id_from_response.md)
+- [response_rops_and_handles_from_execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/response_rops_and_handles_from_execute_body.md)
+- [test_filetime](../../../../../../../functions/crates/lpe-exchange/src/tests/test_filetime.md)
+- [resolve_body_part](../../../../../../../functions/crates/lpe-imap/src/render/resolve_body_part.md)
+- [format_rfc5322_date](../../../../../../../functions/crates/lpe-imap/src/render/format_rfc5322_date.md)
+- [parse_search_key](../../../../../../../functions/crates/lpe-imap/src/search/parse_search_key.md)
+- [next_search_argument](../../../../../../../functions/crates/lpe-imap/src/search/next_search_argument.md)
+- [allocate_uid_validity](../../../../../../../functions/crates/lpe-imap/src/tests/FakeStore/allocate_uid_validity.md)
+- [fetch_imap_mailbox_state](../../../../../../../functions/crates/lpe-imap/src/tests/FakeStore/imapstore/fetch_imap_mailbox_state.md)
+- [handle_blob_lookup](../../../../../../../functions/crates/lpe-jmap/src/blob/JmapService/handle_blob_lookup.md)
+- [handle_calendar_import_or_copy](../../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_import_or_copy.md)
+- [handle_calendar_event_get](../../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/handle_calendar_event_get.md)
+- [calendar_event_update_input](../../../../../../../functions/crates/lpe-jmap/src/calendar/JmapService/calendar_event_update_input.md)
+- [parse_calendar_collection_name](../../../../../../../functions/crates/lpe-jmap/src/calendar/parse_calendar_collection_name.md)
+- [parse_calendar_event_input](../../../../../../../functions/crates/lpe-jmap/src/calendar/parse_calendar_event_input.md)
+- [parse_calendar_attachment_inputs](../../../../../../../functions/crates/lpe-jmap/src/calendar/parse_calendar_attachment_inputs.md)
+- [parse_jmap_calendar_participants](../../../../../../../functions/crates/lpe-jmap/src/calendar/parse_jmap_calendar_participants.md)
+- [participant_email](../../../../../../../functions/crates/lpe-jmap/src/calendar/participant_email.md)
+- [parse_contact_input](../../../../../../../functions/crates/lpe-jmap/src/contacts/parse_contact_input.md)
+- [parse_contact_name](../../../../../../../functions/crates/lpe-jmap/src/contacts/parse_contact_name.md)
+- [contact_object_string](../../../../../../../functions/crates/lpe-jmap/src/contacts/contact_object_string.md)
+- [parse_contact_property_string](../../../../../../../functions/crates/lpe-jmap/src/contacts/parse_contact_property_string.md)
+- [parse_contact_property_array](../../../../../../../functions/crates/lpe-jmap/src/contacts/parse_contact_property_array.md)
+- [resolve_creation_reference](../../../../../../../functions/crates/lpe-jmap/src/convert/resolve_creation_reference.md)
+- [parse_draft_mutation](../../../../../../../functions/crates/lpe-jmap/src/drafts/parse_draft_mutation.md)
+- [parse_email_copy](../../../../../../../functions/crates/lpe-jmap/src/drafts/parse_email_copy.md)
+- [parse_email_import](../../../../../../../functions/crates/lpe-jmap/src/mail/imports/JmapService/parse_email_import.md)
+- [parse_mailbox_create](../../../../../../../functions/crates/lpe-jmap/src/mailboxes/parse_mailbox_create.md)
+- [parse_mailbox_update](../../../../../../../functions/crates/lpe-jmap/src/mailboxes/parse_mailbox_update.md)
+- [filter_mailboxes](../../../../../../../functions/crates/lpe-jmap/src/mailboxes/filter_mailboxes.md)
+- [validate_mailbox_set_names](../../../../../../../functions/crates/lpe-jmap/src/mailboxes/validate_mailbox_set_names.md)
+- [mailbox_parent_chain_contains](../../../../../../../functions/crates/lpe-jmap/src/mailboxes/mailbox_parent_chain_contains.md)
+- [mailbox_name_field](../../../../../../../functions/crates/lpe-jmap/src/mailboxes/mailbox_name_field.md)
+- [parse_note_input](../../../../../../../functions/crates/lpe-jmap/src/notes_journal/parse_note_input.md)
+- [parse_journal_entry_input](../../../../../../../functions/crates/lpe-jmap/src/notes_journal/parse_journal_entry_input.md)
+- [parse_submission_email_id](../../../../../../../functions/crates/lpe-jmap/src/parse/parse_submission_email_id.md)
+- [parse_first_property_object_string](../../../../../../../functions/crates/lpe-jmap/src/parse/parse_first_property_object_string.md)
+- [router](../../../../../../../functions/crates/lpe-jmap/src/service/router.md)
+- [upload_handler](../../../../../../../functions/crates/lpe-jmap/src/service/upload_handler.md)
+- [event_source_handler](../../../../../../../functions/crates/lpe-jmap/src/service/event_source_handler.md)
+- [handle_reminder_set](../../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_reminder_set.md)
+- [handle_reminder_import_or_copy](../../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_reminder_import_or_copy.md)
+- [apply_reminder_mutation](../../../../../../../functions/crates/lpe-jmap/src/service/JmapService/apply_reminder_mutation.md)
+- [handle_share_set](../../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_share_set.md)
+- [handle_share_import_or_copy](../../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_share_import_or_copy.md)
+- [handle_search_folder_set](../../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_search_folder_set.md)
+- [handle_search_folder_import_or_copy](../../../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_search_folder_import_or_copy.md)
+- [handle_canonical_get](../../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_get.md)
+- [handle_canonical_query](../../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query.md)
+- [handle_canonical_query_changes](../../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query_changes.md)
+- [handle_canonical_changes](../../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_changes.md)
+- [handle_canonical_import_or_copy](../../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_import_or_copy.md)
+- [canonical_object_state](../../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/canonical_object_state.md)
+- [canonical_query_ids](../../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/canonical_query_ids.md)
+- [requested_account_id_from_arguments](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/requested_account_id_from_arguments.md)
+- [string_ids_from_arguments](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/string_ids_from_arguments.md)
+- [property_names_from_arguments](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/property_names_from_arguments.md)
+- [project_get_properties](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/project_get_properties.md)
+- [object_keys](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/object_keys.md)
+- [parse_reminder_id](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/parse_reminder_id.md)
+- [parse_share_input](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/parse_share_input.md)
+- [search_folder_input_from_value](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/search_folder_input_from_value.md)
+- [is_method_error_payload](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/is_method_error_payload.md)
+- [resolve_result_references](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/resolve_result_references.md)
+- [object_array_len](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/object_array_len.md)
+- [object_map_len](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/object_map_len.md)
+- [authorization_header](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/authorization_header.md)
+- [public_base_url](../../../../../../../functions/crates/lpe-jmap/src/session/public_base_url.md)
+- [public_base_path](../../../../../../../functions/crates/lpe-jmap/src/session/public_base_path.md)
+- [websocket_url](../../../../../../../functions/crates/lpe-jmap/src/session/websocket_url.md)
+- [session_account_capabilities](../../../../../../../functions/crates/lpe-jmap/src/session/session_account_capabilities.md)
+- [changes_response_from_durable_with_cursor](../../../../../../../functions/crates/lpe-jmap/src/state/changes_response_from_durable_with_cursor.md)
+- [changes_response_with_cursor](../../../../../../../functions/crates/lpe-jmap/src/state/changes_response_with_cursor.md)
+- [apply_state_changes](../../../../../../../functions/crates/lpe-jmap/src/state/apply_state_changes.md)
+- [apply_query_changes](../../../../../../../functions/crates/lpe-jmap/src/state/apply_query_changes.md)
+- [compute_query_diff_with_reorders](../../../../../../../functions/crates/lpe-jmap/src/state/compute_query_diff_with_reorders.md)
+- [delete_jmap_share](../../../../../../../functions/crates/lpe-jmap/src/store/Storage/jmapstore/delete_jmap_share.md)
+- [project_share](../../../../../../../functions/crates/lpe-jmap/src/store/shares/project_share.md)
+- [copy_share_field_as](../../../../../../../functions/crates/lpe-jmap/src/store/shares/copy_share_field_as.md)
+- [share_rights](../../../../../../../functions/crates/lpe-jmap/src/store/shares/share_rights.md)
+- [share_type](../../../../../../../functions/crates/lpe-jmap/src/store/shares/share_type.md)
+- [share_uuid](../../../../../../../functions/crates/lpe-jmap/src/store/shares/share_uuid.md)
+- [parse_task_input](../../../../../../../functions/crates/lpe-jmap/src/tasks/parse_task_input.md)
+- [parse_task_list_create](../../../../../../../functions/crates/lpe-jmap/src/tasks/parse_task_list_create.md)
+- [parse_task_list_update](../../../../../../../functions/crates/lpe-jmap/src/tasks/parse_task_list_update.md)
+- [fetch_jmap_query_state](../../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_query_state.md)
+- [fetch_jmap_message_blob](../../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_jmap_message_blob.md)
+- [fetch_calendar_attachments_for_events](../../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/fetch_calendar_attachments_for_events.md)
+- [delete_jmap_share](../../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/delete_jmap_share.md)
+- [save_vacation_response](../../../../../../../functions/crates/lpe-jmap/src/vacation/save_vacation_response.md)
+- [handle_websocket_message](../../../../../../../functions/crates/lpe-jmap/src/websocket/JmapService/handle_websocket_message.md)
+- [compute_push_changes](../../../../../../../functions/crates/lpe-jmap/src/websocket/JmapService/compute_push_changes.md)
+- [websocket_request_id](../../../../../../../functions/crates/lpe-jmap/src/websocket/websocket_request_id.md)
+- [parse_detection_json](../../../../../../../functions/crates/lpe-magika/src/detection/parse_detection_json.md)
+- [parse_rfc822_header_value](../../../../../../../functions/crates/lpe-magika/src/mime/parse_rfc822_header_value.md)
+- [extract_visible_body_parts](../../../../../../../functions/crates/lpe-magika/src/mime/extract_visible_body_parts.md)
+- [collect_attachment_parts](../../../../../../../functions/crates/lpe-magika/src/mime/collect_attachment_parts.md)
+- [parse_visible_part](../../../../../../../functions/crates/lpe-magika/src/mime/parse_visible_part.md)
+- [first_html_part](../../../../../../../functions/crates/lpe-magika/src/mime/first_html_part.md)
+- [decode_quoted_printable](../../../../../../../functions/crates/lpe-magika/src/mime/decode_quoted_printable.md)
+- [bearer_token](../../../../../../../functions/crates/lpe-mail-auth/src/oauth/bearer_token.md)
+- [basic_credentials](../../../../../../../functions/crates/lpe-mail-auth/src/oauth/basic_credentials.md)
+- [parse_calendar_participants_metadata](../../../../../../../functions/crates/lpe-storage/src/calendar/parse_calendar_participants_metadata.md)
+- [accounts_for](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalPushChangeSet/accounts_for.md)
+- [contains_category](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalPushChangeSet/contains_category.md)
+- [fetch_delegate_access_objects](../../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/fetch_delegate_access_objects.md)
+- [rekey_active_event_identities_in_tx](../../../../../../../functions/crates/lpe-storage/src/collaboration/deleted_events/rekey_active_event_identities_in_tx.md)
+- [parse_rfc822_message](../../../../../../../functions/crates/lpe-storage/src/mail/parse_rfc822_message.md)
+- [from_input](../../../../../../../functions/crates/lpe-storage/src/mapi_contacts/NormalizedContact/from_input.md)
+- [parse_contact_predecessor_change_list](../../../../../../../functions/crates/lpe-storage/src/mapi_contacts/parse_contact_predecessor_change_list.md)
+- [contact_predecessors_include](../../../../../../../functions/crates/lpe-storage/src/mapi_contacts/contact_predecessors_include.md)
+- [contact_predecessors_contain_change_key](../../../../../../../functions/crates/lpe-storage/src/mapi_contacts/contact_predecessors_contain_change_key.md)
+- [merge_contact_predecessor_change_lists](../../../../../../../functions/crates/lpe-storage/src/mapi_contacts/merge_contact_predecessor_change_lists.md)
+- [imported_source_counter](../../../../../../../functions/crates/lpe-storage/src/mapi_contacts/imported_source_counter.md)
+- [fetch_created_accessible_event_in_tx](../../../../../../../functions/crates/lpe-storage/src/mapi_events/fetch_created_accessible_event_in_tx.md)
+- [fetch_mapi_event_reminder_state_in_tx](../../../../../../../functions/crates/lpe-storage/src/mapi_events/fetch_mapi_event_reminder_state_in_tx.md)
+- [mapi_event_version_from_row](../../../../../../../functions/crates/lpe-storage/src/mapi_events/mapi_event_version_from_row.md)
+- [merge_predecessor_change_list](../../../../../../../functions/crates/lpe-storage/src/mapi_events/merge_predecessor_change_list.md)
+- [parse_predecessor_change_list](../../../../../../../functions/crates/lpe-storage/src/mapi_events/parse_predecessor_change_list.md)
+- [imported_source_global_counter](../../../../../../../functions/crates/lpe-storage/src/mapi_events/imported_identity/imported_source_global_counter.md)
+- [rekey_mapi_message_identity_in_tx](../../../../../../../functions/crates/lpe-storage/src/message_ops/rekey_mapi_message_identity_in_tx.md)
+- [replay_jmap_mail_object_changes](../../../../../../../functions/crates/lpe-storage/src/protocols/Storage/replay_jmap_mail_object_changes.md)
+- [expand_jmap_dependency_change](../../../../../../../functions/crates/lpe-storage/src/protocols/Storage/expand_jmap_dependency_change.md)
+- [jmap_string_replay_object_id](../../../../../../../functions/crates/lpe-storage/src/protocols/Storage/jmap_string_replay_object_id.md)
+- [fetch_jmap_emails](../../../../../../../functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_emails.md)
+- [fetch_jmap_emails_with_protected_bcc](../../../../../../../functions/crates/lpe-storage/src/protocols/Storage/fetch_jmap_emails_with_protected_bcc.md)
+- [is_mapi_only_change](../../../../../../../functions/crates/lpe-storage/src/protocols/is_mapi_only_change.md)
+- [jmap_replay_object_id](../../../../../../../functions/crates/lpe-storage/src/protocols/jmap_replay_object_id.md)
+- [summary_json_reminder_changed](../../../../../../../functions/crates/lpe-storage/src/protocols/summary_json_reminder_changed.md)
+- [insert_mail_change_log_in_tx](../../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx.md)
+- [s3_read_object](../../../../../../../functions/crates/lpe-storage/src/storage_backend/s3_read_object.md)
+- [required_string](../../../../../../../functions/crates/lpe-storage/src/storage_backend/required_string.md)
+- [optional_string](../../../../../../../functions/crates/lpe-storage/src/storage_backend/optional_string.md)
+- [stat_from_headers](../../../../../../../functions/crates/lpe-storage/src/storage_backend/stat_from_headers.md)
+- [fetch_storage_policy_overview](../../../../../../../functions/crates/lpe-storage/src/storage_policy/Storage/fetch_storage_policy_overview.md)
+- [assignment_pool](../../../../../../../functions/crates/lpe-storage/src/storage_policy/assignment_pool.md)
+- [find_submission_account_by_email_in_same_tenant](../../../../../../../functions/crates/lpe-storage/src/submission/Storage/find_submission_account_by_email_in_same_tenant.md)
+- [contact_primary_email](../../../../../../../functions/crates/lpe-storage/src/workspace/contact_primary_email.md)
+- [contact_json_with_primary_value](../../../../../../../functions/crates/lpe-storage/src/workspace/contact_json_with_primary_value.md)
+- [check_options](../../../../../../../functions/tools/activesync_mobile_lab_preflight/check_options.md)
+- [check_autodiscover_json](../../../../../../../functions/tools/activesync_mobile_lab_preflight/check_autodiscover_json.md)
+- [env](../../../../../../../functions/tools/jmap_live_shared_delegated_check/env.md)
+- [bool_env](../../../../../../../functions/tools/jmap_live_shared_delegated_check/bool_env.md)
+- [login](../../../../../../../functions/tools/jmap_live_shared_delegated_check/login.md)
+- [jmap](../../../../../../../functions/tools/jmap_live_shared_delegated_check/jmap.md)
+- [websocket_url](../../../../../../../functions/tools/jmap_live_shared_delegated_check/websocket_url.md)
+- [enable_push_snapshot](../../../../../../../functions/tools/jmap_live_shared_delegated_check/enable_push_snapshot.md)
+- [replay_push](../../../../../../../functions/tools/jmap_live_shared_delegated_check/replay_push.md)
+- [assert_grantee_jmap_visibility](../../../../../../../functions/tools/jmap_live_shared_delegated_check/assert_grantee_jmap_visibility.md)
+- [assert_push_replay](../../../../../../../functions/tools/jmap_live_shared_delegated_check/assert_push_replay.md)
+- [env](../../../../../../../functions/tools/operations_benchmark/env.md)
+- [login](../../../../../../../functions/tools/operations_benchmark/login.md)
+- [jmap](../../../../../../../functions/tools/operations_benchmark/jmap.md)
+- [method_response](../../../../../../../functions/tools/operations_benchmark/method_response.md)
+- [websocket_url](../../../../../../../functions/tools/operations_benchmark/websocket_url.md)
+- [encode_wbxml_node](../../../../../../../functions/tools/operations_benchmark/encode_wbxml_node.md)
+- [benchmark_jmap](../../../../../../../functions/tools/operations_benchmark/benchmark_jmap.md)
+- [websocket_push_enable_round_trip](../../../../../../../functions/tools/operations_benchmark/websocket_push_enable_round_trip.md)
+- [jmap_inbox_mailbox_id](../../../../../../../functions/tools/operations_benchmark/jmap_inbox_mailbox_id.md)
+- [markdown_report](../../../../../../../functions/tools/operations_benchmark/markdown_report.md)
+- [check_json_autodiscover](../../../../../../../functions/tools/rca_outlook_connectivity_check/check_json_autodiscover.md)
+- [check_jmap_session](../../../../../../../functions/tools/rca_outlook_connectivity_check/check_jmap_session.md)
+- [check_jmap_email_subject_absent](../../../../../../../functions/tools/rca_outlook_connectivity_check/check_jmap_email_subject_absent.md)
+- [summarize_rr](../../../../../../../functions/tools/rca_outlook_trace_summary/summarize_rr.md)
+- [classify_rr_setcolumns_release_response](../../../../../../../functions/tools/rca_outlook_trace_summary/classify_rr_setcolumns_release_response.md)
+- [parse_rr_response_handle_table](../../../../../../../functions/tools/rca_outlook_trace_summary/parse_rr_response_handle_table.md)
+- [rr_event_tail_summary](../../../../../../../functions/tools/rca_outlook_trace_summary/rr_event_tail_summary.md)
+- [summarize_log](../../../../../../../functions/tools/rca_outlook_trace_summary/summarize_log.md)
+- [record_query_rows_response_frames](../../../../../../../functions/tools/rca_outlook_trace_summary/record_query_rows_response_frames.md)
+- [record_visible_inbox_query_rows](../../../../../../../functions/tools/rca_outlook_trace_summary/record_visible_inbox_query_rows.md)
+- [record_broad_ipm_configuration_row_count_gap](../../../../../../../functions/tools/rca_outlook_trace_summary/record_broad_ipm_configuration_row_count_gap.md)
+- [record_folder_local_default_view_visibility](../../../../../../../functions/tools/rca_outlook_trace_summary/record_folder_local_default_view_visibility.md)
+- [record_post_visible_release_followup](../../../../../../../functions/tools/rca_outlook_trace_summary/record_post_visible_release_followup.md)
+- [int_field](../../../../../../../functions/tools/rca_outlook_trace_summary/int_field.md)
+- [record_hierarchy_query_window](../../../../../../../functions/tools/rca_outlook_trace_summary/record_hierarchy_query_window.md)
+- [field_text](../../../../../../../functions/tools/rca_outlook_trace_summary/field_text.md)
+- [record_query_position_wire_fields](../../../../../../../functions/tools/rca_outlook_trace_summary/record_query_position_wire_fields.md)
+- [record_query_rows_terminal_origin_mismatch](../../../../../../../functions/tools/rca_outlook_trace_summary/record_query_rows_terminal_origin_mismatch.md)
+- [inspect_contract](../../../../../../../functions/tools/rca_outlook_trace_summary/inspect_contract.md)
+- [record_resolved_named_property_context](../../../../../../../functions/tools/rca_outlook_trace_summary/record_resolved_named_property_context.md)
+- [mismatched_capture_sessions](../../../../../../../functions/tools/rca_outlook_trace_summary/mismatched_capture_sessions.md)
+- [print_single_summary](../../../../../../../functions/tools/rca_outlook_trace_summary/print_single_summary.md)
+- [print_batch_summary](../../../../../../../functions/tools/rca_outlook_trace_summary/print_batch_summary.md)
+- [issue_buckets](../../../../../../../functions/tools/rca_outlook_trace_summary/issue_buckets.md)
+- [common_views_fai_missing_default_named_view](../../../../../../../functions/tools/rca_outlook_trace_summary/common_views_fai_missing_default_named_view.md)
+- [visible_release_associated_prefix_issue_buckets](../../../../../../../functions/tools/rca_outlook_trace_summary/visible_release_associated_prefix_issue_buckets.md)
+- [visible_release_needs_action](../../../../../../../functions/tools/rca_outlook_trace_summary/visible_release_needs_action.md)
+- [App](../../../../../../../functions/web/admin/src/App.md)
+- [App](../../../../../../../functions/web/client/src/App/App.md)

@@ -1,0 +1,227 @@
+---
+type: Rust Function
+title: rop_query_rows_response_inner
+resource: crates/lpe-exchange/src/mapi/tables/query_rows.rs#L42-L737
+visibility: private
+generated:
+  by: okf-rs/0.3.0
+relationships:
+  calls:
+  - functions/crates/lpe-exchange/src/mapi/rop/errors/rop_error_response
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/response_handle_index
+  - functions/crates/lpe-exchange/src/mapi/tables/query/query_rows_request_is_valid
+  - functions/crates/lpe-exchange/src/mapi/tables/query/query_rows_response_columns
+  - functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/is_queryable_hierarchy_folder
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/public_folder_for_id
+  - functions/crates/lpe-exchange/src/mapi/tables/columns/default_hierarchy_columns
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_rows_excluding_deleted
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/log_sync_issues_hierarchy_query_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row
+  - functions/crates/lpe-exchange/src/mapi/tables/counts/is_contact_contents_folder
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id
+  - functions/crates/lpe-exchange/src/mapi/tables/columns/default_contact_property_tags
+  - functions/crates/lpe-exchange/src/mapi/tables/columns/default_navigation_shortcut_property_tags
+  - functions/crates/lpe-exchange/src/mapi/tables/columns/default_conversation_action_property_tags
+  - functions/crates/lpe-exchange/src/mapi/tables/columns/default_message_property_tags
+  - functions/crates/lpe-exchange/src/mapi/tables/columns/default_calendar_configuration_property_tags
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/should_use_associated_config_table
+  - functions/crates/lpe-exchange/src/mapi/tables/columns/default_associated_config_columns
+  - functions/crates/lpe-exchange/src/mapi/tables/columns/default_contents_columns
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/delegate_freebusy_messages
+  - functions/crates/lpe-exchange/src/mapi/properties/restriction_matches
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/delegate_freebusy_property_value
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_delegate_freebusy_row
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/common_views_table_messages
+  - functions/crates/lpe-exchange/src/mapi/tables/filters/is_unrestricted_common_views_navigation_projection
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/restriction_matches_common_views_message
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_common_views_messages
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_common_views_property_row_for_principal
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_common_views_property_row_with_mailbox_guid
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/conversation_action_table_messages
+  - functions/crates/lpe-exchange/src/mapi/properties/conversation_action_property_value
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_conversation_action_row
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_associated_table_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_associated_table_property_row
+  - functions/crates/lpe-exchange/src/mapi/tables/counts/normal_contents_suppressed_for_associated_only_folder
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/public_folder_items_for_folder
+  - functions/crates/lpe-exchange/src/mapi/tables/filters/retain_rows_by_restriction
+  - functions/crates/lpe-exchange/src/mapi/tables/public_folders/restriction_matches_public_folder_item
+  - functions/crates/lpe-exchange/src/mapi/tables/public_folders/serialize_public_folder_item_row
+  - functions/crates/lpe-exchange/src/mapi/tables/filters/restriction_matches_conversation_member_in_snapshot
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_emails
+  - functions/crates/lpe-exchange/src/mapi/tables/contents/serialize_message_property_row_in_snapshot_with_mailbox_guid
+  - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/deleted_items_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/sort_deleted_items_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/categorized_deleted_items_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/serialize_deleted_items_content_property_row
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_events
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_versioned_event_row
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_for_folder
+  - functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_contact_in_folder
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_contacts
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_mapi_contact_row
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/tasks_for_folder
+  - functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_task
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_tasks
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_task_row
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_search_results
+  - functions/crates/lpe-exchange/src/mapi/tables/search_folders/todo_search_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/search_folders/sort_search_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/search_folders/serialize_search_content_row
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/tracked_mail_processing_messages
+  - functions/crates/lpe-exchange/src/mapi/tables/filters/restriction_matches_email_in_snapshot
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_mapi_messages
+  - functions/crates/lpe-exchange/src/mapi/tables/contents/serialize_mapi_message_property_row_with_mailbox_guid
+  - functions/crates/lpe-exchange/src/mapi/tables/search_folders/reminder_search_content_rows
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/notes_for_folder
+  - functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_note
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_notes
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_note_row
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/journal_entries_for_folder
+  - functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_journal_entry
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_journal_entries
+  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_journal_entry_row
+  - functions/crates/lpe-exchange/src/mapi_store/recoverable_storage_folder
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/recoverable_items_for_folder
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_recoverable_items
+  - functions/crates/lpe-exchange/src/mapi/tables/recoverable_items/serialize_recoverable_item_row
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/query_forward_read
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/query_row_count
+  - functions/crates/lpe-exchange/src/mapi/tables/filters/is_top_level_count_restriction
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/content_table_window_emails
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/table_view_signature
+  - functions/crates/lpe-exchange/src/mapi/tables/contents/categorized_email_rows
+  - functions/crates/lpe-exchange/src/mapi/sync/scope/emails_for_folder
+  - functions/crates/lpe-exchange/src/mapi/tables/columns/default_attachment_columns
+  - functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_attachment
+  - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_attachments
+  - functions/crates/lpe-exchange/src/mapi/tables/attachments/serialize_attachment_row
+  - functions/crates/lpe-exchange/src/mapi/permissions/default_permission_columns
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/permissions_for_folder
+  - functions/crates/lpe-exchange/src/mapi/permissions/serialize_permission_row
+  - functions/crates/lpe-exchange/src/mapi/tables/columns/default_rule_columns
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/rules
+  - functions/crates/lpe-exchange/src/mapi/tables/rules/serialize_rule_row
+  - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/query_no_advance
+  - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
+  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_property_row
+  called_by:
+  - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response
+  - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_for_principal
+---
+
+# Signature
+
+`fn rop_query_rows_response_inner( request: &RopRequest, object: Option<&mut MapiObject>, mailboxes: &[JmapMailbox], emails: &[JmapEmail], snapshot: &MapiMailStoreSnapshot, mailbox_guid: Uuid, principal: Option<&AccountPrincipal>, ) -> Vec<u8>`
+
+# Calls
+
+- [rop_error_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/errors/rop_error_response.md)
+- [response_handle_index](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/response_handle_index.md)
+- [query_rows_request_is_valid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query/query_rows_request_is_valid.md)
+- [query_rows_response_columns](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query/query_rows_response_columns.md)
+- [table_position_and_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count.md)
+- [is_queryable_hierarchy_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/is_queryable_hierarchy_folder.md)
+- [public_folder_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/public_folder_for_id.md)
+- [default_hierarchy_columns](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_hierarchy_columns.md)
+- [hierarchy_table_rows_excluding_deleted](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_rows_excluding_deleted.md)
+- [log_sync_issues_hierarchy_query_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/log_sync_issues_hierarchy_query_rows.md)
+- [serialize_hierarchy_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row.md)
+- [is_contact_contents_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/is_contact_contents_folder.md)
+- [collaboration_folder_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id.md)
+- [default_contact_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_contact_property_tags.md)
+- [default_navigation_shortcut_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_navigation_shortcut_property_tags.md)
+- [default_conversation_action_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_conversation_action_property_tags.md)
+- [default_message_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_message_property_tags.md)
+- [default_calendar_configuration_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_calendar_configuration_property_tags.md)
+- [should_use_associated_config_table](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/should_use_associated_config_table.md)
+- [default_associated_config_columns](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_associated_config_columns.md)
+- [default_contents_columns](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_contents_columns.md)
+- [delegate_freebusy_messages](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/delegate_freebusy_messages.md)
+- [restriction_matches](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/restriction_matches.md)
+- [delegate_freebusy_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/delegate_freebusy_property_value.md)
+- [serialize_delegate_freebusy_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_delegate_freebusy_row.md)
+- [common_views_table_messages](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/common_views_table_messages.md)
+- [is_unrestricted_common_views_navigation_projection](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/filters/is_unrestricted_common_views_navigation_projection.md)
+- [restriction_matches_common_views_message](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/restriction_matches_common_views_message.md)
+- [sort_common_views_messages](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_common_views_messages.md)
+- [serialize_common_views_property_row_for_principal](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_common_views_property_row_for_principal.md)
+- [serialize_common_views_property_row_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_common_views_property_row_with_mailbox_guid.md)
+- [conversation_action_table_messages](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/conversation_action_table_messages.md)
+- [conversation_action_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/conversation_action_property_value.md)
+- [serialize_conversation_action_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_conversation_action_row.md)
+- [associated_table_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows.md)
+- [sort_associated_table_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_associated_table_rows.md)
+- [serialize_associated_table_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_associated_table_property_row.md)
+- [normal_contents_suppressed_for_associated_only_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/normal_contents_suppressed_for_associated_only_folder.md)
+- [public_folder_items_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/public_folder_items_for_folder.md)
+- [retain_rows_by_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/filters/retain_rows_by_restriction.md)
+- [restriction_matches_public_folder_item](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/public_folders/restriction_matches_public_folder_item.md)
+- [serialize_public_folder_item_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/public_folders/serialize_public_folder_item_row.md)
+- [restriction_matches_conversation_member_in_snapshot](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/filters/restriction_matches_conversation_member_in_snapshot.md)
+- [sort_emails](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_emails.md)
+- [serialize_message_property_row_in_snapshot_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/contents/serialize_message_property_row_in_snapshot_with_mailbox_guid.md)
+- [deleted_items_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/deleted_items_content_rows.md)
+- [sort_deleted_items_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/sort_deleted_items_content_rows.md)
+- [categorized_deleted_items_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/categorized_deleted_items_content_rows.md)
+- [serialize_deleted_items_content_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/serialize_deleted_items_content_property_row.md)
+- [calendar_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows.md)
+- [sort_events](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_events.md)
+- [serialize_versioned_event_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_versioned_event_row.md)
+- [contacts_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_for_folder.md)
+- [restriction_matches_contact_in_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_contact_in_folder.md)
+- [sort_contacts](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_contacts.md)
+- [serialize_mapi_contact_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_mapi_contact_row.md)
+- [tasks_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/tasks_for_folder.md)
+- [restriction_matches_task](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_task.md)
+- [sort_tasks](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_tasks.md)
+- [serialize_task_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_task_row.md)
+- [contacts_search_results](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_search_results.md)
+- [todo_search_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/search_folders/todo_search_content_rows.md)
+- [sort_search_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/search_folders/sort_search_content_rows.md)
+- [serialize_search_content_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/search_folders/serialize_search_content_row.md)
+- [tracked_mail_processing_messages](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/tracked_mail_processing_messages.md)
+- [restriction_matches_email_in_snapshot](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/filters/restriction_matches_email_in_snapshot.md)
+- [sort_mapi_messages](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_mapi_messages.md)
+- [serialize_mapi_message_property_row_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/contents/serialize_mapi_message_property_row_with_mailbox_guid.md)
+- [reminder_search_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/search_folders/reminder_search_content_rows.md)
+- [notes_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/notes_for_folder.md)
+- [restriction_matches_note](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_note.md)
+- [sort_notes](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_notes.md)
+- [serialize_note_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_note_row.md)
+- [journal_entries_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/journal_entries_for_folder.md)
+- [restriction_matches_journal_entry](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_journal_entry.md)
+- [sort_journal_entries](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_journal_entries.md)
+- [serialize_journal_entry_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_journal_entry_row.md)
+- [recoverable_storage_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/recoverable_storage_folder.md)
+- [recoverable_items_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/recoverable_items_for_folder.md)
+- [sort_recoverable_items](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_recoverable_items.md)
+- [serialize_recoverable_item_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/recoverable_items/serialize_recoverable_item_row.md)
+- [query_forward_read](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/query_forward_read.md)
+- [query_row_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/query_row_count.md)
+- [is_top_level_count_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/filters/is_top_level_count_restriction.md)
+- [content_table_window_emails](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/content_table_window_emails.md)
+- [table_view_signature](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/table_view_signature.md)
+- [categorized_email_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/contents/categorized_email_rows.md)
+- [emails_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/sync/scope/emails_for_folder.md)
+- [default_attachment_columns](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_attachment_columns.md)
+- [restriction_matches_attachment](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_attachment.md)
+- [sort_attachments](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_attachments.md)
+- [serialize_attachment_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/attachments/serialize_attachment_row.md)
+- [default_permission_columns](../../../../../../../functions/crates/lpe-exchange/src/mapi/permissions/default_permission_columns.md)
+- [permissions_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/permissions_for_folder.md)
+- [serialize_permission_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/permissions/serialize_permission_row.md)
+- [default_rule_columns](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_rule_columns.md)
+- [rules](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/rules.md)
+- [serialize_rule_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/rules/serialize_rule_row.md)
+- [query_no_advance](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/query_no_advance.md)
+- [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
+- [write_query_rows_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_property_row.md)
+
+# Called by
+
+- [rop_query_rows_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response.md)
+- [rop_query_rows_response_for_principal](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_for_principal.md)
