@@ -17,5 +17,5 @@
 /docs/microsoft/*
 !/docs/microsoft/README.md
 !/docs/microsoft/protocol-sources.toml
-/.okf-cache.json
+.okf-cache.json
 /.agents
