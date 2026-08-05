@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: recipient_suggestions_contact_delete_clears_only_contact_id
-resource: crates/lpe-storage/src/schema_contract.rs#L2593-L2607
+resource: crates/lpe-storage/src/schema_contract.rs#L2610-L2624
 visibility: private
 generated:
   by: okf-rs/0.3.0

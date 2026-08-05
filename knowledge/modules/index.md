@@ -241,6 +241,7 @@
 - [folders](../modules/crates/lpe-exchange/src/mapi/dispatch/tests/folders.md) — Rust Module
 - [unsupported](../modules/crates/lpe-exchange/src/mapi/dispatch/unsupported.md) — Rust Module
 - [identity](../modules/crates/lpe-exchange/src/mapi/identity.md) — Rust Module
+- [notification_metrics](../modules/crates/lpe-exchange/src/mapi/notification_metrics.md) — Rust Module
 - [notifications](../modules/crates/lpe-exchange/src/mapi/notifications.md) — Rust Module
 - [nspi](../modules/crates/lpe-exchange/src/mapi/nspi.md) — Rust Module
 - [diagnostics](../modules/crates/lpe-exchange/src/mapi/nspi/diagnostics.md) — Rust Module

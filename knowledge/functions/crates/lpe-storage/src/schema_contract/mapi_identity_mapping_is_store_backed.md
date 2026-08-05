@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_identity_mapping_is_store_backed
-resource: crates/lpe-storage/src/schema_contract.rs#L703-L780
+resource: crates/lpe-storage/src/schema_contract.rs#L720-L797
 visibility: private
 generated:
   by: okf-rs/0.3.0

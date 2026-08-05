@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_delegate_freebusy_messages_are_computed_from_canonical_state
-resource: crates/lpe-storage/src/schema_contract.rs#L1008-L1029
+resource: crates/lpe-storage/src/schema_contract.rs#L1025-L1046
 visibility: private
 generated:
   by: okf-rs/0.3.0

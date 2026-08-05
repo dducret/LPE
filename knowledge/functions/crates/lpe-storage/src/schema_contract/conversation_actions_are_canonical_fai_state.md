@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: conversation_actions_are_canonical_fai_state
-resource: crates/lpe-storage/src/schema_contract.rs#L2414-L2447
+resource: crates/lpe-storage/src/schema_contract.rs#L2431-L2464
 visibility: private
 generated:
   by: okf-rs/0.3.0

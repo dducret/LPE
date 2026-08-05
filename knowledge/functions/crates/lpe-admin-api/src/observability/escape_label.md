@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: escape_label
-resource: crates/lpe-admin-api/src/observability.rs#L442-L444
+resource: crates/lpe-admin-api/src/observability.rs#L474-L476
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: unix_timestamp_seconds
-resource: crates/lpe-admin-api/src/observability.rs#L446-L451
+resource: crates/lpe-admin-api/src/observability.rs#L478-L483
 visibility: private
 generated:
   by: okf-rs/0.3.0

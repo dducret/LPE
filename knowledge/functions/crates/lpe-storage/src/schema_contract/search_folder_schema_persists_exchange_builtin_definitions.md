@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: search_folder_schema_persists_exchange_builtin_definitions
-resource: crates/lpe-storage/src/schema_contract.rs#L2361-L2411
+resource: crates/lpe-storage/src/schema_contract.rs#L2378-L2428
 visibility: private
 generated:
   by: okf-rs/0.3.0

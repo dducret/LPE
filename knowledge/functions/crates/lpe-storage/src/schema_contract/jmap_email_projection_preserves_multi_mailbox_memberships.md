@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_email_projection_preserves_multi_mailbox_memberships
-resource: crates/lpe-storage/src/schema_contract.rs#L2897-L2912
+resource: crates/lpe-storage/src/schema_contract.rs#L2914-L2929
 visibility: private
 generated:
   by: okf-rs/0.3.0

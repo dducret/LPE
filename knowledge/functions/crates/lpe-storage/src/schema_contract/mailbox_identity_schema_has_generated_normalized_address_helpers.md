@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_identity_schema_has_generated_normalized_address_helpers
-resource: crates/lpe-storage/src/schema_contract.rs#L2188-L2232
+resource: crates/lpe-storage/src/schema_contract.rs#L2205-L2249
 visibility: private
 generated:
   by: okf-rs/0.3.0

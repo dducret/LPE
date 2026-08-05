@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notification_wait_streaming_response
-resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L343-L359
+resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L324-L340
 generated:
   by: okf-rs/0.3.0
 relationships:

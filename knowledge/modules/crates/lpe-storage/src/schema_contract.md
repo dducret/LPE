@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: schema_contract
-resource: crates/lpe-storage/src/schema_contract.rs#L1-L3257
+resource: crates/lpe-storage/src/schema_contract.rs#L1-L3274
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -34,6 +34,7 @@ relationships:
 - [grant_changes_emit_object_level_mail_change_log_entries](../../../../functions/crates/lpe-storage/src/schema_contract/grant_changes_emit_object_level_mail_change_log_entries.md)
 - [collaboration_changes_and_tombstones_are_object_level](../../../../functions/crates/lpe-storage/src/schema_contract/collaboration_changes_and_tombstones_are_object_level.md)
 - [collaboration_mutations_write_object_level_change_rows](../../../../functions/crates/lpe-storage/src/schema_contract/collaboration_mutations_write_object_level_change_rows.md)
+- [collaboration_upserts_mark_inserted_rows_as_created](../../../../functions/crates/lpe-storage/src/schema_contract/collaboration_upserts_mark_inserted_rows_as_created.md)
 - [replay_logs_tombstones_and_cursors_have_structural_constraints](../../../../functions/crates/lpe-storage/src/schema_contract/replay_logs_tombstones_and_cursors_have_structural_constraints.md)
 - [mapi_identity_mapping_is_store_backed](../../../../functions/crates/lpe-storage/src/schema_contract/mapi_identity_mapping_is_store_backed.md)
 - [mapi_local_replica_ranges_and_deleted_item_list_are_durable](../../../../functions/crates/lpe-storage/src/schema_contract/mapi_local_replica_ranges_and_deleted_item_list_are_durable.md)

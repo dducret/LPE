@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_hierarchy_action_summary_records_last_request_contracts
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L826-L860
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L840-L874
 visibility: private
 generated:
   by: okf-rs/0.3.0

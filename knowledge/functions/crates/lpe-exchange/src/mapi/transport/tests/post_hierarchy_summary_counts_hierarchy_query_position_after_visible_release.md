@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_hierarchy_summary_counts_hierarchy_query_position_after_visible_release
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1208-L1242
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1222-L1256
 visibility: private
 generated:
   by: okf-rs/0.3.0

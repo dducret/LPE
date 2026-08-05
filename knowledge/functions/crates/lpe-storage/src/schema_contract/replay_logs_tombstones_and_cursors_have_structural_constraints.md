@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: replay_logs_tombstones_and_cursors_have_structural_constraints
-resource: crates/lpe-storage/src/schema_contract.rs#L644-L700
+resource: crates/lpe-storage/src/schema_contract.rs#L661-L717
 visibility: private
 generated:
   by: okf-rs/0.3.0

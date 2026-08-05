@@ -15,7 +15,9 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/session/lifecycle/established_session_request
   - functions/crates/lpe-exchange/src/mapi/transport/cookies/request_sequence_cookie_matches
   - functions/crates/lpe-exchange/src/mapi/transport/cookies/sequence_cookie
+  - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_response
   - functions/crates/lpe-exchange/src/mapi/transport/tests/accepted_response_rotates_the_mapi_sequence_cookie
+  - functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_keeps_a_valid_session_during_execute_overlap
 ---
 
 # Signature
@@ -35,4 +37,6 @@ relationships:
 - [established_session_request](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/established_session_request.md)
 - [request_sequence_cookie_matches](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/cookies/request_sequence_cookie_matches.md)
 - [sequence_cookie](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/cookies/sequence_cookie.md)
+- [notification_wait_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_response.md)
 - [accepted_response_rotates_the_mapi_sequence_cookie](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/accepted_response_rotates_the_mapi_sequence_cookie.md)
+- [notification_wait_keeps_a_valid_session_during_execute_overlap](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_keeps_a_valid_session_during_execute_overlap.md)

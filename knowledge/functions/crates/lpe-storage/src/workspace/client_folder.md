@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: client_folder
-resource: crates/lpe-storage/src/workspace.rs#L1322-L1339
+resource: crates/lpe-storage/src/workspace.rs#L1332-L1349
 visibility: private
 generated:
   by: okf-rs/0.3.0

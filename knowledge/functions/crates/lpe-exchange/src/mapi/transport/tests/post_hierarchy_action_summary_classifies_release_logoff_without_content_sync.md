@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_hierarchy_action_summary_classifies_release_logoff_without_content_sync
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1680-L1701
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1694-L1715
 visibility: private
 generated:
   by: okf-rs/0.3.0

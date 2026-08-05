@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rops
-resource: crates/lpe-exchange/src/mapi/dispatch.rs#L928-L1615
+resource: crates/lpe-exchange/src/mapi/dispatch.rs#L928-L1624
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -89,6 +89,8 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/rpc_header_ext_rop_buffer_chain
   - functions/crates/lpe-exchange/src/mapi/dispatch/execute/finalize_execute_rop_buffer
   - functions/crates/lpe-exchange/src/mapi/dispatch/execute/restore_pending_notifications_after_execute_overflow
+  - functions/crates/lpe-exchange/src/mapi/dispatch/execute/execute_response_exceeds_max_rop_out
+  - functions/crates/lpe-exchange/src/mapi/notification_metrics/record_mapi_new_mail_notification_deliveries
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/execute_response
   - functions/crates/lpe-exchange/src/mapi/session/lifecycle/execute_rpc_emsmdb_rops
@@ -183,6 +185,8 @@ relationships:
 - [rpc_header_ext_rop_buffer_chain](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/rpc_header_ext_rop_buffer_chain.md)
 - [finalize_execute_rop_buffer](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute/finalize_execute_rop_buffer.md)
 - [restore_pending_notifications_after_execute_overflow](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute/restore_pending_notifications_after_execute_overflow.md)
+- [execute_response_exceeds_max_rop_out](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute/execute_response_exceeds_max_rop_out.md)
+- [record_mapi_new_mail_notification_deliveries](../../../../../../functions/crates/lpe-exchange/src/mapi/notification_metrics/record_mapi_new_mail_notification_deliveries.md)
 
 # Called by
 

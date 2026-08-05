@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: dispatch
-resource: crates/lpe-exchange/src/mapi/dispatch.rs#L1-L1618
+resource: crates/lpe-exchange/src/mapi/dispatch.rs#L1-L1627
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -15,7 +15,7 @@ relationships:
   - external/super-sync
   - external/super-tables
   - external/super-transport
-  - external/super-wire-mapipropertytype-mapisynctype-ropid
+  - external/super-wire-mapinotificationeventmask-mapipropertytype-mapisynctype-ropid
   - external/super
   - external/crate-mapi-identity-conversation-members-contents-table-id-quick-step-settings-folder-id
   - external/crate-mapi-outlook-startup-normal-inbox-visible-row-missing-reason-normal-inbox-visible-row-release-request-shape-outlook-startup-gate-summary
@@ -106,7 +106,7 @@ relationships:
 - `super::sync::*`
 - `super::tables::*`
 - `super::transport::*`
-- `super::wire::{MapiPropertyType, MapiSyncType, RopId}`
+- `super::wire::{MapiNotificationEventMask, MapiPropertyType, MapiSyncType, RopId}`
 - `super::*`
 - `crate::mapi::identity::{
     CONVERSATION_MEMBERS_CONTENTS_TABLE_ID, QUICK_STEP_SETTINGS_FOLDER_ID,

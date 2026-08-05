@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: installation_scripts_require_the_mapi_store_identity_singleton
-resource: crates/lpe-storage/src/schema_contract.rs#L1614-L1649
+resource: crates/lpe-storage/src/schema_contract.rs#L1631-L1666
 visibility: private
 generated:
   by: okf-rs/0.3.0

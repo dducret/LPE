@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: advertised_default_view_pending_open_is_not_primary_after_visible_inbox_release
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1545-L1565
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1559-L1579
 visibility: private
 generated:
   by: okf-rs/0.3.0

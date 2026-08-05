@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_moves_create_target_membership_and_tombstone_source_uid
-resource: crates/lpe-storage/src/schema_contract.rs#L2860-L2894
+resource: crates/lpe-storage/src/schema_contract.rs#L2877-L2911
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -9,7 +9,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/transport/log_mapi_connection
   - functions/crates/lpe-exchange/src/mapi/transport/diagnostics/log_mapi_session_disconnect
   - functions/crates/lpe-exchange/src/mapi/transport/headers/client_flow_key
-  - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_response
   - functions/crates/lpe-exchange/src/service/transport_diagnostics/log_mapi_transport_connection
 ---
 
@@ -22,5 +21,4 @@ relationships:
 - [log_mapi_connection](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/log_mapi_connection.md)
 - [log_mapi_session_disconnect](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/diagnostics/log_mapi_session_disconnect.md)
 - [client_flow_key](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/headers/client_flow_key.md)
-- [notification_wait_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_response.md)
 - [log_mapi_transport_connection](../../../../../../../functions/crates/lpe-exchange/src/service/transport_diagnostics/log_mapi_transport_connection.md)

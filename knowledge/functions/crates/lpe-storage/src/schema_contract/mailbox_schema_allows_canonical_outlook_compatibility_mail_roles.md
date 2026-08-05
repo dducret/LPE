@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_schema_allows_canonical_outlook_compatibility_mail_roles
-resource: crates/lpe-storage/src/schema_contract.rs#L2338-L2358
+resource: crates/lpe-storage/src/schema_contract.rs#L2355-L2375
 visibility: private
 generated:
   by: okf-rs/0.3.0

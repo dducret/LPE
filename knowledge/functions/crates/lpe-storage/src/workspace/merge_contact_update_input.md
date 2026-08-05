@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: merge_contact_update_input
-resource: crates/lpe-storage/src/workspace.rs#L1250-L1281
+resource: crates/lpe-storage/src/workspace.rs#L1260-L1291
 visibility: private
 generated:
   by: okf-rs/0.3.0

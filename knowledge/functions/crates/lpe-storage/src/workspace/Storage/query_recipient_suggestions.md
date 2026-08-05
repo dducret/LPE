@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: query_recipient_suggestions
-resource: crates/lpe-storage/src/workspace.rs#L1021-L1070
+resource: crates/lpe-storage/src/workspace.rs#L1031-L1080
 generated:
   by: okf-rs/0.3.0
 relationships:

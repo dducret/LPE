@@ -14,7 +14,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/session/lifecycle/execute_rpc_emsmdb_rops
   - functions/crates/lpe-exchange/src/mapi/session/lifecycle/established_session_request
   - functions/crates/lpe-exchange/src/mapi/transport/ping_response
-  - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_response
   - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_event_pending
 ---
 
@@ -34,5 +33,4 @@ relationships:
 - [execute_rpc_emsmdb_rops](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/execute_rpc_emsmdb_rops.md)
 - [established_session_request](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/established_session_request.md)
 - [ping_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/ping_response.md)
-- [notification_wait_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_response.md)
 - [notification_wait_event_pending](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_event_pending.md)

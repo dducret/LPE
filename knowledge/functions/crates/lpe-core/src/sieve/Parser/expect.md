@@ -102,6 +102,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/categorized_and_deleted_message_rows_keep_long_term_entry_ids
   - functions/crates/lpe-exchange/src/mapi/transport/tests/regular_mapi_responses_include_exchange_routing_cookies
   - functions/crates/lpe-exchange/src/mapi/transport/tests/accepted_response_rotates_the_mapi_sequence_cookie
+  - functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_keeps_a_valid_session_during_execute_overlap
   - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/CounterSet/union_with
   - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/select_download_manifest_for_client_state
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/source_key_for_uuid
@@ -526,6 +527,7 @@ relationships:
 - [categorized_and_deleted_message_rows_keep_long_term_entry_ids](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/categorized_and_deleted_message_rows_keep_long_term_entry_ids.md)
 - [regular_mapi_responses_include_exchange_routing_cookies](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/regular_mapi_responses_include_exchange_routing_cookies.md)
 - [accepted_response_rotates_the_mapi_sequence_cookie](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/accepted_response_rotates_the_mapi_sequence_cookie.md)
+- [notification_wait_keeps_a_valid_session_during_execute_overlap](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_keeps_a_valid_session_during_execute_overlap.md)
 - [union_with](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/CounterSet/union_with.md)
 - [select_download_manifest_for_client_state](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/select_download_manifest_for_client_state.md)
 - [source_key_for_uuid](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/source_key_for_uuid.md)

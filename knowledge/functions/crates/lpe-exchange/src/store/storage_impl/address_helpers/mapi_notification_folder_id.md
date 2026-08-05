@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_notification_folder_id
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L811-L819
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L869-L877
 visibility: private
 generated:
   by: okf-rs/0.3.0

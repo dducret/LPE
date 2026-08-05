@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: blob_placement_metadata_is_tenant_domain_and_blob_safe
-resource: crates/lpe-storage/src/schema_contract.rs#L1870-L1973
+resource: crates/lpe-storage/src/schema_contract.rs#L1887-L1990
 visibility: private
 generated:
   by: okf-rs/0.3.0

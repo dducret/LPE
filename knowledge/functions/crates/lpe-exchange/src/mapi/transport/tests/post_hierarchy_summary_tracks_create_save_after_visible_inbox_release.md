@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_hierarchy_summary_tracks_create_save_after_visible_inbox_release
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1105-L1145
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1119-L1159
 visibility: private
 generated:
   by: okf-rs/0.3.0

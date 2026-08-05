@@ -8,6 +8,7 @@ generated:
 relationships:
   called_by:
   - functions/crates/lpe-storage/src/schema_contract/collaboration_mutations_write_object_level_change_rows
+  - functions/crates/lpe-storage/src/schema_contract/collaboration_upserts_mark_inserted_rows_as_created
   - functions/crates/lpe-storage/src/schema_contract/collaboration_deletes_write_tombstones
   - functions/crates/lpe-storage/src/schema_contract/mailbox_count_mutations_recalculate_from_visible_memberships
   - functions/crates/lpe-storage/src/schema_contract/mailbox_moves_create_target_membership_and_tombstone_source_uid
@@ -23,6 +24,7 @@ relationships:
 # Called by
 
 - [collaboration_mutations_write_object_level_change_rows](../../../../../functions/crates/lpe-storage/src/schema_contract/collaboration_mutations_write_object_level_change_rows.md)
+- [collaboration_upserts_mark_inserted_rows_as_created](../../../../../functions/crates/lpe-storage/src/schema_contract/collaboration_upserts_mark_inserted_rows_as_created.md)
 - [collaboration_deletes_write_tombstones](../../../../../functions/crates/lpe-storage/src/schema_contract/collaboration_deletes_write_tombstones.md)
 - [mailbox_count_mutations_recalculate_from_visible_memberships](../../../../../functions/crates/lpe-storage/src/schema_contract/mailbox_count_mutations_recalculate_from_visible_memberships.md)
 - [mailbox_moves_create_target_membership_and_tombstone_source_uid](../../../../../functions/crates/lpe-storage/src/schema_contract/mailbox_moves_create_target_membership_and_tombstone_source_uid.md)

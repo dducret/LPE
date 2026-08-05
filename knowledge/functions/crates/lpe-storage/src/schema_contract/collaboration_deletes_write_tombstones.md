@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_deletes_write_tombstones
-resource: crates/lpe-storage/src/schema_contract.rs#L1802-L1854
+resource: crates/lpe-storage/src/schema_contract.rs#L1819-L1871
 visibility: private
 generated:
   by: okf-rs/0.3.0

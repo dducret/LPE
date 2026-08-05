@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1-L1735
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1-L1749
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -38,6 +38,7 @@ relationships:
 - [notification_wait_uses_the_microsoft_five_minute_maximum](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_uses_the_microsoft_five_minute_maximum.md)
 - [notification_wait_polls_before_the_pending_keepalive](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_polls_before_the_pending_keepalive.md)
 - [notification_wait_active_session_acquire_waits_for_short_outlook_overlap](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_active_session_acquire_waits_for_short_outlook_overlap.md)
+- [notification_wait_keeps_a_valid_session_during_execute_overlap](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_keeps_a_valid_session_during_execute_overlap.md)
 - [session_cookie_lookup_debug_reports_sanitized_latest_cookie_selection](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/session_cookie_lookup_debug_reports_sanitized_latest_cookie_selection.md)
 - [session_cookie_lookup_debug_reports_endpoint_and_principal_mismatch](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/session_cookie_lookup_debug_reports_endpoint_and_principal_mismatch.md)
 - [post_hierarchy_action_summary_stays_empty_before_completed_hierarchy](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/post_hierarchy_action_summary_stays_empty_before_completed_hierarchy.md)

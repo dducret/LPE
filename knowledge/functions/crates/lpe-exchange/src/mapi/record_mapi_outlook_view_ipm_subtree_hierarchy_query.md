@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_mapi_outlook_view_ipm_subtree_hierarchy_query
-resource: crates/lpe-exchange/src/mapi.rs#L200-L227
+resource: crates/lpe-exchange/src/mapi.rs#L206-L233
 generated:
   by: okf-rs/0.3.0
 relationships:

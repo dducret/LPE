@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notification_wait_empty_response
-resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L414-L428
+resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L395-L409
 generated:
   by: okf-rs/0.3.0
 relationships:

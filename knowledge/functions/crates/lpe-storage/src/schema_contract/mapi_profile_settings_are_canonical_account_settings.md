@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_profile_settings_are_canonical_account_settings
-resource: crates/lpe-storage/src/schema_contract.rs#L1100-L1141
+resource: crates/lpe-storage/src/schema_contract.rs#L1117-L1158
 visibility: private
 generated:
   by: okf-rs/0.3.0

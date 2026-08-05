@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: runtime_schema_check_rejects_missing_required_mapi_shape
-resource: crates/lpe-storage/src/schema_contract.rs#L1740-L1790
+resource: crates/lpe-storage/src/schema_contract.rs#L1757-L1807
 visibility: private
 generated:
   by: okf-rs/0.3.0

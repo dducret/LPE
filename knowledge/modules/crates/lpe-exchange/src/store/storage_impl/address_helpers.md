@@ -1,12 +1,12 @@
 ---
 type: Rust Module
 title: address_helpers
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1-L1522
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1-L1599
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
-  - external/super-mapi-calendar-event-object-id-mapi-calendar-notification-event-mapi-hierarchy-movement-source-ids-mapi-hierarchy-old-parent-folder-id-mapi-notification-event-mask-for-change-mapi-notification-message-object-id-mapi-notification-old-message-id-mapicalendarnotificationdata
+  - external/super-mapi-calendar-event-object-id-mapi-calendar-notification-event-mapi-contact-notification-folder-id-mapi-hierarchy-movement-source-ids-mapi-hierarchy-old-parent-folder-id-mapi-notification-event-mask-for-change-mapi-notification-message-object-id-mapi-notification-old-message-id-mapicalendarnotificationdata
   - external/crate-mapi-notifications-mapinotificationkind
   - external/std-collections-hashmap
   - external/uuid-uuid
@@ -27,6 +27,7 @@ relationships:
 - [mapi_tenant_id_for_account](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_tenant_id_for_account.md)
 - [mapi_identity_lookup_from_row](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_identity_lookup_from_row.md)
 - [mapi_notification_event_from_change_row](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_event_from_change_row.md)
+- [mapi_contact_notification_folder_id](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_contact_notification_folder_id.md)
 - [mapi_notification_message_object_id](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_message_object_id.md)
 - [mapi_notification_old_message_id](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_old_message_id.md)
 - [mapi_hierarchy_movement_source_ids](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_hierarchy_movement_source_ids.md)
@@ -42,6 +43,7 @@ relationships:
 - [mapi_mailbox_notification_identity_ids_from_row](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_mailbox_notification_identity_ids_from_row.md)
 - [mapi_notification_event_mask_for_change](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_notification_event_mask_for_change.md)
 - [inbox_delivery_uses_new_mail_notification_mask](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/inbox_delivery_uses_new_mail_notification_mask.md)
+- [owned_contacts_book_maps_to_contacts_folder](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/owned_contacts_book_maps_to_contacts_folder.md)
 - [hierarchy_movement_uses_strict_source_folder_and_parent_ids](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/hierarchy_movement_uses_strict_source_folder_and_parent_ids.md)
 - [hierarchy_old_parent_requires_explicit_metadata_but_preserves_root](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/hierarchy_old_parent_requires_explicit_metadata_but_preserves_root.md)
 - [mailbox_move_notification_requires_durable_message_identity_snapshot](../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mailbox_move_notification_requires_durable_message_identity_snapshot.md)
@@ -64,6 +66,7 @@ relationships:
 
 - `super::{
         mapi_calendar_event_object_id, mapi_calendar_notification_event,
+        mapi_contact_notification_folder_id,
         mapi_hierarchy_movement_source_ids, mapi_hierarchy_old_parent_folder_id,
         mapi_notification_event_mask_for_change,
         mapi_notification_message_object_id, mapi_notification_old_message_id,

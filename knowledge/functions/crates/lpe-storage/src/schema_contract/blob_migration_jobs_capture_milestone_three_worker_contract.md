@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: blob_migration_jobs_capture_milestone_three_worker_contract
-resource: crates/lpe-storage/src/schema_contract.rs#L2627-L2697
+resource: crates/lpe-storage/src/schema_contract.rs#L2644-L2714
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_hierarchy_action_summary_exports_bootstrap_phase_scoreboard
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1595-L1629
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1609-L1643
 visibility: private
 generated:
   by: okf-rs/0.3.0

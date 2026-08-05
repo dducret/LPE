@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: partial_scope_checkpoint_not_stored_count_counts_expected_partial_scope_summaries
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L863-L887
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L877-L901
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_cache_fidelity_update_is_transactional_idempotent_and_version_bounded
-resource: crates/lpe-storage/src/schema_contract.rs#L1206-L1263
+resource: crates/lpe-storage/src/schema_contract.rs#L1223-L1280
 visibility: private
 generated:
   by: okf-rs/0.3.0

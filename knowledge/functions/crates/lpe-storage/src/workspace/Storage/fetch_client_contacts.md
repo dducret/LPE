@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_client_contacts
-resource: crates/lpe-storage/src/workspace.rs#L902-L954
+resource: crates/lpe-storage/src/workspace.rs#L912-L964
 generated:
   by: okf-rs/0.3.0
 relationships:

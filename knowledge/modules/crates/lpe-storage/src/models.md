@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: models
-resource: crates/lpe-storage/src/models.rs#L1-L857
+resource: crates/lpe-storage/src/models.rs#L1-L861
 generated:
   by: okf-rs/0.3.0
 relationships:

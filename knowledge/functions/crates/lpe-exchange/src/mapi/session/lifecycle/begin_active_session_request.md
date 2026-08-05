@@ -18,6 +18,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/acquire_notification_wait_active_session_request
   - functions/crates/lpe-exchange/src/mapi/transport/tests/active_session_ping_failure_returns_current_session_cookies
   - functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_active_session_acquire_waits_for_short_outlook_overlap
+  - functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_keeps_a_valid_session_during_execute_overlap
 ---
 
 # Signature
@@ -40,3 +41,4 @@ relationships:
 - [acquire_notification_wait_active_session_request](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/acquire_notification_wait_active_session_request.md)
 - [active_session_ping_failure_returns_current_session_cookies](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/active_session_ping_failure_returns_current_session_cookies.md)
 - [notification_wait_active_session_acquire_waits_for_short_outlook_overlap](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_active_session_acquire_waits_for_short_outlook_overlap.md)
+- [notification_wait_keeps_a_valid_session_during_execute_overlap](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_keeps_a_valid_session_during_execute_overlap.md)

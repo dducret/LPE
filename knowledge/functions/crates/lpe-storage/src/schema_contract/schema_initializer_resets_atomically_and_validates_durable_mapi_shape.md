@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: schema_initializer_resets_atomically_and_validates_durable_mapi_shape
-resource: crates/lpe-storage/src/schema_contract.rs#L1652-L1718
+resource: crates/lpe-storage/src/schema_contract.rs#L1669-L1735
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_mapi_outlook_view_repeated_inbox_open_after_common_views
-resource: crates/lpe-exchange/src/mapi.rs#L186-L189
+resource: crates/lpe-exchange/src/mapi.rs#L192-L195
 generated:
   by: okf-rs/0.3.0
 relationships:

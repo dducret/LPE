@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: admin_settings_and_auth_runtime_tables_exist_in_core_schema
-resource: crates/lpe-storage/src/schema_contract.rs#L2132-L2169
+resource: crates/lpe-storage/src/schema_contract.rs#L2149-L2186
 visibility: private
 generated:
   by: okf-rs/0.3.0

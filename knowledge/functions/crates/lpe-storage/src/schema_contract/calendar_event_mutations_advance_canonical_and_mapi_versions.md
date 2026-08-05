@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_mutations_advance_canonical_and_mapi_versions
-resource: crates/lpe-storage/src/schema_contract.rs#L874-L953
+resource: crates/lpe-storage/src/schema_contract.rs#L891-L970
 visibility: private
 generated:
   by: okf-rs/0.3.0

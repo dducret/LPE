@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: map_contact
-resource: crates/lpe-storage/src/workspace.rs#L1386-L1420
+resource: crates/lpe-storage/src/workspace.rs#L1396-L1430
 visibility: private
 generated:
   by: okf-rs/0.3.0

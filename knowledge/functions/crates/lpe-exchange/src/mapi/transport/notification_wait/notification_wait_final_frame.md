@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notification_wait_final_frame
-resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L321-L341
+resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L302-L322
 visibility: private
 generated:
   by: okf-rs/0.3.0

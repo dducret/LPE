@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_folder_profile_properties_are_bounded_profile_state
-resource: crates/lpe-storage/src/schema_contract.rs#L1144-L1170
+resource: crates/lpe-storage/src/schema_contract.rs#L1161-L1187
 visibility: private
 generated:
   by: okf-rs/0.3.0

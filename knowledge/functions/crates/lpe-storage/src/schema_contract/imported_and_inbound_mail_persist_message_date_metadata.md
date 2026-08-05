@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: imported_and_inbound_mail_persist_message_date_metadata
-resource: crates/lpe-storage/src/schema_contract.rs#L2915-L2934
+resource: crates/lpe-storage/src/schema_contract.rs#L2932-L2951
 visibility: private
 generated:
   by: okf-rs/0.3.0

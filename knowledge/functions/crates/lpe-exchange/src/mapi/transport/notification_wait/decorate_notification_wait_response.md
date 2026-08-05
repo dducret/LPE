@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: decorate_notification_wait_response
-resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L383-L412
+resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L364-L393
 visibility: private
 generated:
   by: okf-rs/0.3.0

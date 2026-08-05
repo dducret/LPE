@@ -503,7 +503,8 @@ impl Storage {
                 import_source,
                 source_uid,
                 source_etag,
-                source_payload_json
+                source_payload_json,
+                (xmax = 0) AS created
             "#,
         )
         .bind(contact_id)
@@ -596,7 +597,11 @@ impl Storage {
             None,
             "contact",
             contact_id,
-            "updated",
+            if row.created == Some(true) {
+                "created"
+            } else {
+                "updated"
+            },
             modseq,
             &[input.account_id],
             serde_json::json!({
@@ -738,7 +743,8 @@ impl Storage {
                 COALESCE(source_payload_json->>'attendees', '') AS attendees,
                 attendees_json::text AS attendees_json,
                 body_text AS notes,
-                COALESCE(body_html, '') AS body_html
+                COALESCE(body_html, '') AS body_html,
+                (xmax = 0) AS created
             "#,
         )
         .bind(event_id)
@@ -796,7 +802,11 @@ impl Storage {
             None,
             "calendar_event",
             event_id,
-            "updated",
+            if row.created == Some(true) {
+                "created"
+            } else {
+                "updated"
+            },
             modseq,
             &affected_principals,
             serde_json::json!({

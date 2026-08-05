@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bcc_is_absent_from_search_log_cursor_and_ai_projection_tables
-resource: crates/lpe-storage/src/schema_contract.rs#L3058-L3083
+resource: crates/lpe-storage/src/schema_contract.rs#L3075-L3100
 visibility: private
 generated:
   by: okf-rs/0.3.0

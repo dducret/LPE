@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_named_properties_and_custom_values_are_durable
-resource: crates/lpe-storage/src/schema_contract.rs#L1032-L1067
+resource: crates/lpe-storage/src/schema_contract.rs#L1049-L1084
 visibility: private
 generated:
   by: okf-rs/0.3.0

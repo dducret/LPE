@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notification_wait_sleep_duration
-resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L278-L286
+resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L259-L267
 generated:
   by: okf-rs/0.3.0
 relationships:

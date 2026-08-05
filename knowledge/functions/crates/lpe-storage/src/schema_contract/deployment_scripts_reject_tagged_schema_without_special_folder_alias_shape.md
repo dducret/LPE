@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deployment_scripts_reject_tagged_schema_without_special_folder_alias_shape
-resource: crates/lpe-storage/src/schema_contract.rs#L1541-L1568
+resource: crates/lpe-storage/src/schema_contract.rs#L1558-L1585
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_hierarchy_action_summary_records_execute_rops_and_client_actions
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L712-L757
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L726-L771
 visibility: private
 generated:
   by: okf-rs/0.3.0

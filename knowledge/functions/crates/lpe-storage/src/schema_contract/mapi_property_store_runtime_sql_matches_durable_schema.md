@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_property_store_runtime_sql_matches_durable_schema
-resource: crates/lpe-storage/src/schema_contract.rs#L1070-L1097
+resource: crates/lpe-storage/src/schema_contract.rs#L1087-L1114
 visibility: private
 generated:
   by: okf-rs/0.3.0

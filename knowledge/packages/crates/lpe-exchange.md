@@ -97,6 +97,7 @@ generated:
 - [folders](../../modules/crates/lpe-exchange/src/mapi/dispatch/tests/folders.md)
 - [unsupported](../../modules/crates/lpe-exchange/src/mapi/dispatch/unsupported.md)
 - [identity](../../modules/crates/lpe-exchange/src/mapi/identity.md)
+- [notification_metrics](../../modules/crates/lpe-exchange/src/mapi/notification_metrics.md)
 - [notifications](../../modules/crates/lpe-exchange/src/mapi/notifications.md)
 - [nspi](../../modules/crates/lpe-exchange/src/mapi/nspi.md)
 - [diagnostics](../../modules/crates/lpe-exchange/src/mapi/nspi/diagnostics.md)

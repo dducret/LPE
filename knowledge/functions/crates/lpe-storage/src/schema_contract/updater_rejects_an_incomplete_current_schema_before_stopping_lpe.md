@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: updater_rejects_an_incomplete_current_schema_before_stopping_lpe
-resource: crates/lpe-storage/src/schema_contract.rs#L1402-L1459
+resource: crates/lpe-storage/src/schema_contract.rs#L1419-L1476
 visibility: private
 generated:
   by: okf-rs/0.3.0

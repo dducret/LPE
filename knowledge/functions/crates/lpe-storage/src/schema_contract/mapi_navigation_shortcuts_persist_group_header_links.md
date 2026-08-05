@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_navigation_shortcuts_persist_group_header_links
-resource: crates/lpe-storage/src/schema_contract.rs#L956-L979
+resource: crates/lpe-storage/src/schema_contract.rs#L973-L996
 visibility: private
 generated:
   by: okf-rs/0.3.0

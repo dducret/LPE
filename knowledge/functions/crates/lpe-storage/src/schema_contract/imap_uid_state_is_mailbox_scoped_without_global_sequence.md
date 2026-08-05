@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: imap_uid_state_is_mailbox_scoped_without_global_sequence
-resource: crates/lpe-storage/src/schema_contract.rs#L2817-L2857
+resource: crates/lpe-storage/src/schema_contract.rs#L2834-L2874
 visibility: private
 generated:
   by: okf-rs/0.3.0

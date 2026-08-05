@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_hierarchy_and_subscriptions_are_canonical_storage
-resource: crates/lpe-storage/src/schema_contract.rs#L2961-L2975
+resource: crates/lpe-storage/src/schema_contract.rs#L2978-L2992
 visibility: private
 generated:
   by: okf-rs/0.3.0

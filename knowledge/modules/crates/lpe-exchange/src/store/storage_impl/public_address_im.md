@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: public_address_im
-resource: crates/lpe-exchange/src/store/storage_impl/public_address_im.rs#L1-L989
+resource: crates/lpe-exchange/src/store/storage_impl/public_address_im.rs#L1-L1040
 generated:
   by: okf-rs/0.3.0
 relationships:

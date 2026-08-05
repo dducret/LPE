@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: AccessibleContactRow
-resource: crates/lpe-storage/src/models.rs#L523-L558
+resource: crates/lpe-storage/src/models.rs#L527-L562
 generated:
   by: okf-rs/0.3.0
 ---

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: storage_policy_assignments_capture_milestone_five_scope_contract
-resource: crates/lpe-storage/src/schema_contract.rs#L2045-L2084
+resource: crates/lpe-storage/src/schema_contract.rs#L2062-L2101
 visibility: private
 generated:
   by: okf-rs/0.3.0

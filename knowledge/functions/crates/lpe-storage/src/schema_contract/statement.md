@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: statement
-resource: crates/lpe-storage/src/schema_contract.rs#L1321-L1330
+resource: crates/lpe-storage/src/schema_contract.rs#L1338-L1347
 visibility: private
 generated:
   by: okf-rs/0.3.0

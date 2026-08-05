@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: complete_notification_wait
-resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L289-L319
+resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L270-L300
 visibility: private
 generated:
   by: okf-rs/0.3.0

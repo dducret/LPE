@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notification_wait_event_pending
-resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L210-L276
+resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L191-L257
 visibility: private
 generated:
   by: okf-rs/0.3.0

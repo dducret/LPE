@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_local_replica_ranges_and_deleted_item_list_are_durable
-resource: crates/lpe-storage/src/schema_contract.rs#L783-L838
+resource: crates/lpe-storage/src/schema_contract.rs#L800-L855
 visibility: private
 generated:
   by: okf-rs/0.3.0

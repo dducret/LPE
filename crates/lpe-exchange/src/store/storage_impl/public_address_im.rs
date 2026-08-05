@@ -277,6 +277,9 @@ macro_rules! store_impl_public_address_im {
                     ) AS old_calendar_role,
                     calendar_event.id AS live_calendar_event_id,
                     calendar_event.title AS calendar_event_subject,
+                    contact.contact_book_id AS contact_book_id,
+                    contact_book.role AS contact_book_role,
+                    contact.display_name AS contact_name,
                     scope_identity.mapi_object_id AS scope_mapi_object_id,
                     scope_parent_identity.mapi_object_id AS scope_parent_mapi_object_id,
                     object_identity.mapi_object_id AS object_mapi_object_id,
@@ -309,7 +312,8 @@ macro_rules! store_impl_public_address_im {
                                 THEN calendar_event_move.new_mapi_object_id
                         END
                     ) AS calendar_event_mapi_object_id,
-                    calendar_event_move.old_mapi_object_id AS old_calendar_event_mapi_object_id
+                    calendar_event_move.old_mapi_object_id AS old_calendar_event_mapi_object_id,
+                    contact_identity.mapi_object_id AS contact_mapi_object_id
                 FROM mail_change_log log
                 LEFT JOIN mailboxes scope_box
                   ON scope_box.tenant_id = log.tenant_id
@@ -377,6 +381,15 @@ macro_rules! store_impl_public_address_im {
                      NULLIF(log.summary_json->>'sourceCollectionId', '')::uuid
                  )
                  AND log.object_kind IN ('calendar_event', 'deleted_calendar_event')
+                LEFT JOIN contacts contact
+                  ON contact.tenant_id = log.tenant_id
+                 AND contact.owner_account_id = log.account_id
+                 AND contact.id = log.object_id
+                 AND log.object_kind = 'contact'
+                LEFT JOIN contact_books contact_book
+                  ON contact_book.tenant_id = contact.tenant_id
+                 AND contact_book.owner_account_id = contact.owner_account_id
+                 AND contact_book.id = contact.contact_book_id
                 LEFT JOIN mapi_object_identities scope_identity
                   ON scope_identity.tenant_id = log.tenant_id
                  AND scope_identity.account_id = $3
@@ -450,6 +463,12 @@ macro_rules! store_impl_public_address_im {
                      ELSE 'calendar_event'
                  END
                  AND calendar_event_identity.canonical_id = log.object_id
+                LEFT JOIN mapi_object_identities contact_identity
+                  ON contact_identity.tenant_id = log.tenant_id
+                 AND contact_identity.account_id = $3
+                 AND contact_identity.object_kind = 'contact'
+                 AND contact_identity.canonical_id = log.object_id
+                 AND contact_identity.deleted_at IS NULL
                 LEFT JOIN mapi_calendar_event_identity_moves calendar_event_move
                   ON calendar_event_move.tenant_id = log.tenant_id
                  AND calendar_event_move.account_id = $3
@@ -460,7 +479,7 @@ macro_rules! store_impl_public_address_im {
                   AND (log.account_id = $3 OR log.affected_principal_ids @> ARRAY[$3]::uuid[])
                   AND (log.retained_until IS NULL OR log.retained_until > NOW())
                   AND log.object_kind IN (
-                      'mailbox', 'mailbox_message', 'attachment', 'calendar_event',
+                      'mailbox', 'mailbox_message', 'attachment', 'contact', 'calendar_event',
                       'deleted_calendar_event', 'navigation_shortcut', 'associated_config'
                   )
                 ORDER BY log.cursor ASC
@@ -526,6 +545,34 @@ macro_rules! store_impl_public_address_im {
                         });
                     }
                 }
+                if object_kind == "contact"
+                    && row
+                        .try_get::<Option<i64>, _>("contact_mapi_object_id")
+                        .ok()
+                        .flatten()
+                        .is_none()
+                {
+                    if let Some(canonical_id) = row
+                        .try_get::<Option<Uuid>, _>("object_id")
+                        .ok()
+                        .flatten()
+                        .filter(|canonical_id| {
+                            !notification_identity_requests.iter().any(
+                                |request: &MapiIdentityRequest| {
+                                    request.object_kind == MapiIdentityObjectKind::Contact
+                                        && request.canonical_id == *canonical_id
+                                },
+                            )
+                        })
+                    {
+                        notification_identity_requests.push(MapiIdentityRequest {
+                            object_kind: MapiIdentityObjectKind::Contact,
+                            canonical_id,
+                            reserved_global_counter: None,
+                            source_key: None,
+                        });
+                    }
+                }
                 if object_kind != "calendar_event" && object_kind != "deleted_calendar_event" {
                     continue;
                 }
@@ -579,6 +626,7 @@ macro_rules! store_impl_public_address_im {
             let mut calendar_folder_ids = std::collections::HashMap::new();
             let mut mailbox_folder_ids = std::collections::HashMap::new();
             let mut calendar_event_ids = std::collections::HashMap::new();
+            let mut contact_ids = std::collections::HashMap::new();
             let mut mailbox_message_ids = std::collections::HashMap::new();
             if !notification_identity_requests.is_empty() {
                 let identities = ExchangeStore::fetch_or_allocate_mapi_identities(
@@ -595,6 +643,8 @@ macro_rules! store_impl_public_address_im {
                         mailbox_folder_ids.insert(identity.canonical_id, identity.object_id);
                     } else if request.object_kind == MapiIdentityObjectKind::CalendarEvent {
                         calendar_event_ids.insert(identity.canonical_id, identity.object_id);
+                    } else if request.object_kind == MapiIdentityObjectKind::Contact {
+                        contact_ids.insert(identity.canonical_id, identity.object_id);
                     } else if request.object_kind == MapiIdentityObjectKind::Message {
                         mailbox_message_ids.insert(identity.canonical_id, identity.object_id);
                     }
@@ -614,6 +664,7 @@ macro_rules! store_impl_public_address_im {
                     row,
                     &calendar_folder_ids,
                     &calendar_event_ids,
+                    &contact_ids,
                     &mailbox_folder_ids,
                     &mailbox_message_ids,
                 ) {

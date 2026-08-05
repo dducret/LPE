@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_notification_event_mask_for_change
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L911-L920
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L969-L978
 visibility: private
 generated:
   by: okf-rs/0.3.0

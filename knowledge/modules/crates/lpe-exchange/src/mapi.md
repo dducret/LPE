@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mapi
-resource: crates/lpe-exchange/src/mapi.rs#L1-L333
+resource: crates/lpe-exchange/src/mapi.rs#L1-L339
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,10 +12,12 @@ relationships:
   - external/lpe-mail-auth-authenticate-account-accountprincipal
   - external/lpe-storage-accessiblecontact-accessibleevent-attachmentuploadinput-auditentryinput-calendarparticipantsmetadata-clientnote-clienttask-collaborationrights-jmapemail-jmapemailaddress-jmapimportedemailinput-jmapmailbox-journalentry-submitmessageinput-submittedmessage-submittedrecipientinput-upsertclientcontactinput-upsertclienteventinput-upsertclientnoteinput-upsertclienttaskinput-upsertjournalentryinput
   - external/std-cmp-ordering-collections-hashmap-hashset-vecdeque-env-sync-atomic-atomicu64-ordering-as-atomicordering-mutex-oncelock-time-duration-systemtime
-  - external/tracing-info-warn
+  - external/tracing-warn
   - external/uuid-uuid
   - external/crate-mapi-mailstore-mapi-store-mapiattachment-mapicollaborationfolder-mapicollaborationfolderkind-mapimailstoresnapshot-mapistore-store-exchangeaddressbookdirectorykind-exchangeaddressbookentry-exchangeaddressbookentrykind-exchangestore-mapicheckpointkind-mapiidentityobjectkind-mapiidentityrequest
   - external/pub-crate-use-crate-mapi-session-create-rpc-emsmdb-context-execute-rpc-emsmdb-rops-transport-client-flow-key-debug-payload-preview-hex-guid-counter-debug-handle-mapi-mapi-error-response-mapi-response-payload-bytes-request-cookie-transport-debug-safe-header-mapiendpoint
+  - external/pub-use-notification-metrics-mapi-notification-metrics-mapinotificationmetrics
+  - external/pub-crate-use-notification-metrics-record-mapi-new-mail-notification-deliveries-record-mapi-notification-wait-completion-mapinotificationwaitoutcome
   - external/pub-crate-use-crate-mapi-session-begin-active-session-request-for-test
   - external/pub-crate-use-crate-mapi-store-adapter-load-mapi-identity-codec-for-test
   member_of:
@@ -71,7 +73,7 @@ relationships:
     },
     time::{Duration, SystemTime},
 }`
-- `tracing::{info, warn}`
+- `tracing::warn`
 - `uuid::Uuid`
 - `crate::{
     mapi_mailstore,
@@ -91,6 +93,11 @@ relationships:
         mapi_error_response, mapi_response_payload_bytes, request_cookie_transport_debug,
         safe_header, MapiEndpoint,
     },
+}`
+- `pub use notification_metrics::{mapi_notification_metrics, MapiNotificationMetrics}`
+- `pub(crate) use notification_metrics::{
+    record_mapi_new_mail_notification_deliveries, record_mapi_notification_wait_completion,
+    MapiNotificationWaitOutcome,
 }`
 - `pub(crate) use crate::mapi::session::begin_active_session_request_for_test`
 - `pub(crate) use crate::mapi::store_adapter::load_mapi_identity_codec_for_test`

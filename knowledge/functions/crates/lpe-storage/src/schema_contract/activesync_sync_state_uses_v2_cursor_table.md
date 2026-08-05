@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: activesync_sync_state_uses_v2_cursor_table
-resource: crates/lpe-storage/src/schema_contract.rs#L3142-L3185
+resource: crates/lpe-storage/src/schema_contract.rs#L3159-L3202
 visibility: private
 generated:
   by: okf-rs/0.3.0

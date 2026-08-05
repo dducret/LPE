@@ -1742,6 +1742,7 @@
 - [metrics](../functions/crates/lpe-admin-api/src/observability/metrics.md) — Rust Function
 - [metrics_enabled](../functions/crates/lpe-admin-api/src/observability/metrics_enabled.md) — Rust Function
 - [metrics_endpoint](../functions/crates/lpe-admin-api/src/observability/metrics_endpoint.md) — Rust Function
+- [metrics_include_mapi_notification_delivery_counters](../functions/crates/lpe-admin-api/src/observability/metrics_include_mapi_notification_delivery_counters.md) — Rust Function
 - [observe_http](../functions/crates/lpe-admin-api/src/observability/observe_http.md) — Rust Function
 - [outlook_http_route_gap_does_not_duplicate_successful_protocol_routes](../functions/crates/lpe-admin-api/src/observability/outlook_http_route_gap_does_not_duplicate_successful_protocol_routes.md) — Rust Function
 - [outlook_http_route_gap_logs_unmatched_exchange_paths](../functions/crates/lpe-admin-api/src/observability/outlook_http_route_gap_logs_unmatched_exchange_paths.md) — Rust Function
@@ -3708,6 +3709,10 @@
 - [with_current_mapi_request_identity_scope](../functions/crates/lpe-exchange/src/mapi/identity/with_current_mapi_request_identity_scope.md) — Rust Function
 - [mapi_folder_purge_metrics](../functions/crates/lpe-exchange/src/mapi/mapi_folder_purge_metrics.md) — Rust Function
 - [mapi_outlook_view_metrics](../functions/crates/lpe-exchange/src/mapi/mapi_outlook_view_metrics.md) — Rust Function
+- [mapi_notification_metrics](../functions/crates/lpe-exchange/src/mapi/notification_metrics/mapi_notification_metrics.md) — Rust Function
+- [notification_metrics_record_wait_completion_and_new_mail_delivery](../functions/crates/lpe-exchange/src/mapi/notification_metrics/notification_metrics_record_wait_completion_and_new_mail_delivery.md) — Rust Function
+- [record_mapi_new_mail_notification_deliveries](../functions/crates/lpe-exchange/src/mapi/notification_metrics/record_mapi_new_mail_notification_deliveries.md) — Rust Function
+- [record_mapi_notification_wait_completion](../functions/crates/lpe-exchange/src/mapi/notification_metrics/record_mapi_notification_wait_completion.md) — Rust Function
 - [canonical](../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/canonical.md) — Rust Method
 - [canonical_folder_id](../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/canonical_folder_id.md) — Rust Method
 - [canonical_message_id](../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/canonical_message_id.md) — Rust Method
@@ -5972,7 +5977,6 @@
 - [notification_wait_streaming_response](../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_streaming_response.md) — Rust Function
 - [notification_wait_trace_response](../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_trace_response.md) — Rust Function
 - [run_notification_wait](../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/run_notification_wait.md) — Rust Function
-- [session_id_prefix](../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/session_id_prefix.md) — Rust Function
 - [ping_response](../functions/crates/lpe-exchange/src/mapi/transport/ping_response.md) — Rust Function
 - [remote_peer](../functions/crates/lpe-exchange/src/mapi/transport/remote_peer.md) — Rust Function
 - [accepted_response_rotates_the_mapi_sequence_cookie](../functions/crates/lpe-exchange/src/mapi/transport/tests/accepted_response_rotates_the_mapi_sequence_cookie.md) — Rust Function
@@ -5990,6 +5994,7 @@
 - [mapi_responses_advertise_the_default_pending_period](../functions/crates/lpe-exchange/src/mapi/transport/tests/mapi_responses_advertise_the_default_pending_period.md) — Rust Function
 - [notification_wait_active_session_acquire_waits_for_short_outlook_overlap](../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_active_session_acquire_waits_for_short_outlook_overlap.md) — Rust Function
 - [notification_wait_empty_response_reports_success_with_empty_body](../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_empty_response_reports_success_with_empty_body.md) — Rust Function
+- [notification_wait_keeps_a_valid_session_during_execute_overlap](../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_keeps_a_valid_session_during_execute_overlap.md) — Rust Function
 - [notification_wait_polls_before_the_pending_keepalive](../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_polls_before_the_pending_keepalive.md) — Rust Function
 - [notification_wait_streaming_response_matches_exchange_completion_cookies](../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_streaming_response_matches_exchange_completion_cookies.md) — Rust Function
 - [notification_wait_uses_the_microsoft_five_minute_maximum](../functions/crates/lpe-exchange/src/mapi/transport/tests/notification_wait_uses_the_microsoft_five_minute_maximum.md) — Rust Function
@@ -7367,6 +7372,7 @@
 - [mapi_calendar_notification_event](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_notification_event.md) — Rust Function
 - [mapi_calendar_notification_folder_id](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_notification_folder_id.md) — Rust Function
 - [mapi_calendar_notification_folder_identity_ids_from_row](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_notification_folder_identity_ids_from_row.md) — Rust Function
+- [mapi_contact_notification_folder_id](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_contact_notification_folder_id.md) — Rust Function
 - [mapi_folder_id_from_role_or_identity](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_folder_id_from_role_or_identity.md) — Rust Function
 - [mapi_hierarchy_movement_source_ids](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_hierarchy_movement_source_ids.md) — Rust Function
 - [mapi_hierarchy_old_parent_folder_id](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_hierarchy_old_parent_folder_id.md) — Rust Function
@@ -7380,6 +7386,7 @@
 - [mapi_sync_checkpoint_from_row](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_sync_checkpoint_from_row.md) — Rust Function
 - [mapi_tenant_id_for_account](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_tenant_id_for_account.md) — Rust Function
 - [message_notification_without_durable_mid_is_not_publishable](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/message_notification_without_durable_mid_is_not_publishable.md) — Rust Function
+- [owned_contacts_book_maps_to_contacts_folder](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/owned_contacts_book_maps_to_contacts_folder.md) — Rust Function
 - [push_unique_associated_config_change](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/push_unique_associated_config_change.md) — Rust Function
 - [push_unique_uuid](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/push_unique_uuid.md) — Rust Function
 - [task_matches_collection](../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/task_matches_collection.md) — Rust Function
@@ -10870,6 +10877,7 @@
 - [collaboration_objects_have_canonical_projection_fields](../functions/crates/lpe-storage/src/schema_contract/collaboration_objects_have_canonical_projection_fields.md) — Rust Function
 - [collaboration_rights_are_canonical_and_same_tenant](../functions/crates/lpe-storage/src/schema_contract/collaboration_rights_are_canonical_and_same_tenant.md) — Rust Function
 - [collaboration_storage_contains](../functions/crates/lpe-storage/src/schema_contract/collaboration_storage_contains.md) — Rust Function
+- [collaboration_upserts_mark_inserted_rows_as_created](../functions/crates/lpe-storage/src/schema_contract/collaboration_upserts_mark_inserted_rows_as_created.md) — Rust Function
 - [contact_book_schema_allows_outlook_compatibility_roles](../functions/crates/lpe-storage/src/schema_contract/contact_book_schema_allows_outlook_compatibility_roles.md) — Rust Function
 - [conversation_actions_are_canonical_fai_state](../functions/crates/lpe-storage/src/schema_contract/conversation_actions_are_canonical_fai_state.md) — Rust Function
 - [core_schema_excludes_lpe_ct_quarantine_and_perimeter_tables](../functions/crates/lpe-storage/src/schema_contract/core_schema_excludes_lpe_ct_quarantine_and_perimeter_tables.md) — Rust Function

@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: FreeBusyEventRow
-resource: crates/lpe-storage/src/models.rs#L593-L597
+resource: crates/lpe-storage/src/models.rs#L597-L601
 generated:
   by: okf-rs/0.3.0
 ---

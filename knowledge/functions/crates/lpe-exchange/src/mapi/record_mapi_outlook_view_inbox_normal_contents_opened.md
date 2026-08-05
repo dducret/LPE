@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_mapi_outlook_view_inbox_normal_contents_opened
-resource: crates/lpe-exchange/src/mapi.rs#L196-L198
+resource: crates/lpe-exchange/src/mapi.rs#L202-L204
 generated:
   by: okf-rs/0.3.0
 relationships:

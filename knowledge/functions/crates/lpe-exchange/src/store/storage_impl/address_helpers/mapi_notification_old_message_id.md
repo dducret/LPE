@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_notification_old_message_id
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L609-L618
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L667-L676
 visibility: private
 generated:
   by: okf-rs/0.3.0

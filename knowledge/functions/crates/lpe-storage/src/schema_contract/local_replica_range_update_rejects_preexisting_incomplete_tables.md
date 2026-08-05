@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: local_replica_range_update_rejects_preexisting_incomplete_tables
-resource: crates/lpe-storage/src/schema_contract.rs#L1266-L1317
+resource: crates/lpe-storage/src/schema_contract.rs#L1283-L1334
 visibility: private
 generated:
   by: okf-rs/0.3.0

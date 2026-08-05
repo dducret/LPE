@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notification_wait_trace_response
-resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L361-L381
+resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L342-L362
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_calendar_events_remain_canonical_and_are_hidden_from_active_reads
-resource: crates/lpe-storage/src/schema_contract.rs#L841-L871
+resource: crates/lpe-storage/src/schema_contract.rs#L858-L888
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_hierarchy_observation_logs_first_execute_and_later_first_bootstrap_probe
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1704-L1735
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L1718-L1749
 visibility: private
 generated:
   by: okf-rs/0.3.0

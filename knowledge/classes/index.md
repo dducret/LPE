@@ -386,6 +386,8 @@
 - [MapiIdentityCodec](../classes/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec.md) — Rust Struct
 - [MapiIdentityMaterial](../classes/crates/lpe-exchange/src/mapi/identity/MapiIdentityMaterial.md) — Rust Struct
 - [MapiRequestIdentityScope](../classes/crates/lpe-exchange/src/mapi/identity/MapiRequestIdentityScope.md) — Rust Struct
+- [MapiNotificationMetrics](../classes/crates/lpe-exchange/src/mapi/notification_metrics/MapiNotificationMetrics.md) — Rust Struct
+- [MapiNotificationWaitOutcome](../classes/crates/lpe-exchange/src/mapi/notification_metrics/MapiNotificationWaitOutcome.md) — Rust Enum
 - [MapiNotificationEvent](../classes/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent.md) — Rust Struct
 - [MapiNotificationKind](../classes/crates/lpe-exchange/src/mapi/notifications/MapiNotificationKind.md) — Rust Enum
 - [MapiNotificationRegistration](../classes/crates/lpe-exchange/src/mapi/notifications/MapiNotificationRegistration.md) — Rust Struct

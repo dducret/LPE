@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_mailbox_storage_uses_shared_name_policy
-resource: crates/lpe-storage/src/schema_contract.rs#L2937-L2958
+resource: crates/lpe-storage/src/schema_contract.rs#L2954-L2975
 visibility: private
 generated:
   by: okf-rs/0.3.0

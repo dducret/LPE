@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_folder_purge_metrics
-resource: crates/lpe-exchange/src/mapi.rs#L162-L169
+resource: crates/lpe-exchange/src/mapi.rs#L168-L175
 generated:
   by: okf-rs/0.3.0
 relationships:

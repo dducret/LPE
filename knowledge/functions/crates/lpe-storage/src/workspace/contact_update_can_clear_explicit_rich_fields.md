@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_update_can_clear_explicit_rich_fields
-resource: crates/lpe-storage/src/workspace.rs#L1501-L1531
+resource: crates/lpe-storage/src/workspace.rs#L1511-L1541
 visibility: private
 generated:
   by: okf-rs/0.3.0

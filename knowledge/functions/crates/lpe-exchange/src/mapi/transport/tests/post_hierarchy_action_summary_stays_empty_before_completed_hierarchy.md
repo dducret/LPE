@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_hierarchy_action_summary_stays_empty_before_completed_hierarchy
-resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L691-L709
+resource: crates/lpe-exchange/src/mapi/transport/tests.rs#L705-L723
 visibility: private
 generated:
   by: okf-rs/0.3.0

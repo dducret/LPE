@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: check_script_rejects_tagged_schema_without_mapi_identity_version_columns
-resource: crates/lpe-storage/src/schema_contract.rs#L1378-L1399
+resource: crates/lpe-storage/src/schema_contract.rs#L1395-L1416
 visibility: private
 generated:
   by: okf-rs/0.3.0

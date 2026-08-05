@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: blob_references_enforce_kind_and_attachment_ownership
-resource: crates/lpe-storage/src/schema_contract.rs#L1976-L2042
+resource: crates/lpe-storage/src/schema_contract.rs#L1993-L2059
 visibility: private
 generated:
   by: okf-rs/0.3.0

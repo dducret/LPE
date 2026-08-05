@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_calendar_event_object_id
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L636-L644
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L694-L702
 visibility: private
 generated:
   by: okf-rs/0.3.0

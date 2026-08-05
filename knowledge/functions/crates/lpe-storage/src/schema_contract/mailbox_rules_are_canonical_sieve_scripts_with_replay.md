@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_rules_are_canonical_sieve_scripts_with_replay
-resource: crates/lpe-storage/src/schema_contract.rs#L2450-L2476
+resource: crates/lpe-storage/src/schema_contract.rs#L2467-L2493
 visibility: private
 generated:
   by: okf-rs/0.3.0

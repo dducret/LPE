@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_mapi_outlook_view_post_calendar_query_position_named_property_probe
-resource: crates/lpe-exchange/src/mapi.rs#L266-L269
+resource: crates/lpe-exchange/src/mapi.rs#L272-L275
 generated:
   by: okf-rs/0.3.0
 relationships:

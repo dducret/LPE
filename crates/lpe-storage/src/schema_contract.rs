@@ -641,6 +641,23 @@ fn collaboration_mutations_write_object_level_change_rows() {
 }
 
 #[test]
+fn collaboration_upserts_mark_inserted_rows_as_created() {
+    for signature in [
+        "pub(crate) async fn upsert_client_contact_in_book_role",
+        "pub(crate) async fn upsert_client_event_in_calendar",
+    ] {
+        let body = function_body(WORKSPACE_STORAGE, signature);
+        assert!(
+            body.contains("(xmax = 0) AS created")
+                && body.contains("if row.created == Some(true)")
+                && body.contains("\"created\"")
+                && body.contains("\"updated\""),
+            "{signature} must distinguish an inserted collaboration row from an upsert update"
+        );
+    }
+}
+
+#[test]
 fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
     let change_log = table_definition("mail_change_log");
     for required in [

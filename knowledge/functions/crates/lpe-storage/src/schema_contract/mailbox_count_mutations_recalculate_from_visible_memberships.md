@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_count_mutations_recalculate_from_visible_memberships
-resource: crates/lpe-storage/src/schema_contract.rs#L2793-L2814
+resource: crates/lpe-storage/src/schema_contract.rs#L2810-L2831
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -452,6 +452,8 @@ pub(crate) struct ClientEventRow {
     pub(crate) attendees_json: String,
     pub(crate) notes: String,
     pub(crate) body_html: String,
+    #[sqlx(default)]
+    pub(crate) created: Option<bool>,
 }
 
 #[derive(Debug, FromRow)]
@@ -483,6 +485,8 @@ pub(crate) struct ClientContactRow {
     pub(crate) source_uid: Option<String>,
     pub(crate) source_etag: Option<String>,
     pub(crate) source_payload_json: Value,
+    #[sqlx(default)]
+    pub(crate) created: Option<bool>,
 }
 
 #[derive(Debug, FromRow)]

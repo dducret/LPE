@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: notification_wait
-resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L1-L453
+resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L1-L426
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -28,7 +28,6 @@ relationships:
 - [decorate_notification_wait_response](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/decorate_notification_wait_response.md)
 - [notification_wait_empty_response](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_empty_response.md)
 - [acquire_notification_wait_active_session_request](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/acquire_notification_wait_active_session_request.md)
-- [session_id_prefix](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/session_id_prefix.md)
 
 # Imports
 

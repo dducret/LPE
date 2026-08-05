@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_book_schema_allows_outlook_compatibility_roles
-resource: crates/lpe-storage/src/schema_contract.rs#L2610-L2624
+resource: crates/lpe-storage/src/schema_contract.rs#L2627-L2641
 visibility: private
 generated:
   by: okf-rs/0.3.0

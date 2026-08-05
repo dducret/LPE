@@ -1,13 +1,14 @@
 ---
 type: Rust Function
 title: run_notification_wait
-resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L136-L208
+resource: crates/lpe-exchange/src/mapi/transport/notification_wait.rs#L107-L189
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_event_pending
+  - functions/crates/lpe-exchange/src/mapi/notification_metrics/record_mapi_notification_wait_completion
   - functions/crates/lpe-exchange/src/mapi/notifications/notification_wait_body
   - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/complete_notification_wait
   - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_sleep_duration
@@ -22,6 +23,7 @@ relationships:
 # Calls
 
 - [notification_wait_event_pending](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_event_pending.md)
+- [record_mapi_notification_wait_completion](../../../../../../../functions/crates/lpe-exchange/src/mapi/notification_metrics/record_mapi_notification_wait_completion.md)
 - [notification_wait_body](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/notification_wait_body.md)
 - [complete_notification_wait](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/complete_notification_wait.md)
 - [notification_wait_sleep_duration](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_sleep_duration.md)

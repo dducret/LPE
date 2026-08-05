@@ -6,6 +6,7 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops
   - functions/crates/lpe-exchange/src/mapi/dispatch/execute/apply_execute_max_rop_out
   - functions/crates/lpe-exchange/src/mapi/dispatch/execute/restore_pending_notifications_after_execute_overflow
 ---
@@ -16,5 +17,6 @@ relationships:
 
 # Called by
 
+- [execute_rops](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops.md)
 - [apply_execute_max_rop_out](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute/apply_execute_max_rop_out.md)
 - [restore_pending_notifications_after_execute_overflow](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute/restore_pending_notifications_after_execute_overflow.md)

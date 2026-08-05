@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_associated_config_messages_are_bounded_mapi_only_state
-resource: crates/lpe-storage/src/schema_contract.rs#L982-L1005
+resource: crates/lpe-storage/src/schema_contract.rs#L999-L1022
 visibility: private
 generated:
   by: okf-rs/0.3.0

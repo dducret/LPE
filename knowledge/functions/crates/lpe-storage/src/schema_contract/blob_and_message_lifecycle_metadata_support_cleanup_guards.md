@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: blob_and_message_lifecycle_metadata_support_cleanup_guards
-resource: crates/lpe-storage/src/schema_contract.rs#L2700-L2728
+resource: crates/lpe-storage/src/schema_contract.rs#L2717-L2745
 visibility: private
 generated:
   by: okf-rs/0.3.0

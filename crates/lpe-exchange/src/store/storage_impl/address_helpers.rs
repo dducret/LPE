@@ -145,6 +145,7 @@ fn mapi_notification_event_from_change_row(
     row: sqlx::postgres::PgRow,
     calendar_folder_ids: &std::collections::HashMap<Uuid, u64>,
     calendar_event_ids: &std::collections::HashMap<Uuid, u64>,
+    contact_ids: &std::collections::HashMap<Uuid, u64>,
     mailbox_folder_ids: &std::collections::HashMap<Uuid, u64>,
     mailbox_message_ids: &std::collections::HashMap<Uuid, u64>,
 ) -> Option<MapiNotificationEvent> {
@@ -380,6 +381,46 @@ fn mapi_notification_event_from_change_row(
             }
             notification
         }
+        "contact" => {
+            let contact_id = row.try_get::<Uuid, _>("object_id").ok()?;
+            let owner_account_id = row.try_get::<Uuid, _>("owner_account_id").ok()?;
+            let notification_account_id = row.try_get::<Uuid, _>("notification_account_id").ok()?;
+            let contact_book_id = row.try_get::<Uuid, _>("contact_book_id").ok()?;
+            let contact_book_role = row.try_get::<String, _>("contact_book_role").ok()?;
+            let contact_mapi_object_id = row
+                .try_get::<Option<i64>, _>("contact_mapi_object_id")
+                .ok()
+                .flatten()
+                .map(|value| value as u64)
+                .or_else(|| contact_ids.get(&contact_id).copied())?;
+            let folder_id = mapi_contact_notification_folder_id(
+                notification_account_id,
+                owner_account_id,
+                &contact_book_role,
+            )?;
+            Some(
+                MapiNotificationEvent::canonical(
+                    MapiNotificationKind::Content,
+                    mapi_notification_event_mask_for_change(&change_kind, false),
+                    folder_id,
+                    Some(contact_mapi_object_id),
+                    None,
+                    cursor,
+                    modseq,
+                    None,
+                    None,
+                    change_kind,
+                    None,
+                    None,
+                    row.try_get::<Option<String>, _>("contact_name")
+                        .ok()
+                        .flatten(),
+                    None,
+                )
+                .with_canonical_ids(Some(contact_book_id), Some(contact_id))
+                .with_object_kind("contact"),
+            )
+        }
         "deleted_calendar_event" => {
             let event_id = row.try_get::<Uuid, _>("object_id").ok()?;
             let owner_account_id = row.try_get::<Uuid, _>("owner_account_id").ok()?;
@@ -589,6 +630,23 @@ fn mapi_notification_event_from_change_row(
             .map(|event| event.with_parent_folder_id(parent_folder_id))
             .map(|event| event.with_old_message_id(old_message_id))
         }
+        _ => None,
+    }
+}
+
+fn mapi_contact_notification_folder_id(
+    notification_account_id: Uuid,
+    owner_account_id: Uuid,
+    contact_book_role: &str,
+) -> Option<u64> {
+    if notification_account_id != owner_account_id {
+        return None;
+    }
+    match contact_book_role {
+        "contacts" => Some(crate::mapi::identity::CONTACTS_FOLDER_ID),
+        "suggested_contacts" => Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID),
+        "quick_contacts" => Some(crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID),
+        "im_contact_list" => Some(crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID),
         _ => None,
     }
 }
@@ -923,6 +981,7 @@ fn mapi_notification_event_mask_for_change(change_kind: &str, is_new_mail: bool)
 mod notification_tests {
     use super::{
         mapi_calendar_event_object_id, mapi_calendar_notification_event,
+        mapi_contact_notification_folder_id,
         mapi_hierarchy_movement_source_ids, mapi_hierarchy_old_parent_folder_id,
         mapi_notification_event_mask_for_change,
         mapi_notification_message_object_id, mapi_notification_old_message_id,
@@ -945,6 +1004,24 @@ mod notification_tests {
         assert_eq!(
             mapi_notification_event_mask_for_change("copied", false),
             0x0040
+        );
+    }
+
+    #[test]
+    fn owned_contacts_book_maps_to_contacts_folder() {
+        let account_id = Uuid::from_u128(0x1200);
+
+        assert_eq!(
+            mapi_contact_notification_folder_id(account_id, account_id, "contacts"),
+            Some(crate::mapi::identity::CONTACTS_FOLDER_ID)
+        );
+        assert_eq!(
+            mapi_contact_notification_folder_id(account_id, account_id, "quick_contacts"),
+            Some(crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID)
+        );
+        assert_eq!(
+            mapi_contact_notification_folder_id(Uuid::from_u128(0x3400), account_id, "contacts"),
+            None
         );
     }
 

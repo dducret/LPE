@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_create_update_delete_notifications_keep_stable_fid_mid
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1072-L1123
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1149-L1200
 visibility: private
 generated:
   by: okf-rs/0.3.0

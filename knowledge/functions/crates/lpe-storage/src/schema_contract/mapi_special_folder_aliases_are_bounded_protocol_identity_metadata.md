@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_special_folder_aliases_are_bounded_protocol_identity_metadata
-resource: crates/lpe-storage/src/schema_contract.rs#L1173-L1203
+resource: crates/lpe-storage/src/schema_contract.rs#L1190-L1220
 visibility: private
 generated:
   by: okf-rs/0.3.0
