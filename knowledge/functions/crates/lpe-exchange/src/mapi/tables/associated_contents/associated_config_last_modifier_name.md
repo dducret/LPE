@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_last_modifier_name
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L937-L944
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L882-L889
 visibility: private
 generated:
   by: okf-rs/0.3.0

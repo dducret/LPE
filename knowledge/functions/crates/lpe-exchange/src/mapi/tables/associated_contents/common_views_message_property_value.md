@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_message_property_value
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L418-L437
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L363-L382
 generated:
   by: okf-rs/0.3.0
 relationships:

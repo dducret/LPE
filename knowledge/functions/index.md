@@ -3737,6 +3737,7 @@
 - [event_object_id](../functions/crates/lpe-exchange/src/mapi/notifications/event_object_id.md) — Rust Function
 - [hierarchy_move_emits_a_source_parent_table_refresh](../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_move_emits_a_source_parent_table_refresh.md) — Rust Function
 - [hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately](../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately.md) — Rust Function
+- [hierarchy_table_row_modified_notification_encodes_current_row](../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_table_row_modified_notification_encodes_current_row.md) — Rust Function
 - [incomplete_hierarchy_move_notification_is_not_serialized](../functions/crates/lpe-exchange/src/mapi/notifications/incomplete_hierarchy_move_notification_is_not_serialized.md) — Rust Function
 - [incomplete_message_move_notifications_are_not_serialized](../functions/crates/lpe-exchange/src/mapi/notifications/incomplete_message_move_notifications_are_not_serialized.md) — Rust Function
 - [new_mail_notification_with_message_id_encodes_exchange_zero_message_flags](../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags.md) — Rust Function
@@ -3747,6 +3748,7 @@
 - [object_moved_and_copied_notifications_preserve_source_message_id](../functions/crates/lpe-exchange/src/mapi/notifications/object_moved_and_copied_notifications_preserve_source_message_id.md) — Rust Function
 - [register_notification_success_response_matches_microsoft_wire_shape](../functions/crates/lpe-exchange/src/mapi/notifications/register_notification_success_response_matches_microsoft_wire_shape.md) — Rust Function
 - [registration_matches_event](../functions/crates/lpe-exchange/src/mapi/notifications/registration_matches_event.md) — Rust Function
+- [rop_hierarchy_table_row_modified_response](../functions/crates/lpe-exchange/src/mapi/notifications/rop_hierarchy_table_row_modified_response.md) — Rust Function
 - [rop_notify_response](../functions/crates/lpe-exchange/src/mapi/notifications/rop_notify_response.md) — Rust Function
 - [rop_register_notification_response](../functions/crates/lpe-exchange/src/mapi/notifications/rop_register_notification_response.md) — Rust Function
 - [bind_response](../functions/crates/lpe-exchange/src/mapi/nspi/bind_response.md) — Rust Function
@@ -4294,7 +4296,7 @@
 - [followup_mail_projects_outlook_flag_properties](../functions/crates/lpe-exchange/src/mapi/properties/tests/followup_mail_projects_outlook_flag_properties.md) — Rust Function
 - [free_busy_entry_ids_advertises_freebusy_data_at_documented_index](../functions/crates/lpe-exchange/src/mapi/properties/tests/free_busy_entry_ids_advertises_freebusy_data_at_documented_index.md) — Rust Function
 - [hierarchy_display_name_prefers_required_hierarchy_value_over_duplicate_property_value](../functions/crates/lpe-exchange/src/mapi/properties/tests/hierarchy_display_name_prefers_required_hierarchy_value_over_duplicate_property_value.md) — Rust Function
-- [inbox_mailbox_properties_advertise_openable_default_view](../functions/crates/lpe-exchange/src/mapi/properties/tests/inbox_mailbox_properties_advertise_openable_default_view.md) — Rust Function
+- [inbox_mailbox_properties_omit_unpersisted_default_view](../functions/crates/lpe-exchange/src/mapi/properties/tests/inbox_mailbox_properties_omit_unpersisted_default_view.md) — Rust Function
 - [internet_header_content_named_properties_have_stable_ids](../functions/crates/lpe-exchange/src/mapi/properties/tests/internet_header_content_named_properties_have_stable_ids.md) — Rust Function
 - [large_inline_string_round_trips_through_common_codec](../functions/crates/lpe-exchange/src/mapi/properties/tests/large_inline_string_round_trips_through_common_codec.md) — Rust Function
 - [logon_omits_exchange_absent_server_type_properties](../functions/crates/lpe-exchange/src/mapi/properties/tests/logon_omits_exchange_absent_server_type_properties.md) — Rust Function
@@ -5142,7 +5144,7 @@
 - [session_remembers_deleted_advertised_special_folder](../functions/crates/lpe-exchange/src/mapi/session/tests/session_remembers_deleted_advertised_special_folder.md) — Rust Function
 - [session_remembers_deleted_saved_search_folder_definition](../functions/crates/lpe-exchange/src/mapi/session/tests/session_remembers_deleted_saved_search_folder_definition.md) — Rust Function
 - [session_remembers_saved_search_folder_definition](../functions/crates/lpe-exchange/src/mapi/session/tests/session_remembers_saved_search_folder_definition.md) — Rust Function
-- [session_retains_collaboration_content_change_for_active_root_depth_hierarchy_table_without_counts](../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_change_for_active_root_depth_hierarchy_table_without_counts.md) — Rust Function
+- [session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts](../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts.md) — Rust Function
 - [session_retains_folder_count_change_for_active_parent_hierarchy_table](../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table.md) — Rust Function
 - [new](../functions/crates/lpe-exchange/src/mapi/session/types/MapiEventTransaction/new.md) — Rust Method
 - [eq](../functions/crates/lpe-exchange/src/mapi/session/types/MapiSavedEmail/partialeq/eq.md) — Rust Method
@@ -5368,12 +5370,10 @@
 - [common_views_message_property_value_for_principal](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/common_views_message_property_value_for_principal.md) — Rust Function
 - [configuration_roaming_datatypes](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/configuration_roaming_datatypes.md) — Rust Function
 - [configuration_uses_xml_stream](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/configuration_uses_xml_stream.md) — Rust Function
-- [default_folder_associated_named_view](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/default_folder_associated_named_view.md) — Rust Function
 - [delegate_freebusy_message_size](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/delegate_freebusy_message_size.md) — Rust Function
 - [delegate_freebusy_property_value](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/delegate_freebusy_property_value.md) — Rust Function
 - [has_associated_table_rows](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/has_associated_table_rows.md) — Rust Function
 - [is_inbox_exact_rule_organizer_restriction](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_inbox_exact_rule_organizer_restriction.md) — Rust Function
-- [is_inbox_folder_design_default_named_view](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_inbox_folder_design_default_named_view.md) — Rust Function
 - [is_outlook_virtual_sharing_state_config](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_outlook_virtual_sharing_state_config.md) — Rust Function
 - [is_stale_minimal_umolk_dictionary](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_stale_minimal_umolk_dictionary.md) — Rust Function
 - [is_umolk_computed_property](../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_umolk_computed_property.md) — Rust Function
@@ -5575,6 +5575,7 @@
 - [hierarchy_row_unread_count](../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_unread_count.md) — Rust Function
 - [hierarchy_rows](../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_rows.md) — Rust Function
 - [hierarchy_rows_excluding_deleted](../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_rows_excluding_deleted.md) — Rust Function
+- [hierarchy_table_row_modified](../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified.md) — Rust Function
 - [hierarchy_table_rows_excluding_deleted](../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_rows_excluding_deleted.md) — Rust Function
 - [log_sync_issues_hierarchy_query_rows](../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/log_sync_issues_hierarchy_query_rows.md) — Rust Function
 - [mailbox_shadowed_by_active_outlook_special_folder](../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/mailbox_shadowed_by_active_outlook_special_folder.md) — Rust Function
@@ -5755,19 +5756,18 @@
 - [inbox_associated_exact_virtual_find_row_does_not_inject_a_row](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_exact_virtual_find_row_does_not_inject_a_row.md) — Rust Function
 - [inbox_associated_extended_rule_snapshot](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_extended_rule_snapshot.md) — Rust Function
 - [inbox_associated_find_row_can_return_a_persisted_extended_rule_message](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_can_return_a_persisted_extended_rule_message.md) — Rust Function
+- [inbox_associated_find_row_does_not_invent_a_default_for_a_broad_startup_lookup](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_does_not_invent_a_default_for_a_broad_startup_lookup.md) — Rust Function
 - [inbox_associated_find_row_followup_uses_the_original_rowset](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_followup_uses_the_original_rowset.md) — Rust Function
 - [inbox_associated_find_row_response_for_message_class](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_response_for_message_class.md) — Rust Function
-- [inbox_associated_find_row_returns_folder_local_default_named_view](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_folder_local_default_named_view.md) — Rust Function
+- [inbox_associated_find_row_returns_not_found_for_unpersisted_named_view](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unpersisted_named_view.md) — Rust Function
 - [inbox_associated_find_row_returns_not_found_for_unstored_aggregation_config](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_aggregation_config.md) — Rust Function
 - [inbox_associated_find_row_returns_not_found_for_unstored_elc_config](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_elc_config.md) — Rust Function
 - [inbox_associated_find_row_returns_not_found_for_unstored_sharing_configuration](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_sharing_configuration.md) — Rust Function
 - [inbox_associated_find_row_returns_not_found_for_unstored_sharing_index](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_sharing_index.md) — Rust Function
-- [inbox_associated_find_row_returns_the_folder_local_default_for_a_broad_startup_lookup](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_the_folder_local_default_for_a_broad_startup_lookup.md) — Rust Function
 - [inbox_associated_find_row_returns_virtual_rule_organizer](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_virtual_rule_organizer.md) — Rust Function
 - [inbox_associated_find_row_suppresses_outlook_eas_config](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_suppresses_outlook_eas_config.md) — Rust Function
 - [inbox_associated_greater_than_restriction_uses_normal_property_semantics](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_greater_than_restriction_uses_normal_property_semantics.md) — Rust Function
 - [inbox_associated_invariant_uses_mailbox_guid_entry_id](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_invariant_uses_mailbox_guid_entry_id.md) — Rust Function
-- [inbox_associated_named_view_find_row_flags_missing_configuration_columns](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_named_view_find_row_flags_missing_configuration_columns.md) — Rust Function
 - [inbox_associated_open_count_includes_unrestricted_persisted_configuration_rows](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_open_count_includes_unrestricted_persisted_configuration_rows.md) — Rust Function
 - [inbox_associated_query_rows_default_columns_cover_required_configuration_contract](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_query_rows_default_columns_cover_required_configuration_contract.md) — Rust Function
 - [inbox_associated_query_rows_does_not_create_virtual_mrm_configuration](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_query_rows_does_not_create_virtual_mrm_configuration.md) — Rust Function
@@ -5783,8 +5783,8 @@
 - [inbox_associated_restriction_does_not_add_a_modeled_startup_class](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_restriction_does_not_add_a_modeled_startup_class.md) — Rust Function
 - [inbox_associated_rows_project_folder_id_and_last_modification_time](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_rows_project_folder_id_and_last_modification_time.md) — Rust Function
 - [inbox_associated_sort_snapshot](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_sort_snapshot.md) — Rust Function
-- [inbox_associated_table_exposes_folder_local_default_named_view_for_exact_lookup](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_exposes_folder_local_default_named_view_for_exact_lookup.md) — Rust Function
-- [inbox_associated_table_exposes_folder_local_default_named_view_without_restriction](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_exposes_folder_local_default_named_view_without_restriction.md) — Rust Function
+- [inbox_associated_table_omits_unpersisted_default_named_view_for_exact_lookup](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_omits_unpersisted_default_named_view_for_exact_lookup.md) — Rust Function
+- [inbox_associated_table_omits_unpersisted_default_named_view_without_restriction](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_omits_unpersisted_default_named_view_without_restriction.md) — Rust Function
 - [inbox_contents_invariant_accepts_message_identity_columns](../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_contents_invariant_accepts_message_identity_columns.md) — Rust Function
 - [ipm_subtree_hierarchy_does_not_duplicate_sync_issues_children](../functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_does_not_duplicate_sync_issues_children.md) — Rust Function
 - [ipm_subtree_hierarchy_restrictions_match_serialized_display_name](../functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_restrictions_match_serialized_display_name.md) — Rust Function
@@ -6631,9 +6631,9 @@
 - [event_lookup_rejects_another_principals_cached_mid](../functions/crates/lpe-exchange/src/mapi_store/tests/event_lookup_rejects_another_principals_cached_mid.md) — Rust Function
 - [exact_event_mid_wins_over_another_events_foreign_cached_alias](../functions/crates/lpe-exchange/src/mapi_store/tests/exact_event_mid_wins_over_another_events_foreign_cached_alias.md) — Rust Function
 - [exchange_builtin_excluded_folder_roles](../functions/crates/lpe-exchange/src/mapi_store/tests/exchange_builtin_excluded_folder_roles.md) — Rust Function
+- [folder_default_named_views_do_not_materialize_without_persisted_selection](../functions/crates/lpe-exchange/src/mapi_store/tests/folder_default_named_views_do_not_materialize_without_persisted_selection.md) — Rust Function
 - [folder_local_default_named_view_ids_are_not_openable](../functions/crates/lpe-exchange/src/mapi_store/tests/folder_local_default_named_view_ids_are_not_openable.md) — Rust Function
 - [inbox_associated_configs_do_not_emit_unpersisted_defaults](../functions/crates/lpe-exchange/src/mapi_store/tests/inbox_associated_configs_do_not_emit_unpersisted_defaults.md) — Rust Function
-- [inbox_default_named_view_is_materialized_for_the_advertised_entry_id](../functions/crates/lpe-exchange/src/mapi_store/tests/inbox_default_named_view_is_materialized_for_the_advertised_entry_id.md) — Rust Function
 - [legacy_default_named_view_alias_does_not_materialize_a_message](../functions/crates/lpe-exchange/src/mapi_store/tests/legacy_default_named_view_alias_does_not_materialize_a_message.md) — Rust Function
 - [mailbox_backed_contact_folder_does_not_invent_osc_contact_sync](../functions/crates/lpe-exchange/src/mapi_store/tests/mailbox_backed_contact_folder_does_not_invent_osc_contact_sync.md) — Rust Function
 - [mailbox_backed_suggested_contacts_does_not_invent_osc_contact_sync](../functions/crates/lpe-exchange/src/mapi_store/tests/mailbox_backed_suggested_contacts_does_not_invent_osc_contact_sync.md) — Rust Function
@@ -7923,6 +7923,7 @@
 - [insert_mapi_content_length](../functions/crates/lpe-exchange/src/tests/insert_mapi_content_length.md) — Rust Function
 - [jmap_search_matches](../functions/crates/lpe-exchange/src/tests/jmap_search_matches.md) — Rust Function
 - [mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable](../functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable.md) — Rust Function
+- [mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent](../functions/crates/lpe-exchange/src/tests/mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent.md) — Rust Function
 - [mapi_associated_config_storage_is_account_scoped](../functions/crates/lpe-exchange/src/tests/mapi_associated_config_storage_is_account_scoped.md) — Rust Function
 - [mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects](../functions/crates/lpe-exchange/src/tests/mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects.md) — Rust Function
 - [mapi_associated_config_upsert_preserves_canonical_message_identity](../functions/crates/lpe-exchange/src/tests/mapi_associated_config_upsert_preserves_canonical_message_identity.md) — Rust Function
@@ -8084,7 +8085,7 @@
 - [mapi_over_http_delete_messages_from_trash_child_hard_deletes](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_delete_messages_from_trash_child_hard_deletes.md) — Rust Function
 - [mapi_over_http_delete_messages_from_trash_reports_partial_when_retention_blocks_delete](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_delete_messages_from_trash_reports_partial_when_retention_blocks_delete.md) — Rust Function
 - [mapi_over_http_delete_messages_reports_partial_only_for_mixed_delete_failure](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_delete_messages_reports_partial_only_for_mixed_delete_failure.md) — Rust Function
-- [mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change.md) — Rust Function
+- [mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows.md) — Rust Function
 - [mapi_over_http_does_not_open_unbacked_quick_step_config](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_does_not_open_unbacked_quick_step_config.md) — Rust Function
 - [mapi_over_http_empty_extended_execute_returns_success](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_empty_extended_execute_returns_success.md) — Rust Function
 - [mapi_over_http_execute_accepts_release_rop](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_execute_accepts_release_rop.md) — Rust Function

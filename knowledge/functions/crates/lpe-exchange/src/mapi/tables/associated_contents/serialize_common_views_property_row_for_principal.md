@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_common_views_property_row_for_principal
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L46-L60
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L45-L59
 generated:
   by: okf-rs/0.3.0
 relationships:

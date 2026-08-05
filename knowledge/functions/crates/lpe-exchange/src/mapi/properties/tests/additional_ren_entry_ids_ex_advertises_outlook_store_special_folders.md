@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: additional_ren_entry_ids_ex_advertises_outlook_store_special_folders
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1987-L2041
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1980-L2034
 visibility: private
 generated:
   by: okf-rs/0.3.0

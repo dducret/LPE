@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_bind_accepts_rca_bare_guid_headers
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5738-L5775
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5834-L5871
 visibility: private
 generated:
   by: okf-rs/0.3.0

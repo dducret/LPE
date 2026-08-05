@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_exact_virtual_find_row_does_not_inject_a_row
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5383-L5439
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5315-L5371
 visibility: private
 generated:
   by: okf-rs/0.3.0

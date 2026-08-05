@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_message_row_projects_microsoft_view_descriptor_string8_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9333-L9380
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9246-L9293
 visibility: private
 generated:
   by: okf-rs/0.3.0

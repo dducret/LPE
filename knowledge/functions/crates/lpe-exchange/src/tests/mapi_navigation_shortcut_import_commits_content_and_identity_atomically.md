@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_navigation_shortcut_import_commits_content_and_identity_atomically
-resource: crates/lpe-exchange/src/tests/mod.rs#L1359-L1966
+resource: crates/lpe-exchange/src/tests/mod.rs#L1416-L2023
 visibility: private
 generated:
   by: okf-rs/0.3.0

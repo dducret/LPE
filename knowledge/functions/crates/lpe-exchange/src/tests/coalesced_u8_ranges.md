@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: coalesced_u8_ranges
-resource: crates/lpe-exchange/src/tests/mod.rs#L14324-L14344
+resource: crates/lpe-exchange/src/tests/mod.rs#L14381-L14401
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: empty_snapshot_does_not_contain_virtual_sharing_index
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5521-L5527
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5453-L5459
 visibility: private
 generated:
   by: okf-rs/0.3.0

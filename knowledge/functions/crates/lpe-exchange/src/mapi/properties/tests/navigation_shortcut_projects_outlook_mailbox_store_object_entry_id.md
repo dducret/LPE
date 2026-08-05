@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: navigation_shortcut_projects_outlook_mailbox_store_object_entry_id
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6964-L7002
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6957-L6995
 visibility: private
 generated:
   by: okf-rs/0.3.0

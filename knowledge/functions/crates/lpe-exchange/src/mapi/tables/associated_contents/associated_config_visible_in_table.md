@@ -1,12 +1,11 @@
 ---
 type: Rust Function
 title: associated_config_visible_in_table
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L265-L275
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L234-L242
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
-  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_inbox_folder_design_default_named_view
   - functions/crates/lpe-exchange/src/mapi_store/associated_config/is_outlook_inbox_virtual_only_associated_config_id
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_inbox_exact_rule_organizer_restriction
   called_by:
@@ -20,7 +19,6 @@ relationships:
 
 # Calls
 
-- [is_inbox_folder_design_default_named_view](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_inbox_folder_design_default_named_view.md)
 - [is_outlook_inbox_virtual_only_associated_config_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/is_outlook_inbox_virtual_only_associated_config_id.md)
 - [is_inbox_exact_rule_organizer_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_inbox_exact_rule_organizer_restriction.md)
 

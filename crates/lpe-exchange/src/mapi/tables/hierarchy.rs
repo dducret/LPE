@@ -1,4 +1,6 @@
 use super::*;
+use crate::mapi::notifications::{MapiNotificationEvent, MapiNotificationKind};
+use crate::mapi::wire::MapiNotificationEventMask;
 use crate::mapi_store::MapiPublicFolder;
 
 #[derive(Clone, Copy)]
@@ -179,6 +181,92 @@ pub(super) fn hierarchy_table_rows_excluding_deleted<'a>(
         rows.retain(|row| !matches!(row, HierarchyRow::Collaboration(_)));
     }
     rows
+}
+
+/// The informative hierarchy-table form is safe only when the current table
+/// row remains in place. Restricted views and content-count sorts can instead
+/// require an add/delete notification, so callers retain the basic fallback.
+pub(in crate::mapi) struct HierarchyTableRowModified {
+    pub(in crate::mapi) folder_id: u64,
+    pub(in crate::mapi) insert_after_folder_id: u64,
+    pub(in crate::mapi) row_data: Vec<u8>,
+}
+
+/// [MS-OXCNOTIF] sections 2.2.1.4.1.2 and 3.1.4.3: an informative hierarchy
+/// table notification carries the changed folder row using that table's last
+/// RopSetColumns projection.
+pub(in crate::mapi) fn hierarchy_table_row_modified(
+    table: &MapiObject,
+    event: &MapiNotificationEvent,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
+) -> Option<HierarchyTableRowModified> {
+    // table_notifications retargets a child-content aggregate event to its
+    // parent hierarchy table while retaining that parent in parent_folder_id.
+    if event.kind != MapiNotificationKind::Hierarchy
+        || event.parent_folder_id != Some(event.folder_id)
+        || event.event_mask & 0x0FFF != MapiNotificationEventMask::TableModified.as_u16()
+    {
+        return None;
+    }
+    let changed_folder_id = event.message_id?;
+    let MapiObject::HierarchyTable {
+        folder_id,
+        depth,
+        columns,
+        columns_set,
+        sort_orders,
+        restriction,
+        deleted_advertised_special_folders,
+        ..
+    } = table
+    else {
+        return None;
+    };
+    if !*columns_set
+        || restriction.is_some()
+        || sort_orders.iter().any(|sort_order| {
+            matches!(
+                sort_order.property_tag,
+                PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT
+            )
+        })
+    {
+        return None;
+    }
+
+    let rows = hierarchy_table_rows_excluding_deleted(
+        *folder_id,
+        mailboxes,
+        snapshot,
+        None,
+        sort_orders,
+        mailbox_guid,
+        deleted_advertised_special_folders,
+        *depth,
+    );
+    let changed_row_index = rows
+        .iter()
+        .position(|row| hierarchy_row_id(row) == changed_folder_id)?;
+    let changed_row = *rows.get(changed_row_index)?;
+    let insert_after_folder_id = changed_row_index
+        .checked_sub(1)
+        .and_then(|index| rows.get(index))
+        .map(hierarchy_row_id)
+        .unwrap_or_default();
+
+    Some(HierarchyTableRowModified {
+        folder_id: changed_folder_id,
+        insert_after_folder_id,
+        row_data: standard_property_row_bytes(&serialize_hierarchy_row(
+            changed_row,
+            mailboxes,
+            snapshot,
+            columns,
+            mailbox_guid,
+        )),
+    })
 }
 
 pub(in crate::mapi) fn hierarchy_depth_folder_ids_excluding_deleted(

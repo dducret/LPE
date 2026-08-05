@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_common_views_property_row_with_mailbox_guid
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L32-L44
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L31-L43
 generated:
   by: okf-rs/0.3.0
 relationships:

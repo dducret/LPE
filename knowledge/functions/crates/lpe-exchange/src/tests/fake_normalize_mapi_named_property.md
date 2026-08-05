@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fake_normalize_mapi_named_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L3972-L3979
+resource: crates/lpe-exchange/src/tests/mod.rs#L4029-L4036
 visibility: private
 generated:
   by: okf-rs/0.3.0

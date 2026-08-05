@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: email
-resource: crates/lpe-exchange/src/tests/mod.rs#L4210-L4282
+resource: crates/lpe-exchange/src/tests/mod.rs#L4267-L4339
 visibility: private
 generated:
   by: okf-rs/0.3.0

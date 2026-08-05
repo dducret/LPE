@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: categorized_and_deleted_message_rows_keep_long_term_entry_ids
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9253-L9330
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9166-L9243
 visibility: private
 generated:
   by: okf-rs/0.3.0

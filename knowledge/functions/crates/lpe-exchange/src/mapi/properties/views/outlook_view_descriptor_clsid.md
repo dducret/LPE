@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_view_descriptor_clsid
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L140-L150
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L129-L139
 generated:
   by: okf-rs/0.3.0
 relationships:

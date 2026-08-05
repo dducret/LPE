@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_hierarchy_row_from_backing_object
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L647-L701
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L735-L789
 visibility: private
 generated:
   by: okf-rs/0.3.0

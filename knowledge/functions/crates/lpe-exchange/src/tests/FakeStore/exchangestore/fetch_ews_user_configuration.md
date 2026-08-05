@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_ews_user_configuration
-resource: crates/lpe-exchange/src/tests/mod.rs#L4949-L4969
+resource: crates/lpe-exchange/src/tests/mod.rs#L5006-L5026
 visibility: private
 generated:
   by: okf-rs/0.3.0

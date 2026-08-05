@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_view_sent_to_descriptor_uses_recipient_columns
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5698-L5724
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5691-L5717
 visibility: private
 generated:
   by: okf-rs/0.3.0

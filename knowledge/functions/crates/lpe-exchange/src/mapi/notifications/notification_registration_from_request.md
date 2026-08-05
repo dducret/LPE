@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notification_registration_from_request
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L816-L831
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L866-L881
 generated:
   by: okf-rs/0.3.0
 relationships:

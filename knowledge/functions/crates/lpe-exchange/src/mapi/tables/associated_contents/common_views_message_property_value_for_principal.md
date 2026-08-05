@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_message_property_value_for_principal
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L439-L466
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L384-L411
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: view_named_id_column
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L576-L591
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L565-L580
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: change_number_properties_use_replid_and_globcnt_wire_ids
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2153-L2167
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2146-L2160
 visibility: private
 generated:
   by: okf-rs/0.3.0

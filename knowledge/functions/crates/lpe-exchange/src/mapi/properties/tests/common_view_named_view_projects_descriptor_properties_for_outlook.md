@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_view_named_view_projects_descriptor_properties_for_outlook
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5409-L5513
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5402-L5506
 visibility: private
 generated:
   by: okf-rs/0.3.0

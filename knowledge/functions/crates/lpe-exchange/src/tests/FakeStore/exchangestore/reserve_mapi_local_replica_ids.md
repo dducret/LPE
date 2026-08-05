@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: reserve_mapi_local_replica_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L4739-L4765
+resource: crates/lpe-exchange/src/tests/mod.rs#L4796-L4822
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -32,6 +32,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cnset_and_deleted_when_canonical_is_emitted
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect
   - functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable
+  - functions/crates/lpe-exchange/src/tests/mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent
   - functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_import_commits_content_and_identity_atomically
   - functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_delete_tombstones_identity_and_replay_is_object_deleted
   - functions/crates/lpe-exchange/src/tests/postgres_mapi_special_folder_alias_round_trip_and_identity_collision_guards
@@ -70,6 +71,7 @@ relationships:
 - [mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cnset_and_deleted_when_canonical_is_emitted](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cnset_and_deleted_when_canonical_is_emitted.md)
 - [mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect.md)
 - [mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable.md)
+- [mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent.md)
 - [mapi_navigation_shortcut_import_commits_content_and_identity_atomically](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_import_commits_content_and_identity_atomically.md)
 - [mapi_navigation_shortcut_delete_tombstones_identity_and_replay_is_object_deleted](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_delete_tombstones_identity_and_replay_is_object_deleted.md)
 - [postgres_mapi_special_folder_alias_round_trip_and_identity_collision_guards](../../../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_special_folder_alias_round_trip_and_identity_collision_guards.md)

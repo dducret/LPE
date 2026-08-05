@@ -11,8 +11,6 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_associated_table_rows
   - functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response
-  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows_with_lookup_restriction
-  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_row_matches
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/restriction_matches_common_views_message
 ---
 
@@ -29,6 +27,4 @@ relationships:
 
 - [debug_associated_table_rows](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_associated_table_rows.md)
 - [rop_find_row_response](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response.md)
-- [associated_table_rows_with_lookup_restriction](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows_with_lookup_restriction.md)
-- [associated_table_row_matches](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_row_matches.md)
 - [restriction_matches_common_views_message](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/restriction_matches_common_views_message.md)

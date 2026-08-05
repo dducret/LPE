@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: minimal_working_hours_roaming_xml_stream
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L999-L1001
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L944-L946
 visibility: private
 generated:
   by: okf-rs/0.3.0

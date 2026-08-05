@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_body_with_max_rop_out
-resource: crates/lpe-exchange/src/tests/mod.rs#L12272-L12280
+resource: crates/lpe-exchange/src/tests/mod.rs#L12329-L12337
 visibility: private
 generated:
   by: okf-rs/0.3.0

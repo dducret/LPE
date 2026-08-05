@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_mailbox_content_commit_times
-resource: crates/lpe-exchange/src/tests/mod.rs#L9520-L9539
+resource: crates/lpe-exchange/src/tests/mod.rs#L9577-L9596
 visibility: private
 generated:
   by: okf-rs/0.3.0

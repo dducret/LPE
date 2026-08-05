@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: classify_outlook_bootstrap_row_invariants
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L215-L330
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L214-L329
 generated:
   by: okf-rs/0.3.0
 relationships:

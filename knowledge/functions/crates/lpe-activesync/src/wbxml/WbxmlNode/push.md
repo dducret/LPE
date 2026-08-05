@@ -355,6 +355,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/identity/mailbox_store_object_entry_id
   - functions/crates/lpe-exchange/src/mapi/identity/scoped_codec_maps_logical_default_folder_ids_to_durable_ids
   - functions/crates/lpe-exchange/src/mapi/notifications/rop_notify_response
+  - functions/crates/lpe-exchange/src/mapi/notifications/rop_hierarchy_table_row_modified_response
   - functions/crates/lpe-exchange/src/mapi/notifications/append_notification_data
   - functions/crates/lpe-exchange/src/mapi/nspi/resolve_names_response
   - functions/crates/lpe-exchange/src/mapi/nspi/parse_resolve_names_columns
@@ -510,7 +511,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/sync/tests/appointment_fast_transfer_named_lid_includes_property_definition
   - functions/crates/lpe-exchange/src/mapi/sync/tests/common_views_associated_content_sync_payload_emits_view_and_wunderbar_properties
   - functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response
-  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows_with_lookup_restriction
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_optional_property_row
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_named_property_tags
   - functions/crates/lpe-exchange/src/mapi/tables/attachments/serialize_attachment_row
@@ -556,10 +556,9 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_does_not_invent_default_compact_named_view
   - functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_does_not_invent_default_sent_to_named_view
   - functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_matches_mail_wlink_folder_type
-  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_named_view_find_row_flags_missing_configuration_columns
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_exact_virtual_find_row_does_not_inject_a_row
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_aggregation_config
-  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_the_folder_local_default_for_a_broad_startup_lookup
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_does_not_invent_a_default_for_a_broad_startup_lookup
   - functions/crates/lpe-exchange/src/mapi/tables/tests/quick_step_associated_find_row_does_not_return_synthetic_custom_action
   - functions/crates/lpe-exchange/src/mapi/tables/tests/contacts_associated_find_row_preserves_table_position_for_contact_link_timestamp
   - functions/crates/lpe-exchange/src/mapi/tables/tests/empty_conversation_action_settings_find_row_returns_not_found
@@ -747,7 +746,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_execute_does_not_notify_for_empty_canonical_poll
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1940_notifies_the_active_inbox_table
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_without_registration_replays_later_change
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_replays_change_committed_during_snapshot
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_transport_info_rops_reject_missing_input_handle_without_batch_drift
@@ -1638,6 +1637,7 @@ relationships:
 - [mailbox_store_object_entry_id](../../../../../../functions/crates/lpe-exchange/src/mapi/identity/mailbox_store_object_entry_id.md)
 - [scoped_codec_maps_logical_default_folder_ids_to_durable_ids](../../../../../../functions/crates/lpe-exchange/src/mapi/identity/scoped_codec_maps_logical_default_folder_ids_to_durable_ids.md)
 - [rop_notify_response](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_notify_response.md)
+- [rop_hierarchy_table_row_modified_response](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_hierarchy_table_row_modified_response.md)
 - [append_notification_data](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/append_notification_data.md)
 - [resolve_names_response](../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/resolve_names_response.md)
 - [parse_resolve_names_columns](../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/parse_resolve_names_columns.md)
@@ -1793,7 +1793,6 @@ relationships:
 - [appointment_fast_transfer_named_lid_includes_property_definition](../../../../../../functions/crates/lpe-exchange/src/mapi/sync/tests/appointment_fast_transfer_named_lid_includes_property_definition.md)
 - [common_views_associated_content_sync_payload_emits_view_and_wunderbar_properties](../../../../../../functions/crates/lpe-exchange/src/mapi/sync/tests/common_views_associated_content_sync_payload_emits_view_and_wunderbar_properties.md)
 - [rop_find_row_response](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response.md)
-- [associated_table_rows_with_lookup_restriction](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows_with_lookup_restriction.md)
 - [serialize_optional_property_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_optional_property_row.md)
 - [associated_config_named_property_tags](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_named_property_tags.md)
 - [serialize_attachment_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/attachments/serialize_attachment_row.md)
@@ -1839,10 +1838,9 @@ relationships:
 - [common_views_find_row_does_not_invent_default_compact_named_view](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_does_not_invent_default_compact_named_view.md)
 - [common_views_find_row_does_not_invent_default_sent_to_named_view](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_does_not_invent_default_sent_to_named_view.md)
 - [common_views_find_row_matches_mail_wlink_folder_type](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_matches_mail_wlink_folder_type.md)
-- [inbox_associated_named_view_find_row_flags_missing_configuration_columns](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_named_view_find_row_flags_missing_configuration_columns.md)
 - [inbox_associated_exact_virtual_find_row_does_not_inject_a_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_exact_virtual_find_row_does_not_inject_a_row.md)
 - [inbox_associated_find_row_returns_not_found_for_unstored_aggregation_config](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_aggregation_config.md)
-- [inbox_associated_find_row_returns_the_folder_local_default_for_a_broad_startup_lookup](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_the_folder_local_default_for_a_broad_startup_lookup.md)
+- [inbox_associated_find_row_does_not_invent_a_default_for_a_broad_startup_lookup](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_does_not_invent_a_default_for_a_broad_startup_lookup.md)
 - [quick_step_associated_find_row_does_not_return_synthetic_custom_action](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/quick_step_associated_find_row_does_not_return_synthetic_custom_action.md)
 - [contacts_associated_find_row_preserves_table_position_for_contact_link_timestamp](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/contacts_associated_find_row_preserves_table_position_for_contact_link_timestamp.md)
 - [empty_conversation_action_settings_find_row_returns_not_found](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/empty_conversation_action_settings_find_row_returns_not_found.md)
@@ -2030,7 +2028,7 @@ relationships:
 - [mapi_over_http_execute_does_not_notify_for_empty_canonical_poll](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_execute_does_not_notify_for_empty_canonical_poll.md)
 - [mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify.md)
 - [mapi_over_http_run_1940_notifies_the_active_inbox_table](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1940_notifies_the_active_inbox_table.md)
-- [mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change.md)
+- [mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows.md)
 - [mapi_over_http_active_table_without_registration_replays_later_change](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_without_registration_replays_later_change.md)
 - [mapi_over_http_active_table_replays_change_committed_during_snapshot](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_replays_change_committed_during_snapshot.md)
 - [mapi_over_http_microsoft_transport_info_rops_reject_missing_input_handle_without_batch_drift](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_transport_info_rops_reject_missing_input_handle_without_batch_drift.md)

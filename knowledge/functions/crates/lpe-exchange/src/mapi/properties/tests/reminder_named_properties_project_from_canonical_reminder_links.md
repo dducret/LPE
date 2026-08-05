@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reminder_named_properties_project_from_canonical_reminder_links
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3348-L3514
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3341-L3507
 visibility: private
 generated:
   by: okf-rs/0.3.0

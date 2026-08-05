@@ -118,7 +118,6 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
         }) if *associated && *folder_id == INBOX_FOLDER_ID => {
             let mut rows =
                 associated_table_rows(*folder_id, snapshot, restriction.as_ref(), mailbox_guid);
-            rows.retain(|row| associated_table_row_config(row).is_some());
             sort_associated_table_rows(&mut rows, sort_orders, mailbox_guid);
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()

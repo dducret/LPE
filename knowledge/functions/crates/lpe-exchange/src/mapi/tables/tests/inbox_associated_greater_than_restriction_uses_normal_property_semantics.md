@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_greater_than_restriction_uses_normal_property_semantics
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6514-L6533
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6436-L6446
 visibility: private
 generated:
   by: okf-rs/0.3.0

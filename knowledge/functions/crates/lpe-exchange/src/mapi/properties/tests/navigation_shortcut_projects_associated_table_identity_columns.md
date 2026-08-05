@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: navigation_shortcut_projects_associated_table_identity_columns
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5334-L5402
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5327-L5395
 visibility: private
 generated:
   by: okf-rs/0.3.0

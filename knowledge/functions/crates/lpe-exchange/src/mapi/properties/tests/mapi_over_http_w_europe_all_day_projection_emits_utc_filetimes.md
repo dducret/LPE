@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_w_europe_all_day_projection_emits_utc_filetimes
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4077-L4093
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4070-L4086
 visibility: private
 generated:
   by: okf-rs/0.3.0

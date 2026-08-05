@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_does_not_materialize_mail_group_header_for_persisted_favorite_links
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1859-L1919
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1855-L1915
 visibility: private
 generated:
   by: okf-rs/0.3.0

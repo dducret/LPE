@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: FakeMailAppManifest
-resource: crates/lpe-exchange/src/tests/mod.rs#L3935-L3938
+resource: crates/lpe-exchange/src/tests/mod.rs#L3992-L3995
 visibility: private
 generated:
   by: okf-rs/0.3.0

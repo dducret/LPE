@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_content_upload_final_state_includes
-resource: crates/lpe-exchange/src/tests/mod.rs#L12593-L12636
+resource: crates/lpe-exchange/src/tests/mod.rs#L12650-L12693
 visibility: private
 generated:
   by: okf-rs/0.3.0

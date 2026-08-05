@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: debug_expected_container_class
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L365-L391
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L364-L390
 generated:
   by: okf-rs/0.3.0
 relationships:

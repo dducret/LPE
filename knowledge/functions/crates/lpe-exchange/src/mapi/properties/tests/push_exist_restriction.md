@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_exist_restriction
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2682-L2685
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2675-L2678
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_headers_without_content_type
-resource: crates/lpe-exchange/src/tests/mod.rs#L12136-L12153
+resource: crates/lpe-exchange/src/tests/mod.rs#L12193-L12210
 visibility: private
 generated:
   by: okf-rs/0.3.0

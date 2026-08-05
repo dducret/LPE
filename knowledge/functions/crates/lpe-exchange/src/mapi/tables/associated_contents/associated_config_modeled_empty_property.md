@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_modeled_empty_property
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L515-L537
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L460-L482
 generated:
   by: okf-rs/0.3.0
 relationships:

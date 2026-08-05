@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_outlook_virtual_sharing_state_config
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L946-L951
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L891-L896
 visibility: private
 generated:
   by: okf-rs/0.3.0

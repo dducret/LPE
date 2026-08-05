@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_calendar_event_identity_survives_restart_style_store_reload
-resource: crates/lpe-exchange/src/tests/mod.rs#L2255-L2316
+resource: crates/lpe-exchange/src/tests/mod.rs#L2312-L2373
 visibility: private
 generated:
   by: okf-rs/0.3.0

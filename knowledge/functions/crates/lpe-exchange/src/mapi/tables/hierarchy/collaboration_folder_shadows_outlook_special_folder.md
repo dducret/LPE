@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_folder_shadows_outlook_special_folder
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L321-L335
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L409-L423
 visibility: private
 generated:
   by: okf-rs/0.3.0

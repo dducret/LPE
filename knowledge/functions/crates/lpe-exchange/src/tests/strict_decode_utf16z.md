@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_decode_utf16z
-resource: crates/lpe-exchange/src/tests/mod.rs#L13318-L13327
+resource: crates/lpe-exchange/src/tests/mod.rs#L13375-L13384
 visibility: private
 generated:
   by: okf-rs/0.3.0

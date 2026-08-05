@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1-L7280
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1-L7273
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -35,7 +35,7 @@ relationships:
 - [microsoft_oxcfold_folder_message_size_projects_32_and_64_bit_values](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_oxcfold_folder_message_size_projects_32_and_64_bit_values.md)
 - [folder_properties_report_deleted_count_total](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/folder_properties_report_deleted_count_total.md)
 - [mailbox_properties_report_persisted_search_folder_type](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/mailbox_properties_report_persisted_search_folder_type.md)
-- [inbox_mailbox_properties_advertise_openable_default_view](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/inbox_mailbox_properties_advertise_openable_default_view.md)
+- [inbox_mailbox_properties_omit_unpersisted_default_view](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/inbox_mailbox_properties_omit_unpersisted_default_view.md)
 - [sent_mailbox_properties_do_not_advertise_unpersisted_common_view](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/sent_mailbox_properties_do_not_advertise_unpersisted_common_view.md)
 - [mailbox_backed_internal_note_folders_do_not_advertise_mail_default_view](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/mailbox_backed_internal_note_folders_do_not_advertise_mail_default_view.md)
 - [collaboration_default_folders_advertise_type_specific_default_views](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/collaboration_default_folders_advertise_type_specific_default_views.md)

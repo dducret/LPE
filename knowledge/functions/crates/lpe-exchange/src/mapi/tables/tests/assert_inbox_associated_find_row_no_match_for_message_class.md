@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_inbox_associated_find_row_no_match_for_message_class
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8508-L8517
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8421-L8430
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -11,6 +11,7 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_suppresses_outlook_eas_config
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_elc_config
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unpersisted_named_view
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_sharing_configuration
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_sharing_index
 ---
@@ -27,5 +28,6 @@ relationships:
 
 - [inbox_associated_find_row_suppresses_outlook_eas_config](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_suppresses_outlook_eas_config.md)
 - [inbox_associated_find_row_returns_not_found_for_unstored_elc_config](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_elc_config.md)
+- [inbox_associated_find_row_returns_not_found_for_unpersisted_named_view](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unpersisted_named_view.md)
 - [inbox_associated_find_row_returns_not_found_for_unstored_sharing_configuration](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_sharing_configuration.md)
 - [inbox_associated_find_row_returns_not_found_for_unstored_sharing_index](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_sharing_index.md)

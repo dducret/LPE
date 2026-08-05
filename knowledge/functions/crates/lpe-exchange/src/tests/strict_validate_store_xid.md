@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_validate_store_xid
-resource: crates/lpe-exchange/src/tests/mod.rs#L13455-L13463
+resource: crates/lpe-exchange/src/tests/mod.rs#L13512-L13520
 visibility: private
 generated:
   by: okf-rs/0.3.0

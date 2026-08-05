@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_strict_slice
-resource: crates/lpe-exchange/src/tests/mod.rs#L13537-L13541
+resource: crates/lpe-exchange/src/tests/mod.rs#L13594-L13598
 visibility: private
 generated:
   by: okf-rs/0.3.0

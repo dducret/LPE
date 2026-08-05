@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_delegate_freebusy_row
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L106-L112
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L105-L111
 generated:
   by: okf-rs/0.3.0
 relationships:

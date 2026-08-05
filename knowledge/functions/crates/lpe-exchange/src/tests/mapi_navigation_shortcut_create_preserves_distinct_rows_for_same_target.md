@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_navigation_shortcut_create_preserves_distinct_rows_for_same_target
-resource: crates/lpe-exchange/src/tests/mod.rs#L1267-L1356
+resource: crates/lpe-exchange/src/tests/mod.rs#L1324-L1413
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_daily_recur_blob
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4702-L4716
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4695-L4709
 visibility: private
 generated:
   by: okf-rs/0.3.0

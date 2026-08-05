@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_query_rows_default_columns_cover_required_configuration_contract
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7643-L7710
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7556-L7623
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_shadowed_by_active_outlook_special_folder
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L282-L319
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L370-L407
 generated:
   by: okf-rs/0.3.0
 relationships:

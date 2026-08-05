@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_mapi_message_id
-resource: crates/lpe-exchange/src/tests/mod.rs#L15563-L15566
+resource: crates/lpe-exchange/src/tests/mod.rs#L15620-L15623
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -30,7 +30,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_notification_wait_reports_content_event_after_registered_delete
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1940_notifies_the_active_inbox_table
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_without_registration_replays_later_change
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_replays_change_committed_during_snapshot
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_open_message_recovers_unique_message_folder_mismatch
@@ -130,7 +130,7 @@ relationships:
 - [mapi_over_http_notification_wait_reports_content_event_after_registered_delete](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_notification_wait_reports_content_event_after_registered_delete.md)
 - [mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify.md)
 - [mapi_over_http_run_1940_notifies_the_active_inbox_table](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1940_notifies_the_active_inbox_table.md)
-- [mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change.md)
+- [mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows.md)
 - [mapi_over_http_active_table_without_registration_replays_later_change](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_without_registration_replays_later_change.md)
 - [mapi_over_http_active_table_replays_change_committed_during_snapshot](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_replays_change_committed_during_snapshot.md)
 - [mapi_over_http_open_message_recovers_unique_message_folder_mismatch](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_open_message_recovers_unique_message_folder_mismatch.md)

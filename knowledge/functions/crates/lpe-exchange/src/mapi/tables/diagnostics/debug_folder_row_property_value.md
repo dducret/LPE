@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: debug_folder_row_property_value
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L191-L213
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L190-L212
 generated:
   by: okf-rs/0.3.0
 relationships:

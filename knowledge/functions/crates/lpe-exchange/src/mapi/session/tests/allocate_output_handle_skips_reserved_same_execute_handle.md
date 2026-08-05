@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: allocate_output_handle_skips_reserved_same_execute_handle
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L848-L881
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L852-L885
 visibility: private
 generated:
   by: okf-rs/0.3.0

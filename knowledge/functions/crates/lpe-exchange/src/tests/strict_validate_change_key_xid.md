@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_validate_change_key_xid
-resource: crates/lpe-exchange/src/tests/mod.rs#L13465-L13473
+resource: crates/lpe-exchange/src/tests/mod.rs#L13522-L13530
 visibility: private
 generated:
   by: okf-rs/0.3.0

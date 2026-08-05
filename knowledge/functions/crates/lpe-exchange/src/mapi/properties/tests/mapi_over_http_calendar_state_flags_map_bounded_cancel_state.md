@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_state_flags_map_bounded_cancel_state
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4122-L4142
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4115-L4135
 visibility: private
 generated:
   by: okf-rs/0.3.0

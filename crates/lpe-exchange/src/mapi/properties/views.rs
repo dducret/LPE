@@ -85,24 +85,13 @@ pub(in crate::mapi) fn default_view_supported_folder(
 }
 
 pub(in crate::mapi) fn default_folder_view_entry_id(
-    mailbox_guid: Uuid,
-    folder_id: u64,
+    _mailbox_guid: Uuid,
+    _folder_id: u64,
     _container_class: &str,
 ) -> Option<MapiValue> {
-    // [MS-OXCFOLD] section 2.2.2.2 and [MS-OXOCFG] sections 2.2.6 and
-    // 3.1.4.1: Outlook's Inbox bootstrap opens the advertised named view
-    // before it opens the normal contents table. The target is materialized
-    // by MapiMailStoreSnapshot::default_folder_named_view_message.
-    (folder_id == INBOX_FOLDER_ID)
-        .then(|| {
-            crate::mapi::identity::message_entry_id_from_object_ids(
-                mailbox_guid,
-                folder_id,
-                crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
-            )
-        })
-        .flatten()
-        .map(MapiValue::Binary)
+    // Do not advertise a default-view EntryID unless it resolves to a
+    // persisted named-view FAI. Outlook uses its built-in default otherwise.
+    None
 }
 
 pub(in crate::mapi) fn default_view_uses_common_views(

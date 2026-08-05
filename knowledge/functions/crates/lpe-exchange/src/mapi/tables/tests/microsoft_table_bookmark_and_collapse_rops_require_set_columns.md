@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_table_bookmark_and_collapse_rops_require_set_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L10077-L10191
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9990-L10104
 visibility: private
 generated:
   by: okf-rs/0.3.0

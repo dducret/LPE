@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_identity_repair_keeps_delegated_contact_until_read_grant_is_removed
-resource: crates/lpe-exchange/src/tests/mod.rs#L3339-L3492
+resource: crates/lpe-exchange/src/tests/mod.rs#L3396-L3549
 visibility: private
 generated:
   by: okf-rs/0.3.0

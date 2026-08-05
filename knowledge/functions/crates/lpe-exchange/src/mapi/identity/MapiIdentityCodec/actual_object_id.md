@@ -17,6 +17,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/long_term_id_from_object_id
   - functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/folder_entry_id_with_provider
   - functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/message_entry_id_from_object_ids
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows
   - functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test
 ---
 
@@ -39,4 +40,5 @@ relationships:
 - [long_term_id_from_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/long_term_id_from_object_id.md)
 - [folder_entry_id_with_provider](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/folder_entry_id_with_provider.md)
 - [message_entry_id_from_object_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/message_entry_id_from_object_ids.md)
+- [mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows.md)
 - [durable_special_folder_id_for_test](../../../../../../../functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test.md)

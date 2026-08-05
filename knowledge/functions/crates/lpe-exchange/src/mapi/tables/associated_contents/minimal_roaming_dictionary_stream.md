@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: minimal_roaming_dictionary_stream
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L991-L993
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L936-L938
 generated:
   by: okf-rs/0.3.0
 relationships:

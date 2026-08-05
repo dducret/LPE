@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_navigation_shortcut_row
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L9-L30
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L8-L29
 generated:
   by: okf-rs/0.3.0
 relationships:

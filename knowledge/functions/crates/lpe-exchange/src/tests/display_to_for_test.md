@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: display_to_for_test
-resource: crates/lpe-exchange/src/tests/mod.rs#L3983-L3996
+resource: crates/lpe-exchange/src/tests/mod.rs#L4040-L4053
 visibility: private
 generated:
   by: okf-rs/0.3.0

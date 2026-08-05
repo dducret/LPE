@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_stale_minimal_umolk_dictionary
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L495-L506
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L440-L451
 generated:
   by: okf-rs/0.3.0
 relationships:

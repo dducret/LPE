@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: ensure_jmap_system_mailboxes
-resource: crates/lpe-exchange/src/tests/mod.rs#L9541-L9546
+resource: crates/lpe-exchange/src/tests/mod.rs#L9598-L9603
 visibility: private
 generated:
   by: okf-rs/0.3.0

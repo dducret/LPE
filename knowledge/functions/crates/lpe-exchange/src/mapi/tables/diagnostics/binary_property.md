@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: binary_property
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L332-L337
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L331-L336
 visibility: private
 generated:
   by: okf-rs/0.3.0

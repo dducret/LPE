@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_configuration_prefix_restriction
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L303-L310
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L263-L270
 generated:
   by: okf-rs/0.3.0
 relationships:

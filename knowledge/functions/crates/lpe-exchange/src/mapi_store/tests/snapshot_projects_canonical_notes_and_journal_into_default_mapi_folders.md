@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_projects_canonical_notes_and_journal_into_default_mapi_folders
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2580-L2641
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2576-L2637
 visibility: private
 generated:
   by: okf-rs/0.3.0

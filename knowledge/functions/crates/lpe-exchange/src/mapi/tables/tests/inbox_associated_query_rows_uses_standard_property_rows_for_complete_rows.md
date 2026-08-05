@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_query_rows_uses_standard_property_rows_for_complete_rows
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7325-L7382
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7238-L7295
 visibility: private
 generated:
   by: okf-rs/0.3.0

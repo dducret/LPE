@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_content_restriction
-resource: crates/lpe-exchange/src/tests/mod.rs#L15553-L15561
+resource: crates/lpe-exchange/src/tests/mod.rs#L15610-L15618
 visibility: private
 generated:
   by: okf-rs/0.3.0

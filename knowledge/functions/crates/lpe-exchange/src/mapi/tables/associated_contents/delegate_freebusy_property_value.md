@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delegate_freebusy_property_value
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L1035-L1108
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L980-L1053
 generated:
   by: okf-rs/0.3.0
 relationships:

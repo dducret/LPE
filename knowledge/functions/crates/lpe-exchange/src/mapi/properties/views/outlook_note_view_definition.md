@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_note_view_definition
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L496-L524
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L485-L513
 visibility: private
 generated:
   by: okf-rs/0.3.0

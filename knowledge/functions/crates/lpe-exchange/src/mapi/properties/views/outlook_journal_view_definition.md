@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_journal_view_definition
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L526-L564
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L515-L553
 visibility: private
 generated:
   by: okf-rs/0.3.0

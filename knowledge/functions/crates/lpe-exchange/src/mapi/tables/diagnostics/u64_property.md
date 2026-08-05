@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: u64_property
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L346-L351
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L345-L350
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_associated_config_row_with_mailbox_guid
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L142-L155
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L141-L154
 generated:
   by: okf-rs/0.3.0
 relationships:

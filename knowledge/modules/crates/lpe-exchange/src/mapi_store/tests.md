@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1-L3494
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1-L3490
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -48,7 +48,7 @@ relationships:
 - [modeled_virtual_associated_config_identity_opens_via_dynamic_id](../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/modeled_virtual_associated_config_identity_opens_via_dynamic_id.md)
 - [empty_conversation_action_settings_exposes_no_synthetic_rows](../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/empty_conversation_action_settings_exposes_no_synthetic_rows.md)
 - [empty_common_views_exposes_no_synthetic_fai](../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/empty_common_views_exposes_no_synthetic_fai.md)
-- [inbox_default_named_view_is_materialized_for_the_advertised_entry_id](../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/inbox_default_named_view_is_materialized_for_the_advertised_entry_id.md)
+- [folder_default_named_views_do_not_materialize_without_persisted_selection](../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/folder_default_named_views_do_not_materialize_without_persisted_selection.md)
 - [legacy_default_named_view_alias_does_not_materialize_a_message](../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/legacy_default_named_view_alias_does_not_materialize_a_message.md)
 - [sent_common_views_default_view_does_not_materialize_folder_local_message](../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/sent_common_views_default_view_does_not_materialize_folder_local_message.md)
 - [folder_local_default_named_view_ids_are_not_openable](../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/folder_local_default_named_view_ids_are_not_openable.md)

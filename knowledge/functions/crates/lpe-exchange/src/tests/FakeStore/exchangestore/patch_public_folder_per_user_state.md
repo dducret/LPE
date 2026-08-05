@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: patch_public_folder_per_user_state
-resource: crates/lpe-exchange/src/tests/mod.rs#L6614-L6658
+resource: crates/lpe-exchange/src/tests/mod.rs#L6671-L6715
 visibility: private
 generated:
   by: okf-rs/0.3.0

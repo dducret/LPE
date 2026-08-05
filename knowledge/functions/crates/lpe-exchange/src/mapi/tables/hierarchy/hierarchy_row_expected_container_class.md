@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_row_expected_container_class
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L400-L411
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L488-L499
 generated:
   by: okf-rs/0.3.0
 relationships:

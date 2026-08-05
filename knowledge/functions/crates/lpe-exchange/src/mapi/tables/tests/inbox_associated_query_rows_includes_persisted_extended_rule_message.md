@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_query_rows_includes_persisted_extended_rule_message
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6775-L6812
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6688-L6725
 visibility: private
 generated:
   by: okf-rs/0.3.0

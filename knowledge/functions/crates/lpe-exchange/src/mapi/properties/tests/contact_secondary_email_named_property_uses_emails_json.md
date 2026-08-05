@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_secondary_email_named_property_uses_emails_json
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1323-L1368
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1316-L1361
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,12 +1,10 @@
 ---
 type: Rust Function
 title: default_folder_view_entry_id
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L87-L106
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L87-L95
 generated:
   by: okf-rs/0.3.0
 relationships:
-  calls:
-  - functions/crates/lpe-exchange/src/mapi_store/associated_config/outlook_default_folder_named_view_id
   called_by:
   - functions/crates/lpe-exchange/src/mapi/properties/mailbox_property_value_with_context_for_account
   - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_property_value
@@ -17,11 +15,7 @@ relationships:
 
 # Signature
 
-`pub(in crate::mapi) fn default_folder_view_entry_id( mailbox_guid: Uuid, folder_id: u64, _container_class: &str, ) -> Option<MapiValue>`
-
-# Calls
-
-- [outlook_default_folder_named_view_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/outlook_default_folder_named_view_id.md)
+`pub(in crate::mapi) fn default_folder_view_entry_id( _mailbox_guid: Uuid, _folder_id: u64, _container_class: &str, ) -> Option<MapiValue>`
 
 # Called by
 

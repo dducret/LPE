@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_restriction_compares_folder_entry_ids_by_decoded_object_id
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L921-L951
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L914-L944
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_open_folder
-resource: crates/lpe-exchange/src/tests/mod.rs#L14858-L14862
+resource: crates/lpe-exchange/src/tests/mod.rs#L14915-L14919
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -98,7 +98,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_modify_rules_writes_bounded_canonical_sieve_rule
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_update_deferred_action_messages_rejects_without_sieve_side_effect
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_notification_wait_reports_content_event_after_registered_save
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_local_replica_ids_distinguishes_null_and_non_logon_handles
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_does_not_open_unbacked_quick_step_config
@@ -461,7 +461,7 @@ relationships:
 - [mapi_over_http_modify_rules_writes_bounded_canonical_sieve_rule](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_modify_rules_writes_bounded_canonical_sieve_rule.md)
 - [mapi_over_http_update_deferred_action_messages_rejects_without_sieve_side_effect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_update_deferred_action_messages_rejects_without_sieve_side_effect.md)
 - [mapi_over_http_notification_wait_reports_content_event_after_registered_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_notification_wait_reports_content_event_after_registered_save.md)
-- [mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change.md)
+- [mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows.md)
 - [mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests.md)
 - [mapi_over_http_get_local_replica_ids_distinguishes_null_and_non_logon_handles](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_local_replica_ids_distinguishes_null_and_non_logon_handles.md)
 - [mapi_over_http_does_not_open_unbacked_quick_step_config](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_does_not_open_unbacked_quick_step_config.md)

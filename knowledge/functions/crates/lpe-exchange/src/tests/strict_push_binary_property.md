@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_push_binary_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L14363-L14367
+resource: crates/lpe-exchange/src/tests/mod.rs#L14420-L14424
 visibility: private
 generated:
   by: okf-rs/0.3.0

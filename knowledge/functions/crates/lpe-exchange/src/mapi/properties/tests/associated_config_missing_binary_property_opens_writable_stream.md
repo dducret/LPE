@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_missing_binary_property_opens_writable_stream
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6072-L6196
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6065-L6189
 visibility: private
 generated:
   by: okf-rs/0.3.0

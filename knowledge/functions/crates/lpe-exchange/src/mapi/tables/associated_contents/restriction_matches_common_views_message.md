@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: restriction_matches_common_views_message
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L391-L416
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L336-L361
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_active_table_without_registration_replays_later_change
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4321-L4420
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4417-L4516
 visibility: private
 generated:
   by: okf-rs/0.3.0

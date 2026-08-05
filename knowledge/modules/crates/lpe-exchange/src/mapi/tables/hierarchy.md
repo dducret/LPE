@@ -1,12 +1,14 @@
 ---
 type: Rust Module
 title: hierarchy
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L1-L701
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L1-L789
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/super
+  - external/crate-mapi-notifications-mapinotificationevent-mapinotificationkind
+  - external/crate-mapi-wire-mapinotificationeventmask
   - external/crate-mapi-store-mapipublicfolder
   member_of:
   - packages/crates/lpe-exchange
@@ -18,6 +20,8 @@ relationships:
 - [hierarchy_rows](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_rows.md)
 - [hierarchy_rows_excluding_deleted](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_rows_excluding_deleted.md)
 - [hierarchy_table_rows_excluding_deleted](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_rows_excluding_deleted.md)
+- [HierarchyTableRowModified](../../../../../../classes/crates/lpe-exchange/src/mapi/tables/hierarchy/HierarchyTableRowModified.md)
+- [hierarchy_table_row_modified](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified.md)
 - [hierarchy_depth_folder_ids_excluding_deleted](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_depth_folder_ids_excluding_deleted.md)
 - [sort_hierarchy_rows](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/sort_hierarchy_rows.md)
 - [hierarchy_row_display_name](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_display_name.md)
@@ -40,6 +44,8 @@ relationships:
 # Imports
 
 - `super::*`
+- `crate::mapi::notifications::{MapiNotificationEvent, MapiNotificationKind}`
+- `crate::mapi::wire::MapiNotificationEventMask`
 - `crate::mapi_store::MapiPublicFolder`
 
 # Member of

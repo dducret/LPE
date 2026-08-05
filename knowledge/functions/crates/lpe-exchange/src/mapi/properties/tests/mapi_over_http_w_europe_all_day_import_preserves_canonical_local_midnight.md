@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_w_europe_all_day_import_preserves_canonical_local_midnight
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4039-L4074
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4032-L4067
 visibility: private
 generated:
   by: okf-rs/0.3.0

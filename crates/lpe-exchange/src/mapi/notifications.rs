@@ -356,6 +356,33 @@ mod tests {
     }
 
     #[test]
+    fn hierarchy_table_row_modified_notification_encodes_current_row() {
+        let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
+        let changed_folder_id = 0x0000_0000_0005_0001;
+        let insert_after_folder_id = 0x0000_0000_0004_0001;
+        let row_data = vec![0, 0x11, 0x22];
+
+        let response = rop_hierarchy_table_row_modified_response(
+            &identity_codec,
+            3,
+            1,
+            changed_folder_id,
+            insert_after_folder_id,
+            &row_data,
+        )
+        .expect("short hierarchy row notification serializes");
+
+        let mut expected = vec![0x2A, 0x03, 0, 0, 0, 0x01];
+        expected.extend_from_slice(&0x0100u16.to_le_bytes());
+        expected.extend_from_slice(&0x0005u16.to_le_bytes());
+        expected.extend_from_slice(&wire_id_bytes_from_object_id(changed_folder_id).unwrap());
+        expected.extend_from_slice(&wire_id_bytes_from_object_id(insert_after_folder_id).unwrap());
+        expected.extend_from_slice(&(row_data.len() as u16).to_le_bytes());
+        expected.extend_from_slice(&row_data);
+        assert_eq!(response, expected);
+    }
+
+    #[test]
     fn new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags() {
         let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
         let event = MapiNotificationEvent::canonical(
@@ -623,6 +650,29 @@ pub(in crate::mapi) fn rop_notify_response(
     write_u32(&mut response, notification_handle);
     response.push(logon_id);
     append_notification_data(&mut response, identity_codec, event);
+    Some(response)
+}
+
+/// [MS-OXCNOTIF] section 2.2.1.4.1.2: hierarchy TableRowModified uses two
+/// Folder IDs and a PropertyRow. It has neither the message nor search flags.
+pub(in crate::mapi) fn rop_hierarchy_table_row_modified_response(
+    identity_codec: &crate::mapi::identity::MapiIdentityCodec,
+    notification_handle: u32,
+    logon_id: u8,
+    changed_folder_id: u64,
+    insert_after_folder_id: u64,
+    row_data: &[u8],
+) -> Option<Vec<u8>> {
+    let row_data_size = u16::try_from(row_data.len()).ok()?;
+    let mut response = vec![0x2A];
+    write_u32(&mut response, notification_handle);
+    response.push(logon_id);
+    write_u16(&mut response, 0x0100);
+    write_u16(&mut response, 0x0005);
+    append_wire_id(&mut response, identity_codec, changed_folder_id);
+    append_wire_id(&mut response, identity_codec, insert_after_folder_id);
+    write_u16(&mut response, row_data_size);
+    response.extend_from_slice(row_data);
     Some(response)
 }
 

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: conversation_action_settings_find_row_honors_restriction
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6015-L6058
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5937-L5980
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,13 +1,15 @@
 ---
 type: Rust Function
 title: mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4205-L4318
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4205-L4414
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/test_mapi_message_id
+  - functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_identity_codec_for_test
+  - functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/actual_object_id
   - functions/crates/lpe-exchange/src/tests/mapi_headers
   - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
@@ -16,6 +18,9 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/execute_body
   - functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response
   - functions/crates/lpe-exchange/src/tests/response_bytes
+  - functions/crates/lpe-exchange/src/tests/mapi_wire_id_bytes
+  - functions/crates/lpe-core/src/sieve/Parser/expect
+  - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/position
 ---
 
 # Signature
@@ -25,6 +30,8 @@ relationships:
 # Calls
 
 - [test_mapi_message_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_message_id.md)
+- [load_mapi_identity_codec_for_test](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_identity_codec_for_test.md)
+- [actual_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/actual_object_id.md)
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
 - [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
@@ -33,3 +40,6 @@ relationships:
 - [execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/execute_body.md)
 - [response_rops_from_execute_response](../../../../../../../functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response.md)
 - [response_bytes](../../../../../../../functions/crates/lpe-exchange/src/tests/response_bytes.md)
+- [mapi_wire_id_bytes](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_wire_id_bytes.md)
+- [expect](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/expect.md)
+- [position](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/position.md)

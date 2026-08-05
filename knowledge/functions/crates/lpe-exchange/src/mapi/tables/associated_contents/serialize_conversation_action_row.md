@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_conversation_action_row
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L92-L104
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L91-L103
 generated:
   by: okf-rs/0.3.0
 relationships:

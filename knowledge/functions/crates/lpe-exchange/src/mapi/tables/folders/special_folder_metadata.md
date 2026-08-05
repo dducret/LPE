@@ -6,7 +6,6 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
-  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/default_folder_associated_named_view
   - functions/crates/lpe-exchange/src/mapi/tables/folders/folder_message_class
   - functions/crates/lpe-exchange/src/mapi/tables/folders/advertised_special_folder_id_for_create
   - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_change_number
@@ -22,7 +21,6 @@ relationships:
 
 # Called by
 
-- [default_folder_associated_named_view](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/default_folder_associated_named_view.md)
 - [folder_message_class](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/folder_message_class.md)
 - [advertised_special_folder_id_for_create](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/advertised_special_folder_id_for_create.md)
 - [serialize_advertised_special_folder_row_with_counts_and_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_change_number.md)

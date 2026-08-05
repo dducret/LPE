@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_find_row_followup_uses_the_original_rowset
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6376-L6511
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6298-L6433
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_yearly_recurrence_projects_back_to_mapi_binary_with_month
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4646-L4670
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4639-L4663
 visibility: private
 generated:
   by: okf-rs/0.3.0

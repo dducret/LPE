@@ -1019,6 +1019,63 @@ async fn mapi_associated_config_import_assigns_missing_creation_and_keeps_it_sta
 }
 
 #[tokio::test]
+async fn mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let canonical_id = Uuid::parse_str("fb621bac-7c5d-432b-b1a0-bdcf8f0912f8").unwrap();
+    let reservation_start = fixture
+        .storage
+        .reserve_mapi_local_replica_ids(fixture.account_id, 0x0100)
+        .await
+        .unwrap();
+    let source_key = crate::mapi::identity::source_key_for_object_id(
+        crate::mapi::identity::mapi_store_id(reservation_start + 0x26),
+    );
+    let change_key = vec![
+        0xd0, 0x79, 0x1c, 0xae, 0xe9, 0x36, 0x46, 0x42, 0xbd, 0xce, 0xa2, 0xdc, 0x70, 0x9b, 0x3c,
+        0x7c, 0x00, 0x00, 0x04, 0x16,
+    ];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+
+    fixture
+        .storage
+        .commit_mapi_associated_config_import(crate::store::CommitMapiAssociatedConfigImportInput {
+            config: crate::store::UpsertMapiAssociatedConfigInput {
+                id: Some(canonical_id),
+                account_id: fixture.account_id,
+                folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+                message_class: "IPM.Configuration.Calendar".to_string(),
+                subject: "IPM.Configuration.Calendar".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+            identity: crate::store::MapiFaiImportedIdentity {
+                source_key,
+                change_key,
+                predecessor_change_list,
+                last_modification_time: 0x01dd_1c6d_3863_cae0,
+            },
+            creation_time: None,
+            fail_on_conflict: false,
+        })
+        .await
+        .unwrap();
+
+    let snapshot = fixture
+        .storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await
+        .unwrap();
+    assert!(snapshot
+        .associated_config_messages_for_folder(crate::mapi::identity::CALENDAR_FOLDER_ID)
+        .iter()
+        .any(|message| message.canonical_id == canonical_id));
+
+    fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
 async fn mapi_navigation_shortcut_upsert_preserves_distinct_message_rows() {
     let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
         return;

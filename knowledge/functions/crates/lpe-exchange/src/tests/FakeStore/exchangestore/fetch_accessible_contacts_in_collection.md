@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_contacts_in_collection
-resource: crates/lpe-exchange/src/tests/mod.rs#L7653-L7667
+resource: crates/lpe-exchange/src/tests/mod.rs#L7710-L7724
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_ews_searchable_mailboxes
-resource: crates/lpe-exchange/src/tests/mod.rs#L5113-L5138
+resource: crates/lpe-exchange/src/tests/mod.rs#L5170-L5195
 visibility: private
 generated:
   by: okf-rs/0.3.0

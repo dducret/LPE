@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: set_ews_hold_mailboxes
-resource: crates/lpe-exchange/src/tests/mod.rs#L5326-L5403
+resource: crates/lpe-exchange/src/tests/mod.rs#L5383-L5460
 visibility: private
 generated:
   by: okf-rs/0.3.0

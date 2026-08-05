@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: virtual_umolk_user_options_reports_optional_properties_absent
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7424-L7456
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7337-L7369
 visibility: private
 generated:
   by: okf-rs/0.3.0

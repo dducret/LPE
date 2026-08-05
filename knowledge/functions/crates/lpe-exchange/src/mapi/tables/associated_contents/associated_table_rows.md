@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_table_rows
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L173-L186
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L171-L184
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -13,8 +13,8 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/diagnostics/outlook_bootstrap_row_invariant_summaries
   - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner
   - functions/crates/lpe-exchange/src/mapi/tables/tests/suggested_contacts_associated_table_does_not_expose_folder_default_named_view
-  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_exposes_folder_local_default_named_view_for_exact_lookup
-  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_exposes_folder_local_default_named_view_without_restriction
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_omits_unpersisted_default_named_view_for_exact_lookup
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_omits_unpersisted_default_named_view_without_restriction
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_exact_named_view_find_row_respects_existing_table_restriction
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_greater_than_restriction_uses_normal_property_semantics
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_content_restriction_projects_persisted_configs
@@ -39,8 +39,8 @@ relationships:
 - [outlook_bootstrap_row_invariant_summaries](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/diagnostics/outlook_bootstrap_row_invariant_summaries.md)
 - [rop_query_rows_response_inner](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner.md)
 - [suggested_contacts_associated_table_does_not_expose_folder_default_named_view](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/suggested_contacts_associated_table_does_not_expose_folder_default_named_view.md)
-- [inbox_associated_table_exposes_folder_local_default_named_view_for_exact_lookup](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_exposes_folder_local_default_named_view_for_exact_lookup.md)
-- [inbox_associated_table_exposes_folder_local_default_named_view_without_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_exposes_folder_local_default_named_view_without_restriction.md)
+- [inbox_associated_table_omits_unpersisted_default_named_view_for_exact_lookup](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_omits_unpersisted_default_named_view_for_exact_lookup.md)
+- [inbox_associated_table_omits_unpersisted_default_named_view_without_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_table_omits_unpersisted_default_named_view_without_restriction.md)
 - [inbox_associated_exact_named_view_find_row_respects_existing_table_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_exact_named_view_find_row_respects_existing_table_restriction.md)
 - [inbox_associated_greater_than_restriction_uses_normal_property_semantics](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_greater_than_restriction_uses_normal_property_semantics.md)
 - [inbox_associated_content_restriction_projects_persisted_configs](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_content_restriction_projects_persisted_configs.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_query_rows_prefix_configuration_suppresses_virtual_elc
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7291-L7322
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7204-L7235
 visibility: private
 generated:
   by: okf-rs/0.3.0

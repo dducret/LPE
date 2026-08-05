@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: attachment_rows_use_by_value_method
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9667-L9681
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9580-L9594
 visibility: private
 generated:
   by: okf-rs/0.3.0

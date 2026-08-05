@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_projects_persisted_default_mail_favorites_in_startup_table
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1922-L2025
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1918-L2021
 visibility: private
 generated:
   by: okf-rs/0.3.0

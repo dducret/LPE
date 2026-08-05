@@ -35,7 +35,7 @@ relationships:
   - external/pub-in-crate-mapi-use-folders
   - external/pub-in-crate-mapi-use-hierarchy-special-folder-property-value-with-change-number
   - external/hierarchy
-  - external/pub-in-crate-mapi-use-hierarchy-hierarchy-depth-folder-ids-excluding-deleted-mailbox-shadowed-by-active-outlook-special-folder-special-folder-property-value
+  - external/pub-in-crate-mapi-use-hierarchy-hierarchy-depth-folder-ids-excluding-deleted-hierarchy-table-row-modified-mailbox-shadowed-by-active-outlook-special-folder-special-folder-property-value
   - external/pub-in-crate-mapi-use-pending
   - external/pub-in-crate-mapi-use-public-folders
   - external/query
@@ -97,7 +97,7 @@ relationships:
 - `pub(in crate::mapi) use hierarchy::special_folder_property_value_with_change_number`
 - `hierarchy::*`
 - `pub(in crate::mapi) use hierarchy::{
-    hierarchy_depth_folder_ids_excluding_deleted,
+    hierarchy_depth_folder_ids_excluding_deleted, hierarchy_table_row_modified,
     mailbox_shadowed_by_active_outlook_special_folder, special_folder_property_value,
 }`
 - `pub(in crate::mapi) use pending::*`

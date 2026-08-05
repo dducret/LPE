@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_free_appointment_is_not_imported_as_cancelled
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4005-L4036
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3998-L4029
 visibility: private
 generated:
   by: okf-rs/0.3.0

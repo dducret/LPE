@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_property_value_with_mailbox_guid
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L539-L856
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L484-L801
 generated:
   by: okf-rs/0.3.0
 relationships:

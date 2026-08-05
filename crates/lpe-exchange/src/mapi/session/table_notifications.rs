@@ -164,10 +164,12 @@ impl MapiSession {
                     _ => {}
                 }
             }
+            // Exchange delivers an explicit subscription (for example NewMail)
+            // before the automatic table invalidation for the same change.
             event_deliveries.sort_unstable_by_key(|(handle, _logon_id, delivery, table_change)| {
                 (
-                    *handle,
                     *table_change,
+                    *handle,
                     match delivery.kind {
                         MapiNotificationKind::Content => 0,
                         MapiNotificationKind::Hierarchy => 1,
@@ -176,8 +178,21 @@ impl MapiSession {
             });
             let delivery_count_before_event = deliveries.len();
             for (handle, logon_id, delivery, table_change) in event_deliveries {
+                // Basic invalidations can coalesce by table. An informative
+                // child-content hierarchy row must retain its changed folder
+                // identity so two folders changed before one Execute are both
+                // delivered.
+                let changed_hierarchy_row_id = (delivery.kind == MapiNotificationKind::Hierarchy
+                    && delivery.parent_folder_id == Some(delivery.folder_id))
+                .then_some(delivery.message_id)
+                .flatten();
                 if table_change
-                    && !delivered_table_changes.insert((handle, delivery.kind, delivery.folder_id))
+                    && !delivered_table_changes.insert((
+                        handle,
+                        delivery.kind,
+                        delivery.folder_id,
+                        changed_hierarchy_row_id,
+                    ))
                 {
                     continue;
                 }

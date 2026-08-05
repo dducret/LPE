@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_sort_snapshot
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8616-L8637
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8529-L8550
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: query_client_reminders
-resource: crates/lpe-exchange/src/tests/mod.rs#L10651-L10666
+resource: crates/lpe-exchange/src/tests/mod.rs#L10708-L10723
 visibility: private
 generated:
   by: okf-rs/0.3.0

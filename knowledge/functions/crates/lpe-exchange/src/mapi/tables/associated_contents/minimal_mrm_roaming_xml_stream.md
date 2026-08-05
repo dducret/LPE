@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: minimal_mrm_roaming_xml_stream
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L1007-L1009
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L952-L954
 visibility: private
 generated:
   by: okf-rs/0.3.0

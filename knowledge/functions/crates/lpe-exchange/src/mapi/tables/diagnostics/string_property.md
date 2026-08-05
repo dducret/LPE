@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: string_property
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L339-L344
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L338-L343
 visibility: private
 generated:
   by: okf-rs/0.3.0

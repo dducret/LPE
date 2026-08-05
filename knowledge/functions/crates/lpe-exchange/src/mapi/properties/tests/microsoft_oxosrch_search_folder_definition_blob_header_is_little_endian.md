@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxosrch_search_folder_definition_blob_header_is_little_endian
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1021-L1056
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1014-L1049
 visibility: private
 generated:
   by: okf-rs/0.3.0

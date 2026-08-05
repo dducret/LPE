@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: incomplete_message_move_notifications_are_not_serialized
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L533-L573
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L560-L600
 visibility: private
 generated:
   by: okf-rs/0.3.0

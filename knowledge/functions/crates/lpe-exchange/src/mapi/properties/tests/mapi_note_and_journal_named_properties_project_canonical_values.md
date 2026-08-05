@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_note_and_journal_named_properties_project_canonical_values
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2431-L2519
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2424-L2512
 visibility: private
 generated:
   by: okf-rs/0.3.0

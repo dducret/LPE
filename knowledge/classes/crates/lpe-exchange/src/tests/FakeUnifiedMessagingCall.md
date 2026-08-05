@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: FakeUnifiedMessagingCall
-resource: crates/lpe-exchange/src/tests/mod.rs#L3950-L3954
+resource: crates/lpe-exchange/src/tests/mod.rs#L4007-L4011
 visibility: private
 generated:
   by: okf-rs/0.3.0

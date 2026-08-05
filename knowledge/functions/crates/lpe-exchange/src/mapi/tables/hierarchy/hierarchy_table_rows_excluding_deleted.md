@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_table_rows_excluding_deleted
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L131-L182
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L133-L184
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -17,6 +17,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count
   - functions/crates/lpe-exchange/src/mapi/tables/diagnostics/outlook_bootstrap_row_invariant_summaries
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_depth_folder_ids_excluding_deleted
   - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner
   - functions/crates/lpe-exchange/src/mapi/tables/row_keys/table_row_keys
@@ -41,6 +42,7 @@ relationships:
 - [table_position_and_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count.md)
 - [outlook_bootstrap_row_invariant_summaries](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/diagnostics/outlook_bootstrap_row_invariant_summaries.md)
 - [hierarchy_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_rows.md)
+- [hierarchy_table_row_modified](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified.md)
 - [hierarchy_depth_folder_ids_excluding_deleted](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_depth_folder_ids_excluding_deleted.md)
 - [rop_query_rows_response_inner](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner.md)
 - [table_row_keys](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_keys/table_row_keys.md)

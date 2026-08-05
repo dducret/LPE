@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: remove_ews_im_group
-resource: crates/lpe-exchange/src/tests/mod.rs#L7517-L7534
+resource: crates/lpe-exchange/src/tests/mod.rs#L7574-L7591
 visibility: private
 generated:
   by: okf-rs/0.3.0

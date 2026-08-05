@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_bootstrap_row_invariant_summaries
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L4-L175
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L4-L174
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -23,7 +23,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/sorting/common_views_message_id
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/common_views_message_property_value
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows
-  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_row_config
   - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_associated_table_rows
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_row_id
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_row_property_value
@@ -61,7 +60,6 @@ relationships:
 - [common_views_message_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/common_views_message_id.md)
 - [common_views_message_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/common_views_message_property_value.md)
 - [associated_table_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows.md)
-- [associated_table_row_config](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_row_config.md)
 - [sort_associated_table_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_associated_table_rows.md)
 - [associated_table_row_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_row_id.md)
 - [associated_table_row_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_row_property_value.md)

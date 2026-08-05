@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: configuration_special_folder_projects_default_post_message_class
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9592-L9624
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9505-L9537
 visibility: private
 generated:
   by: okf-rs/0.3.0

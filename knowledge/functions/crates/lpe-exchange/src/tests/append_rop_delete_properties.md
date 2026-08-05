@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_delete_properties
-resource: crates/lpe-exchange/src/tests/mod.rs#L15019-L15025
+resource: crates/lpe-exchange/src/tests/mod.rs#L15076-L15082
 visibility: private
 generated:
   by: okf-rs/0.3.0

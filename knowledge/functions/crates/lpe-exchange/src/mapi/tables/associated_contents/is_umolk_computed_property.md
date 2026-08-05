@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_umolk_computed_property
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L876-L917
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L821-L862
 visibility: private
 generated:
   by: okf-rs/0.3.0

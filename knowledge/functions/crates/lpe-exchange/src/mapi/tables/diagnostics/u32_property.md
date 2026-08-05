@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: u32_property
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L353-L359
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L352-L358
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: commit_mapi_folder_hierarchy_change
-resource: crates/lpe-exchange/src/tests/mod.rs#L4812-L4947
+resource: crates/lpe-exchange/src/tests/mod.rs#L4869-L5004
 visibility: private
 generated:
   by: okf-rs/0.3.0

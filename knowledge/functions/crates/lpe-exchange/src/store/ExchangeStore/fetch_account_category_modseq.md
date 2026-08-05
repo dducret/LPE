@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_account_category_modseq
-resource: crates/lpe-exchange/src/store.rs#L451-L457
+resource: crates/lpe-exchange/src/store.rs#L452-L458
 visibility: private
 generated:
   by: okf-rs/0.3.0

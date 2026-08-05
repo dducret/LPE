@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_note_and_journal_inputs_preserve_canonical_fields
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2321-L2390
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2314-L2383
 visibility: private
 generated:
   by: okf-rs/0.3.0

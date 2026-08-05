@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: swapped_todo_data_parser_rejects_placeholder_bytes
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1904-L1912
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1897-L1905
 visibility: private
 generated:
   by: okf-rs/0.3.0

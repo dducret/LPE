@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: associated_config_messages_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1346-L1367
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1338-L1359
 generated:
   by: okf-rs/0.3.0
 relationships:

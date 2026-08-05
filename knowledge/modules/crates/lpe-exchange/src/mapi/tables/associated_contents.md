@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: associated_contents
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L1-L1108
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L1-L1053
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -28,9 +28,7 @@ relationships:
 - [associated_table_rows](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows.md)
 - [associated_table_rows_for_find_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows_for_find_row.md)
 - [associated_table_rows_with_lookup_restriction](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_table_rows_with_lookup_restriction.md)
-- [default_folder_associated_named_view](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/default_folder_associated_named_view.md)
 - [associated_config_visible_in_table](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_visible_in_table.md)
-- [is_inbox_folder_design_default_named_view](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_inbox_folder_design_default_named_view.md)
 - [is_inbox_exact_rule_organizer_restriction](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/is_inbox_exact_rule_organizer_restriction.md)
 - [outlook_configuration_prefix_restriction](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/outlook_configuration_prefix_restriction.md)
 - [serialize_associated_table_property_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_associated_table_property_row.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fake_contact_address_value
-resource: crates/lpe-exchange/src/tests/mod.rs#L4042-L4056
+resource: crates/lpe-exchange/src/tests/mod.rs#L4099-L4113
 visibility: private
 generated:
   by: okf-rs/0.3.0

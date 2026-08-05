@@ -1467,20 +1467,16 @@ fn empty_common_views_exposes_no_synthetic_fai() {
 }
 
 #[test]
-fn inbox_default_named_view_is_materialized_for_the_advertised_entry_id() {
+fn folder_default_named_views_do_not_materialize_without_persisted_selection() {
     let snapshot = MapiMailStoreSnapshot::empty();
     let folder_id = crate::mapi::identity::INBOX_FOLDER_ID;
     let view_id = outlook_default_folder_named_view_id(folder_id);
-    let view = snapshot
+    assert!(snapshot
         .default_folder_named_view_message(folder_id, view_id)
-        .expect("advertised Inbox default view");
-
-    assert_eq!(view.id, view_id);
-    assert_eq!(view.folder_id, folder_id);
-    assert_eq!(view.name, "Compact");
+        .is_none());
     assert!(snapshot
         .named_view_message_for_folder_and_id(folder_id, view_id)
-        .is_some());
+        .is_none());
 
     assert!(snapshot
         .default_folder_named_view_message(

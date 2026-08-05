@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: dispatch
-resource: crates/lpe-exchange/src/mapi/dispatch.rs#L1-L1627
+resource: crates/lpe-exchange/src/mapi/dispatch.rs#L1-L1677
 generated:
   by: okf-rs/0.3.0
 relationships:

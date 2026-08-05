@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_store_identity
-resource: crates/lpe-exchange/src/store.rs#L66-L72
+resource: crates/lpe-exchange/src/store.rs#L67-L73
 visibility: private
 generated:
   by: okf-rs/0.3.0

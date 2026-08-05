@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_associated_find_row_preserves_table_position_for_contact_link_timestamp
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5662-L5761
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5597-L5696
 visibility: private
 generated:
   by: okf-rs/0.3.0

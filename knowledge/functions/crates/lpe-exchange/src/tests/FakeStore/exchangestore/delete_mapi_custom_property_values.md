@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_mapi_custom_property_values
-resource: crates/lpe-exchange/src/tests/mod.rs#L6944-L6969
+resource: crates/lpe-exchange/src/tests/mod.rs#L7001-L7026
 visibility: private
 generated:
   by: okf-rs/0.3.0

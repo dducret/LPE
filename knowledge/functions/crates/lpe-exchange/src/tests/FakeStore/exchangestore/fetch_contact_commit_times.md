@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_contact_commit_times
-resource: crates/lpe-exchange/src/tests/mod.rs#L7691-L7705
+resource: crates/lpe-exchange/src/tests/mod.rs#L7748-L7762
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -85,6 +85,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_inserts_no_defaults
   - functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row
   - functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable
+  - functions/crates/lpe-exchange/src/tests/mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent
   - functions/crates/lpe-exchange/src/tests/mapi_default_calendar_folder_identity_is_persisted
   - functions/crates/lpe-exchange/src/tests/mapi_calendar_event_identity_survives_restart_style_store_reload
   - functions/crates/lpe-exchange/src/tests/mapi_full_snapshot_loads_messages_without_search_index_query
@@ -178,6 +179,7 @@ relationships:
 - [mapi_inbox_associated_config_bootstrap_inserts_no_defaults](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_inserts_no_defaults.md)
 - [mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row.md)
 - [mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable.md)
+- [mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent.md)
 - [mapi_default_calendar_folder_identity_is_persisted](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_default_calendar_folder_identity_is_persisted.md)
 - [mapi_calendar_event_identity_survives_restart_style_store_reload](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_calendar_event_identity_survives_restart_style_store_reload.md)
 - [mapi_full_snapshot_loads_messages_without_search_index_query](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_full_snapshot_loads_messages_without_search_index_query.md)

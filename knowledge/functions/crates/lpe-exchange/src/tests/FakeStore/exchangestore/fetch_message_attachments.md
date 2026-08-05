@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_message_attachments
-resource: crates/lpe-exchange/src/tests/mod.rs#L11037-L11050
+resource: crates/lpe-exchange/src/tests/mod.rs#L11094-L11107
 visibility: private
 generated:
   by: okf-rs/0.3.0

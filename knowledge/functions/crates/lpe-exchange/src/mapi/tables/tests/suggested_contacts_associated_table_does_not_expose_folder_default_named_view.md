@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: suggested_contacts_associated_table_does_not_expose_folder_default_named_view
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5773-L5789
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5708-L5724
 visibility: private
 generated:
   by: okf-rs/0.3.0

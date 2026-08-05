@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_table_rows_for_find_row
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L188-L202
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L186-L200
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_lineage
-resource: crates/lpe-exchange/src/tests/mod.rs#L3495-L3795
+resource: crates/lpe-exchange/src/tests/mod.rs#L3552-L3852
 visibility: private
 generated:
   by: okf-rs/0.3.0

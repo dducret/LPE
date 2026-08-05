@@ -465,6 +465,7 @@
 - [CategorizedTableRow](../classes/crates/lpe-exchange/src/mapi/tables/contents/CategorizedTableRow.md) — Rust Struct
 - [DeletedItemsContentRow](../classes/crates/lpe-exchange/src/mapi/tables/deleted_items/DeletedItemsContentRow.md) — Rust Enum
 - [HierarchyRow](../classes/crates/lpe-exchange/src/mapi/tables/hierarchy/HierarchyRow.md) — Rust Enum
+- [HierarchyTableRowModified](../classes/crates/lpe-exchange/src/mapi/tables/hierarchy/HierarchyTableRowModified.md) — Rust Struct
 - [MapiRecipient](../classes/crates/lpe-exchange/src/mapi/tables/recipients/MapiRecipient.md) — Rust Struct
 - [SearchContentRow](../classes/crates/lpe-exchange/src/mapi/tables/search_folders/SearchContentRow.md) — Rust Enum
 - [MapiEndpoint](../classes/crates/lpe-exchange/src/mapi/transport/MapiEndpoint.md) — Rust Enum

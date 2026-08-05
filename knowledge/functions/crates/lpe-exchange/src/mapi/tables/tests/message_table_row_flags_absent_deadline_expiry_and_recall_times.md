@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_table_row_flags_absent_deadline_expiry_and_recall_times
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8712-L8745
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8625-L8658
 visibility: private
 generated:
   by: okf-rs/0.3.0

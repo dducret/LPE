@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_ipm_subtree_ost_id
-resource: crates/lpe-exchange/src/tests/mod.rs#L7021-L7027
+resource: crates/lpe-exchange/src/tests/mod.rs#L7078-L7084
 visibility: private
 generated:
   by: okf-rs/0.3.0

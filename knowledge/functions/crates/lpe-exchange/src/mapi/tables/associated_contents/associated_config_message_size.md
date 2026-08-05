@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_message_size
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L468-L475
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L413-L420
 visibility: private
 generated:
   by: okf-rs/0.3.0

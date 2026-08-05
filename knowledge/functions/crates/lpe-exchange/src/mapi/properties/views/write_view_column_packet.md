@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_view_column_packet
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L655-L701
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L644-L690
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_projection_keeps_meeting_state_after_all_attendees_are_removed
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3850-L3900
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3843-L3893
 visibility: private
 generated:
   by: okf-rs/0.3.0

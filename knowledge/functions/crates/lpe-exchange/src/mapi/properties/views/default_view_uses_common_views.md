@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_view_uses_common_views
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L108-L113
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L97-L102
 generated:
   by: okf-rs/0.3.0
 relationships:

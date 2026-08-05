@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: view_descriptor_property_tags
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L746-L751
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L735-L740
 generated:
   by: okf-rs/0.3.0
 ---

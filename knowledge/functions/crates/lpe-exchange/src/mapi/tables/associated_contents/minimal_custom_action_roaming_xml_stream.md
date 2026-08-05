@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: minimal_custom_action_roaming_xml_stream
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L995-L997
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L940-L942
 visibility: private
 generated:
   by: okf-rs/0.3.0

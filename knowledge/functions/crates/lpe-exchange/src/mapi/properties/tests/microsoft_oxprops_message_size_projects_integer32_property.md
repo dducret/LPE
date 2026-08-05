@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxprops_message_size_projects_integer32_property
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2170-L2263
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2163-L2256
 visibility: private
 generated:
   by: okf-rs/0.3.0

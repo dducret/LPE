@@ -34,7 +34,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/identity/forgotten_mapi_identity_is_not_mapped
   - functions/crates/lpe-exchange/src/mapi/properties/tests/mailbox_properties_report_real_subfolder_state
   - functions/crates/lpe-exchange/src/mapi/properties/tests/mailbox_properties_report_persisted_search_folder_type
-  - functions/crates/lpe-exchange/src/mapi/properties/tests/inbox_mailbox_properties_advertise_openable_default_view
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/inbox_mailbox_properties_omit_unpersisted_default_view
   - functions/crates/lpe-exchange/src/mapi/properties/tests/sent_mailbox_properties_do_not_advertise_unpersisted_common_view
   - functions/crates/lpe-exchange/src/mapi/properties/tests/contact_restriction_uses_projected_folder_context
   - functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_oxosrch_search_folder_definition_blob_header_is_little_endian
@@ -274,7 +274,7 @@ relationships:
 - [forgotten_mapi_identity_is_not_mapped](../../../../../../functions/crates/lpe-exchange/src/mapi/identity/forgotten_mapi_identity_is_not_mapped.md)
 - [mailbox_properties_report_real_subfolder_state](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/mailbox_properties_report_real_subfolder_state.md)
 - [mailbox_properties_report_persisted_search_folder_type](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/mailbox_properties_report_persisted_search_folder_type.md)
-- [inbox_mailbox_properties_advertise_openable_default_view](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/inbox_mailbox_properties_advertise_openable_default_view.md)
+- [inbox_mailbox_properties_omit_unpersisted_default_view](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/inbox_mailbox_properties_omit_unpersisted_default_view.md)
 - [sent_mailbox_properties_do_not_advertise_unpersisted_common_view](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/sent_mailbox_properties_do_not_advertise_unpersisted_common_view.md)
 - [contact_restriction_uses_projected_folder_context](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/contact_restriction_uses_projected_folder_context.md)
 - [microsoft_oxosrch_search_folder_definition_blob_header_is_little_endian](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_oxosrch_search_folder_definition_blob_header_is_little_endian.md)

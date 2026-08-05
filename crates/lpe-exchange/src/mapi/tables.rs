@@ -68,7 +68,7 @@ pub(in crate::mapi) use folders::*;
 pub(in crate::mapi) use hierarchy::special_folder_property_value_with_change_number;
 use hierarchy::*;
 pub(in crate::mapi) use hierarchy::{
-    hierarchy_depth_folder_ids_excluding_deleted,
+    hierarchy_depth_folder_ids_excluding_deleted, hierarchy_table_row_modified,
     mailbox_shadowed_by_active_outlook_special_folder, special_folder_property_value,
 };
 pub(in crate::mapi) use pending::*;

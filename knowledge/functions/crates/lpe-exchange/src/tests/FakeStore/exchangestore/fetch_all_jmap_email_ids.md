@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_all_jmap_email_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L10886-L10902
+resource: crates/lpe-exchange/src/tests/mod.rs#L10943-L10959
 visibility: private
 generated:
   by: okf-rs/0.3.0

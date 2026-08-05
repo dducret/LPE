@@ -28,6 +28,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/wlink_ordinal_bytes
   - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_move_copy_display_name
   - functions/crates/lpe-exchange/src/mapi/tables/controls/rop_seek_row_bookmark_response
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified
   - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_string8_value
   - functions/crates/lpe-exchange/src/mapi/tables/tests/captured_common_views_query_rows_flags_heterogeneous_missing_columns
   - functions/crates/lpe-exchange/src/mapi/tables/tests/utf16_position
@@ -53,6 +54,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_reload_cached_information_returns_pending_message_summary
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1940_notifies_the_active_inbox_table
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_get_matches_ranks_distribution_list_exact_smtp_first
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves_self
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_named_property_create_keeps_colliding_property_sets_bijective
@@ -121,6 +123,7 @@ relationships:
 - [wlink_ordinal_bytes](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/wlink_ordinal_bytes.md)
 - [folder_move_copy_display_name](../../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/folder_move_copy_display_name.md)
 - [rop_seek_row_bookmark_response](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/controls/rop_seek_row_bookmark_response.md)
+- [hierarchy_table_row_modified](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified.md)
 - [write_query_rows_string8_value](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_query_rows_string8_value.md)
 - [captured_common_views_query_rows_flags_heterogeneous_missing_columns](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/captured_common_views_query_rows_flags_heterogeneous_missing_columns.md)
 - [utf16_position](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/utf16_position.md)
@@ -146,6 +149,7 @@ relationships:
 - [mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id](../../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id.md)
 - [mapi_over_http_reload_cached_information_returns_pending_message_summary](../../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_reload_cached_information_returns_pending_message_summary.md)
 - [mapi_over_http_run_1940_notifies_the_active_inbox_table](../../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1940_notifies_the_active_inbox_table.md)
+- [mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows](../../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows.md)
 - [mapi_over_http_nspi_get_matches_ranks_distribution_list_exact_smtp_first](../../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_get_matches_ranks_distribution_list_exact_smtp_first.md)
 - [mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves_self](../../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves_self.md)
 - [mapi_over_http_named_property_create_keeps_colliding_property_sets_bijective](../../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_named_property_create_keeps_colliding_property_sets_bijective.md)

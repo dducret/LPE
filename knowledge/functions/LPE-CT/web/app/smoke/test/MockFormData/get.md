@@ -449,6 +449,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/controls/rop_create_bookmark_response
   - functions/crates/lpe-exchange/src/mapi/tables/controls/rop_seek_row_bookmark_response
   - functions/crates/lpe-exchange/src/mapi/tables/controls/seek_row_bookmark_request_is_valid
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified
   - functions/crates/lpe-exchange/src/mapi/tables/pending/navigation_shortcut_from_mapi_properties
   - functions/crates/lpe-exchange/src/mapi/tables/pending/navigation_shortcut_property_by_id
   - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_note_row
@@ -1426,6 +1427,7 @@ relationships:
 - [rop_create_bookmark_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/controls/rop_create_bookmark_response.md)
 - [rop_seek_row_bookmark_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/controls/rop_seek_row_bookmark_response.md)
 - [seek_row_bookmark_request_is_valid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/controls/seek_row_bookmark_request_is_valid.md)
+- [hierarchy_table_row_modified](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified.md)
 - [navigation_shortcut_from_mapi_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/navigation_shortcut_from_mapi_properties.md)
 - [navigation_shortcut_property_by_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/navigation_shortcut_property_by_id.md)
 - [serialize_pending_note_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_note_row.md)

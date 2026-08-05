@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: captured_calendar_fai_terminal_window_contains_only_canonical_configs
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7075-L7164
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6988-L7077
 visibility: private
 generated:
   by: okf-rs/0.3.0

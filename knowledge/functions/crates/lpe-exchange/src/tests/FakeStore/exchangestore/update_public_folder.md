@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_public_folder
-resource: crates/lpe-exchange/src/tests/mod.rs#L6235-L6266
+resource: crates/lpe-exchange/src/tests/mod.rs#L6292-L6323
 visibility: private
 generated:
   by: okf-rs/0.3.0

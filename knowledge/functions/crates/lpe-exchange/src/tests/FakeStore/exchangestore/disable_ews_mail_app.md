@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: disable_ews_mail_app
-resource: crates/lpe-exchange/src/tests/mod.rs#L5550-L5575
+resource: crates/lpe-exchange/src/tests/mod.rs#L5607-L5632
 visibility: private
 generated:
   by: okf-rs/0.3.0

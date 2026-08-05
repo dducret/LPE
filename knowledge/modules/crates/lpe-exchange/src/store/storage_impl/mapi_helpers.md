@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mapi_helpers
-resource: crates/lpe-exchange/src/store/storage_impl/mapi_helpers.rs#L1-L886
+resource: crates/lpe-exchange/src/store/storage_impl/mapi_helpers.rs#L1-L887
 generated:
   by: okf-rs/0.3.0
 relationships:

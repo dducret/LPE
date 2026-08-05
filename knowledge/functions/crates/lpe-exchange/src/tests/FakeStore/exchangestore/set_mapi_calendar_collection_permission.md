@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: set_mapi_calendar_collection_permission
-resource: crates/lpe-exchange/src/tests/mod.rs#L7252-L7313
+resource: crates/lpe-exchange/src/tests/mod.rs#L7309-L7370
 visibility: private
 generated:
   by: okf-rs/0.3.0

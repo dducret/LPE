@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_table_property_tags
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L416-L421
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L415-L420
 generated:
   by: okf-rs/0.3.0
 ---

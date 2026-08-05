@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_full_snapshot_never_truncates_mailbox_contents_for_ics
-resource: crates/lpe-exchange/src/tests/mod.rs#L2346-L2378
+resource: crates/lpe-exchange/src/tests/mod.rs#L2403-L2435
 visibility: private
 generated:
   by: okf-rs/0.3.0

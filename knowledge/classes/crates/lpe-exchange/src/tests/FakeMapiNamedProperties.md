@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: FakeMapiNamedProperties
-resource: crates/lpe-exchange/src/tests/mod.rs#L3963-L3966
+resource: crates/lpe-exchange/src/tests/mod.rs#L4020-L4023
 visibility: private
 generated:
   by: okf-rs/0.3.0

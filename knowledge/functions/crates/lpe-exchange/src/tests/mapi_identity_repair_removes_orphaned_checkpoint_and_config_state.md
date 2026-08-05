@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_identity_repair_removes_orphaned_checkpoint_and_config_state
-resource: crates/lpe-exchange/src/tests/mod.rs#L2735-L3336
+resource: crates/lpe-exchange/src/tests/mod.rs#L2792-L3393
 visibility: private
 generated:
   by: okf-rs/0.3.0

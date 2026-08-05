@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: response_bytes
-resource: crates/lpe-exchange/src/tests/mod.rs#L12429-L12435
+resource: crates/lpe-exchange/src/tests/mod.rs#L12486-L12492
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -48,7 +48,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_register_notification_from_empty_change_log_observes_later_new_mail_with_exchange_zero_message_flags
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1940_notifies_the_active_inbox_table
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_without_registration_replays_later_change
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_matches_uses_complete_utf16_lookup_value
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_replays_outlook_contact_sync_import_then_save
@@ -234,7 +234,7 @@ relationships:
 - [mapi_over_http_register_notification_from_empty_change_log_observes_later_new_mail_with_exchange_zero_message_flags](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_register_notification_from_empty_change_log_observes_later_new_mail_with_exchange_zero_message_flags.md)
 - [mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify.md)
 - [mapi_over_http_run_1940_notifies_the_active_inbox_table](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1940_notifies_the_active_inbox_table.md)
-- [mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change.md)
+- [mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows.md)
 - [mapi_over_http_active_table_without_registration_replays_later_change](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_without_registration_replays_later_change.md)
 - [mapi_over_http_get_matches_uses_complete_utf16_lookup_value](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_matches_uses_complete_utf16_lookup_value.md)
 - [mapi_over_http_replays_outlook_contact_sync_import_then_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_replays_outlook_contact_sync_import_then_save.md)

@@ -113,10 +113,9 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_does_not_invent_default_compact_named_view
   - functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_does_not_invent_default_sent_to_named_view
   - functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_matches_mail_wlink_folder_type
-  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_named_view_find_row_flags_missing_configuration_columns
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_exact_virtual_find_row_does_not_inject_a_row
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_aggregation_config
-  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_the_folder_local_default_for_a_broad_startup_lookup
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_does_not_invent_a_default_for_a_broad_startup_lookup
   - functions/crates/lpe-exchange/src/mapi/tables/tests/quick_step_associated_find_row_does_not_return_synthetic_custom_action
   - functions/crates/lpe-exchange/src/mapi/tables/tests/contacts_associated_find_row_preserves_table_position_for_contact_link_timestamp
   - functions/crates/lpe-exchange/src/mapi/tables/tests/empty_conversation_action_settings_find_row_returns_not_found
@@ -246,10 +245,9 @@ relationships:
 - [common_views_find_row_does_not_invent_default_compact_named_view](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_does_not_invent_default_compact_named_view.md)
 - [common_views_find_row_does_not_invent_default_sent_to_named_view](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_does_not_invent_default_sent_to_named_view.md)
 - [common_views_find_row_matches_mail_wlink_folder_type](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_matches_mail_wlink_folder_type.md)
-- [inbox_associated_named_view_find_row_flags_missing_configuration_columns](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_named_view_find_row_flags_missing_configuration_columns.md)
 - [inbox_associated_exact_virtual_find_row_does_not_inject_a_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_exact_virtual_find_row_does_not_inject_a_row.md)
 - [inbox_associated_find_row_returns_not_found_for_unstored_aggregation_config](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_not_found_for_unstored_aggregation_config.md)
-- [inbox_associated_find_row_returns_the_folder_local_default_for_a_broad_startup_lookup](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_returns_the_folder_local_default_for_a_broad_startup_lookup.md)
+- [inbox_associated_find_row_does_not_invent_a_default_for_a_broad_startup_lookup](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_does_not_invent_a_default_for_a_broad_startup_lookup.md)
 - [quick_step_associated_find_row_does_not_return_synthetic_custom_action](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/quick_step_associated_find_row_does_not_return_synthetic_custom_action.md)
 - [contacts_associated_find_row_preserves_table_position_for_contact_link_timestamp](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/contacts_associated_find_row_preserves_table_position_for_contact_link_timestamp.md)
 - [empty_conversation_action_settings_find_row_returns_not_found](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/empty_conversation_action_settings_find_row_returns_not_found.md)

@@ -1350,11 +1350,20 @@ not by itself authorize broad client publication.
   [MS-OXCFOLD] sections 2.2.1.13.1 and 2.2.1.14.1. Notification FolderId and MessageId fields are serialized through
   the authenticated request's scoped identity codec, including an otherwise
   release-only Execute that has registered notification targets; logical
-  default-folder role IDs are never emitted as wire identifiers. The generic
-  mailbox-copy path does not yet produce a durable
+  default-folder role IDs are never emitted as wire identifiers. An active,
+  unrestricted hierarchy table with a prior `RopSetColumns` receives an
+  informative `TableRowModified` payload when a child-content change leaves
+  its containing folder row in the table's current non-count sort order; the
+  payload uses its existing column projection, current aggregate values, and
+  predecessor folder ID; separately changed folder rows are not coalesced.
+  Explicit
+  subscription deliveries, including `NewMail`, are emitted before automatic
+  table notifications from the same canonical change. Restricted hierarchy
+  tables and tables sorted by changing counts retain the basic `TableChanged`
+  fallback. The generic mailbox-copy path does not yet produce a durable
   `copied` change, so it cannot emit `ObjectCopied` until the canonical copy
   identity lifecycle is implemented. Full notification registration, all table
-  row values, and Exchange delivery parity remain deferred.
+  row values for every view shape, and Exchange delivery parity remain deferred.
 
 ## Deferred Surfaces
 
@@ -1521,8 +1530,9 @@ canonical `from` identity.
   uploads that include user-visible message data are canonical message imports,
   not metadata-only reports.
 - Sync-upload saves with `import_associated=true` create or update bounded
-  MAPI associated configuration rows when they target a regular folder. LPE
-  persists and replays those rows through associated contents and FAI content
+  MAPI associated configuration rows when they target a regular folder or a
+  supported virtual parent, including Calendar. LPE preserves those rows across
+  identity repair and replays them through associated contents and FAI content
   sync, including `MetaTagCnsetSeenFAI`, but keeps them out of canonical mail
   storage and all non-MAPI user-visible surfaces.
 - Hierarchy sync emits changed descendant folders of the configured

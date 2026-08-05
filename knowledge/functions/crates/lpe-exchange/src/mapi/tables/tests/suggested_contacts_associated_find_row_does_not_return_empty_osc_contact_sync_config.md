@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: suggested_contacts_associated_find_row_does_not_return_empty_osc_contact_sync_config
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5764-L5770
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5699-L5705
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_ews_delegates
-resource: crates/lpe-exchange/src/tests/mod.rs#L5789-L5802
+resource: crates/lpe-exchange/src/tests/mod.rs#L5846-L5859
 visibility: private
 generated:
   by: okf-rs/0.3.0

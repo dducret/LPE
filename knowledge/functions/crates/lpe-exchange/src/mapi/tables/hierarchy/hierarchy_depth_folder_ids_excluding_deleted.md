@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_depth_folder_ids_excluding_deleted
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L184-L203
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L272-L291
 generated:
   by: okf-rs/0.3.0
 relationships:

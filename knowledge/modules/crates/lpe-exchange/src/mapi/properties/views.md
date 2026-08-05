@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: views
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L1-L794
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L1-L783
 generated:
   by: okf-rs/0.3.0
 relationships:

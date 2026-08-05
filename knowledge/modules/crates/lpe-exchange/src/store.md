@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: store
-resource: crates/lpe-exchange/src/store.rs#L1-L1297
+resource: crates/lpe-exchange/src/store.rs#L1-L1298
 generated:
   by: okf-rs/0.3.0
 relationships:

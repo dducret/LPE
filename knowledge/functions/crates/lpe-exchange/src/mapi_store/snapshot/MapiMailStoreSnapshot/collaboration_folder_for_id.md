@@ -37,7 +37,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/debug/folders/log_calendar_default_folder_lookup_debug
   - functions/crates/lpe-exchange/src/mapi/sync/special_sync_objects_for
   - functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response
-  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/default_folder_associated_named_view
   - functions/crates/lpe-exchange/src/mapi/tables/controls/rop_query_columns_all_response
   - functions/crates/lpe-exchange/src/mapi/tables/counts/folder_message_count
   - functions/crates/lpe-exchange/src/mapi/tables/counts/associated_folder_message_count
@@ -85,7 +84,6 @@ relationships:
 - [log_calendar_default_folder_lookup_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/debug/folders/log_calendar_default_folder_lookup_debug.md)
 - [special_sync_objects_for](../../../../../../../functions/crates/lpe-exchange/src/mapi/sync/special_sync_objects_for.md)
 - [rop_find_row_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response.md)
-- [default_folder_associated_named_view](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/default_folder_associated_named_view.md)
 - [rop_query_columns_all_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/controls/rop_query_columns_all_response.md)
 - [folder_message_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/folder_message_count.md)
 - [associated_folder_message_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/associated_folder_message_count.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: postgres_mapi_sync_checkpoint_ignores_and_refreshes_expired_rows
-resource: crates/lpe-exchange/src/tests/mod.rs#L2609-L2700
+resource: crates/lpe-exchange/src/tests/mod.rs#L2666-L2757
 visibility: private
 generated:
   by: okf-rs/0.3.0

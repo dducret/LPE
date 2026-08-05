@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_row_property_value
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L377-L398
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L465-L486
 generated:
   by: okf-rs/0.3.0
 relationships:

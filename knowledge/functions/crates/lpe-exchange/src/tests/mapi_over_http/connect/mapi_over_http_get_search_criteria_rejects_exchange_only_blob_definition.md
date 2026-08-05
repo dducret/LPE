@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_search_criteria_rejects_exchange_only_blob_definition
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5683-L5735
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5779-L5831
 visibility: private
 generated:
   by: okf-rs/0.3.0

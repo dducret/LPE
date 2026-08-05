@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_common_views_named_view_id
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L115-L120
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L104-L109
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -11,7 +11,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_default_folder_associated_named_view
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_advertised_default_named_view
   - functions/crates/lpe-exchange/src/mapi/properties/views/default_view_uses_common_views
-  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/default_folder_associated_named_view
 ---
 
 # Signature
@@ -25,4 +24,3 @@ relationships:
 - [debug_default_folder_associated_named_view](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_default_folder_associated_named_view.md)
 - [debug_advertised_default_named_view](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_advertised_default_named_view.md)
 - [default_view_uses_common_views](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/default_view_uses_common_views.md)
-- [default_folder_associated_named_view](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/default_folder_associated_named_view.md)

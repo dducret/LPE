@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_mapi_binary_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L14764-L14768
+resource: crates/lpe-exchange/src/tests/mod.rs#L14821-L14825
 visibility: private
 generated:
   by: okf-rs/0.3.0

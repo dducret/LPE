@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: response_rops_from_execute_response
-resource: crates/lpe-exchange/src/tests/mod.rs#L15462-L15466
+resource: crates/lpe-exchange/src/tests/mod.rs#L15519-L15523
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -120,7 +120,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_execute_does_not_notify_for_empty_canonical_poll
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1940_notifies_the_active_inbox_table
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_without_registration_replays_later_change
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_replays_change_committed_during_snapshot
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_long_term_id_round_trips_canonical_replica_ids
@@ -625,7 +625,7 @@ relationships:
 - [mapi_over_http_execute_does_not_notify_for_empty_canonical_poll](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_execute_does_not_notify_for_empty_canonical_poll.md)
 - [mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify.md)
 - [mapi_over_http_run_1940_notifies_the_active_inbox_table](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_run_1940_notifies_the_active_inbox_table.md)
-- [mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change.md)
+- [mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows.md)
 - [mapi_over_http_active_table_without_registration_replays_later_change](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_without_registration_replays_later_change.md)
 - [mapi_over_http_active_table_replays_change_committed_during_snapshot](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_active_table_replays_change_committed_during_snapshot.md)
 - [mapi_over_http_long_term_id_round_trips_canonical_replica_ids](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_long_term_id_round_trips_canonical_replica_ids.md)

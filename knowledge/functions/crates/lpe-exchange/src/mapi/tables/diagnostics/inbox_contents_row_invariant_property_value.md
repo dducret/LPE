@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_contents_row_invariant_property_value
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L177-L189
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L176-L188
 visibility: private
 generated:
   by: okf-rs/0.3.0

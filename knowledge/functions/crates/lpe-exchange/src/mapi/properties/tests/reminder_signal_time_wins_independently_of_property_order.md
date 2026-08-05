@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reminder_signal_time_wins_independently_of_property_order
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3327-L3345
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3320-L3338
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_item_properties_project_outlook_table_identity_columns
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1613-L1672
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1606-L1665
 visibility: private
 generated:
   by: okf-rs/0.3.0

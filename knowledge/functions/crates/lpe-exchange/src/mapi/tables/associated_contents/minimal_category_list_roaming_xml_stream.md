@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: minimal_category_list_roaming_xml_stream
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L1003-L1005
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L948-L950
 visibility: private
 generated:
   by: okf-rs/0.3.0

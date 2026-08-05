@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: contact
-resource: crates/lpe-exchange/src/tests/mod.rs#L4176-L4193
+resource: crates/lpe-exchange/src/tests/mod.rs#L4233-L4250
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_row_parent_id
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L364-L375
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L452-L463
 generated:
   by: okf-rs/0.3.0
 relationships:

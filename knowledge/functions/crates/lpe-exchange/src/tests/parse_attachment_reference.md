@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_attachment_reference
-resource: crates/lpe-exchange/src/tests/mod.rs#L12482-L12490
+resource: crates/lpe-exchange/src/tests/mod.rs#L12539-L12547
 visibility: private
 generated:
   by: okf-rs/0.3.0

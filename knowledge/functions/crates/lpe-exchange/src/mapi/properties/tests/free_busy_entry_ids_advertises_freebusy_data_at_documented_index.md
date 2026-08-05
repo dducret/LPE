@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: free_busy_entry_ids_advertises_freebusy_data_at_documented_index
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2070-L2103
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2063-L2096
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_calendar_view_definition
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L375-L421
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L364-L410
 visibility: private
 generated:
   by: okf-rs/0.3.0

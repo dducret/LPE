@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_backed_internal_note_folders_do_not_advertise_mail_default_view
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L741-L759
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L734-L752
 visibility: private
 generated:
   by: okf-rs/0.3.0

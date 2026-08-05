@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_strict_u32
-resource: crates/lpe-exchange/src/tests/mod.rs#L13532-L13535
+resource: crates/lpe-exchange/src/tests/mod.rs#L13589-L13592
 visibility: private
 generated:
   by: okf-rs/0.3.0

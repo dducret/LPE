@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_inbox_compact_view_definition
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L334-L373
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L323-L362
 visibility: private
 generated:
   by: okf-rs/0.3.0

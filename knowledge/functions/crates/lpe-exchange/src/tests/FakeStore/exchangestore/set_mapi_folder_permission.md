@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: set_mapi_folder_permission
-resource: crates/lpe-exchange/src/tests/mod.rs#L7131-L7191
+resource: crates/lpe-exchange/src/tests/mod.rs#L7188-L7248
 visibility: private
 generated:
   by: okf-rs/0.3.0

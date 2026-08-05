@@ -306,7 +306,7 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
 }
 
 #[test]
-fn session_retains_collaboration_content_change_for_active_root_depth_hierarchy_table_without_counts(
+fn session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts(
 ) {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
@@ -336,44 +336,48 @@ fn session_retains_collaboration_content_change_for_active_root_depth_hierarchy_
         .table_notification_active_handles
         .insert(hierarchy_handle);
 
-    session.record_notification(
-        MapiNotificationEvent::canonical(
-            MapiNotificationKind::Content,
-            MapiNotificationEventMask::ObjectCreated.as_u16(),
-            crate::mapi::identity::CONTACTS_FOLDER_ID,
-            Some(0x0000_0000_0044_0001),
-            None,
-            1,
-            1,
-            None,
-            None,
-            "created".to_string(),
-            None,
-            None,
-            Some("Test contact".to_string()),
-            None,
-        )
-        .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
-    );
+    for (changed_folder_id, subject) in [
+        (crate::mapi::identity::CONTACTS_FOLDER_ID, "Test contact"),
+        (crate::mapi::identity::CALENDAR_FOLDER_ID, "Test event"),
+    ] {
+        session.record_notification(
+            MapiNotificationEvent::canonical(
+                MapiNotificationKind::Content,
+                MapiNotificationEventMask::ObjectCreated.as_u16(),
+                changed_folder_id,
+                Some(0x0000_0000_0044_0001),
+                None,
+                1,
+                1,
+                None,
+                None,
+                "created".to_string(),
+                None,
+                None,
+                Some(subject.to_string()),
+                None,
+            )
+            .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+        );
+    }
 
-    assert_eq!(session.pending_notification_count(), 1);
+    assert_eq!(session.pending_notification_count(), 2);
     let (deliveries, _) = session.take_pending_notification_delivery_batch();
-    assert_eq!(deliveries.len(), 1);
-    assert_eq!(deliveries[0].0, hierarchy_handle);
-    assert_eq!(deliveries[0].1, 1);
-    assert_eq!(deliveries[0].2.kind, MapiNotificationKind::Hierarchy);
-    assert_eq!(
-        deliveries[0].2.event_mask,
-        MapiNotificationEventMask::TableModified.as_u16()
-    );
-    assert_eq!(
-        deliveries[0].2.folder_id,
-        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
-    );
-    assert_eq!(
-        deliveries[0].2.message_id,
-        Some(crate::mapi::identity::CONTACTS_FOLDER_ID)
-    );
+    assert_eq!(deliveries.len(), 2);
+    for changed_folder_id in [
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    ] {
+        assert!(deliveries.iter().any(|(handle, logon_id, event)| {
+            *handle == hierarchy_handle
+                && *logon_id == 1
+                && event.kind == MapiNotificationKind::Hierarchy
+                && event.event_mask == MapiNotificationEventMask::TableModified.as_u16()
+                && event.folder_id == crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
+                && event.parent_folder_id == Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+                && event.message_id == Some(changed_folder_id)
+        }));
+    }
 }
 
 #[test]

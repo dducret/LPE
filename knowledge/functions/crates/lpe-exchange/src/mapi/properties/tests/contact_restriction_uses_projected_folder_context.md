@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_restriction_uses_projected_folder_context
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L863-L894
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L856-L887
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -24,6 +24,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/sync_mailboxes_with_collaboration_counts
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_hierarchy/imported_hierarchy_version
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_fai_identity
+  - functions/crates/lpe-exchange/src/mapi/notifications/rop_hierarchy_table_row_modified_response
   - functions/crates/lpe-exchange/src/mapi/properties/message/rtf_uncompressed_container
   - functions/crates/lpe-exchange/src/mapi/properties/message/mapi_submit_from_email
   - functions/crates/lpe-exchange/src/mapi/properties/message/message_followup_update_from_mapi_values
@@ -103,6 +104,7 @@ relationships:
 - [sync_mailboxes_with_collaboration_counts](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/sync_mailboxes_with_collaboration_counts.md)
 - [imported_hierarchy_version](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_hierarchy/imported_hierarchy_version.md)
 - [imported_fai_identity](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_fai_identity.md)
+- [rop_hierarchy_table_row_modified_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_hierarchy_table_row_modified_response.md)
 - [rtf_uncompressed_container](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/rtf_uncompressed_container.md)
 - [mapi_submit_from_email](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_submit_from_email.md)
 - [message_followup_update_from_mapi_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/message_followup_update_from_mapi_values.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_configuration_stamp
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L1011-L1023
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L956-L968
 visibility: private
 generated:
   by: okf-rs/0.3.0

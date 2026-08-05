@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_mapi_pcl_includes_change_key
-resource: crates/lpe-exchange/src/tests/mod.rs#L4666-L4699
+resource: crates/lpe-exchange/src/tests/mod.rs#L4723-L4756
 visibility: private
 generated:
   by: okf-rs/0.3.0

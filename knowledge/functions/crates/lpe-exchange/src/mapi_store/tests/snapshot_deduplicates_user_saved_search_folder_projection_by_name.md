@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_deduplicates_user_saved_search_folder_projection_by_name
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2769-L2807
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2765-L2803
 visibility: private
 generated:
   by: okf-rs/0.3.0

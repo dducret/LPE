@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_malformed_rop_terminates_current_buffer
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5159-L5166
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5255-L5262
 visibility: private
 generated:
   by: okf-rs/0.3.0

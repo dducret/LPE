@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: has_notification_target
-resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L203-L227
+resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L218-L242
 visibility: private
 generated:
   by: okf-rs/0.3.0

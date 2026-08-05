@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_named_property_tags
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L858-L874
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L803-L819
 generated:
   by: okf-rs/0.3.0
 relationships:

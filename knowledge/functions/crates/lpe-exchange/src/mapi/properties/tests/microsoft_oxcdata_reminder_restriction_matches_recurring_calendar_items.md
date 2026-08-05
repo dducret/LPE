@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxcdata_reminder_restriction_matches_recurring_calendar_items
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2579-L2644
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2572-L2637
 visibility: private
 generated:
   by: okf-rs/0.3.0

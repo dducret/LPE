@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: configuration_uses_xml_stream
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L978-L989
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L923-L934
 visibility: private
 generated:
   by: okf-rs/0.3.0

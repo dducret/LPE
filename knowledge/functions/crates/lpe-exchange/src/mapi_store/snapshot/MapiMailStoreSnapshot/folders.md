@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: folders
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1557-L1559
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1549-L1551
 generated:
   by: okf-rs/0.3.0
 relationships:

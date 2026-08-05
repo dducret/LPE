@@ -56,6 +56,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_associated_config_upsert_preserves_canonical_message_identity
   - functions/crates/lpe-exchange/src/tests/mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects
   - functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable
+  - functions/crates/lpe-exchange/src/tests/mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent
   - functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_upsert_preserves_distinct_message_rows
   - functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_create_preserves_distinct_rows_for_same_target
   - functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_import_commits_content_and_identity_atomically
@@ -125,6 +126,7 @@ relationships:
 - [mapi_associated_config_upsert_preserves_canonical_message_identity](../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_upsert_preserves_canonical_message_identity.md)
 - [mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects](../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects.md)
 - [mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable](../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable.md)
+- [mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent](../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent.md)
 - [mapi_navigation_shortcut_upsert_preserves_distinct_message_rows](../../../../../functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_upsert_preserves_distinct_message_rows.md)
 - [mapi_navigation_shortcut_create_preserves_distinct_rows_for_same_target](../../../../../functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_create_preserves_distinct_rows_for_same_target.md)
 - [mapi_navigation_shortcut_import_commits_content_and_identity_atomically](../../../../../functions/crates/lpe-exchange/src/tests/mapi_navigation_shortcut_import_commits_content_and_identity_atomically.md)

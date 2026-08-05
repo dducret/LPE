@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: count_property
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L361-L363
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L360-L362
 visibility: private
 generated:
   by: okf-rs/0.3.0

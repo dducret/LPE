@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_query_rows_does_not_create_virtual_umolk_user_options
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7385-L7421
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7298-L7334
 visibility: private
 generated:
   by: okf-rs/0.3.0

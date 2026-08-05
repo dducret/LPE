@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_recurrence_rejects_unsupported_shapes
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4307-L4327
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4300-L4320
 visibility: private
 generated:
   by: okf-rs/0.3.0

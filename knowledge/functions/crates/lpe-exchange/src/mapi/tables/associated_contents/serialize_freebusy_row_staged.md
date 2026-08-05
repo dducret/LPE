@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_freebusy_row_staged
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L114-L140
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L113-L139
 generated:
   by: okf-rs/0.3.0
 relationships:

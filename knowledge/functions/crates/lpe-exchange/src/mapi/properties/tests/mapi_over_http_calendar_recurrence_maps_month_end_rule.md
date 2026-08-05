@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_recurrence_maps_month_end_rule
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4273-L4304
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4266-L4297
 visibility: private
 generated:
   by: okf-rs/0.3.0

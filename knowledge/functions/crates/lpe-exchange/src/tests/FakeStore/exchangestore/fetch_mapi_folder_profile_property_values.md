@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_folder_profile_property_values
-resource: crates/lpe-exchange/src/tests/mod.rs#L7041-L7073
+resource: crates/lpe-exchange/src/tests/mod.rs#L7098-L7130
 visibility: private
 generated:
   by: okf-rs/0.3.0

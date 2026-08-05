@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: diagnostics
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L1-L421
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L1-L420
 generated:
   by: okf-rs/0.3.0
 relationships:

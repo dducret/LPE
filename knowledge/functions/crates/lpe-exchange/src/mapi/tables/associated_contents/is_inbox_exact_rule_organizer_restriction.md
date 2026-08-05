@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_inbox_exact_rule_organizer_restriction
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L284-L300
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L244-L260
 visibility: private
 generated:
   by: okf-rs/0.3.0

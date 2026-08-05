@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rops
-resource: crates/lpe-exchange/src/mapi/dispatch.rs#L928-L1624
+resource: crates/lpe-exchange/src/mapi/dispatch.rs#L928-L1674
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -79,8 +79,10 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/matching_notifications
   - functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/record_notification
   - functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/take_pending_notification_delivery_batch
-  - functions/crates/lpe-exchange/src/mapi/notifications/rop_notify_response
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified
+  - functions/crates/lpe-exchange/src/mapi/notifications/rop_hierarchy_table_row_modified_response
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/identity_codec
+  - functions/crates/lpe-exchange/src/mapi/notifications/rop_notify_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/release/log_post_hierarchy_release_events
   - functions/crates/lpe-exchange/src/mapi/dispatch/execute/execute_response_handle_table
   - functions/crates/lpe-exchange/src/mapi/rop/errors/rop_buffer_with_response_spec
@@ -175,8 +177,10 @@ relationships:
 - [matching_notifications](../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/matching_notifications.md)
 - [record_notification](../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/record_notification.md)
 - [take_pending_notification_delivery_batch](../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/take_pending_notification_delivery_batch.md)
-- [rop_notify_response](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_notify_response.md)
+- [hierarchy_table_row_modified](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified.md)
+- [rop_hierarchy_table_row_modified_response](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_hierarchy_table_row_modified_response.md)
 - [identity_codec](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/identity_codec.md)
+- [rop_notify_response](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_notify_response.md)
 - [log_post_hierarchy_release_events](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/release/log_post_hierarchy_release_events.md)
 - [execute_response_handle_table](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute/execute_response_handle_table.md)
 - [rop_buffer_with_response_spec](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/errors/rop_buffer_with_response_spec.md)

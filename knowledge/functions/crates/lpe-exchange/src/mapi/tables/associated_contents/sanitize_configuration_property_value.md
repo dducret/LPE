@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sanitize_configuration_property_value
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L477-L493
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L422-L438
 visibility: private
 generated:
   by: okf-rs/0.3.0

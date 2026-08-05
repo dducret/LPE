@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_search_folder_definition_row_with_mailbox_guid
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L62-L75
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L61-L74
 generated:
   by: okf-rs/0.3.0
 relationships:

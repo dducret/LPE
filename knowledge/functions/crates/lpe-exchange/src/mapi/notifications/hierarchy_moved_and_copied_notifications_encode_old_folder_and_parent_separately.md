@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L441-L492
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L468-L519
 visibility: private
 generated:
   by: okf-rs/0.3.0

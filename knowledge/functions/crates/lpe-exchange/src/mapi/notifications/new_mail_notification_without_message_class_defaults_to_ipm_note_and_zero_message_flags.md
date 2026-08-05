@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L359-L385
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L386-L412
 visibility: private
 generated:
   by: okf-rs/0.3.0

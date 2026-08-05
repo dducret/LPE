@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_debug_binary
-resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L393-L402
+resource: crates/lpe-exchange/src/mapi/tables/diagnostics.rs#L392-L401
 visibility: private
 generated:
   by: okf-rs/0.3.0

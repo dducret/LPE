@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: configuration_roaming_datatypes
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L953-L976
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L898-L921
 visibility: private
 generated:
   by: okf-rs/0.3.0

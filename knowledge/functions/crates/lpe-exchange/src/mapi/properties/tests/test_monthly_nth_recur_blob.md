@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_monthly_nth_recur_blob
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4874-L4890
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4867-L4883
 visibility: private
 generated:
   by: okf-rs/0.3.0

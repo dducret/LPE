@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_normal_message_query_row_summary
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_contact_query_row_summary
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_calendar_event_query_position_summary
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified
   - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/query_rows_property_row_bytes
 ---
 
@@ -31,4 +32,5 @@ relationships:
 - [format_normal_message_query_row_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_normal_message_query_row_summary.md)
 - [format_contact_query_row_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_contact_query_row_summary.md)
 - [format_calendar_event_query_position_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_calendar_event_query_position_summary.md)
+- [hierarchy_table_row_modified](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified.md)
 - [query_rows_property_row_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/query_rows_property_row_bytes.md)

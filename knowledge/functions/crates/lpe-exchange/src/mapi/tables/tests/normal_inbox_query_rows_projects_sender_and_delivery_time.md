@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_inbox_query_rows_projects_sender_and_delivery_time
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9150-L9250
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9063-L9163
 visibility: private
 generated:
   by: okf-rs/0.3.0

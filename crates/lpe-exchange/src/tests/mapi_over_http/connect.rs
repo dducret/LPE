@@ -4202,21 +4202,28 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change() {
+async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows() {
     let folder_id = crate::mapi::identity::INBOX_FOLDER_ID;
     let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
+    let contact_message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999998");
+    let calendar_message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999997");
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 3;
+    inbox.unread_emails = 2;
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            "55555555-5555-5555-5555-555555555555",
-            "inbox",
-            "Inbox",
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
         )])),
         mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
         mapi_notification_polls: Arc::new(Mutex::new(vec![
             MapiNotificationPoll {
                 event_pending: true,
-                cursor: Some(8),
+                cursor: Some(10),
                 events: vec![
                     crate::mapi::notifications::MapiNotificationEvent::canonical(
                         crate::mapi::notifications::MapiNotificationKind::Content,
@@ -4235,6 +4242,40 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change()
                         Some("IPM.Note".to_string()),
                     )
                     .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+                    crate::mapi::notifications::MapiNotificationEvent::canonical(
+                        crate::mapi::notifications::MapiNotificationKind::Content,
+                        0x0004,
+                        crate::mapi::identity::CONTACTS_FOLDER_ID,
+                        Some(contact_message_id),
+                        None,
+                        9,
+                        45,
+                        Some(1),
+                        Some(1),
+                        "created".to_string(),
+                        Some("Contacts".to_string()),
+                        None,
+                        Some("Test contact".to_string()),
+                        Some("IPM.Contact".to_string()),
+                    )
+                    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+                    crate::mapi::notifications::MapiNotificationEvent::canonical(
+                        crate::mapi::notifications::MapiNotificationKind::Content,
+                        0x0004,
+                        crate::mapi::identity::CALENDAR_FOLDER_ID,
+                        Some(calendar_message_id),
+                        None,
+                        10,
+                        46,
+                        Some(1),
+                        Some(1),
+                        "created".to_string(),
+                        Some("Calendar".to_string()),
+                        None,
+                        Some("Test entry".to_string()),
+                        Some("IPM.Appointment".to_string()),
+                    )
+                    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
                 ],
             },
             MapiNotificationPoll {
@@ -4245,6 +4286,17 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change()
         ])),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
+    let scoped_inbox_folder_id = identity_codec.actual_object_id(folder_id).unwrap();
+    let scoped_contacts_folder_id = identity_codec
+        .actual_object_id(crate::mapi::identity::CONTACTS_FOLDER_ID)
+        .unwrap();
+    let scoped_calendar_folder_id = identity_codec
+        .actual_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4305,15 +4357,59 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_inbox_count_change()
     let response_rops = response_rops_from_execute_response(response).await;
 
     // Exchange raw/753 targets the active root hierarchy table as well as the
-    // whole-store NewMail subscription. The table target is not an Inbox
-    // contents-table notification.
-    assert!(contains_bytes(
+    // whole-store NewMail subscription. The hierarchy row notification is
+    // informative, while NewMail is delivered first for the same change.
+    let table_notification_prefix = [0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x05, 0x00];
+    let table_notification_offsets = response_rops
+        .windows(table_notification_prefix.len())
+        .enumerate()
+        .filter_map(|(offset, window)| (window == table_notification_prefix).then_some(offset))
+        .collect::<Vec<_>>();
+    assert_eq!(table_notification_offsets.len(), 3);
+    for expected_folder_id in [
+        scoped_inbox_folder_id,
+        scoped_contacts_folder_id,
+        scoped_calendar_folder_id,
+    ] {
+        assert!(table_notification_offsets.iter().any(|offset| {
+            response_rops[*offset + 10..*offset + 18] == mapi_wire_id_bytes(expected_folder_id)
+        }));
+    }
+    let table_notification_offset = *table_notification_offsets
+        .iter()
+        .find(|offset| {
+            response_rops[**offset + 10..**offset + 18]
+                == mapi_wire_id_bytes(scoped_inbox_folder_id)
+        })
+        .expect("Inbox hierarchy table row notification should be present");
+    let new_mail_prefix = [0x2A, 0x04, 0, 0, 0, 0, 0x02, 0x80];
+    let new_mail_offset = response_rops
+        .windows(new_mail_prefix.len())
+        .position(|window| window == new_mail_prefix)
+        .expect("whole-store NewMail notification should be present");
+    assert!(new_mail_offset < table_notification_offset);
+    assert_eq!(
+        &response_rops[table_notification_offset + 10..table_notification_offset + 18],
+        &mapi_wire_id_bytes(scoped_inbox_folder_id)
+    );
+    let row_data_size_offset = table_notification_offset + 26;
+    let row_data_size = u16::from_le_bytes(
+        response_rops[row_data_size_offset..row_data_size_offset + 2]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let row_data_offset = row_data_size_offset + 2;
+    let row_data = &response_rops[row_data_offset..row_data_offset + row_data_size];
+    assert!(!row_data.is_empty());
+    assert_eq!(row_data[0], 0);
+    assert!(contains_bytes(row_data, &utf16z("Inbox")));
+    assert!(contains_bytes(row_data, &3u32.to_le_bytes()));
+    assert!(contains_bytes(row_data, &2u32.to_le_bytes()));
+    assert!(contains_bytes(&response_rops, &utf16z("Contacts")));
+    assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
+    assert!(!contains_bytes(
         &response_rops,
         &[0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x2A, 0x04, 0, 0, 0, 0, 0x02, 0x80]
     ));
 }
 

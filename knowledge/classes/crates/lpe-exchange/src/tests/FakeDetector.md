@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: FakeDetector
-resource: crates/lpe-exchange/src/tests/mod.rs#L4078-L4080
+resource: crates/lpe-exchange/src/tests/mod.rs#L4135-L4137
 visibility: private
 generated:
   by: okf-rs/0.3.0

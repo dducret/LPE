@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: commit_mapi_associated_config_import
-resource: crates/lpe-exchange/src/tests/mod.rs#L10320-L10482
+resource: crates/lpe-exchange/src/tests/mod.rs#L10377-L10539
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -15,6 +15,7 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/persist_associated_config_message
   - functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable
+  - functions/crates/lpe-exchange/src/tests/mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent
 ---
 
 # Signature
@@ -33,3 +34,4 @@ relationships:
 
 - [persist_associated_config_message](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/persist_associated_config_message.md)
 - [mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable.md)
+- [mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent.md)

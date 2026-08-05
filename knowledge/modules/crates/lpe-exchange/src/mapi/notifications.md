@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: notifications
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L1-L831
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L1-L881
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -40,6 +40,7 @@ relationships:
 - [rop_register_notification_response](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_register_notification_response.md)
 - [register_notification_success_response_matches_microsoft_wire_shape](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/register_notification_success_response_matches_microsoft_wire_shape.md)
 - [new_mail_notification_with_message_id_encodes_exchange_zero_message_flags](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags.md)
+- [hierarchy_table_row_modified_notification_encodes_current_row](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_table_row_modified_notification_encodes_current_row.md)
 - [new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags.md)
 - [object_moved_and_copied_notifications_preserve_source_message_id](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/object_moved_and_copied_notifications_preserve_source_message_id.md)
 - [hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately.md)
@@ -48,6 +49,7 @@ relationships:
 - [incomplete_hierarchy_move_notification_is_not_serialized](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/incomplete_hierarchy_move_notification_is_not_serialized.md)
 - [notification_wait_body](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/notification_wait_body.md)
 - [rop_notify_response](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_notify_response.md)
+- [rop_hierarchy_table_row_modified_response](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_hierarchy_table_row_modified_response.md)
 - [append_notification_data](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/append_notification_data.md)
 - [append_event_object_ids](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/append_event_object_ids.md)
 - [event_object_id](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/event_object_id.md)

@@ -1519,18 +1519,77 @@ where
             .iter()
             .map(|(handle, _logon_id, event)| {
                 format!(
-                    "handle={handle};target={};event=0x{:04x};folder=0x{:016x}",
+                    "handle={handle};target={};kind={:?};event=0x{:04x};folder=0x{:016x};message={};parent={};cursor={};modseq={}",
                     if session.table_notification_active_handles.contains(handle) {
                         "table"
                     } else {
                         "subscription"
                     },
+                    event.kind,
                     event.event_mask,
-                    event.folder_id
+                    event.folder_id,
+                    event
+                        .message_id
+                        .map(|message_id| format!("0x{message_id:016x}"))
+                        .unwrap_or_else(|| "-".to_string()),
+                    event
+                        .parent_folder_id
+                        .map(|parent_folder_id| format!("0x{parent_folder_id:016x}"))
+                        .unwrap_or_else(|| "-".to_string()),
+                    event
+                        .change_cursor
+                        .map(|cursor| cursor.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                    event
+                        .modseq
+                        .map(|modseq| modseq.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
                 )
             })
             .collect::<Vec<_>>()
             .join("|");
+        let mut notification_wire_shapes = Vec::new();
+        for (notification_handle, logon_id, event) in notification_deliveries {
+            let detailed_response = session
+                .handles
+                .get(&notification_handle)
+                .and_then(|table| {
+                    hierarchy_table_row_modified(
+                        table,
+                        &event,
+                        mailboxes,
+                        snapshot,
+                        principal.account_id,
+                    )
+                })
+                .and_then(|row| {
+                    rop_hierarchy_table_row_modified_response(
+                        snapshot.identity_codec(),
+                        notification_handle,
+                        logon_id,
+                        row.folder_id,
+                        row.insert_after_folder_id,
+                        &row.row_data,
+                    )
+                });
+            let (response, wire_shape) = match detailed_response {
+                Some(response) => (Some(response), "hierarchy_table_row_modified"),
+                None => (
+                    rop_notify_response(
+                        snapshot.identity_codec(),
+                        notification_handle,
+                        logon_id,
+                        &event,
+                    ),
+                    "generic",
+                ),
+            };
+            if let Some(response) = response {
+                responses.extend_from_slice(&response);
+                notification_wire_shapes
+                    .push(format!("handle={notification_handle};shape={wire_shape}"));
+            }
+        }
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -1538,20 +1597,11 @@ where
             operation = "Execute",
             account_id = %principal.account_id,
             mapi_request_id = request_id,
-            notification_count = notification_deliveries.len(),
+            notification_count = notification_wire_shapes.len(),
             notification_targets,
+            notification_wire_shapes = notification_wire_shapes.join("|"),
             "mapi execute appended RopNotify responses"
         );
-        for (notification_handle, logon_id, event) in notification_deliveries {
-            if let Some(response) = rop_notify_response(
-                snapshot.identity_codec(),
-                notification_handle,
-                logon_id,
-                &event,
-            ) {
-                responses.extend_from_slice(&response);
-            }
-        }
     }
     log_post_hierarchy_release_events(
         principal,

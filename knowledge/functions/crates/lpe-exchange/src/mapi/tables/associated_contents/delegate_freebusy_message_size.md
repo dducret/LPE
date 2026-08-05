@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delegate_freebusy_message_size
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L1025-L1033
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L970-L978
 visibility: private
 generated:
   by: okf-rs/0.3.0

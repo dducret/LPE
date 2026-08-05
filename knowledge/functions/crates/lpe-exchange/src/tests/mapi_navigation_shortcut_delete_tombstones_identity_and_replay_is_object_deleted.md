@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_navigation_shortcut_delete_tombstones_identity_and_replay_is_object_deleted
-resource: crates/lpe-exchange/src/tests/mod.rs#L1969-L2184
+resource: crates/lpe-exchange/src/tests/mod.rs#L2026-L2241
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -20,7 +20,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/mailbox_property_value_with_context_for_account
   - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_property_value
   - functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_definition_property_value
-  - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/default_folder_associated_named_view
   - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_change_number
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value_with_change_number
 ---
@@ -47,6 +46,5 @@ relationships:
 - [mailbox_property_value_with_context_for_account](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/mailbox_property_value_with_context_for_account.md)
 - [collaboration_folder_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_property_value.md)
 - [search_folder_definition_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_definition_property_value.md)
-- [default_folder_associated_named_view](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/default_folder_associated_named_view.md)
 - [serialize_advertised_special_folder_row_with_counts_and_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_change_number.md)
 - [special_folder_property_value_with_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value_with_change_number.md)

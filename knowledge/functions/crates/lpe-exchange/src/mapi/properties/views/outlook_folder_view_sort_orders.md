@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_folder_view_sort_orders
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L314-L332
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L303-L321
 generated:
   by: okf-rs/0.3.0
 relationships:

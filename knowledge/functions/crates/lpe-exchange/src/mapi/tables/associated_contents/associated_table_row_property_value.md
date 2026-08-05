@@ -1,13 +1,12 @@
 ---
 type: Rust Function
 title: associated_table_row_property_value
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L345-L358
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L305-L312
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_property_value_with_mailbox_guid
-  - functions/crates/lpe-exchange/src/mapi/properties/common_view_named_view_property_value
   called_by:
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_associated_table_property_row
   - functions/crates/lpe-exchange/src/mapi/tables/diagnostics/outlook_bootstrap_row_invariant_summaries
@@ -22,7 +21,6 @@ relationships:
 # Calls
 
 - [associated_config_property_value_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_property_value_with_mailbox_guid.md)
-- [common_view_named_view_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/common_view_named_view_property_value.md)
 
 # Called by
 

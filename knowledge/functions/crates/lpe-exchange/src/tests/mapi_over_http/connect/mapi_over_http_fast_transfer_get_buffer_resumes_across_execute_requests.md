@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4656-L4742
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4752-L4838
 visibility: private
 generated:
   by: okf-rs/0.3.0

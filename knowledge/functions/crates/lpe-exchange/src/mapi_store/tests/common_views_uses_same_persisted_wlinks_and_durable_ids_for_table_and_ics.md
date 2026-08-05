@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_uses_same_persisted_wlinks_and_durable_ids_for_table_and_ics
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1600-L1677
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1596-L1673
 visibility: private
 generated:
   by: okf-rs/0.3.0

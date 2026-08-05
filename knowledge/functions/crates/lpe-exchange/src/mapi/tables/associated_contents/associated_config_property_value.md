@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_property_value
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L508-L513
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L453-L458
 generated:
   by: okf-rs/0.3.0
 relationships:

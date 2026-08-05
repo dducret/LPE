@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_row_unread_count
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L346-L353
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L434-L441
 visibility: private
 generated:
   by: okf-rs/0.3.0

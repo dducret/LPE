@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: email_addresses
-resource: crates/lpe-exchange/src/tests/mod.rs#L4433-L4441
+resource: crates/lpe-exchange/src/tests/mod.rs#L4490-L4498
 visibility: private
 generated:
   by: okf-rs/0.3.0

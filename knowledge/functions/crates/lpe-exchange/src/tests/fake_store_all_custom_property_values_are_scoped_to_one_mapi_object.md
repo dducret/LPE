@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fake_store_all_custom_property_values_are_scoped_to_one_mapi_object
-resource: crates/lpe-exchange/src/tests/mod.rs#L12001-L12055
+resource: crates/lpe-exchange/src/tests/mod.rs#L12058-L12112
 visibility: private
 generated:
   by: okf-rs/0.3.0

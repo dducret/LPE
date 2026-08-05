@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_table_row_id
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L384-L389
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L331-L334
 generated:
   by: okf-rs/0.3.0
 relationships:

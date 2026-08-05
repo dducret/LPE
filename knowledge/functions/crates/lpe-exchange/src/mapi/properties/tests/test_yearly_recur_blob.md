@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_yearly_recur_blob
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4856-L4872
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4849-L4865
 visibility: private
 generated:
   by: okf-rs/0.3.0

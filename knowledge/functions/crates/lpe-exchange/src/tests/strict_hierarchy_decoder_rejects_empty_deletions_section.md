@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_decoder_rejects_empty_deletions_section
-resource: crates/lpe-exchange/src/tests/mod.rs#L14533-L14541
+resource: crates/lpe-exchange/src/tests/mod.rs#L14590-L14598
 visibility: private
 generated:
   by: okf-rs/0.3.0

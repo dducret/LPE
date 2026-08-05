@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contains_bytes
-resource: crates/lpe-exchange/src/tests/mod.rs#L12511-L12515
+resource: crates/lpe-exchange/src/tests/mod.rs#L12568-L12572
 visibility: private
 generated:
   by: okf-rs/0.3.0

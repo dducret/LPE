@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_carries_persisted_search_folder_definitions
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2644-L2688
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2640-L2684
 visibility: private
 generated:
   by: okf-rs/0.3.0

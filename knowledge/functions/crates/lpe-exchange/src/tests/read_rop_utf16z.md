@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_rop_utf16z
-resource: crates/lpe-exchange/src/tests/mod.rs#L13337-L13347
+resource: crates/lpe-exchange/src/tests/mod.rs#L13394-L13404
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: uninstall_ews_mail_app
-resource: crates/lpe-exchange/src/tests/mod.rs#L5577-L5607
+resource: crates/lpe-exchange/src/tests/mod.rs#L5634-L5664
 visibility: private
 generated:
   by: okf-rs/0.3.0

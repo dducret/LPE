@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_associated_table_property_row
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L312-L324
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L272-L284
 generated:
   by: okf-rs/0.3.0
 relationships:

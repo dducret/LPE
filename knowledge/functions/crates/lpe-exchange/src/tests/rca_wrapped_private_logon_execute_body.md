@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rca_wrapped_private_logon_execute_body
-resource: crates/lpe-exchange/src/tests/mod.rs#L12318-L12352
+resource: crates/lpe-exchange/src/tests/mod.rs#L12375-L12409
 visibility: private
 generated:
   by: okf-rs/0.3.0

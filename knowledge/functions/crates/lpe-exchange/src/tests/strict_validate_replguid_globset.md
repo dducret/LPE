@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_validate_replguid_globset
-resource: crates/lpe-exchange/src/tests/mod.rs#L13475-L13478
+resource: crates/lpe-exchange/src/tests/mod.rs#L13532-L13535
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_last_modified_filetime
-resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L919-L926
+resource: crates/lpe-exchange/src/mapi/tables/associated_contents.rs#L864-L871
 visibility: private
 generated:
   by: okf-rs/0.3.0

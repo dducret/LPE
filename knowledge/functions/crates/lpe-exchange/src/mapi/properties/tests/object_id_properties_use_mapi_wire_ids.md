@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: object_id_properties_use_mapi_wire_ids
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2138-L2150
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2131-L2143
 visibility: private
 generated:
   by: okf-rs/0.3.0
