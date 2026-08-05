@@ -57,7 +57,7 @@
 | mailbox and submission metrics | `LPE` |
 | outbound worker metrics | `LPE` |
 | JMAP/IMAP/ActiveSync protocol metrics | `LPE` |
-| MAPI/Outlook startup view metrics | `LPE` |
+| MAPI/Outlook startup view and notification metrics | `LPE` |
 | SMTP edge metrics | `LPE-CT` |
 | relay metrics | `LPE-CT` |
 | quarantine metrics | `LPE-CT` |

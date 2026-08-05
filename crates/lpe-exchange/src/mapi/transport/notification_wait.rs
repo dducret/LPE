@@ -125,12 +125,22 @@ async fn run_notification_wait<S>(
     loop {
         let outcome =
             notification_wait_event_pending(&store, endpoint, &principal, &session_id).await;
-        let (event_pending, response_code) = match outcome {
-            Ok(Some(event_pending)) => (event_pending, 0),
-            Ok(None) => (false, 0),
-            Err(response_code) => (false, response_code),
+        let (event_pending, response_code, session_unavailable) = match outcome {
+            Ok(Some(event_pending)) => (event_pending, 0, false),
+            Ok(None) => (false, 0, true),
+            Err(response_code) => (false, response_code, false),
         };
         if event_pending || response_code != 0 || tokio::time::Instant::now() >= deadline {
+            let metric_outcome = if event_pending {
+                MapiNotificationWaitOutcome::EventPending
+            } else if response_code != 0 {
+                MapiNotificationWaitOutcome::Error
+            } else if session_unavailable {
+                MapiNotificationWaitOutcome::SessionUnavailable
+            } else {
+                MapiNotificationWaitOutcome::IdleTimeout
+            };
+            record_mapi_notification_wait_completion(metric_outcome, started_at.elapsed());
             let body = if response_code == 0 {
                 notification_wait_body(event_pending)
             } else {

@@ -369,6 +369,38 @@ fn render_metrics() -> String {
             purge.partial_total
         ));
 
+        let notifications = lpe_exchange::mapi_notification_metrics();
+        output.push_str("# HELP lpe_mapi_notification_wait_completions_total MAPI NotificationWait completion outcomes.\n");
+        output.push_str("# TYPE lpe_mapi_notification_wait_completions_total counter\n");
+        output.push_str(&format!(
+            "lpe_mapi_notification_wait_completions_total{{outcome=\"event_pending\"}} {}\n",
+            notifications.wait_event_pending_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_notification_wait_completions_total{{outcome=\"idle_timeout\"}} {}\n",
+            notifications.wait_idle_timeout_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_notification_wait_completions_total{{outcome=\"session_unavailable\"}} {}\n",
+            notifications.wait_session_unavailable_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_notification_wait_completions_total{{outcome=\"error\"}} {}\n",
+            notifications.wait_error_total
+        ));
+        output.push_str("# HELP lpe_mapi_notification_wait_elapsed_milliseconds_total Elapsed time of completed MAPI NotificationWait requests.\n");
+        output.push_str("# TYPE lpe_mapi_notification_wait_elapsed_milliseconds_total counter\n");
+        output.push_str(&format!(
+            "lpe_mapi_notification_wait_elapsed_milliseconds_total {}\n",
+            notifications.wait_elapsed_milliseconds_total
+        ));
+        output.push_str("# HELP lpe_mapi_notification_new_mail_deliveries_total NewMail RopNotify responses delivered to MAPI clients.\n");
+        output.push_str("# TYPE lpe_mapi_notification_new_mail_deliveries_total counter\n");
+        output.push_str(&format!(
+            "lpe_mapi_notification_new_mail_deliveries_total {}\n",
+            notifications.new_mail_deliveries_total
+        ));
+
         let outlook_view = lpe_exchange::mapi_outlook_view_metrics();
         output.push_str("# HELP lpe_mapi_outlook_view_startup_events_total Outlook MAPI startup view events observed by LPE.\n");
         output.push_str("# TYPE lpe_mapi_outlook_view_startup_events_total counter\n");
@@ -453,6 +485,15 @@ fn unix_timestamp_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::should_log_outlook_http_route_gap;
+
+    #[cfg(feature = "exchange")]
+    #[test]
+    fn metrics_include_mapi_notification_delivery_counters() {
+        let rendered = super::render_metrics();
+
+        assert!(rendered.contains("lpe_mapi_notification_wait_completions_total"));
+        assert!(rendered.contains("lpe_mapi_notification_new_mail_deliveries_total"));
+    }
 
     #[test]
     fn outlook_http_route_gap_logs_unmatched_exchange_paths() {

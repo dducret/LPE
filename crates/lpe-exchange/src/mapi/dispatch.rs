@@ -7,7 +7,7 @@ use super::store_adapter::*;
 use super::sync::*;
 use super::tables::*;
 use super::transport::*;
-use super::wire::{MapiPropertyType, MapiSyncType, RopId};
+use super::wire::{MapiNotificationEventMask, MapiPropertyType, MapiSyncType, RopId};
 use super::*;
 use crate::mapi::identity::{
     CONVERSATION_MEMBERS_CONTENTS_TABLE_ID, QUICK_STEP_SETTINGS_FOLDER_ID,
@@ -1508,6 +1508,12 @@ where
     }
     let (notification_deliveries, delivered_notification_events) =
         session.take_pending_notification_delivery_batch();
+    let new_mail_notification_delivery_count = notification_deliveries
+        .iter()
+        .filter(|(_, _, event)| {
+            event.event_mask & 0x0FFF == MapiNotificationEventMask::NewMail.as_u16()
+        })
+        .count();
     if !notification_deliveries.is_empty() {
         let notification_targets = notification_deliveries
             .iter()
@@ -1611,6 +1617,9 @@ where
         &response_rop_buffer,
         max_rop_out,
     );
+    if !execute_response_exceeds_max_rop_out(&response_rop_buffer, max_rop_out) {
+        record_mapi_new_mail_notification_deliveries(new_mail_notification_delivery_count);
+    }
     response_rop_buffer
 }
 

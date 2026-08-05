@@ -44,6 +44,7 @@ use crate::{
 
 mod dispatch;
 pub(crate) mod identity;
+mod notification_metrics;
 pub(crate) mod notifications;
 mod nspi;
 mod outlook_startup;
@@ -64,6 +65,11 @@ pub(crate) use crate::mapi::{
         mapi_error_response, mapi_response_payload_bytes, request_cookie_transport_debug,
         safe_header, MapiEndpoint,
     },
+};
+pub use notification_metrics::{mapi_notification_metrics, MapiNotificationMetrics};
+pub(crate) use notification_metrics::{
+    record_mapi_new_mail_notification_deliveries, record_mapi_notification_wait_completion,
+    MapiNotificationWaitOutcome,
 };
 
 #[cfg(test)]
