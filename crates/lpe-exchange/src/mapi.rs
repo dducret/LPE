@@ -27,7 +27,7 @@ use std::{
     },
     time::{Duration, SystemTime},
 };
-use tracing::{info, warn};
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::{
