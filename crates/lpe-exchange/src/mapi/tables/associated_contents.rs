@@ -277,7 +277,7 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
 fn is_inbox_folder_design_default_named_view(message: &MapiAssociatedConfigMessage) -> bool {
     message
         .message_class
-        .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
+        .eq_ignore_ascii_case("IPM.Microsoft.FolderDesign.NamedView")
         && message.subject.eq_ignore_ascii_case("Compact")
 }
 
