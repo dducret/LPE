@@ -89,9 +89,10 @@ pub(in crate::mapi) fn default_folder_view_entry_id(
     folder_id: u64,
     _container_class: &str,
 ) -> Option<MapiValue> {
-    // Outlook's Inbox bootstrap opens the advertised named view before it
-    // opens the normal contents table.  The target is materialized by
-    // MapiMailStoreSnapshot::default_folder_named_view_message.
+    // [MS-OXCFOLD] section 2.2.2.2 and [MS-OXOCFG] sections 2.2.6 and
+    // 3.1.4.1: Outlook's Inbox bootstrap opens the advertised named view
+    // before it opens the normal contents table. The target is materialized
+    // by MapiMailStoreSnapshot::default_folder_named_view_message.
     (folder_id == INBOX_FOLDER_ID)
         .then(|| {
             crate::mapi::identity::message_entry_id_from_object_ids(
