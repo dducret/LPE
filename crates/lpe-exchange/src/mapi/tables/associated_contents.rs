@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone)]
 pub(super) enum AssociatedTableRow {
     Config(MapiAssociatedConfigMessage),
+    NamedView(MapiCommonViewNamedViewMessage),
 }
 
 pub(in crate::mapi) fn serialize_navigation_shortcut_row(
@@ -157,6 +158,7 @@ pub(super) fn has_associated_table_rows(folder_id: u64, snapshot: &MapiMailStore
     !snapshot
         .associated_config_messages_for_folder(folder_id)
         .is_empty()
+        || default_folder_associated_named_view(snapshot, folder_id).is_some()
 }
 
 pub(super) fn should_use_associated_config_table(
@@ -204,7 +206,7 @@ fn associated_table_rows_with_lookup_restriction(
     snapshot: &MapiMailStoreSnapshot,
     restriction: Option<&MapiRestriction>,
     find_row_restriction: Option<&MapiRestriction>,
-    _mailbox_guid: Uuid,
+    mailbox_guid: Uuid,
 ) -> Vec<AssociatedTableRow> {
     let mut messages = snapshot.associated_config_messages_for_folder(folder_id);
     let virtual_restriction = restriction.or(find_row_restriction);
@@ -221,14 +223,43 @@ fn associated_table_rows_with_lookup_restriction(
             ),
         );
     }
-    messages
+    let mut rows = messages
         .into_iter()
         .filter(|message| {
             restriction_matches_associated_config(restriction, message)
                 && associated_config_visible_in_table(folder_id, virtual_restriction, message)
         })
         .map(AssociatedTableRow::Config)
-        .collect()
+        .collect::<Vec<_>>();
+    if let Some(message) = default_folder_associated_named_view(snapshot, folder_id) {
+        if restriction_matches_common_view_named_view(virtual_restriction, &message, mailbox_guid) {
+            rows.push(AssociatedTableRow::NamedView(message));
+        }
+    }
+    rows
+}
+
+fn default_folder_associated_named_view(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+) -> Option<MapiCommonViewNamedViewMessage> {
+    let container_class = snapshot
+        .collaboration_folder_for_id(folder_id)
+        .map(|folder| collaboration_folder_message_class(folder.kind))
+        .or_else(|| {
+            let (_, _, container_class, _) = special_folder_metadata(folder_id);
+            (!container_class.is_empty()).then_some(container_class)
+        })?;
+    if !default_view_supported_folder(folder_id, container_class)
+        || default_common_views_named_view_id(container_class, folder_id).is_some()
+    {
+        None
+    } else {
+        snapshot.default_folder_named_view_message(
+            folder_id,
+            crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
+        )
+    }
 }
 
 pub(in crate::mapi) fn associated_config_visible_in_table(
@@ -236,9 +267,18 @@ pub(in crate::mapi) fn associated_config_visible_in_table(
     restriction: Option<&MapiRestriction>,
     message: &MapiAssociatedConfigMessage,
 ) -> bool {
-    !crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
-        || (message.message_class == crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
-            && is_inbox_exact_rule_organizer_restriction(folder_id, restriction))
+    !(folder_id == INBOX_FOLDER_ID && is_inbox_folder_design_default_named_view(message))
+        && (!crate::mapi_store::is_outlook_inbox_virtual_only_associated_config_id(message.id)
+            || (message.message_class
+                == crate::mapi_store::OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS
+                && is_inbox_exact_rule_organizer_restriction(folder_id, restriction)))
+}
+
+fn is_inbox_folder_design_default_named_view(message: &MapiAssociatedConfigMessage) -> bool {
+    message
+        .message_class
+        .eq_ignore_ascii_case(crate::mapi_store::OUTLOOK_INBOX_COMPACT_VIEW_CONFIG_CLASS)
+        && message.subject.eq_ignore_ascii_case("Compact")
 }
 
 fn is_inbox_exact_rule_organizer_restriction(
@@ -311,17 +351,23 @@ pub(super) fn associated_table_row_property_value(
         AssociatedTableRow::Config(message) => {
             associated_config_property_value_with_mailbox_guid(message, mailbox_guid, property_tag)
         }
+        AssociatedTableRow::NamedView(message) => {
+            common_view_named_view_property_value(message, mailbox_guid, property_tag)
+        }
     }
 }
 
 pub(super) fn associated_table_row_matches(
     message: &AssociatedTableRow,
     restriction: Option<&MapiRestriction>,
-    _mailbox_guid: Uuid,
+    mailbox_guid: Uuid,
 ) -> bool {
     match message {
         AssociatedTableRow::Config(message) => {
             restriction_matches_associated_config(restriction, message)
+        }
+        AssociatedTableRow::NamedView(message) => {
+            restriction_matches_common_view_named_view(restriction, message, mailbox_guid)
         }
     }
 }
@@ -331,12 +377,14 @@ pub(super) fn associated_table_row_config(
 ) -> Option<&MapiAssociatedConfigMessage> {
     match message {
         AssociatedTableRow::Config(message) => Some(message),
+        AssociatedTableRow::NamedView(_) => None,
     }
 }
 
 pub(super) fn associated_table_row_id(message: &AssociatedTableRow) -> u64 {
     match message {
         AssociatedTableRow::Config(message) => message.id,
+        AssociatedTableRow::NamedView(message) => message.id,
     }
 }
 
