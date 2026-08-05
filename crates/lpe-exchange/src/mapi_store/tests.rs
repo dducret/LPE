@@ -1427,25 +1427,27 @@ fn empty_common_views_exposes_no_synthetic_fai() {
 }
 
 #[test]
-fn empty_folders_do_not_materialize_default_named_views() {
+fn inbox_default_named_view_is_materialized_for_the_advertised_entry_id() {
     let snapshot = MapiMailStoreSnapshot::empty();
+    let folder_id = crate::mapi::identity::INBOX_FOLDER_ID;
+    let view_id = outlook_default_folder_named_view_id(folder_id);
+    let view = snapshot
+        .default_folder_named_view_message(folder_id, view_id)
+        .expect("advertised Inbox default view");
 
-    for folder_id in [
-        crate::mapi::identity::INBOX_FOLDER_ID,
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-        crate::mapi::identity::CONTACTS_FOLDER_ID,
-        crate::mapi::identity::TASKS_FOLDER_ID,
-        crate::mapi::identity::NOTES_FOLDER_ID,
-        crate::mapi::identity::JOURNAL_FOLDER_ID,
-    ] {
-        let view_id = outlook_default_folder_named_view_id(folder_id);
-        assert!(snapshot
-            .default_folder_named_view_message(folder_id, view_id)
-            .is_none());
-        assert!(snapshot
-            .named_view_message_for_folder_and_id(folder_id, view_id)
-            .is_none());
-    }
+    assert_eq!(view.id, view_id);
+    assert_eq!(view.folder_id, folder_id);
+    assert_eq!(view.name, "Compact");
+    assert!(snapshot
+        .named_view_message_for_folder_and_id(folder_id, view_id)
+        .is_some());
+
+    assert!(snapshot
+        .default_folder_named_view_message(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+            outlook_default_folder_named_view_id(crate::mapi::identity::CALENDAR_FOLDER_ID),
+        )
+        .is_none());
 }
 
 #[test]

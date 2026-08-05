@@ -85,16 +85,23 @@ pub(in crate::mapi) fn default_view_supported_folder(
 }
 
 pub(in crate::mapi) fn default_folder_view_entry_id(
-    _mailbox_guid: Uuid,
-    _folder_id: u64,
+    mailbox_guid: Uuid,
+    folder_id: u64,
     _container_class: &str,
 ) -> Option<MapiValue> {
-    // [MS-OXOCFG] sections 2.2.6 and 3.1.4.1: a view definition is an FAI
-    // Message, and when no matching configuration message exists the client
-    // uses its defaults. LPE has no canonical folder property selecting a
-    // persisted view, so advertising an EntryID here would create a dangling
-    // pointer to synthetic state.
-    None
+    // Outlook's Inbox bootstrap opens the advertised named view before it
+    // opens the normal contents table.  The target is materialized by
+    // MapiMailStoreSnapshot::default_folder_named_view_message.
+    (folder_id == INBOX_FOLDER_ID)
+        .then(|| {
+            crate::mapi::identity::message_entry_id_from_object_ids(
+                mailbox_guid,
+                folder_id,
+                crate::mapi_store::outlook_default_folder_named_view_id(folder_id),
+            )
+        })
+        .flatten()
+        .map(MapiValue::Binary)
 }
 
 pub(in crate::mapi) fn default_view_uses_common_views(
