@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_mapi_navigation_shortcut
-resource: crates/lpe-exchange/src/tests/mod.rs#L9756-L9785
+resource: crates/lpe-exchange/src/tests/mod.rs#L9757-L9786
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_sharing_folder_returns_accessible_same_tenant_calendar_grant
-resource: crates/lpe-exchange/src/tests/ews.rs#L2442-L2500
+resource: crates/lpe-exchange/src/tests/ews.rs#L2538-L2596
 visibility: private
 generated:
   by: okf-rs/0.3.0

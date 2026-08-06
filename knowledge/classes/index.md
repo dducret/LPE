@@ -380,7 +380,7 @@
 - [ImportedHierarchyVersion](../classes/crates/lpe-exchange/src/mapi/dispatch/sync_import_hierarchy/ImportedHierarchyVersion.md) — Rust Struct
 - [TableControlFlow](../classes/crates/lpe-exchange/src/mapi/dispatch/table_controls/TableControlFlow.md) — Rust Enum
 - [DebugAssociatedTableRow](../classes/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/DebugAssociatedTableRow.md) — Rust Enum
-- [HierarchyResponseMetricSummary](../classes/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/HierarchyResponseMetricSummary.md) — Rust Struct
+- [HierarchyResponseMetricSummary](../classes/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/HierarchyResponseMetricSummary.md) — Rust Struct
 - [VisibleInboxProjectionAudit](../classes/crates/lpe-exchange/src/mapi/dispatch/table_lifecycle/VisibleInboxProjectionAudit.md) — Rust Struct
 - [SaveDisposition](../classes/crates/lpe-exchange/src/mapi/dispatch/table_validation/SaveDisposition.md) — Rust Enum
 - [MapiIdentityCodec](../classes/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec.md) — Rust Struct
@@ -543,6 +543,7 @@
 - [ConversationActionRequest](../classes/crates/lpe-exchange/src/service/ews/conversations/ConversationActionRequest.md) — Rust Struct
 - [EwsResponseDebug](../classes/crates/lpe-exchange/src/service/ews/diagnostics/EwsResponseDebug.md) — Rust Struct
 - [FolderKind](../classes/crates/lpe-exchange/src/service/ews/folders/FolderKind.md) — Rust Enum
+- [HierarchySyncFolder](../classes/crates/lpe-exchange/src/service/ews/folders/HierarchySyncFolder.md) — Rust Struct
 - [CanonicalEwsObjectId](../classes/crates/lpe-exchange/src/service/ews/ids/CanonicalEwsObjectId.md) — Rust Struct
 - [ConvertIdOutput](../classes/crates/lpe-exchange/src/service/ews/ids/ConvertIdOutput.md) — Rust Struct
 - [ConvertIdSource](../classes/crates/lpe-exchange/src/service/ews/ids/ConvertIdSource.md) — Rust Struct

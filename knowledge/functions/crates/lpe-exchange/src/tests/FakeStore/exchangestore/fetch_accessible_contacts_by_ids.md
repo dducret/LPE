@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_contacts_by_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L8797-L8811
+resource: crates/lpe-exchange/src/tests/mod.rs#L8798-L8812
 visibility: private
 generated:
   by: okf-rs/0.3.0

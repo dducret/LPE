@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/notifications/incomplete_message_move_notifications_are_not_serialized
   - functions/crates/lpe-exchange/src/mapi/notifications/incomplete_hierarchy_move_notification_is_not_serialized
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table
+  - functions/crates/lpe-exchange/src/mapi/session/tests/session_new_mail_hierarchy_row_survives_preceding_basic_table_change
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_derives_counted_folder_modified_notification_for_collaboration_content_create
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_delivers_only_complete_message_moves_and_copies_to_subscriptions
@@ -37,6 +38,7 @@ relationships:
 - [incomplete_message_move_notifications_are_not_serialized](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/incomplete_message_move_notifications_are_not_serialized.md)
 - [incomplete_hierarchy_move_notification_is_not_serialized](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/incomplete_hierarchy_move_notification_is_not_serialized.md)
 - [session_retains_folder_count_change_for_active_parent_hierarchy_table](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table.md)
+- [session_new_mail_hierarchy_row_survives_preceding_basic_table_change](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_new_mail_hierarchy_row_survives_preceding_basic_table_change.md)
 - [session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts.md)
 - [session_derives_counted_folder_modified_notification_for_collaboration_content_create](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_derives_counted_folder_modified_notification_for_collaboration_content_create.md)
 - [session_delivers_only_complete_message_moves_and_copies_to_subscriptions](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_delivers_only_complete_message_moves_and_copies_to_subscriptions.md)

@@ -322,13 +322,15 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/ipm_configuration_row_issues
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/collect_restriction_property_tags
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_associated_table_rows
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/append_debug_modeled_inbox_exact_startup_config
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_query_rows_wire_summary
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_open/append_open_table_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_validation/request_with_orders
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/candidate_find_row_debug_tags
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/table_column_support_summary
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/hierarchy_query_rows_wire_summary_decodes_compact_folder_projection
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/hierarchy_query_rows_wire_summary_decodes_flagged_folder_projection
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/hierarchy_response_metrics_decode_standard_and_flagged_rows
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/inbox_open_loop_summary_requires_repeated_probe_without_contents_table
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/inbox_post_fai_handoff_context_points_to_missing_contents_step
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/post_fai_hierarchy_release_context_reports_stop_before_inbox_contents
@@ -533,6 +535,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_collaboration_folder_row_with_context
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_rows_excluding_deleted
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_rows_excluding_deleted
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_property_row
   - functions/crates/lpe-exchange/src/mapi/tables/public_folders/serialize_public_folder_row
   - functions/crates/lpe-exchange/src/mapi/tables/public_folders/serialize_public_folder_item_row
   - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner
@@ -644,6 +647,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/directory/expand_dl_response
   - functions/crates/lpe-exchange/src/service/ews/directory/visible_persona_entries
   - functions/crates/lpe-exchange/src/service/ews/dispatch/trace_ews_event
+  - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/sync_folder_hierarchy
   - functions/crates/lpe-exchange/src/service/ews/folders/requested_folder_kinds
   - functions/crates/lpe-exchange/src/service/ews/ids/convert_id_sources_for_tag
   - functions/crates/lpe-exchange/src/service/ews/ids/decode_hex_entry_id
@@ -655,6 +659,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/durable_events_response
   - functions/crates/lpe-exchange/src/service/ews/request_ids/requested_item_references
   - functions/crates/lpe-exchange/src/service/ews/rules/ExchangeService/update_inbox_rules
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items
   - functions/crates/lpe-exchange/src/service/ews/xml/attribute_values_for_tag
   - functions/crates/lpe-exchange/src/service/ews/xml/element_contents
   - functions/crates/lpe-exchange/src/service/ews/xml/html_to_text
@@ -1604,13 +1609,15 @@ relationships:
 - [ipm_configuration_row_issues](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/ipm_configuration_row_issues.md)
 - [collect_restriction_property_tags](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/collect_restriction_property_tags.md)
 - [debug_associated_table_rows](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_associated_table_rows.md)
-- [format_hierarchy_query_rows_wire_summary](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary.md)
 - [append_debug_modeled_inbox_exact_startup_config](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/append_debug_modeled_inbox_exact_startup_config.md)
+- [format_hierarchy_query_rows_wire_summary](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_query_rows_wire_summary.md)
 - [append_open_table_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_open/append_open_table_response.md)
 - [request_with_orders](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_validation/request_with_orders.md)
 - [candidate_find_row_debug_tags](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/candidate_find_row_debug_tags.md)
 - [table_column_support_summary](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/table_column_support_summary.md)
 - [hierarchy_query_rows_wire_summary_decodes_compact_folder_projection](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/hierarchy_query_rows_wire_summary_decodes_compact_folder_projection.md)
+- [hierarchy_query_rows_wire_summary_decodes_flagged_folder_projection](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/hierarchy_query_rows_wire_summary_decodes_flagged_folder_projection.md)
+- [hierarchy_response_metrics_decode_standard_and_flagged_rows](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/hierarchy_response_metrics_decode_standard_and_flagged_rows.md)
 - [inbox_open_loop_summary_requires_repeated_probe_without_contents_table](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/inbox_open_loop_summary_requires_repeated_probe_without_contents_table.md)
 - [inbox_post_fai_handoff_context_points_to_missing_contents_step](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/inbox_post_fai_handoff_context_points_to_missing_contents_step.md)
 - [post_fai_hierarchy_release_context_reports_stop_before_inbox_contents](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/post_fai_hierarchy_release_context_reports_stop_before_inbox_contents.md)
@@ -1815,6 +1822,7 @@ relationships:
 - [serialize_collaboration_folder_row_with_context](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_collaboration_folder_row_with_context.md)
 - [hierarchy_rows_excluding_deleted](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_rows_excluding_deleted.md)
 - [hierarchy_table_rows_excluding_deleted](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_rows_excluding_deleted.md)
+- [serialize_hierarchy_property_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_property_row.md)
 - [serialize_public_folder_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/public_folders/serialize_public_folder_row.md)
 - [serialize_public_folder_item_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/public_folders/serialize_public_folder_item_row.md)
 - [rop_query_rows_response_inner](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner.md)
@@ -1926,6 +1934,7 @@ relationships:
 - [expand_dl_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/directory/expand_dl_response.md)
 - [visible_persona_entries](../../../../../../functions/crates/lpe-exchange/src/service/ews/directory/visible_persona_entries.md)
 - [trace_ews_event](../../../../../../functions/crates/lpe-exchange/src/service/ews/dispatch/trace_ews_event.md)
+- [sync_folder_hierarchy](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/sync_folder_hierarchy.md)
 - [requested_folder_kinds](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/requested_folder_kinds.md)
 - [convert_id_sources_for_tag](../../../../../../functions/crates/lpe-exchange/src/service/ews/ids/convert_id_sources_for_tag.md)
 - [decode_hex_entry_id](../../../../../../functions/crates/lpe-exchange/src/service/ews/ids/decode_hex_entry_id.md)
@@ -1937,6 +1946,7 @@ relationships:
 - [durable_events_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/durable_events_response.md)
 - [requested_item_references](../../../../../../functions/crates/lpe-exchange/src/service/ews/request_ids/requested_item_references.md)
 - [update_inbox_rules](../../../../../../functions/crates/lpe-exchange/src/service/ews/rules/ExchangeService/update_inbox_rules.md)
+- [sync_folder_items](../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items.md)
 - [attribute_values_for_tag](../../../../../../functions/crates/lpe-exchange/src/service/ews/xml/attribute_values_for_tag.md)
 - [element_contents](../../../../../../functions/crates/lpe-exchange/src/service/ews/xml/element_contents.md)
 - [html_to_text](../../../../../../functions/crates/lpe-exchange/src/service/ews/xml/html_to_text.md)

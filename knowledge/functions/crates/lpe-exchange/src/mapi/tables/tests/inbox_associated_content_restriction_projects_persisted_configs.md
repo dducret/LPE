@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_content_restriction_projects_persisted_configs
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6507-L6622
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6580-L6695
 visibility: private
 generated:
   by: okf-rs/0.3.0

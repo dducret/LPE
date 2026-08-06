@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_query_position_summary_flags_zero_duration_timed_events
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2439-L2499
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2517-L2577
 visibility: private
 generated:
   by: okf-rs/0.3.0

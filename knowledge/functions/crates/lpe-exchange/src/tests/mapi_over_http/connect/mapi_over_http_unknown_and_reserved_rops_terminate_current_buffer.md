@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_unknown_and_reserved_rops_terminate_current_buffer
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5257-L5278
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5299-L5320
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: public_folder_sync_state_items
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L565-L609
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L615-L659
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -18,8 +18,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/tags/MapiPropertyTag/property_type_code
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/default_folders/additional_ren_entry_ids_from_profile_bytes
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response_metric_summary
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/parse_hierarchy_property_row_value
   - functions/crates/lpe-exchange/src/mapi/properties/tests/round_trip
   - functions/crates/lpe-exchange/src/mapi/properties/tests/unsupported_property_types_fail_explicitly
   - functions/crates/lpe-exchange/src/mapi/rop/debug/format_default_view_entry_id_decoding
@@ -59,8 +58,7 @@ relationships:
 # Called by
 
 - [additional_ren_entry_ids_from_profile_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/default_folders/additional_ren_entry_ids_from_profile_bytes.md)
-- [hierarchy_response_metric_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response_metric_summary.md)
-- [format_hierarchy_query_rows_wire_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary.md)
+- [parse_hierarchy_property_row_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/parse_hierarchy_property_row_value.md)
 - [round_trip](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/round_trip.md)
 - [unsupported_property_types_fail_explicitly](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/unsupported_property_types_fail_explicitly.md)
 - [format_default_view_entry_id_decoding](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/debug/format_default_view_entry_id_decoding.md)

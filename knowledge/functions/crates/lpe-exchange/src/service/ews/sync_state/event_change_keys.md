@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: event_change_keys
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L429-L458
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L479-L508
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -8,8 +8,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
-  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/append_utf16z
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_query_rows_wire_summary
 ---
 
 # Signature
@@ -19,5 +18,4 @@ relationships:
 # Calls
 
 - [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
-- [append_utf16z](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/append_utf16z.md)
-- [format_hierarchy_query_rows_wire_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary.md)
+- [format_hierarchy_query_rows_wire_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_query_rows_wire_summary.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_configuration_prefix_debug_restriction
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L931-L938
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L935-L942
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_detects_abandon_after_inbox_fai_query_rows_release
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L628-L646
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L739-L757
 visibility: private
 generated:
   by: okf-rs/0.3.0

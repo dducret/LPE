@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: builtin_search_criteria_fallback_covers_advertised_reminders_folder
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2750-L2762
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2828-L2840
 visibility: private
 generated:
   by: okf-rs/0.3.0

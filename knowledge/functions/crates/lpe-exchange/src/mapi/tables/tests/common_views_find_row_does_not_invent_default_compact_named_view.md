@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_find_row_does_not_invent_default_compact_named_view
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4695-L4776
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4768-L4849
 visibility: private
 generated:
   by: okf-rs/0.3.0

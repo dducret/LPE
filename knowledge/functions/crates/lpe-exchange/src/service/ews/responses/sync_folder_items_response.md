@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_folder_items_response
-resource: crates/lpe-exchange/src/service/ews/responses.rs#L276-L293
+resource: crates/lpe-exchange/src/service/ews/responses.rs#L286-L308
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -11,7 +11,7 @@ relationships:
 
 # Signature
 
-`pub(in crate::service) fn sync_folder_items_response(sync_state: &str, changes: String) -> String`
+`pub(in crate::service) fn sync_folder_items_response( sync_state: &str, changes: String, includes_last: bool, ) -> String`
 
 # Called by
 

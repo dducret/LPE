@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/xml/attribute_value
   called_by:
   - functions/crates/lpe-exchange/src/service/ews/ids/ExchangeService/convert_id
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/find_item
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/create_item
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/delete_item
   - functions/crates/lpe-exchange/src/service/ews/request_ids/requested_item_references
@@ -29,6 +30,7 @@ relationships:
 # Called by
 
 - [convert_id](../../../../../../../functions/crates/lpe-exchange/src/service/ews/ids/ExchangeService/convert_id.md)
+- [find_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/find_item.md)
 - [create_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/create_item.md)
 - [delete_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/delete_item.md)
 - [requested_item_references](../../../../../../../functions/crates/lpe-exchange/src/service/ews/request_ids/requested_item_references.md)

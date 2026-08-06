@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collect_restriction_property_tags
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L415-L449
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L419-L453
 visibility: private
 generated:
   by: okf-rs/0.3.0

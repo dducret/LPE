@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: public_folder_replica
-resource: crates/lpe-exchange/src/tests/mod.rs#L4546-L4556
+resource: crates/lpe-exchange/src/tests/mod.rs#L4547-L4557
 visibility: private
 generated:
   by: okf-rs/0.3.0

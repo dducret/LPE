@@ -236,13 +236,22 @@ pub(in crate::service) fn mark_as_junk_success_response(moved_item_ids: String) 
 }
 
 pub(in crate::service) fn find_item_response(items: String) -> String {
+    let count = count_tag_occurrences(&items, "<t:ItemId");
+    find_item_page_response(items, count as u64, true)
+}
+
+pub(in crate::service) fn find_item_page_response(
+    items: String,
+    total_items: u64,
+    includes_last: bool,
+) -> String {
     format!(
         concat!(
             "<m:FindItemResponse>",
             "<m:ResponseMessages>",
             "<m:FindItemResponseMessage ResponseClass=\"Success\">",
             "<m:ResponseCode>NoError</m:ResponseCode>",
-            "<m:RootFolder TotalItemsInView=\"{count}\" IncludesLastItemInRange=\"true\">",
+            "<m:RootFolder TotalItemsInView=\"{total_items}\" IncludesLastItemInRange=\"{includes_last}\">",
             "<t:Items>{items}</t:Items>",
             "</m:RootFolder>",
             "</m:FindItemResponseMessage>",
@@ -250,7 +259,8 @@ pub(in crate::service) fn find_item_response(items: String) -> String {
             "</m:FindItemResponse>"
         ),
         items = items,
-        count = count_tag_occurrences(&items, "<t:ItemId")
+        total_items = total_items,
+        includes_last = includes_last,
     )
 }
 
@@ -273,7 +283,11 @@ pub(in crate::service) fn operation_response_message(
     )
 }
 
-pub(in crate::service) fn sync_folder_items_response(sync_state: &str, changes: String) -> String {
+pub(in crate::service) fn sync_folder_items_response(
+    sync_state: &str,
+    changes: String,
+    includes_last: bool,
+) -> String {
     format!(
         concat!(
             "<m:SyncFolderItemsResponse>",
@@ -281,7 +295,7 @@ pub(in crate::service) fn sync_folder_items_response(sync_state: &str, changes: 
             "<m:SyncFolderItemsResponseMessage ResponseClass=\"Success\">",
             "<m:ResponseCode>NoError</m:ResponseCode>",
             "<m:SyncState>{sync_state}</m:SyncState>",
-            "<m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>",
+            "<m:IncludesLastItemInRange>{includes_last}</m:IncludesLastItemInRange>",
             "<m:Changes>{changes}</m:Changes>",
             "</m:SyncFolderItemsResponseMessage>",
             "</m:ResponseMessages>",
@@ -289,6 +303,7 @@ pub(in crate::service) fn sync_folder_items_response(sync_state: &str, changes: 
         ),
         sync_state = escape_xml(sync_state),
         changes = changes,
+        includes_last = includes_last,
     )
 }
 

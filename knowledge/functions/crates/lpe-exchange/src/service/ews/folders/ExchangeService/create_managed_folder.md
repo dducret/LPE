@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_managed_folder
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L165-L214
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L201-L250
 generated:
   by: okf-rs/0.3.0
 relationships:

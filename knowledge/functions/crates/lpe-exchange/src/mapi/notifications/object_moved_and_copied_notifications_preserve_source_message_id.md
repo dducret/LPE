@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: object_moved_and_copied_notifications_preserve_source_message_id
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L454-L504
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L485-L535
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -87,6 +87,7 @@ generated:
 - [sync_upload_state](../../modules/crates/lpe-exchange/src/mapi/dispatch/sync_upload_state.md)
 - [table_controls](../../modules/crates/lpe-exchange/src/mapi/dispatch/table_controls.md)
 - [table_diagnostics](../../modules/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.md)
+- [hierarchy_response](../../modules/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response.md)
 - [table_lifecycle](../../modules/crates/lpe-exchange/src/mapi/dispatch/table_lifecycle.md)
 - [table_open](../../modules/crates/lpe-exchange/src/mapi/dispatch/table_open.md)
 - [table_validation](../../modules/crates/lpe-exchange/src/mapi/dispatch/table_validation.md)

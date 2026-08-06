@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_contact_round_trips_through_sync_folder_items
-resource: crates/lpe-exchange/src/tests/ews.rs#L6960-L7046
+resource: crates/lpe-exchange/src/tests/ews.rs#L7056-L7142
 visibility: private
 generated:
   by: okf-rs/0.3.0

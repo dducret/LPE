@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_exact_configuration_findrow_matched
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L964-L986
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L968-L990
 generated:
   by: okf-rs/0.3.0
 relationships:

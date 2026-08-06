@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_service_configuration_defaults_to_supported_mail_tips_config
-resource: crates/lpe-exchange/src/tests/ews.rs#L4374-L4395
+resource: crates/lpe-exchange/src/tests/ews.rs#L4470-L4491
 visibility: private
 generated:
   by: okf-rs/0.3.0

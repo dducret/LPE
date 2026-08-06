@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: create_attachment_rejects_magika_blocked_payload
-resource: crates/lpe-exchange/src/tests/ews.rs#L8274-L8302
+resource: crates/lpe-exchange/src/tests/ews.rs#L8526-L8554
 visibility: private
 generated:
   by: okf-rs/0.3.0

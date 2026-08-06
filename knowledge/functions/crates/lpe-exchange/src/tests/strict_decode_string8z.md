@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_decode_string8z
-resource: crates/lpe-exchange/src/tests/mod.rs#L13454-L13460
+resource: crates/lpe-exchange/src/tests/mod.rs#L13460-L13466
 visibility: private
 generated:
   by: okf-rs/0.3.0

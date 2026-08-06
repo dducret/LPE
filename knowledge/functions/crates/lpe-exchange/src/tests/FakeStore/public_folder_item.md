@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: public_folder_item
-resource: crates/lpe-exchange/src/tests/mod.rs#L4431-L4451
+resource: crates/lpe-exchange/src/tests/mod.rs#L4432-L4452
 visibility: private
 generated:
   by: okf-rs/0.3.0

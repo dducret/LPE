@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: create_public_folder_success_response
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L574-L588
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L647-L661
 generated:
   by: okf-rs/0.3.0
 relationships:

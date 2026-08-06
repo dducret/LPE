@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: response_handle_table_preserves_sparse_output_handle_indexes
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L842-L846
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L953-L957
 visibility: private
 generated:
   by: okf-rs/0.3.0

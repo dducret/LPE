@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pull_subscription_get_events_does_not_synthesize_mailbox_events
-resource: crates/lpe-exchange/src/tests/ews.rs#L3456-L3521
+resource: crates/lpe-exchange/src/tests/ews.rs#L3552-L3617
 visibility: private
 generated:
   by: okf-rs/0.3.0

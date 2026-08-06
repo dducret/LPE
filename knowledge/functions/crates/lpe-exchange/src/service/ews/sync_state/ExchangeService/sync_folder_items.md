@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: sync_folder_items
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L11-L392
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L11-L442
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -24,7 +24,9 @@ relationships:
   - functions/crates/lpe-core/src/sieve/Parser/next
   - functions/crates/lpe-exchange/src/service/ews/responses/sync_folder_items_response
   - functions/crates/lpe-exchange/src/service/ews/mail/message_change_key
-  - functions/crates/lpe-exchange/src/service/ews/mail/message_summary_xml_for_mailbox
+  - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/requested_max_changes
+  - functions/LPE-CT/web/app/smoke/test/MockClassList/remove
   - functions/crates/lpe-exchange/src/service/ews/request_ids/requested_public_folder_ids
   - functions/crates/lpe-exchange/src/service/ews/public_folders/public_folder_item_change_key
   - functions/crates/lpe-exchange/src/service/ews/sync_state/public_folder_sync_state_items
@@ -58,7 +60,9 @@ relationships:
 - [next](../../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
 - [sync_folder_items_response](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/sync_folder_items_response.md)
 - [message_change_key](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail/message_change_key.md)
-- [message_summary_xml_for_mailbox](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail/message_summary_xml_for_mailbox.md)
+- [push](../../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
+- [requested_max_changes](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/requested_max_changes.md)
+- [remove](../../../../../../../../functions/LPE-CT/web/app/smoke/test/MockClassList/remove.md)
 - [requested_public_folder_ids](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/request_ids/requested_public_folder_ids.md)
 - [public_folder_item_change_key](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/public_folders/public_folder_item_change_key.md)
 - [public_folder_sync_state_items](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/public_folder_sync_state_items.md)

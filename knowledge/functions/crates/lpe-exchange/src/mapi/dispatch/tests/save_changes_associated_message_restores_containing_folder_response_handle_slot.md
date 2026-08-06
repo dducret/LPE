@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: save_changes_associated_message_restores_containing_folder_response_handle_slot
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2675-L2709
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2753-L2787
 visibility: private
 generated:
   by: okf-rs/0.3.0

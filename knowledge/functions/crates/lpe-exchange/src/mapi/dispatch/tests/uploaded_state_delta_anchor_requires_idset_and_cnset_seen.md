@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: uploaded_state_delta_anchor_requires_idset_and_cnset_seen
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1692-L1700
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1770-L1778
 visibility: private
 generated:
   by: okf-rs/0.3.0

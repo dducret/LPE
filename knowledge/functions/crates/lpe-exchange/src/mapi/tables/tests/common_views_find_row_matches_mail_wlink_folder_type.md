@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_find_row_matches_mail_wlink_folder_type
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4865-L4931
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4938-L5004
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -8,7 +8,6 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/find_item
   - functions/crates/lpe-exchange/src/service/ews/mail/message_summary_xml
-  - functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items
 ---
 
 # Signature
@@ -19,4 +18,3 @@ relationships:
 
 - [find_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/find_item.md)
 - [message_summary_xml](../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail/message_summary_xml.md)
-- [sync_folder_items](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items.md)

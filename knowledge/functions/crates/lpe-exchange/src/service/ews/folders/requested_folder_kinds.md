@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: requested_folder_kinds
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L490-L538
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L563-L611
 generated:
   by: okf-rs/0.3.0
 relationships:

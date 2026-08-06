@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contents_find_row_matches_message_search_key
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4376-L4497
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4449-L4570
 visibility: private
 generated:
   by: okf-rs/0.3.0

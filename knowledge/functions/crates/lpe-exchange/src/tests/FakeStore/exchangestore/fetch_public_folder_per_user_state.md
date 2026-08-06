@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_public_folder_per_user_state
-resource: crates/lpe-exchange/src/tests/mod.rs#L6716-L6737
+resource: crates/lpe-exchange/src/tests/mod.rs#L6717-L6738
 visibility: private
 generated:
   by: okf-rs/0.3.0

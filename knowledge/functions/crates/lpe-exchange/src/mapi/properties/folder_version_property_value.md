@@ -15,6 +15,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_version
   - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_folder_row_with_context_and_version
   - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_collaboration_folder_row_with_context_and_version
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_property_is_present
 ---
 
 # Signature
@@ -34,3 +35,4 @@ relationships:
 - [serialize_advertised_special_folder_row_with_counts_and_version](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_version.md)
 - [serialize_folder_row_with_context_and_version](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_folder_row_with_context_and_version.md)
 - [serialize_collaboration_folder_row_with_context_and_version](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_collaboration_folder_row_with_context_and_version.md)
+- [hierarchy_row_property_is_present](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_property_is_present.md)

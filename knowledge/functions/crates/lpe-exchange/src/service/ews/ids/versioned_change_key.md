@@ -8,6 +8,7 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/service/ews/calendar/calendar_change_key
   - functions/crates/lpe-exchange/src/service/ews/contacts/contact_change_key
+  - functions/crates/lpe-exchange/src/service/ews/folders/HierarchySyncFolder/new
   - functions/crates/lpe-exchange/src/service/ews/mail/message_change_key
   - functions/crates/lpe-exchange/src/service/ews/public_folders/public_folder_item_change_key
   - functions/crates/lpe-exchange/src/service/ews/sharing/ExchangeService/accept_sharing_invitation
@@ -22,6 +23,7 @@ relationships:
 
 - [calendar_change_key](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/calendar_change_key.md)
 - [contact_change_key](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_change_key.md)
+- [new](../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/HierarchySyncFolder/new.md)
 - [message_change_key](../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail/message_change_key.md)
 - [public_folder_item_change_key](../../../../../../../functions/crates/lpe-exchange/src/service/ews/public_folders/public_folder_item_change_key.md)
 - [accept_sharing_invitation](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sharing/ExchangeService/accept_sharing_invitation.md)

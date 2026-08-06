@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_record_content_body_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L14235-L14278
+resource: crates/lpe-exchange/src/tests/mod.rs#L14276-L14319
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -54,6 +54,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/identity/message_entry_id_uses_private_mailbox_shape_with_source_key_counters
   - functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags
   - functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_table_row_modified_notification_encodes_current_row
+  - functions/crates/lpe-exchange/src/mapi/notifications/new_mail_hierarchy_row_notification_encodes_message_row_keys
   - functions/crates/lpe-exchange/src/mapi/notifications/folder_modified_notification_with_total_count_encodes_t_flag
   - functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags
   - functions/crates/lpe-exchange/src/mapi/notifications/object_moved_and_copied_notifications_preserve_source_message_id
@@ -77,6 +78,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/session/lifecycle/begin_active_session_request_for_test
   - functions/crates/lpe-exchange/src/mapi/session/tests/connect_rejects_an_expired_session_context
   - functions/crates/lpe-exchange/src/mapi/session/tests/reconnect_session_replaces_the_prior_emsmdb_context
+  - functions/crates/lpe-exchange/src/mapi/session/tests/session_new_mail_hierarchy_row_survives_preceding_basic_table_change
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_derives_counted_folder_modified_notification_for_collaboration_content_create
   - functions/crates/lpe-exchange/src/mapi/session/tests/notification_subscription_preserves_rop_logon_id_through_rop_notify
   - functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_includes_long_term_id_source_in_trailing_replid_form
@@ -97,6 +99,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/contacts_search_hierarchy_row_belongs_to_search_folder
   - functions/crates/lpe-exchange/src/mapi/tables/tests/persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy
   - functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection
   - functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants
   - functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders
   - functions/crates/lpe-exchange/src/mapi/tables/tests/captured_common_views_query_rows_flags_heterogeneous_missing_columns
@@ -486,6 +489,7 @@ relationships:
 - [message_entry_id_uses_private_mailbox_shape_with_source_key_counters](../../../../../../functions/crates/lpe-exchange/src/mapi/identity/message_entry_id_uses_private_mailbox_shape_with_source_key_counters.md)
 - [new_mail_notification_with_message_id_encodes_exchange_zero_message_flags](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags.md)
 - [hierarchy_table_row_modified_notification_encodes_current_row](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_table_row_modified_notification_encodes_current_row.md)
+- [new_mail_hierarchy_row_notification_encodes_message_row_keys](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_hierarchy_row_notification_encodes_message_row_keys.md)
 - [folder_modified_notification_with_total_count_encodes_t_flag](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/folder_modified_notification_with_total_count_encodes_t_flag.md)
 - [new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags.md)
 - [object_moved_and_copied_notifications_preserve_source_message_id](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/object_moved_and_copied_notifications_preserve_source_message_id.md)
@@ -509,6 +513,7 @@ relationships:
 - [begin_active_session_request_for_test](../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/begin_active_session_request_for_test.md)
 - [connect_rejects_an_expired_session_context](../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/connect_rejects_an_expired_session_context.md)
 - [reconnect_session_replaces_the_prior_emsmdb_context](../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/reconnect_session_replaces_the_prior_emsmdb_context.md)
+- [session_new_mail_hierarchy_row_survives_preceding_basic_table_change](../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_new_mail_hierarchy_row_survives_preceding_basic_table_change.md)
 - [session_derives_counted_folder_modified_notification_for_collaboration_content_create](../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_derives_counted_folder_modified_notification_for_collaboration_content_create.md)
 - [notification_subscription_preserves_rop_logon_id_through_rop_notify](../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/notification_subscription_preserves_rop_logon_id_through_rop_notify.md)
 - [access_plan_includes_long_term_id_source_in_trailing_replid_form](../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_includes_long_term_id_source_in_trailing_replid_form.md)
@@ -529,6 +534,7 @@ relationships:
 - [contacts_search_hierarchy_row_belongs_to_search_folder](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/contacts_search_hierarchy_row_belongs_to_search_folder.md)
 - [persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy.md)
 - [hierarchy_table_projects_user_saved_search_folder](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder.md)
+- [hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection.md)
 - [custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants.md)
 - [ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders.md)
 - [captured_common_views_query_rows_flags_heterogeneous_missing_columns](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/captured_common_views_query_rows_flags_heterogeneous_missing_columns.md)

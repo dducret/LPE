@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_inbox_fai_handoff_visibility_context
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L600-L647
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L604-L651
 generated:
   by: okf-rs/0.3.0
 relationships:

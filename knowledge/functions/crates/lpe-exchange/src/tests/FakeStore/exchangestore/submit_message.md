@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: submit_message
-resource: crates/lpe-exchange/src/tests/mod.rs#L11935-L12023
+resource: crates/lpe-exchange/src/tests/mod.rs#L11941-L12029
 visibility: private
 generated:
   by: okf-rs/0.3.0

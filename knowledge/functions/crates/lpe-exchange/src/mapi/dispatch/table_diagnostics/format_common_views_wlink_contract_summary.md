@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_common_views_wlink_contract_summary
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1250-L1315
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1254-L1319
 generated:
   by: okf-rs/0.3.0
 relationships:

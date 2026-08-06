@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folders_operation_success_response
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L590-L608
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L663-L681
 generated:
   by: okf-rs/0.3.0
 relationships:

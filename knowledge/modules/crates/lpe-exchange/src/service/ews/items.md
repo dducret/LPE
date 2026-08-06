@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: items
-resource: crates/lpe-exchange/src/service/ews/items.rs#L1-L1454
+resource: crates/lpe-exchange/src/service/ews/items.rs#L1-L1468
 generated:
   by: okf-rs/0.3.0
 relationships:

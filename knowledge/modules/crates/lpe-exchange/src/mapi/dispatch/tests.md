@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1-L3019
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1-L3097
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -69,6 +69,9 @@ relationships:
 - [normal_inbox_query_row_summary_reports_message_shapes](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/normal_inbox_query_row_summary_reports_message_shapes.md)
 - [hierarchy_query_rows_wire_summary_decodes_compact_folder_projection](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/hierarchy_query_rows_wire_summary_decodes_compact_folder_projection.md)
 - [append_utf16z](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/append_utf16z.md)
+- [hierarchy_query_rows_wire_summary_decodes_flagged_folder_projection](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/hierarchy_query_rows_wire_summary_decodes_flagged_folder_projection.md)
+- [append_utf16z](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/append_utf16z-2.md)
+- [hierarchy_response_metrics_decode_standard_and_flagged_rows](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/hierarchy_response_metrics_decode_standard_and_flagged_rows.md)
 - [uploaded_state_delta_anchor_requires_idset_and_cnset_seen](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/uploaded_state_delta_anchor_requires_idset_and_cnset_seen.md)
 - [uploaded_state_empty_streams_create_delta_anchor](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/uploaded_state_empty_streams_create_delta_anchor.md)
 - [inbox_open_loop_summary_requires_repeated_probe_without_contents_table](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/inbox_open_loop_summary_requires_repeated_probe_without_contents_table.md)

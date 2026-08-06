@@ -306,7 +306,7 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
 }
 
 #[test]
-fn session_new_mail_delivery_includes_message_derived_parent_hierarchy_table_notification() {
+fn session_new_mail_hierarchy_row_survives_preceding_basic_table_change() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
     let mut session = remove_session(&session_id).unwrap();
@@ -349,6 +349,25 @@ fn session_new_mail_delivery_includes_message_derived_parent_hierarchy_table_not
     session.record_notification(
         MapiNotificationEvent::canonical(
             MapiNotificationKind::Content,
+            MapiNotificationEventMask::ObjectModified.as_u16(),
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            Some(0x0000_0001_00c7_0001),
+            None,
+            1,
+            1,
+            Some(4),
+            Some(3),
+            "updated".to_string(),
+            None,
+            None,
+            Some("Incoming message".to_string()),
+            Some("IPM.Note".to_string()),
+        )
+        .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+    );
+    session.record_notification(
+        MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
             MapiNotificationEventMask::NewMail.as_u16(),
             crate::mapi::identity::INBOX_FOLDER_ID,
             Some(0x0000_0001_00c7_0001),
@@ -367,7 +386,7 @@ fn session_new_mail_delivery_includes_message_derived_parent_hierarchy_table_not
     );
 
     let (deliveries, _) = session.take_pending_notification_delivery_batch();
-    assert_eq!(deliveries.len(), 2);
+    assert_eq!(deliveries.len(), 3);
     let new_mail = deliveries
         .iter()
         .find(|(handle, _, _)| *handle == notification_handle)
@@ -380,7 +399,10 @@ fn session_new_mail_delivery_includes_message_derived_parent_hierarchy_table_not
     );
     let hierarchy = deliveries
         .iter()
-        .find(|(handle, _, _)| *handle == hierarchy_handle)
+        .find(|(handle, _, event)| {
+            *handle == hierarchy_handle
+                && event.event_mask == MapiNotificationEventMask::TableModified.as_u16() | 0xC000
+        })
         .expect("message-derived parent hierarchy row delivery");
     assert_eq!(hierarchy.1, 0);
     assert_eq!(hierarchy.2.kind, MapiNotificationKind::Hierarchy);

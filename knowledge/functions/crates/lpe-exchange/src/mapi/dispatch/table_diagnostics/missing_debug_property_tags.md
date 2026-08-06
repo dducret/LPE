@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: missing_debug_property_tags
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L117-L125
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L121-L129
 generated:
   by: okf-rs/0.3.0
 relationships:

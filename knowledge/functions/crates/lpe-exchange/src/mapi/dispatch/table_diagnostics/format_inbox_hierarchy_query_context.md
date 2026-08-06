@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_inbox_hierarchy_query_context
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L663-L706
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L667-L710
 generated:
   by: okf-rs/0.3.0
 relationships:

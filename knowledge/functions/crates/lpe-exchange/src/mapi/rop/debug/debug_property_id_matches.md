@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: debug_property_id_matches
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L365-L367
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L366-L368
 visibility: private
 generated:
   by: okf-rs/0.3.0

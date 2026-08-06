@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_handoff_context_reports_visible_query_position_before_query_rows
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1899-L1914
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1977-L1992
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_hierarchy_row
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L694-L731
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L762-L815
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -10,11 +10,10 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_id
   - functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag
   - functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_folder_flags
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row_from_backing_object
   called_by:
-  - functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response
-  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified
-  - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_property_row
   - functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder
   - functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders
   - functions/crates/lpe-exchange/src/mapi/tables/tests/dynamic_contacts_associated_find_row_does_not_invent_osc_contact_sync_config
@@ -30,13 +29,12 @@ relationships:
 - [hierarchy_row_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_id.md)
 - [canonical_property_storage_tag](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag.md)
 - [write_mapi_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value.md)
+- [hierarchy_row_folder_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_folder_flags.md)
 - [serialize_hierarchy_row_from_backing_object](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row_from_backing_object.md)
 
 # Called by
 
-- [rop_find_row_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response.md)
-- [hierarchy_table_row_modified](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_row_modified.md)
-- [rop_query_rows_response_inner](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner.md)
+- [serialize_hierarchy_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_property_row.md)
 - [hierarchy_table_projects_user_saved_search_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder.md)
 - [ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders.md)
 - [dynamic_contacts_associated_find_row_does_not_invent_osc_contact_sync_config](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/dynamic_contacts_associated_find_row_does_not_invent_osc_contact_sync_config.md)

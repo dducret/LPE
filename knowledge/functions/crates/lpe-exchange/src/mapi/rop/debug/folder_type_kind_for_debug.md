@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_type_kind_for_debug
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L757-L764
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L758-L765
 generated:
   by: okf-rs/0.3.0
 ---

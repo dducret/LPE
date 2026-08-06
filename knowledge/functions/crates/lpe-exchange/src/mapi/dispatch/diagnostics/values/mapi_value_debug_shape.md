@@ -12,10 +12,10 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_bool
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_binary_decode
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_u32_from_value
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_folder_id
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_string
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_count
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_bool
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_debug_folder_id
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_debug_string
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_debug_count
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_debug_bool
 ---
 
 # Signature
@@ -30,7 +30,7 @@ relationships:
 - [mapi_value_debug_bool](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_bool.md)
 - [mapi_value_debug_binary_decode](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_binary_decode.md)
 - [mapi_value_debug_u32_from_value](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_u32_from_value.md)
-- [format_hierarchy_debug_folder_id](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_folder_id.md)
-- [format_hierarchy_debug_string](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_string.md)
-- [format_hierarchy_debug_count](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_count.md)
-- [format_hierarchy_debug_bool](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_bool.md)
+- [format_hierarchy_debug_folder_id](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_debug_folder_id.md)
+- [format_hierarchy_debug_string](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_debug_string.md)
+- [format_hierarchy_debug_count](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_debug_count.md)
+- [format_hierarchy_debug_bool](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_debug_bool.md)

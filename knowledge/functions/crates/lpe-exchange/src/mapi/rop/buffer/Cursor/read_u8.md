@@ -13,8 +13,9 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/post_hierarchy/getprops_contract_response_summary
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/extract_getprops_binary_value
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/summarize_flagged_getprops_materialization
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response_metric_summary
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/parse_hierarchy_property_row_value
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/hierarchy_response_metric_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_query_rows_wire_summary
   - functions/crates/lpe-exchange/src/mapi/nspi/parse_resolve_names_columns
   - functions/crates/lpe-exchange/src/mapi/nspi/parse_resolve_names_values
   - functions/crates/lpe-exchange/src/mapi/nspi/dn_to_mid/parse_dn_to_mid_names
@@ -46,8 +47,9 @@ relationships:
 - [getprops_contract_response_summary](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/post_hierarchy/getprops_contract_response_summary.md)
 - [extract_getprops_binary_value](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/extract_getprops_binary_value.md)
 - [summarize_flagged_getprops_materialization](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/summarize_flagged_getprops_materialization.md)
-- [hierarchy_response_metric_summary](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response_metric_summary.md)
-- [format_hierarchy_query_rows_wire_summary](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary.md)
+- [parse_hierarchy_property_row_value](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/parse_hierarchy_property_row_value.md)
+- [hierarchy_response_metric_summary](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/hierarchy_response_metric_summary.md)
+- [format_hierarchy_query_rows_wire_summary](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_query_rows_wire_summary.md)
 - [parse_resolve_names_columns](../../../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/parse_resolve_names_columns.md)
 - [parse_resolve_names_values](../../../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/parse_resolve_names_values.md)
 - [parse_dn_to_mid_names](../../../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/dn_to_mid/parse_dn_to_mid_names.md)

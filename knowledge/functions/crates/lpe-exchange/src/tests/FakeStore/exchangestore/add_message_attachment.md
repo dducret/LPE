@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: add_message_attachment
-resource: crates/lpe-exchange/src/tests/mod.rs#L11209-L11257
+resource: crates/lpe-exchange/src/tests/mod.rs#L11215-L11263
 visibility: private
 generated:
   by: okf-rs/0.3.0

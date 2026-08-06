@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_inbox_associated_prefix_find_summary
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L895-L929
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L899-L933
 visibility: private
 generated:
   by: okf-rs/0.3.0

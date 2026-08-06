@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: debug_advertised_default_named_view
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L582-L598
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L586-L602
 generated:
   by: okf-rs/0.3.0
 relationships:

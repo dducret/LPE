@@ -96,6 +96,102 @@ async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
 }
 
 #[tokio::test]
+async fn sync_folder_hierarchy_replays_canonical_mailbox_changes() {
+    let mailbox_id = "44444444-4444-4444-4444-444444444444";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "custom", "RCA Sync",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderHierarchy /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let initial = response_text(response).await;
+    let initial_state = test_xml_text(&initial, "SyncState").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderHierarchy><m:SyncState>{initial_state}</m:SyncState></m:SyncFolderHierarchy></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(!body.contains("<t:Create>"));
+    assert!(!body.contains("<t:Update>"));
+    assert!(!body.contains("<t:Delete>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id="mailbox:{mailbox_id}"/><t:Updates><t:SetFolderField><t:FieldURI FieldURI="folder:DisplayName"/><t:Folder><t:DisplayName>Renamed RCA Sync</t:DisplayName></t:Folder></t:SetFolderField></t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    assert!(response_text(response)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderHierarchy><m:SyncState>{initial_state}</m:SyncState></m:SyncFolderHierarchy></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let renamed = response_text(response).await;
+    assert!(renamed.contains("<t:Update><t:Folder>"));
+    assert!(renamed.contains("<t:DisplayName>Renamed RCA Sync</t:DisplayName>"));
+    let renamed_state = test_xml_text(&renamed, "SyncState").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:DeleteFolder DeleteType="HardDelete"><m:FolderIds><t:FolderId Id="mailbox:{mailbox_id}"/></m:FolderIds></m:DeleteFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    assert!(response_text(response)
+        .await
+        .contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderHierarchy><m:SyncState>{renamed_state}</m:SyncState></m:SyncFolderHierarchy></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let deleted = response_text(response).await;
+    assert!(deleted.contains(&format!(
+        "<t:Delete><t:FolderId Id=\"mailbox:{mailbox_id}\""
+    )));
+}
+
+#[tokio::test]
 async fn create_folder_path_creates_nested_mailboxes_and_sync_reports_changes() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -7460,6 +7556,56 @@ async fn find_item_lists_custom_mailbox_messages() {
 }
 
 #[tokio::test]
+async fn find_item_pages_more_than_two_hundred_mailbox_messages() {
+    let mailbox_id = "44444444-4444-4444-4444-444444444444";
+    let emails = (1..=201)
+        .map(|index| {
+            FakeStore::email(
+                &Uuid::from_u128(index).to_string(),
+                mailbox_id,
+                "custom",
+                &format!("Mailbox item {index}"),
+            )
+        })
+        .collect();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(emails)),
+        respect_jmap_query_pagination: true,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:FindItem><m:IndexedPageItemView BasePoint="Beginning" Offset="0" MaxEntriesReturned="200"/><m:ParentFolderIds><t:FolderId Id="mailbox:{mailbox_id}"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let first_page = response_text(response).await;
+    assert!(first_page.contains("TotalItemsInView=\"201\" IncludesLastItemInRange=\"false\""));
+    assert_eq!(first_page.matches("<t:Message>").count(), 200);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:FindItem><m:IndexedPageItemView BasePoint="Beginning" Offset="200" MaxEntriesReturned="5"/><m:ParentFolderIds><t:FolderId Id="mailbox:{mailbox_id}"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let last_page = response_text(response).await;
+    assert!(last_page.contains("TotalItemsInView=\"201\" IncludesLastItemInRange=\"true\""));
+    assert_eq!(last_page.matches("<t:Message>").count(), 1);
+}
+
+#[tokio::test]
 async fn ews_mail_change_key_is_stable_for_a_non_primary_mailbox_membership() {
     let inbox_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
     let archive_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
@@ -7616,6 +7762,112 @@ async fn sync_folder_items_reports_custom_mailbox_create_and_delete_changes() {
     assert!(body.contains(&format!(
         "<t:Delete><t:ItemId Id=\"message:99999999-9999-9999-9999-999999999999\" ChangeKey=\"{change_key}\"/>"
     )));
+}
+
+#[tokio::test]
+async fn sync_folder_items_pages_more_than_two_hundred_mailbox_messages() {
+    let mailbox_id = "44444444-4444-4444-4444-444444444444";
+    let emails = (1..=201)
+        .map(|index| {
+            FakeStore::email(
+                &Uuid::from_u128(index).to_string(),
+                mailbox_id,
+                "custom",
+                &format!("Mailbox item {index}"),
+            )
+        })
+        .collect();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(emails)),
+        respect_jmap_query_pagination: true,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{mailbox_id}"/></m:SyncFolderId><m:MaxChangesReturned>200</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let first_page = response_text(response).await;
+    assert!(first_page.contains("<m:IncludesLastItemInRange>false</m:IncludesLastItemInRange>"));
+    assert_eq!(first_page.matches("<t:Create>").count(), 200);
+    let sync_state = test_xml_text(&first_page, "SyncState").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{mailbox_id}"/></m:SyncFolderId><m:SyncState>{sync_state}</m:SyncState><m:MaxChangesReturned>200</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let last_page = response_text(response).await;
+    assert!(last_page.contains("<m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>"));
+    assert_eq!(last_page.matches("<t:Create>").count(), 1);
+}
+
+#[tokio::test]
+async fn sync_folder_items_honors_max_changes_returned() {
+    let mailbox_id = "44444444-4444-4444-4444-444444444444";
+    let emails = vec![
+        FakeStore::email(
+            "11111111-1111-1111-1111-111111111111",
+            mailbox_id,
+            "custom",
+            "First item",
+        ),
+        FakeStore::email(
+            "22222222-2222-2222-2222-222222222222",
+            mailbox_id,
+            "custom",
+            "Second item",
+        ),
+    ];
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(emails)),
+        respect_jmap_query_pagination: true,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{mailbox_id}"/></m:SyncFolderId><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let first_page = response_text(response).await;
+    assert!(first_page.contains("<m:IncludesLastItemInRange>false</m:IncludesLastItemInRange>"));
+    assert_eq!(first_page.matches("<t:Create>").count(), 1);
+    let sync_state = test_xml_text(&first_page, "SyncState").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:{mailbox_id}"/></m:SyncFolderId><m:SyncState>{sync_state}</m:SyncState><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let last_page = response_text(response).await;
+    assert!(last_page.contains("<m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>"));
+    assert_eq!(last_page.matches("<t:Create>").count(), 1);
 }
 
 #[tokio::test]

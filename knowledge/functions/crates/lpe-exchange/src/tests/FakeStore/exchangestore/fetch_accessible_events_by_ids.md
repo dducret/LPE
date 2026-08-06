@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_events_by_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L8912-L8926
+resource: crates/lpe-exchange/src/tests/mod.rs#L8913-L8927
 visibility: private
 generated:
   by: okf-rs/0.3.0

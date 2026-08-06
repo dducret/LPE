@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_query_rows_preserves_empty_persisted_compact_named_view
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6860-L6933
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6933-L7006
 visibility: private
 generated:
   by: okf-rs/0.3.0

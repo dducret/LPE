@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: empty_snapshot
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L3006-L3019
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L3084-L3097
 visibility: private
 generated:
   by: okf-rs/0.3.0

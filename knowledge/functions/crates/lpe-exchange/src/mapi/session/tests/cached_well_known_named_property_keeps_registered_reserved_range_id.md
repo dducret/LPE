@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: cached_well_known_named_property_keeps_registered_reserved_range_id
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1091-L1110
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1202-L1221
 visibility: private
 generated:
   by: okf-rs/0.3.0

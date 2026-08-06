@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_search_folder
-resource: crates/lpe-exchange/src/tests/mod.rs#L9681-L9711
+resource: crates/lpe-exchange/src/tests/mod.rs#L9682-L9712
 visibility: private
 generated:
   by: okf-rs/0.3.0

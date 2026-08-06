@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_outlook_logon_bootstrap_getprops
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L559-L601
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L560-L602
 generated:
   by: okf-rs/0.3.0
 relationships:

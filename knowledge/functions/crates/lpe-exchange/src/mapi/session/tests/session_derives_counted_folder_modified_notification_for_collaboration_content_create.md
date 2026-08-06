@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_derives_counted_folder_modified_notification_for_collaboration_content_create
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L384-L438
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L495-L549
 visibility: private
 generated:
   by: okf-rs/0.3.0

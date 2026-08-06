@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_public_folder_permission
-resource: crates/lpe-exchange/src/tests/mod.rs#L6602-L6625
+resource: crates/lpe-exchange/src/tests/mod.rs#L6603-L6626
 visibility: private
 generated:
   by: okf-rs/0.3.0

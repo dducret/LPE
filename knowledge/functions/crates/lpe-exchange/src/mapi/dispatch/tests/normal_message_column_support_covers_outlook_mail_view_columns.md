@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_message_column_support_covers_outlook_mail_view_columns
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2182-L2203
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2260-L2281
 visibility: private
 generated:
   by: okf-rs/0.3.0

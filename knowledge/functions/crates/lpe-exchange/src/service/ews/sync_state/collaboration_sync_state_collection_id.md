@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_sync_state_collection_id
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L670-L678
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L720-L728
 generated:
   by: okf-rs/0.3.0
 relationships:

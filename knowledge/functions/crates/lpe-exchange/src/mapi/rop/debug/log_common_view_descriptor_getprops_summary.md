@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: log_common_view_descriptor_getprops_summary
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L973-L1052
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L974-L1053
 generated:
   by: okf-rs/0.3.0
 relationships:

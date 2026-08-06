@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/identity/owner_and_grantee_scopes_keep_hierarchy_folder_wire_ids_separate
   - functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags
   - functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_table_row_modified_notification_encodes_current_row
+  - functions/crates/lpe-exchange/src/mapi/notifications/new_mail_hierarchy_row_notification_encodes_message_row_keys
   - functions/crates/lpe-exchange/src/mapi/notifications/folder_modified_notification_with_total_count_encodes_t_flag
   - functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags
   - functions/crates/lpe-exchange/src/mapi/notifications/object_moved_and_copied_notifications_preserve_source_message_id
@@ -40,6 +41,7 @@ relationships:
 - [owner_and_grantee_scopes_keep_hierarchy_folder_wire_ids_separate](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/owner_and_grantee_scopes_keep_hierarchy_folder_wire_ids_separate.md)
 - [new_mail_notification_with_message_id_encodes_exchange_zero_message_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags.md)
 - [hierarchy_table_row_modified_notification_encodes_current_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_table_row_modified_notification_encodes_current_row.md)
+- [new_mail_hierarchy_row_notification_encodes_message_row_keys](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_hierarchy_row_notification_encodes_message_row_keys.md)
 - [folder_modified_notification_with_total_count_encodes_t_flag](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/folder_modified_notification_with_total_count_encodes_t_flag.md)
 - [new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags.md)
 - [object_moved_and_copied_notifications_preserve_source_message_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/object_moved_and_copied_notifications_preserve_source_message_id.md)

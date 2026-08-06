@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_public_folder_items
-resource: crates/lpe-exchange/src/tests/mod.rs#L6448-L6465
+resource: crates/lpe-exchange/src/tests/mod.rs#L6449-L6466
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_common_views_inbox_shortcut_context
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1082-L1138
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1086-L1142
 generated:
   by: okf-rs/0.3.0
 relationships:

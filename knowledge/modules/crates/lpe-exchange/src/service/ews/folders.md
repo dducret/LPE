@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: folders
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L1-L784
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L1-L857
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -19,6 +19,10 @@ relationships:
 - [create_managed_folder](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/create_managed_folder.md)
 - [get_folder](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/get_folder.md)
 - [root_child_folder_count](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/root_child_folder_count.md)
+- [HierarchySyncFolder](../../../../../../classes/crates/lpe-exchange/src/service/ews/folders/HierarchySyncFolder.md)
+- [new](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/HierarchySyncFolder/new.md)
+- [hierarchy_sync_state](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/hierarchy_sync_state.md)
+- [hierarchy_sync_state_items](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/hierarchy_sync_state_items.md)
 - [requested_folder_kind](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/requested_folder_kind.md)
 - [sync_state_folder_kind](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/sync_state_folder_kind.md)
 - [requested_folder_kinds](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/requested_folder_kinds.md)

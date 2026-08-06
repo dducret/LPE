@@ -19,6 +19,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/session/tests/execute_replay_cache_evicts_oldest_inserted_request_id
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_records_transport_request_lifetime
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table
+  - functions/crates/lpe-exchange/src/mapi/session/tests/session_new_mail_hierarchy_row_survives_preceding_basic_table_change
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_derives_counted_folder_modified_notification_for_collaboration_content_create
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_delivers_only_complete_message_moves_and_copies_to_subscriptions
@@ -74,6 +75,7 @@ relationships:
 - [execute_replay_cache_evicts_oldest_inserted_request_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/execute_replay_cache_evicts_oldest_inserted_request_id.md)
 - [session_records_transport_request_lifetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_records_transport_request_lifetime.md)
 - [session_retains_folder_count_change_for_active_parent_hierarchy_table](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table.md)
+- [session_new_mail_hierarchy_row_survives_preceding_basic_table_change](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_new_mail_hierarchy_row_survives_preceding_basic_table_change.md)
 - [session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts.md)
 - [session_derives_counted_folder_modified_notification_for_collaboration_content_create](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_derives_counted_folder_modified_notification_for_collaboration_content_create.md)
 - [session_delivers_only_complete_message_moves_and_copies_to_subscriptions](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_delivers_only_complete_message_moves_and_copies_to_subscriptions.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_item_change_key
-resource: crates/lpe-exchange/src/tests/ews.rs#L4793-L4801
+resource: crates/lpe-exchange/src/tests/ews.rs#L4889-L4897
 visibility: private
 generated:
   by: okf-rs/0.3.0

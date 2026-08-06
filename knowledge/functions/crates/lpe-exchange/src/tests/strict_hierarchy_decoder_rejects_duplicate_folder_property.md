@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_decoder_rejects_duplicate_folder_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L14718-L14726
+resource: crates/lpe-exchange/src/tests/mod.rs#L14759-L14767
 visibility: private
 generated:
   by: okf-rs/0.3.0

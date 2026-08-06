@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_inbox_associated_query_context
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L708-L773
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L712-L777
 generated:
   by: okf-rs/0.3.0
 relationships:

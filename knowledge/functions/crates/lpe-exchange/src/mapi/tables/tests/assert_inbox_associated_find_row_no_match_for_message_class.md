@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_inbox_associated_find_row_no_match_for_message_class
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8479-L8488
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8552-L8561
 visibility: private
 generated:
   by: okf-rs/0.3.0

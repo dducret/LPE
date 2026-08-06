@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_navigation_shortcuts
-resource: crates/lpe-exchange/src/tests/mod.rs#L9748-L9754
+resource: crates/lpe-exchange/src/tests/mod.rs#L9749-L9755
 visibility: private
 generated:
   by: okf-rs/0.3.0

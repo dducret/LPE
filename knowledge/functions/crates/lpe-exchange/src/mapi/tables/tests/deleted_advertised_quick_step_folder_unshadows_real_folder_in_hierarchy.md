@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3871-L3905
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3944-L3978
 visibility: private
 generated:
   by: okf-rs/0.3.0

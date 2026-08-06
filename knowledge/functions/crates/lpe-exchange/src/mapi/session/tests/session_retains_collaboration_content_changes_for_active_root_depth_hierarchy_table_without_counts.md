@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L309-L381
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L420-L492
 visibility: private
 generated:
   by: okf-rs/0.3.0

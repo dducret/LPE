@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_marker
-resource: crates/lpe-exchange/src/tests/mod.rs#L13132-L13141
+resource: crates/lpe-exchange/src/tests/mod.rs#L13138-L13147
 visibility: private
 generated:
   by: okf-rs/0.3.0

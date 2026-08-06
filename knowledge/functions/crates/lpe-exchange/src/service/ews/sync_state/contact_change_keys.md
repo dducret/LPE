@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_change_keys
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L395-L427
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L445-L477
 generated:
   by: okf-rs/0.3.0
 relationships:

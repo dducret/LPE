@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: SyncStateItem
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L612-L615
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L662-L665
 generated:
   by: okf-rs/0.3.0
 ---

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_folder_property_value_with_change_number
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L610-L692
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L677-L760
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -16,6 +16,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/views/default_folder_view_entry_id
   - functions/crates/lpe-exchange/src/mapi/properties/default_post_message_class_for_container_class
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_change_number
+  - functions/crates/lpe-exchange/src/mapi/tables/folders/serialized_replid_guid_map
   - functions/crates/lpe-exchange/src/mapi/properties/folder/special_folder_identification_property_value
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/folders/folder_properties_for_open_from_mailboxes
@@ -38,6 +39,7 @@ relationships:
 - [default_folder_view_entry_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/default_folder_view_entry_id.md)
 - [default_post_message_class_for_container_class](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/default_post_message_class_for_container_class.md)
 - [filetime_from_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_change_number.md)
+- [serialized_replid_guid_map](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialized_replid_guid_map.md)
 - [special_folder_identification_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/folder/special_folder_identification_property_value.md)
 
 # Called by

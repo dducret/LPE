@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_user_photo_error_response
-resource: crates/lpe-exchange/src/service/ews/responses.rs#L303-L315
+resource: crates/lpe-exchange/src/service/ews/responses.rs#L318-L330
 generated:
   by: okf-rs/0.3.0
 relationships:

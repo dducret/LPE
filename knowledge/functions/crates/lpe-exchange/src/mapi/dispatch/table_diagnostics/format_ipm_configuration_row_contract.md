@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_ipm_configuration_row_contract
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L154-L192
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L158-L196
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/sync_mailboxes_with_collaboration_counts
   - functions/crates/lpe-exchange/src/mapi/identity/owner_and_grantee_scopes_keep_hierarchy_folder_wire_ids_separate
   - functions/crates/lpe-exchange/src/mapi/tables/folders/mapi_folder_id
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_folder_is_in_ipm_subtree
 ---
 
 # Signature
@@ -32,3 +33,4 @@ relationships:
 - [sync_mailboxes_with_collaboration_counts](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/sync_mailboxes_with_collaboration_counts.md)
 - [owner_and_grantee_scopes_keep_hierarchy_folder_wire_ids_separate](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/owner_and_grantee_scopes_keep_hierarchy_folder_wire_ids_separate.md)
 - [mapi_folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/mapi_folder_id.md)
+- [hierarchy_folder_is_in_ipm_subtree](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_folder_is_in_ipm_subtree.md)

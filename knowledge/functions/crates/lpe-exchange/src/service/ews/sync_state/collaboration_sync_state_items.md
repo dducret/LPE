@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_sync_state_items
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L632-L668
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L682-L718
 generated:
   by: okf-rs/0.3.0
 relationships:

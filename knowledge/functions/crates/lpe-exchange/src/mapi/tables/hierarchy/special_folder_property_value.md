@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_folder_property_value
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L597-L608
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L664-L675
 generated:
   by: okf-rs/0.3.0
 relationships:

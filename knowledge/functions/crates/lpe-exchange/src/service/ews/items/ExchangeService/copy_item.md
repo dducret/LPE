@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: copy_item
-resource: crates/lpe-exchange/src/service/ews/items.rs#L863-L991
+resource: crates/lpe-exchange/src/service/ews/items.rs#L877-L1005
 generated:
   by: okf-rs/0.3.0
 relationships:

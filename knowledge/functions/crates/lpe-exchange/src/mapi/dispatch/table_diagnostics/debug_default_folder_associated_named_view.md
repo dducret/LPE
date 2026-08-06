@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: debug_default_folder_associated_named_view
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L562-L580
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L566-L584
 generated:
   by: okf-rs/0.3.0
 relationships:

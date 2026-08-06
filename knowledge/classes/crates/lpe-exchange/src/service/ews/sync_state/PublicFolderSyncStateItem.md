@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: PublicFolderSyncStateItem
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L531-L535
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L581-L585
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -3439,6 +3439,7 @@ fn hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection() {
         PID_TAG_FOLDER_ID,
         PID_TAG_FOLDER_XVIEWINFO_E,
         PID_TAG_FOLDER_FLAGS,
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP,
     ];
 
     let property_row =
@@ -3456,6 +3457,11 @@ fn hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection() {
     assert_eq!(cursor.read_u32().unwrap(), ROP_ERROR_NOT_FOUND);
     assert_eq!(cursor.read_u8().unwrap(), 0);
     assert_eq!(cursor.read_u32().unwrap(), 0x0000_0005);
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_SERIALIZED_REPLID_GUID_MAP).unwrap(),
+        MapiValue::Binary(serialized_replid_guid_map())
+    );
     assert_eq!(cursor.position() as usize, property_row.len());
 
     let root_rows = hierarchy_rows(

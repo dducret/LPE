@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_folder_items_returns_no_contact_change_for_current_keyed_sync_state
-resource: crates/lpe-exchange/src/tests/ews.rs#L6773-L6826
+resource: crates/lpe-exchange/src/tests/ews.rs#L6869-L6922
 visibility: private
 generated:
   by: okf-rs/0.3.0

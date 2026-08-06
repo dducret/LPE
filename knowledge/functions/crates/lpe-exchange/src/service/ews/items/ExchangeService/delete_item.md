@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_item
-resource: crates/lpe-exchange/src/service/ews/items.rs#L1135-L1300
+resource: crates/lpe-exchange/src/service/ews/items.rs#L1149-L1314
 generated:
   by: okf-rs/0.3.0
 relationships:

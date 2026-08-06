@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_rows_excluding_deleted
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/mailbox_shadowed_by_active_outlook_special_folder
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_parent_id
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_folder_is_in_ipm_subtree
 ---
 
 # Signature
@@ -30,3 +31,4 @@ relationships:
 - [hierarchy_rows_excluding_deleted](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_rows_excluding_deleted.md)
 - [mailbox_shadowed_by_active_outlook_special_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/mailbox_shadowed_by_active_outlook_special_folder.md)
 - [hierarchy_row_parent_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_parent_id.md)
+- [hierarchy_folder_is_in_ipm_subtree](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_folder_is_in_ipm_subtree.md)

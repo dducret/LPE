@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: site_mailbox_operations_return_explicit_unsupported_errors
-resource: crates/lpe-exchange/src/service/ews/responses.rs#L338-L348
+resource: crates/lpe-exchange/src/service/ews/responses.rs#L353-L363
 visibility: private
 generated:
   by: okf-rs/0.3.0

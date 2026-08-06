@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: collection
-resource: crates/lpe-exchange/src/tests/mod.rs#L4287-L4299
+resource: crates/lpe-exchange/src/tests/mod.rs#L4288-L4300
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: reserve_mapi_local_replica_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L4864-L4890
+resource: crates/lpe-exchange/src/tests/mod.rs#L4865-L4891
 visibility: private
 generated:
   by: okf-rs/0.3.0

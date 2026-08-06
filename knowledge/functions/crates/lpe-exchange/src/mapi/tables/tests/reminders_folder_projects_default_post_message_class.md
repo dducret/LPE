@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reminders_folder_projects_default_post_message_class
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9401-L9419
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9474-L9492
 visibility: private
 generated:
   by: okf-rs/0.3.0

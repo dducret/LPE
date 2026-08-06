@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: commit_mapi_navigation_shortcut_create
-resource: crates/lpe-exchange/src/tests/mod.rs#L9787-L9809
+resource: crates/lpe-exchange/src/tests/mod.rs#L9788-L9810
 visibility: private
 generated:
   by: okf-rs/0.3.0

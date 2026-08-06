@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pull_subscription_get_events_and_unsubscribe_return_status_flow
-resource: crates/lpe-exchange/src/tests/ews.rs#L3376-L3453
+resource: crates/lpe-exchange/src/tests/ews.rs#L3472-L3549
 visibility: private
 generated:
   by: okf-rs/0.3.0

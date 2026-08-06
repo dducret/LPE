@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_default_view_entry_id_decoding
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1153-L1187
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1154-L1188
 generated:
   by: okf-rs/0.3.0
 relationships:

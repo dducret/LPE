@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: restriction_property_tags_from_request
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L235-L246
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L239-L250
 generated:
   by: okf-rs/0.3.0
 relationships:

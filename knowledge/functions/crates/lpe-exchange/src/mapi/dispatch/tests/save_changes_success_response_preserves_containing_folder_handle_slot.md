@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: save_changes_success_response_preserves_containing_folder_handle_slot
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2650-L2672
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2728-L2750
 visibility: private
 generated:
   by: okf-rs/0.3.0

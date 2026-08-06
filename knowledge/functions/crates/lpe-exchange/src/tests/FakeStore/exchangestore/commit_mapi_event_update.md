@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: commit_mapi_event_update
-resource: crates/lpe-exchange/src/tests/mod.rs#L8504-L8751
+resource: crates/lpe-exchange/src/tests/mod.rs#L8505-L8752
 visibility: private
 generated:
   by: okf-rs/0.3.0

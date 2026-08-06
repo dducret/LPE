@@ -735,6 +735,7 @@ pub(in crate::mapi) fn special_folder_property_value_with_change_number(
         | PID_TAG_HIER_REV => Some(MapiValue::I64(mapi_mailstore::filetime_from_change_number(
             change_number,
         ) as i64)),
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP => Some(MapiValue::Binary(serialized_replid_guid_map())),
         PID_TAG_HIERARCHY_CHANGE_NUMBER => {
             Some(MapiValue::U32(change_number.min(u64::from(u32::MAX)) as u32))
         }

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_search_matches
-resource: crates/lpe-exchange/src/tests/mod.rs#L4183-L4200
+resource: crates/lpe-exchange/src/tests/mod.rs#L4184-L4201
 visibility: private
 generated:
   by: okf-rs/0.3.0

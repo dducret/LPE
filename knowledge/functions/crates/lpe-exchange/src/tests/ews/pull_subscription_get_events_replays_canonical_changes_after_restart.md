@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pull_subscription_get_events_replays_canonical_changes_after_restart
-resource: crates/lpe-exchange/src/tests/ews.rs#L3524-L3600
+resource: crates/lpe-exchange/src/tests/ews.rs#L3620-L3696
 visibility: private
 generated:
   by: okf-rs/0.3.0

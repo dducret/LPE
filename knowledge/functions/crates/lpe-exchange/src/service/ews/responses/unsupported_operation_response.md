@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: unsupported_operation_response
-resource: crates/lpe-exchange/src/service/ews/responses.rs#L295-L301
+resource: crates/lpe-exchange/src/service/ews/responses.rs#L310-L316
 generated:
   by: okf-rs/0.3.0
 relationships:

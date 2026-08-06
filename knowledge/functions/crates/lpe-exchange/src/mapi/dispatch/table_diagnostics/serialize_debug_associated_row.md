@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_debug_associated_row
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L547-L560
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L551-L564
 generated:
   by: okf-rs/0.3.0
 relationships:

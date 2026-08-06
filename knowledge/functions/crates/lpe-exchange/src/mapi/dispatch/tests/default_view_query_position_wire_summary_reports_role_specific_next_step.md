@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_view_query_position_wire_summary_reports_role_specific_next_step
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2026-L2062
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2104-L2140
 visibility: private
 generated:
   by: okf-rs/0.3.0

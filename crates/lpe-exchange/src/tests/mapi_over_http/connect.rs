@@ -4481,6 +4481,18 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
         );
         if expected_folder_id == scoped_inbox_folder_id {
             assert_eq!(notification_flags, 0xC100);
+            assert_eq!(row_data.len(), 77, "Exchange raw/753 Inbox row size");
+            assert_eq!(row_data[34], 0x0A, "XView error value flag");
+            assert_eq!(
+                &row_data[35..39],
+                &0x8004_010Fu32.to_le_bytes(),
+                "XView MAPI_E_NOT_FOUND"
+            );
+            assert_eq!(
+                &row_data[54..58],
+                &5u32.to_le_bytes(),
+                "Inbox IPM | NORMAL FolderFlags"
+            );
             table_notification_offset = Some(offset);
         } else {
             assert_eq!(notification_flags, 0x0100);

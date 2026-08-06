@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: rights
-resource: crates/lpe-exchange/src/tests/mod.rs#L4278-L4285
+resource: crates/lpe-exchange/src/tests/mod.rs#L4279-L4286
 visibility: private
 generated:
   by: okf-rs/0.3.0

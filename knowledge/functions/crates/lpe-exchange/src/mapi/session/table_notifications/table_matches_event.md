@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_matches_event
-resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L300-L325
+resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L307-L332
 visibility: private
 generated:
   by: okf-rs/0.3.0

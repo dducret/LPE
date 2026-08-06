@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: set_user_oof_settings_errors_use_single_response_message_shape
-resource: crates/lpe-exchange/src/tests/ews.rs#L4804-L4836
+resource: crates/lpe-exchange/src/tests/ews.rs#L4900-L4932
 visibility: private
 generated:
   by: okf-rs/0.3.0

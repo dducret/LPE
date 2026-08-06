@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_item_mime_content_hides_bcc_for_sent_message_default_fetch
-resource: crates/lpe-exchange/src/tests/ews.rs#L8027-L8058
+resource: crates/lpe-exchange/src/tests/ews.rs#L8279-L8310
 visibility: private
 generated:
   by: okf-rs/0.3.0

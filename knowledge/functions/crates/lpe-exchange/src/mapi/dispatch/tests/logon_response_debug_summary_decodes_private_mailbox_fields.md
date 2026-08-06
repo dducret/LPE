@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: logon_response_debug_summary_decodes_private_mailbox_fields
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2877-L2916
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2955-L2994
 visibility: private
 generated:
   by: okf-rs/0.3.0

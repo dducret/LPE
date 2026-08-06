@@ -14,6 +14,7 @@ where
         request: &str,
     ) -> Result<String> {
         let mut changes = String::new();
+        let mut includes_last = true;
         let sync_state = match requested_folder_kind(request).unwrap_or(FolderKind::Contacts) {
             FolderKind::Root => "root:0".to_string(),
             FolderKind::Contacts => {
@@ -241,21 +242,31 @@ where
                     .into_iter()
                     .next()
                 else {
-                    return Ok(sync_folder_items_response("mailbox:0", String::new()));
+                    return Ok(sync_folder_items_response("mailbox:0", String::new(), true));
                 };
-                let query = self
-                    .store
-                    .query_jmap_email_ids(
-                        principal.account_id,
-                        Some(mailbox_id),
-                        None,
-                        0,
-                        MAILBOX_QUERY_LIMIT,
-                    )
-                    .await?;
+                let mut ids = Vec::new();
+                let mut position = 0;
+                loop {
+                    let query = self
+                        .store
+                        .query_jmap_email_ids(
+                            principal.account_id,
+                            Some(mailbox_id),
+                            None,
+                            position,
+                            MAILBOX_QUERY_LIMIT,
+                        )
+                        .await?;
+                    let returned = query.ids.len() as u64;
+                    ids.extend(query.ids);
+                    if returned == 0 || position.saturating_add(returned) >= query.total {
+                        break;
+                    }
+                    position += returned;
+                }
                 let emails = self
                     .store
-                    .fetch_jmap_emails(principal.account_id, &query.ids)
+                    .fetch_jmap_emails(principal.account_id, &ids)
                     .await?
                     .into_iter()
                     .filter(|email| {
@@ -266,38 +277,48 @@ where
                     })
                     .collect::<Vec<_>>();
                 let collection_id = mailbox_id.to_string();
-                let current_items = emails
-                    .iter()
-                    .map(|email| (email.id, message_change_key(email)))
-                    .collect::<Vec<_>>();
-                let current_set = current_items
-                    .iter()
-                    .map(|(id, _)| *id)
-                    .collect::<HashSet<_>>();
+                let current_set = emails.iter().map(|email| email.id).collect::<HashSet<_>>();
                 let previous_state = requested_sync_state(request)
                     .map(|state| collaboration_sync_state_items(&state, "mailbox", &collection_id))
                     .unwrap_or_default();
-                let previous_by_id = sync_state_items_by_id(&previous_state.items);
+                let mut next_by_id = sync_state_items_by_id(&previous_state.items);
+                let previous_by_id = next_by_id.clone();
+                let mut pending_changes = Vec::new();
                 for email in &emails {
                     let current_change_key = message_change_key(email);
                     match previous_by_id.get(&email.id) {
                         None => {
-                            changes.push_str("<t:Create>");
-                            changes.push_str(&message_summary_xml_for_mailbox(email, mailbox_id));
-                            changes.push_str("</t:Create>");
+                            pending_changes.push((
+                                email.id,
+                                Some(current_change_key),
+                                format!(
+                                    "<t:Create>{}</t:Create>",
+                                    message_summary_xml_for_mailbox(email, mailbox_id),
+                                ),
+                            ));
                         }
                         Some(None) => {
-                            changes.push_str("<t:Update>");
-                            changes.push_str(&message_summary_xml_for_mailbox(email, mailbox_id));
-                            changes.push_str("</t:Update>");
+                            pending_changes.push((
+                                email.id,
+                                Some(current_change_key),
+                                format!(
+                                    "<t:Update>{}</t:Update>",
+                                    message_summary_xml_for_mailbox(email, mailbox_id),
+                                ),
+                            ));
                         }
                         Some(Some(previous_change_key))
                             if !previous_state.is_current_version
                                 || previous_change_key != &current_change_key =>
                         {
-                            changes.push_str("<t:Update>");
-                            changes.push_str(&message_summary_xml_for_mailbox(email, mailbox_id));
-                            changes.push_str("</t:Update>");
+                            pending_changes.push((
+                                email.id,
+                                Some(current_change_key),
+                                format!(
+                                    "<t:Update>{}</t:Update>",
+                                    message_summary_xml_for_mailbox(email, mailbox_id),
+                                ),
+                            ));
                         }
                         _ => {}
                     }
@@ -306,20 +327,45 @@ where
                     let message_id = item.id;
                     if !current_set.contains(&message_id) {
                         let change_key = item.change_key.as_deref().unwrap_or("deleted");
-                        changes.push_str("<t:Delete>");
-                        changes.push_str(&format!(
-                            "<t:ItemId Id=\"message:{message_id}\" ChangeKey=\"{}\"/>",
-                            escape_xml(change_key),
+                        pending_changes.push((
+                            message_id,
+                            None,
+                            format!(
+                                "<t:Delete><t:ItemId Id=\"message:{message_id}\" ChangeKey=\"{}\"/></t:Delete>",
+                                escape_xml(change_key),
+                            ),
                         ));
-                        changes.push_str("</t:Delete>");
                     }
                 }
-                collaboration_sync_state("mailbox", &collection_id, &current_items)
+                let max_changes = requested_max_changes(request)?;
+                includes_last = pending_changes.len() <= max_changes;
+                for (id, change_key, change) in pending_changes.into_iter().take(max_changes) {
+                    changes.push_str(&change);
+                    if let Some(change_key) = change_key {
+                        next_by_id.insert(id, Some(change_key));
+                    } else {
+                        next_by_id.remove(&id);
+                    }
+                }
+                collaboration_sync_state(
+                    "mailbox",
+                    &collection_id,
+                    &next_by_id
+                        .into_iter()
+                        .filter_map(|(id, change_key)| {
+                            change_key.map(|change_key| (id, change_key))
+                        })
+                        .collect::<Vec<_>>(),
+                )
             }
             FolderKind::PublicFolders => {
                 let Some(folder_id) = requested_public_folder_ids(request).into_iter().next()
                 else {
-                    return Ok(sync_folder_items_response("public-folder:0", String::new()));
+                    return Ok(sync_folder_items_response(
+                        "public-folder:0",
+                        String::new(),
+                        true,
+                    ));
                 };
                 let items = self
                     .store
@@ -388,7 +434,11 @@ where
             }
         };
 
-        Ok(sync_folder_items_response(&sync_state, changes))
+        Ok(sync_folder_items_response(
+            &sync_state,
+            changes,
+            includes_last,
+        ))
     }
 }
 
@@ -695,6 +745,21 @@ pub(in crate::service) fn requested_sync_collection_id(
 
 pub(in crate::service) fn requested_sync_state(request: &str) -> Option<String> {
     element_text(request, "SyncState").filter(|value| !value.trim().is_empty())
+}
+
+fn requested_max_changes(request: &str) -> Result<usize> {
+    match element_text(request, "MaxChangesReturned") {
+        None => Ok(MAILBOX_QUERY_LIMIT as usize),
+        Some(value) => {
+            let value = value
+                .parse::<usize>()
+                .map_err(|_| anyhow!("MaxChangesReturned must be a positive integer"))?;
+            if value == 0 {
+                bail!("MaxChangesReturned must be a positive integer");
+            }
+            Ok(value.min(MAILBOX_QUERY_LIMIT as usize))
+        }
+    }
 }
 
 pub(in crate::service) fn mailbox_sync_state_folder_id(sync_state: &str) -> Option<Uuid> {

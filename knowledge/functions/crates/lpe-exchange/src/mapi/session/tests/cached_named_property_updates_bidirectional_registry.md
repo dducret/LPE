@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: cached_named_property_updates_bidirectional_registry
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L979-L996
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1090-L1107
 visibility: private
 generated:
   by: okf-rs/0.3.0

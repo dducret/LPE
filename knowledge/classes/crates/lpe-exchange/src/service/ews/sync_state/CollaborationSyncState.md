@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: CollaborationSyncState
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L618-L621
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L668-L671
 generated:
   by: okf-rs/0.3.0
 ---

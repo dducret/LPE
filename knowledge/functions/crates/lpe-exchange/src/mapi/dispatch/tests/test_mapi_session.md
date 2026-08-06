@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_mapi_session
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2952-L3004
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L3030-L3082
 visibility: private
 generated:
   by: okf-rs/0.3.0

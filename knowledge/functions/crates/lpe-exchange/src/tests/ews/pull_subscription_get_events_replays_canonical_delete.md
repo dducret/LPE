@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pull_subscription_get_events_replays_canonical_delete
-resource: crates/lpe-exchange/src/tests/ews.rs#L3603-L3674
+resource: crates/lpe-exchange/src/tests/ews.rs#L3699-L3770
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: blank_search_criteria_is_invalid
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2802-L2818
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2880-L2896
 visibility: private
 generated:
   by: okf-rs/0.3.0

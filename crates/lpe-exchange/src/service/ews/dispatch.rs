@@ -20,7 +20,7 @@ where
         );
 
         let payload = match operation.as_str() {
-            "SyncFolderHierarchy" => self.sync_folder_hierarchy(&principal).await?,
+            "SyncFolderHierarchy" => self.sync_folder_hierarchy(&principal, &body).await?,
             "FindFolder" => self.find_folder(&principal).await?,
             "GetFolder" => self.get_folder(&principal, &body).await?,
             "FindItem" => self

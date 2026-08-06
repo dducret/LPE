@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_change_key
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L782-L784
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L855-L857
 generated:
   by: okf-rs/0.3.0
 relationships:

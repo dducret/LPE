@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rop_query_rows_response_inner
-resource: crates/lpe-exchange/src/mapi/tables/query_rows.rs#L42-L737
+resource: crates/lpe-exchange/src/mapi/tables/query_rows.rs#L42-L744
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -17,7 +17,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/columns/default_hierarchy_columns
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_rows_excluding_deleted
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/log_sync_issues_hierarchy_query_rows
-  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_property_row
   - functions/crates/lpe-exchange/src/mapi/tables/counts/is_contact_contents_folder
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id
   - functions/crates/lpe-exchange/src/mapi/tables/columns/default_contact_property_tags
@@ -129,7 +129,7 @@ relationships:
 - [default_hierarchy_columns](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_hierarchy_columns.md)
 - [hierarchy_table_rows_excluding_deleted](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_table_rows_excluding_deleted.md)
 - [log_sync_issues_hierarchy_query_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/log_sync_issues_hierarchy_query_rows.md)
-- [serialize_hierarchy_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row.md)
+- [serialize_hierarchy_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_property_row.md)
 - [is_contact_contents_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/is_contact_contents_folder.md)
 - [collaboration_folder_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id.md)
 - [default_contact_property_tags](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_contact_property_tags.md)

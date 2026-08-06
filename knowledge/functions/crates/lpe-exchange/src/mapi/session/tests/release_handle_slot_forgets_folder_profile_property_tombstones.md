@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: release_handle_slot_forgets_folder_profile_property_tombstones
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L856-L887
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L967-L998
 visibility: private
 generated:
   by: okf-rs/0.3.0

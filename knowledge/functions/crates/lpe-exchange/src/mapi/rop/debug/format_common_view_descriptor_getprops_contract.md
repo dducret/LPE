@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_common_view_descriptor_getprops_contract
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1054-L1128
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1055-L1129
 generated:
   by: okf-rs/0.3.0
 relationships:

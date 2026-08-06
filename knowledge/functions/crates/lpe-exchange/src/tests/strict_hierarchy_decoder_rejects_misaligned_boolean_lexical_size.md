@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_decoder_rejects_misaligned_boolean_lexical_size
-resource: crates/lpe-exchange/src/tests/mod.rs#L14669-L14675
+resource: crates/lpe-exchange/src/tests/mod.rs#L14710-L14716
 visibility: private
 generated:
   by: okf-rs/0.3.0

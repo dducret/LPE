@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_mapi_navigation_shortcut
-resource: crates/lpe-exchange/src/tests/mod.rs#L10146-L10166
+resource: crates/lpe-exchange/src/tests/mod.rs#L10147-L10167
 visibility: private
 generated:
   by: okf-rs/0.3.0

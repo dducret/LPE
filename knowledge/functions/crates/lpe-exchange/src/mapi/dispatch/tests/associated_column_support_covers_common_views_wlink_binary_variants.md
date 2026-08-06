@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_column_support_covers_common_views_wlink_binary_variants
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2545-L2579
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2623-L2657
 visibility: private
 generated:
   by: okf-rs/0.3.0

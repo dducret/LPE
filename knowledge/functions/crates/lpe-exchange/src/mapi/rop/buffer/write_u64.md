@@ -6,6 +6,7 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/notifications/rop_hierarchy_table_row_modified_response
   - functions/crates/lpe-exchange/src/mapi/permissions/serialize_permission_row
   - functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/write_object_id
@@ -38,6 +39,7 @@ relationships:
 
 # Called by
 
+- [rop_hierarchy_table_row_modified_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_hierarchy_table_row_modified_response.md)
 - [serialize_permission_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/permissions/serialize_permission_row.md)
 - [write_mapi_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value.md)
 - [write_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/write_object_id.md)

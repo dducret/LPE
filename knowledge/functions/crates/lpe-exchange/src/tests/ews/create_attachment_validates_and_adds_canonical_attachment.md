@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: create_attachment_validates_and_adds_canonical_attachment
-resource: crates/lpe-exchange/src/tests/ews.rs#L8230-L8271
+resource: crates/lpe-exchange/src/tests/ews.rs#L8482-L8523
 visibility: private
 generated:
   by: okf-rs/0.3.0

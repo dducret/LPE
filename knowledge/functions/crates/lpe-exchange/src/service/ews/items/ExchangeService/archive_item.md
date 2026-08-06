@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: archive_item
-resource: crates/lpe-exchange/src/service/ews/items.rs#L782-L861
+resource: crates/lpe-exchange/src/service/ews/items.rs#L796-L875
 generated:
   by: okf-rs/0.3.0
 relationships:

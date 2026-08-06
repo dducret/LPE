@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: resolve_names_returns_no_results_for_non_directory_names
-resource: crates/lpe-exchange/src/tests/ews.rs#L1141-L1161
+resource: crates/lpe-exchange/src/tests/ews.rs#L1237-L1257
 visibility: private
 generated:
   by: okf-rs/0.3.0

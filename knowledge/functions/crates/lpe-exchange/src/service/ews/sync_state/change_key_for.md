@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: change_key_for
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L491-L500
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L541-L550
 generated:
   by: okf-rs/0.3.0
 relationships:

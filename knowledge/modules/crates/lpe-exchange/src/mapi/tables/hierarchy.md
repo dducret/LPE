@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: hierarchy
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L1-L787
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L1-L945
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -32,6 +32,8 @@ relationships:
 - [hierarchy_row_id](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_id.md)
 - [hierarchy_row_parent_id](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_parent_id.md)
 - [hierarchy_row_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_property_value.md)
+- [hierarchy_row_folder_flags](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_folder_flags.md)
+- [hierarchy_folder_is_in_ipm_subtree](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_folder_is_in_ipm_subtree.md)
 - [hierarchy_row_expected_container_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_expected_container_class.md)
 - [hierarchy_row_matches](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_matches.md)
 - [special_hierarchy_row_matches](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_hierarchy_row_matches.md)
@@ -39,6 +41,8 @@ relationships:
 - [special_folder_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value.md)
 - [special_folder_property_value_with_change_number](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value_with_change_number.md)
 - [serialize_hierarchy_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row.md)
+- [serialize_hierarchy_property_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_property_row.md)
+- [hierarchy_row_property_is_present](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_property_is_present.md)
 - [serialize_hierarchy_row_from_backing_object](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row_from_backing_object.md)
 
 # Imports

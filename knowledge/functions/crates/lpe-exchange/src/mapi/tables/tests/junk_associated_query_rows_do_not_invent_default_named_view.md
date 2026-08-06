@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: junk_associated_query_rows_do_not_invent_default_named_view
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6936-L6968
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7009-L7041
 visibility: private
 generated:
   by: okf-rs/0.3.0

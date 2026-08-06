@@ -113,8 +113,10 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/serialize_categorized_deleted_event_row
   - functions/crates/lpe-exchange/src/mapi/tables/diagnostics/inbox_contents_row_invariant_property_value
   - functions/crates/lpe-exchange/src/mapi/tables/diagnostics/debug_folder_row_property_value
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_property_value
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value_with_change_number
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_property_is_present
   - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_message_row
   - functions/crates/lpe-exchange/src/mapi/tables/pending/pending_message_property_value
   - functions/crates/lpe-exchange/src/mapi/tables/pending/pending_associated_message_property_value
@@ -245,8 +247,10 @@ relationships:
 - [serialize_categorized_deleted_event_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/serialize_categorized_deleted_event_row.md)
 - [inbox_contents_row_invariant_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/diagnostics/inbox_contents_row_invariant_property_value.md)
 - [debug_folder_row_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/diagnostics/debug_folder_row_property_value.md)
+- [hierarchy_row_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_property_value.md)
 - [special_folder_property_value_with_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value_with_change_number.md)
 - [serialize_hierarchy_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row.md)
+- [hierarchy_row_property_is_present](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_property_is_present.md)
 - [serialize_pending_message_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_message_row.md)
 - [pending_message_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/pending_message_property_value.md)
 - [pending_associated_message_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/pending_associated_message_property_value.md)

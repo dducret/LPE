@@ -199,8 +199,8 @@ impl MapiSession {
             for (handle, logon_id, delivery, table_change) in event_deliveries {
                 // Basic invalidations can coalesce by table. An informative
                 // child-content hierarchy row must retain its changed folder
-                // identity so two folders changed before one Execute are both
-                // delivered.
+                // identity and wire flags so a basic row cannot suppress a
+                // later NewMail 0xC100 row before the same Execute.
                 let changed_hierarchy_row_id = (delivery.kind == MapiNotificationKind::Hierarchy
                     && delivery.parent_folder_id == Some(delivery.folder_id))
                 .then_some(delivery.message_id)
@@ -211,6 +211,7 @@ impl MapiSession {
                         delivery.kind,
                         delivery.folder_id,
                         changed_hierarchy_row_id,
+                        delivery.event_mask,
                     ))
                 {
                     continue;

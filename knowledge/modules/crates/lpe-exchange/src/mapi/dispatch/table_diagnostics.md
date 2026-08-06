@@ -1,12 +1,13 @@
 ---
 type: Rust Module
 title: table_diagnostics
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1-L1622
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1-L1456
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/super
+  - external/pub-super-use-hierarchy-response
   member_of:
   - packages/crates/lpe-exchange
 ---
@@ -57,15 +58,6 @@ relationships:
 - [format_common_views_wlink_target_decoding](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_common_views_wlink_target_decoding.md)
 - [format_common_views_wlink_contract_summary](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_common_views_wlink_contract_summary.md)
 - [format_inbox_related_release_context](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_inbox_related_release_context.md)
-- [HierarchyResponseMetricSummary](../../../../../../classes/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/HierarchyResponseMetricSummary.md)
-- [hierarchy_response_metric_summary](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response_metric_summary.md)
-- [hierarchy_metric_folder_id](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_metric_folder_id.md)
-- [format_hierarchy_query_rows_wire_summary](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary.md)
-- [format_hierarchy_debug_folder_id](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_folder_id.md)
-- [format_hierarchy_debug_wire_folder_id](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_wire_folder_id.md)
-- [format_hierarchy_debug_string](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_string.md)
-- [format_hierarchy_debug_count](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_count.md)
-- [format_hierarchy_debug_bool](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_bool.md)
 - [append_exact_virtual_inbox_debug_associated_config](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/append_exact_virtual_inbox_debug_associated_config.md)
 - [append_debug_modeled_inbox_exact_startup_config](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/append_debug_modeled_inbox_exact_startup_config.md)
 - [debug_exact_message_class_restriction_value](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_exact_message_class_restriction_value.md)
@@ -74,6 +66,7 @@ relationships:
 # Imports
 
 - `super::*`
+- `pub(super) use hierarchy_response::*`
 
 # Member of
 

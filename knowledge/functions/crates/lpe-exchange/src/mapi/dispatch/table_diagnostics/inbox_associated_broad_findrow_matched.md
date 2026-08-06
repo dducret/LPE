@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_broad_findrow_matched
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L940-L962
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L944-L966
 generated:
   by: okf-rs/0.3.0
 relationships:

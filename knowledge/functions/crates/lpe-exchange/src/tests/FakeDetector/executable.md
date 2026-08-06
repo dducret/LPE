@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: executable
-resource: crates/lpe-exchange/src/tests/mod.rs#L4247-L4258
+resource: crates/lpe-exchange/src/tests/mod.rs#L4248-L4259
 visibility: private
 generated:
   by: okf-rs/0.3.0

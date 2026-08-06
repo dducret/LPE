@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: builtin_search_criteria_fallback_covers_tracked_mail_processing_folder
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2765-L2777
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2843-L2855
 visibility: private
 generated:
   by: okf-rs/0.3.0

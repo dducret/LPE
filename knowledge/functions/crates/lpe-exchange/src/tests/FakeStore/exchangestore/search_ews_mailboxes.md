@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: search_ews_mailboxes
-resource: crates/lpe-exchange/src/tests/mod.rs#L5273-L5345
+resource: crates/lpe-exchange/src/tests/mod.rs#L5274-L5346
 visibility: private
 generated:
   by: okf-rs/0.3.0

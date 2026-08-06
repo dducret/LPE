@@ -227,8 +227,8 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_inbox_associated_prefix_find_summary
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/inbox_associated_broad_findrow_matched
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/inbox_associated_exact_configuration_findrow_matched
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response_metric_summary
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/hierarchy_response_metric_summary
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_query_rows_wire_summary
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_validation/sort_table_request_is_valid
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_query_position_wire_summary
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/normalize_table_property_tag_for_session
@@ -522,6 +522,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_parts
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_email_entries_xml
   - functions/crates/lpe-exchange/src/service/ews/contacts/contact_labeled_string
+  - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/sync_folder_hierarchy
   - functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/durable_events_response
   - functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items
   - functions/crates/lpe-exchange/src/service/ews/sync_state/change_key_for
@@ -1205,8 +1206,8 @@ relationships:
 - [format_inbox_associated_prefix_find_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_inbox_associated_prefix_find_summary.md)
 - [inbox_associated_broad_findrow_matched](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/inbox_associated_broad_findrow_matched.md)
 - [inbox_associated_exact_configuration_findrow_matched](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/inbox_associated_exact_configuration_findrow_matched.md)
-- [hierarchy_response_metric_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response_metric_summary.md)
-- [format_hierarchy_query_rows_wire_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_query_rows_wire_summary.md)
+- [hierarchy_response_metric_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/hierarchy_response_metric_summary.md)
+- [format_hierarchy_query_rows_wire_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_query_rows_wire_summary.md)
 - [sort_table_request_is_valid](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_validation/sort_table_request_is_valid.md)
 - [format_query_position_wire_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_query_position_wire_summary.md)
 - [normalize_table_property_tag_for_session](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/normalize_table_property_tag_for_session.md)
@@ -1500,6 +1501,7 @@ relationships:
 - [ews_datetime_parts](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_parts.md)
 - [ews_contact_email_entries_xml](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_email_entries_xml.md)
 - [contact_labeled_string](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_labeled_string.md)
+- [sync_folder_hierarchy](../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/sync_folder_hierarchy.md)
 - [durable_events_response](../../../../../../../functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/durable_events_response.md)
 - [sync_folder_items](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items.md)
 - [change_key_for](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/change_key_for.md)

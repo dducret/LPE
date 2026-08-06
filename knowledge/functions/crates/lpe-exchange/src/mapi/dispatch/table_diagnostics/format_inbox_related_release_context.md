@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_inbox_related_release_context
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1317-L1384
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1321-L1388
 generated:
   by: okf-rs/0.3.0
 relationships:

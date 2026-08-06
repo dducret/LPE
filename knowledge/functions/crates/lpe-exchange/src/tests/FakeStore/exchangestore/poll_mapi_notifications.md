@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: poll_mapi_notifications
-resource: crates/lpe-exchange/src/tests/mod.rs#L7448-L7468
+resource: crates/lpe-exchange/src/tests/mod.rs#L7449-L7469
 visibility: private
 generated:
   by: okf-rs/0.3.0

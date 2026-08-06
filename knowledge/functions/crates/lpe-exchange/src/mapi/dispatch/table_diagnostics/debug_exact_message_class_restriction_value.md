@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: debug_exact_message_class_restriction_value
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1593-L1609
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1427-L1443
 visibility: private
 generated:
   by: okf-rs/0.3.0

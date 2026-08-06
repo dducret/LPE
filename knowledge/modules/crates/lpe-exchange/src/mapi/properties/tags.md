@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tags
-resource: crates/lpe-exchange/src/mapi/properties/tags.rs#L1-L675
+resource: crates/lpe-exchange/src/mapi/properties/tags.rs#L1-L676
 generated:
   by: okf-rs/0.3.0
 relationships:

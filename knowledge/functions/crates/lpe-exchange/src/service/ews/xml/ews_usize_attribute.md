@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/xml/attribute_value_after
   called_by:
   - functions/crates/lpe-exchange/src/service/ews/conversations/find_conversation_response
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/find_item
 ---
 
 # Signature
@@ -22,3 +23,4 @@ relationships:
 # Called by
 
 - [find_conversation_response](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/find_conversation_response.md)
+- [find_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/find_item.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ucs_im_group_operations_use_canonical_contact_group_state
-resource: crates/lpe-exchange/src/tests/ews.rs#L5152-L5304
+resource: crates/lpe-exchange/src/tests/ews.rs#L5248-L5400
 visibility: private
 generated:
   by: okf-rs/0.3.0

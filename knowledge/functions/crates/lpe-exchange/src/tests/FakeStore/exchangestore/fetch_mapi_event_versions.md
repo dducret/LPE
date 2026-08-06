@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_event_versions
-resource: crates/lpe-exchange/src/tests/mod.rs#L7882-L7921
+resource: crates/lpe-exchange/src/tests/mod.rs#L7883-L7922
 visibility: private
 generated:
   by: okf-rs/0.3.0

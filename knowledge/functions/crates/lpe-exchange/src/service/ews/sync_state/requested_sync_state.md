@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: requested_sync_state
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L696-L698
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L746-L748
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/xml/element_text
   called_by:
   - functions/crates/lpe-exchange/src/service/ExchangeService/requested_mailbox_folder_ids
+  - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/sync_folder_hierarchy
   - functions/crates/lpe-exchange/src/service/ews/folders/requested_folder_kind
   - functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items
   - functions/crates/lpe-exchange/src/service/ews/sync_state/requested_sync_collection_id
@@ -25,6 +26,7 @@ relationships:
 # Called by
 
 - [requested_mailbox_folder_ids](../../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/requested_mailbox_folder_ids.md)
+- [sync_folder_hierarchy](../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/sync_folder_hierarchy.md)
 - [requested_folder_kind](../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/requested_folder_kind.md)
 - [sync_folder_items](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items.md)
 - [requested_sync_collection_id](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/requested_sync_collection_id.md)

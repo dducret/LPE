@@ -63,6 +63,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/controls/rop_free_bookmark_response
   - functions/crates/lpe-exchange/src/mapi/transport/cookies/refresh_accepted_session_response_cookies
   - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/CounterSet/insert
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items
   - functions/crates/lpe-exchange/src/service/rpc_proxy_channels/consume_rpc_proxy_out_endpoint_bind_ack
   - functions/crates/lpe-exchange/src/service/rpc_proxy_channels/consume_pending_rpc_proxy_out_channel_responses
   - functions/crates/lpe-exchange/src/service/rpc_proxy_channels/consume_rpc_proxy_out_endpoint_rts_connect
@@ -165,6 +166,7 @@ relationships:
 - [rop_free_bookmark_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/controls/rop_free_bookmark_response.md)
 - [refresh_accepted_session_response_cookies](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/cookies/refresh_accepted_session_response_cookies.md)
 - [insert](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/CounterSet/insert.md)
+- [sync_folder_items](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items.md)
 - [consume_rpc_proxy_out_endpoint_bind_ack](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_channels/consume_rpc_proxy_out_endpoint_bind_ack.md)
 - [consume_pending_rpc_proxy_out_channel_responses](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_channels/consume_pending_rpc_proxy_out_channel_responses.md)
 - [consume_rpc_proxy_out_endpoint_rts_connect](../../../../../../../functions/crates/lpe-exchange/src/service/rpc_proxy_channels/consume_rpc_proxy_out_endpoint_rts_connect.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_finish_content_message
-resource: crates/lpe-exchange/src/tests/mod.rs#L14280-L14331
+resource: crates/lpe-exchange/src/tests/mod.rs#L14321-L14372
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: commit_mapi_associated_config_create
-resource: crates/lpe-exchange/src/tests/mod.rs#L10401-L10443
+resource: crates/lpe-exchange/src/tests/mod.rs#L10402-L10444
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_service_configuration_reports_bounded_mail_tips_and_parseable_gaps
-resource: crates/lpe-exchange/src/tests/ews.rs#L4321-L4371
+resource: crates/lpe-exchange/src/tests/ews.rs#L4417-L4467
 visibility: private
 generated:
   by: okf-rs/0.3.0

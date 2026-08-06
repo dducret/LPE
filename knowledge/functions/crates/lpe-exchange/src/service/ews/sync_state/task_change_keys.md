@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_change_keys
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L460-L489
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L510-L539
 generated:
   by: okf-rs/0.3.0
 relationships:

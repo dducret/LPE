@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: notifications
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L1-L920
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L1-L964
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -42,6 +42,7 @@ relationships:
 - [register_notification_success_response_matches_microsoft_wire_shape](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/register_notification_success_response_matches_microsoft_wire_shape.md)
 - [new_mail_notification_with_message_id_encodes_exchange_zero_message_flags](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags.md)
 - [hierarchy_table_row_modified_notification_encodes_current_row](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_table_row_modified_notification_encodes_current_row.md)
+- [new_mail_hierarchy_row_notification_encodes_message_row_keys](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_hierarchy_row_notification_encodes_message_row_keys.md)
 - [folder_modified_notification_with_total_count_encodes_t_flag](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/folder_modified_notification_with_total_count_encodes_t_flag.md)
 - [new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags.md)
 - [object_moved_and_copied_notifications_preserve_source_message_id](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/object_moved_and_copied_notifications_preserve_source_message_id.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_column_support_covers_inbox_configuration_columns
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2527-L2542
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2605-L2620
 visibility: private
 generated:
   by: okf-rs/0.3.0

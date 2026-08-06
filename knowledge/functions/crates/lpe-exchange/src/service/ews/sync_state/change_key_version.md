@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: change_key_version
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L502-L511
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L552-L561
 visibility: private
 generated:
   by: okf-rs/0.3.0

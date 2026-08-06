@@ -68,6 +68,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/sharing/parse_sharing_request
   - functions/crates/lpe-exchange/src/service/ews/sharing/sharing_rights
   - functions/crates/lpe-exchange/src/service/ews/sync_state/requested_sync_state
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/requested_max_changes
   - functions/crates/lpe-exchange/src/service/ews/tasks/parse_create_task_input
   - functions/crates/lpe-exchange/src/service/ews/tasks/parse_update_task_input
   - functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_new_im_contact_to_group
@@ -154,6 +155,7 @@ relationships:
 - [parse_sharing_request](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sharing/parse_sharing_request.md)
 - [sharing_rights](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sharing/sharing_rights.md)
 - [requested_sync_state](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/requested_sync_state.md)
+- [requested_max_changes](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/requested_max_changes.md)
 - [parse_create_task_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/tasks/parse_create_task_input.md)
 - [parse_update_task_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/tasks/parse_update_task_input.md)
 - [add_new_im_contact_to_group](../../../../../../../functions/crates/lpe-exchange/src/service/ews/ucs/ExchangeService/add_new_im_contact_to_group.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: dismiss_reminder_occurrence
-resource: crates/lpe-exchange/src/tests/mod.rs#L10793-L10814
+resource: crates/lpe-exchange/src/tests/mod.rs#L10794-L10815
 visibility: private
 generated:
   by: okf-rs/0.3.0

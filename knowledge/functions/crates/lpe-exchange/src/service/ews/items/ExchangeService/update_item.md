@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_item
-resource: crates/lpe-exchange/src/service/ews/items.rs#L266-L506
+resource: crates/lpe-exchange/src/service/ews/items.rs#L280-L520
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: append_audit_event
-resource: crates/lpe-exchange/src/tests/mod.rs#L4782-L4788
+resource: crates/lpe-exchange/src/tests/mod.rs#L4783-L4789
 visibility: private
 generated:
   by: okf-rs/0.3.0

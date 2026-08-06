@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: validate_mutating_item_change_keys
-resource: crates/lpe-exchange/src/service/ews/items.rs#L1302-L1417
+resource: crates/lpe-exchange/src/service/ews/items.rs#L1316-L1431
 generated:
   by: okf-rs/0.3.0
 relationships:

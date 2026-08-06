@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: query_rows
-resource: crates/lpe-exchange/src/mapi/tables/query_rows.rs#L1-L737
+resource: crates/lpe-exchange/src/mapi/tables/query_rows.rs#L1-L744
 generated:
   by: okf-rs/0.3.0
 relationships:

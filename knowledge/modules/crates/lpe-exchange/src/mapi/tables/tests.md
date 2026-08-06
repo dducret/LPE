@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1-L10253
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1-L10326
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -92,6 +92,7 @@ relationships:
 - [folder_type_rows_follow_microsoft_values](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/folder_type_rows_follow_microsoft_values.md)
 - [microsoft_oxosfld_special_folder_metadata_covers_bounded_list](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/microsoft_oxosfld_special_folder_metadata_covers_bounded_list.md)
 - [hierarchy_table_projects_user_saved_search_folder](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder.md)
+- [hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection.md)
 - [custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants.md)
 - [ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders.md)
 - [deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy.md)

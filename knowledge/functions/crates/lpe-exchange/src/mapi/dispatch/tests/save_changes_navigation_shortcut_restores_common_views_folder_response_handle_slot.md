@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: save_changes_navigation_shortcut_restores_common_views_folder_response_handle_slot
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2712-L2747
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2790-L2825
 visibility: private
 generated:
   by: okf-rs/0.3.0

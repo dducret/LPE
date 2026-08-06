@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_debug_modeled_inbox_exact_startup_config
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1578-L1591
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1412-L1425
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_inbox_associated_find_context
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L826-L893
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L830-L897
 generated:
   by: okf-rs/0.3.0
 relationships:

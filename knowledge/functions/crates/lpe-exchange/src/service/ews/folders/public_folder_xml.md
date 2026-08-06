@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: public_folder_xml
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L734-L780
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L807-L853
 generated:
   by: okf-rs/0.3.0
 relationships:

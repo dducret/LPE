@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: debug_associated_table_rows
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L457-L486
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L461-L490
 generated:
   by: okf-rs/0.3.0
 relationships:

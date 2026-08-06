@@ -4041,6 +4041,7 @@ struct FakeStore {
         Arc<Mutex<Vec<(Uuid, u64, crate::store::MapiLocalReplicaDeletedRange)>>>,
     omit_principal_from_directory: bool,
     fail_query_jmap_email_ids: bool,
+    respect_jmap_query_pagination: bool,
     fail_fetch_all_jmap_email_ids: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
     mapi_mail_store_load_continue: Option<Arc<tokio::sync::Notify>>,
@@ -10902,14 +10903,14 @@ impl ExchangeStore for FakeStore {
         _account_id: Uuid,
         mailbox_id: Option<Uuid>,
         search_text: Option<&'a str>,
-        _position: u64,
-        _limit: u64,
+        position: u64,
+        limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery> {
         self.queried_jmap_email_ids.fetch_add(1, Ordering::SeqCst);
         if self.fail_query_jmap_email_ids {
             return Box::pin(async move { Err(anyhow::anyhow!("forced email query failure")) });
         }
-        let ids = self
+        let all_ids = self
             .emails
             .lock()
             .unwrap()
@@ -10922,12 +10923,17 @@ impl ExchangeStore for FakeStore {
             })
             .map(|email| email.id)
             .collect::<Vec<_>>();
-        Box::pin(async move {
-            Ok(JmapEmailQuery {
-                total: ids.len() as u64,
-                ids,
-            })
-        })
+        let total = all_ids.len() as u64;
+        let ids = if self.respect_jmap_query_pagination {
+            all_ids
+                .into_iter()
+                .skip(position as usize)
+                .take(limit as usize)
+                .collect::<Vec<_>>()
+        } else {
+            all_ids
+        };
+        Box::pin(async move { Ok(JmapEmailQuery { total, ids }) })
     }
 
     fn query_mapi_content_table_ids<'a>(

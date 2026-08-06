@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ipm_configuration_row_issues
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L194-L225
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L198-L229
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: view_descriptor_debug_property_tags
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L952-L954
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L953-L955
 generated:
   by: okf-rs/0.3.0
 relationships:

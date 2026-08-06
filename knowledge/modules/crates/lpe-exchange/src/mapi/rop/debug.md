@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: debug
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1-L1450
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1-L1451
 generated:
   by: okf-rs/0.3.0
 relationships:

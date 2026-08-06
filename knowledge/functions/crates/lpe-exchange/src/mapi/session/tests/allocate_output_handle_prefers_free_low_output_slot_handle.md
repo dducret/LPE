@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: allocate_output_handle_prefers_free_low_output_slot_handle
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L890-L906
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1001-L1017
 visibility: private
 generated:
   by: okf-rs/0.3.0

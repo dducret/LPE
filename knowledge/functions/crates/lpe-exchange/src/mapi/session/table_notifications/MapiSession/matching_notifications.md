@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: matching_notifications
-resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L227-L235
+resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L228-L236
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: requested_sync_collection_id
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L680-L694
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L730-L744
 generated:
   by: okf-rs/0.3.0
 relationships:

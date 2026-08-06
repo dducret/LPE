@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_message_body_getprops_contract
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1189-L1266
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1190-L1267
 generated:
   by: okf-rs/0.3.0
 relationships:

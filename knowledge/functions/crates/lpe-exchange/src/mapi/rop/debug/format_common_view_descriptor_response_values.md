@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_common_view_descriptor_response_values
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1130-L1151
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1131-L1152
 visibility: private
 generated:
   by: okf-rs/0.3.0

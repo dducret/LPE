@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_sync_state_folder_id
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L700-L704
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L765-L769
 generated:
   by: okf-rs/0.3.0
 relationships:

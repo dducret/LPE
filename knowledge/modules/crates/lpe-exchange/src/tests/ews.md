@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: ews
-resource: crates/lpe-exchange/src/tests/ews.rs#L1-L9767
+resource: crates/lpe-exchange/src/tests/ews.rs#L1-L10019
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -15,6 +15,7 @@ relationships:
 
 - [find_folder_lists_contact_and_calendar_folders](../../../../../functions/crates/lpe-exchange/src/tests/ews/find_folder_lists_contact_and_calendar_folders.md)
 - [sync_folder_hierarchy_lists_contact_and_calendar_folders](../../../../../functions/crates/lpe-exchange/src/tests/ews/sync_folder_hierarchy_lists_contact_and_calendar_folders.md)
+- [sync_folder_hierarchy_replays_canonical_mailbox_changes](../../../../../functions/crates/lpe-exchange/src/tests/ews/sync_folder_hierarchy_replays_canonical_mailbox_changes.md)
 - [create_folder_path_creates_nested_mailboxes_and_sync_reports_changes](../../../../../functions/crates/lpe-exchange/src/tests/ews/create_folder_path_creates_nested_mailboxes_and_sync_reports_changes.md)
 - [copy_move_and_update_folder_use_canonical_mailbox_changes](../../../../../functions/crates/lpe-exchange/src/tests/ews/copy_move_and_update_folder_use_canonical_mailbox_changes.md)
 - [empty_folder_deletes_messages_and_subfolders_through_canonical_paths](../../../../../functions/crates/lpe-exchange/src/tests/ews/empty_folder_deletes_messages_and_subfolders_through_canonical_paths.md)
@@ -148,9 +149,12 @@ relationships:
 - [sync_folder_items_accepts_utf16_soap_requests](../../../../../functions/crates/lpe-exchange/src/tests/ews/sync_folder_items_accepts_utf16_soap_requests.md)
 - [create_item_saveonly_imports_message_into_custom_mailbox_folder](../../../../../functions/crates/lpe-exchange/src/tests/ews/create_item_saveonly_imports_message_into_custom_mailbox_folder.md)
 - [find_item_lists_custom_mailbox_messages](../../../../../functions/crates/lpe-exchange/src/tests/ews/find_item_lists_custom_mailbox_messages.md)
+- [find_item_pages_more_than_two_hundred_mailbox_messages](../../../../../functions/crates/lpe-exchange/src/tests/ews/find_item_pages_more_than_two_hundred_mailbox_messages.md)
 - [ews_mail_change_key_is_stable_for_a_non_primary_mailbox_membership](../../../../../functions/crates/lpe-exchange/src/tests/ews/ews_mail_change_key_is_stable_for_a_non_primary_mailbox_membership.md)
 - [find_item_lists_system_mailbox_messages_by_distinguished_id](../../../../../functions/crates/lpe-exchange/src/tests/ews/find_item_lists_system_mailbox_messages_by_distinguished_id.md)
 - [sync_folder_items_reports_custom_mailbox_create_and_delete_changes](../../../../../functions/crates/lpe-exchange/src/tests/ews/sync_folder_items_reports_custom_mailbox_create_and_delete_changes.md)
+- [sync_folder_items_pages_more_than_two_hundred_mailbox_messages](../../../../../functions/crates/lpe-exchange/src/tests/ews/sync_folder_items_pages_more_than_two_hundred_mailbox_messages.md)
+- [sync_folder_items_honors_max_changes_returned](../../../../../functions/crates/lpe-exchange/src/tests/ews/sync_folder_items_honors_max_changes_returned.md)
 - [sync_folder_items_reports_system_mailbox_messages](../../../../../functions/crates/lpe-exchange/src/tests/ews/sync_folder_items_reports_system_mailbox_messages.md)
 - [find_item_lists_public_folder_items](../../../../../functions/crates/lpe-exchange/src/tests/ews/find_item_lists_public_folder_items.md)
 - [find_item_rejects_public_folder_without_read_access](../../../../../functions/crates/lpe-exchange/src/tests/ews/find_item_rejects_public_folder_without_read_access.md)

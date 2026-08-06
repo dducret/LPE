@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_public_folder_replicas
-resource: crates/lpe-exchange/src/tests/mod.rs#L6506-L6522
+resource: crates/lpe-exchange/src/tests/mod.rs#L6507-L6523
 visibility: private
 generated:
   by: okf-rs/0.3.0

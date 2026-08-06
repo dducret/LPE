@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: query_jmap_email_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L10900-L10931
+resource: crates/lpe-exchange/src/tests/mod.rs#L10901-L10937
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -12,7 +12,7 @@ relationships:
 
 # Signature
 
-`fn query_jmap_email_ids<'a>( &'a self, _account_id: Uuid, mailbox_id: Option<Uuid>, search_text: Option<&'a str>, _position: u64, _limit: u64, ) -> StoreFuture<'a, JmapEmailQuery>`
+`fn query_jmap_email_ids<'a>( &'a self, _account_id: Uuid, mailbox_id: Option<Uuid>, search_text: Option<&'a str>, position: u64, limit: u64, ) -> StoreFuture<'a, JmapEmailQuery>`
 
 # Calls
 

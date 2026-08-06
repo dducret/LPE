@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_item_deletes_canonical_task
-resource: crates/lpe-exchange/src/tests/ews.rs#L1737-L1764
+resource: crates/lpe-exchange/src/tests/ews.rs#L1833-L1860
 visibility: private
 generated:
   by: okf-rs/0.3.0

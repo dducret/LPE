@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_tasks_by_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L9308-L9322
+resource: crates/lpe-exchange/src/tests/mod.rs#L9309-L9323
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_debug_restriction_option
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L322-L326
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L326-L330
 generated:
   by: okf-rs/0.3.0
 relationships:

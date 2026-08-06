@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_conversation_action
-resource: crates/lpe-exchange/src/tests/mod.rs#L10764-L10774
+resource: crates/lpe-exchange/src/tests/mod.rs#L10765-L10775
 visibility: private
 generated:
   by: okf-rs/0.3.0

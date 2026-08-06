@@ -23,6 +23,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/object_ids/advertised_virtual_object_id_from_bare_little_endian_short_id
   - functions/crates/lpe-exchange/src/mapi/store_adapter/unresolved_mapi_object_scope
   - functions/crates/lpe-exchange/src/mapi/store_adapter/is_expected_unbacked_mapi_object
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_folder_is_in_ipm_subtree
 ---
 
 # Signature
@@ -50,3 +51,4 @@ relationships:
 - [advertised_virtual_object_id_from_bare_little_endian_short_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/object_ids/advertised_virtual_object_id_from_bare_little_endian_short_id.md)
 - [unresolved_mapi_object_scope](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/unresolved_mapi_object_scope.md)
 - [is_expected_unbacked_mapi_object](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/is_expected_unbacked_mapi_object.md)
+- [hierarchy_folder_is_in_ipm_subtree](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_folder_is_in_ipm_subtree.md)

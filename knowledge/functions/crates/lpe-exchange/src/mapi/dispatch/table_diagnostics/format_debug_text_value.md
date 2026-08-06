@@ -1,13 +1,13 @@
 ---
 type: Rust Function
 title: format_debug_text_value
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L32-L34
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L36-L38
 generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_debug_mapi_value
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_string
+  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_debug_string
 ---
 
 # Signature
@@ -17,4 +17,4 @@ relationships:
 # Called by
 
 - [format_debug_mapi_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_debug_mapi_value.md)
-- [format_hierarchy_debug_string](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_hierarchy_debug_string.md)
+- [format_hierarchy_debug_string](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/format_hierarchy_debug_string.md)

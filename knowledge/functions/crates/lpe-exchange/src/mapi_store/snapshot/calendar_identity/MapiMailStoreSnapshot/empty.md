@@ -183,6 +183,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/seek_row_request_validation_matches_microsoft_bookmark_and_boolean_values
   - functions/crates/lpe-exchange/src/mapi/tables/tests/seek_row_bookmark_request_validation_matches_microsoft_boolean_values
   - functions/crates/lpe-exchange/src/mapi/tables/tests/query_position_counts_categorized_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection
   - functions/crates/lpe-exchange/src/mapi/tables/tests/deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy
   - functions/crates/lpe-exchange/src/mapi/tables/tests/find_row_request_validation_matches_microsoft_flags
   - functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_honors_restriction
@@ -457,6 +458,7 @@ relationships:
 - [seek_row_request_validation_matches_microsoft_bookmark_and_boolean_values](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/seek_row_request_validation_matches_microsoft_bookmark_and_boolean_values.md)
 - [seek_row_bookmark_request_validation_matches_microsoft_boolean_values](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/seek_row_bookmark_request_validation_matches_microsoft_boolean_values.md)
 - [query_position_counts_categorized_content_rows](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/query_position_counts_categorized_content_rows.md)
+- [hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection.md)
 - [deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy.md)
 - [find_row_request_validation_matches_microsoft_flags](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/find_row_request_validation_matches_microsoft_flags.md)
 - [common_views_find_row_honors_restriction](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_find_row_honors_restriction.md)

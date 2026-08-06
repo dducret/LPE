@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: search_mailboxes_records_canonical_discovery_search_results_without_bcc
-resource: crates/lpe-exchange/src/tests/ews.rs#L5596-L5651
+resource: crates/lpe-exchange/src/tests/ews.rs#L5692-L5747
 visibility: private
 generated:
   by: okf-rs/0.3.0

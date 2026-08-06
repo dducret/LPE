@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: operation_response_message
-resource: crates/lpe-exchange/src/service/ews/responses.rs#L257-L274
+resource: crates/lpe-exchange/src/service/ews/responses.rs#L267-L284
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -83,48 +83,53 @@ where
     pub(in crate::service) async fn sync_folder_hierarchy(
         &self,
         principal: &AccountPrincipal,
+        request: &str,
     ) -> Result<String> {
-        let mut changes = String::new();
-        let mut count = 0;
+        let mut folders = Vec::new();
         for mailbox in self
             .store
             .fetch_jmap_mailboxes(principal.account_id)
             .await?
         {
-            changes.push_str("<t:Create>");
-            changes.push_str(&mailbox_folder_xml(&mailbox));
-            changes.push_str("</t:Create>");
-            count += 1;
+            let id = format!("mailbox:{}", mailbox.id);
+            folders.push(HierarchySyncFolder::new(
+                format!("mailbox|{id}"),
+                id,
+                mailbox_folder_xml(&mailbox),
+            ));
         }
         for collection in self
             .store
             .fetch_accessible_contact_collections(principal.account_id)
             .await?
         {
-            changes.push_str("<t:Create>");
-            changes.push_str(&folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts"));
-            changes.push_str("</t:Create>");
-            count += 1;
+            folders.push(HierarchySyncFolder::new(
+                format!("contacts|{}", collection.id),
+                collection.id.clone(),
+                folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts"),
+            ));
         }
         for collection in self
             .store
             .fetch_accessible_calendar_collections(principal.account_id)
             .await?
         {
-            changes.push_str("<t:Create>");
-            changes.push_str(&folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"));
-            changes.push_str("</t:Create>");
-            count += 1;
+            folders.push(HierarchySyncFolder::new(
+                format!("calendar|{}", collection.id),
+                collection.id.clone(),
+                folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"),
+            ));
         }
         for collection in self
             .store
             .fetch_accessible_task_collections(principal.account_id)
             .await?
         {
-            changes.push_str("<t:Create>");
-            changes.push_str(&folder_xml(&collection, TASKS_FOLDER_ID, "Task"));
-            changes.push_str("</t:Create>");
-            count += 1;
+            folders.push(HierarchySyncFolder::new(
+                format!("tasks|{}", collection.id),
+                collection.id.clone(),
+                folder_xml(&collection, TASKS_FOLDER_ID, "Task"),
+            ));
         }
         for tree in self
             .store
@@ -136,13 +141,44 @@ where
                     .store
                     .fetch_public_folder(principal.account_id, root_folder_id)
                     .await?;
-                changes.push_str("<t:Create>");
-                changes.push_str(&public_folder_xml(&folder, None, 0, 0));
-                changes.push_str("</t:Create>");
-                count += 1;
+                let id = format!("public-folder:{root_folder_id}");
+                folders.push(HierarchySyncFolder::new(
+                    format!("public-folder|{id}"),
+                    id,
+                    public_folder_xml(&folder, None, 0, 0),
+                ));
             }
         }
-        let sync_state = format!("folder-hierarchy:{count}");
+        let previous = requested_sync_state(request)
+            .map(|state| hierarchy_sync_state_items(&state))
+            .unwrap_or_default();
+        let current = folders
+            .iter()
+            .map(|folder| (folder.key.as_str(), folder))
+            .collect::<HashMap<_, _>>();
+        let mut changes = String::new();
+        for folder in &folders {
+            match previous.get(&folder.key) {
+                None => changes.push_str(&format!("<t:Create>{}</t:Create>", folder.xml)),
+                Some(fingerprint) if fingerprint != &folder.fingerprint => {
+                    changes.push_str(&format!("<t:Update>{}</t:Update>", folder.xml));
+                }
+                _ => {}
+            }
+        }
+        for key in previous
+            .keys()
+            .filter(|key| !current.contains_key(key.as_str()))
+        {
+            if let Some((_, id)) = key.split_once('|') {
+                changes.push_str(&format!(
+                    "<t:Delete><t:FolderId Id=\"{}\" ChangeKey=\"{}\"/></t:Delete>",
+                    escape_xml(id),
+                    escape_xml(&folder_change_key(id)),
+                ));
+            }
+        }
+        let sync_state = hierarchy_sync_state(&folders);
 
         Ok(format!(
             concat!(
@@ -401,6 +437,43 @@ where
                 .filter(|tree| tree.root_folder_id.is_some())
                 .count())
     }
+}
+
+const HIERARCHY_SYNC_STATE_VERSION: &str = "folder-hierarchy:v1:";
+
+struct HierarchySyncFolder {
+    key: String,
+    fingerprint: String,
+    xml: String,
+}
+
+impl HierarchySyncFolder {
+    fn new(key: String, id: String, xml: String) -> Self {
+        Self {
+            fingerprint: versioned_change_key("folder-hierarchy", &id, &xml),
+            key,
+            xml,
+        }
+    }
+}
+
+fn hierarchy_sync_state(folders: &[HierarchySyncFolder]) -> String {
+    let mut entries = folders
+        .iter()
+        .map(|folder| format!("{}={}", folder.key, folder.fingerprint))
+        .collect::<Vec<_>>();
+    entries.sort();
+    format!("{HIERARCHY_SYNC_STATE_VERSION}{}", entries.join(","))
+}
+
+fn hierarchy_sync_state_items(sync_state: &str) -> HashMap<String, String> {
+    sync_state
+        .strip_prefix(HIERARCHY_SYNC_STATE_VERSION)
+        .into_iter()
+        .flat_map(|values| values.split(','))
+        .filter_map(|value| value.split_once('='))
+        .map(|(key, fingerprint)| (key.to_string(), fingerprint.to_string()))
+        .collect()
 }
 
 pub(in crate::service) fn requested_folder_kind(request: &str) -> Option<FolderKind> {

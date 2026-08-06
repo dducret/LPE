@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_message_column_support_backs_outlook_auxiliary_flags
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2348-L2355
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2426-L2433
 visibility: private
 generated:
   by: okf-rs/0.3.0

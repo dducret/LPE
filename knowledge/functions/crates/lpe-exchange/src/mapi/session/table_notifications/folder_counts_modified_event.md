@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_counts_modified_event
-resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L270-L287
+resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L271-L288
 visibility: private
 generated:
   by: okf-rs/0.3.0

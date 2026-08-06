@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: navigation_shortcut_parser_accepts_binary_wlink_group_ids
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4191-L4215
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4264-L4288
 visibility: private
 generated:
   by: okf-rs/0.3.0

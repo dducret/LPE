@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_named_properties
-resource: crates/lpe-exchange/src/tests/mod.rs#L6929-L6954
+resource: crates/lpe-exchange/src/tests/mod.rs#L6930-L6955
 visibility: private
 generated:
   by: okf-rs/0.3.0

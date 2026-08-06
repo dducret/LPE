@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sort_debug_associated_table_rows
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L488-L509
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L492-L513
 generated:
   by: okf-rs/0.3.0
 relationships:

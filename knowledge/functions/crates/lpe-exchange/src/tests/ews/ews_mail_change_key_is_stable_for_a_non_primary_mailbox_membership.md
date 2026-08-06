@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_mail_change_key_is_stable_for_a_non_primary_mailbox_membership
-resource: crates/lpe-exchange/src/tests/ews.rs#L7463-L7539
+resource: crates/lpe-exchange/src/tests/ews.rs#L7609-L7685
 visibility: private
 generated:
   by: okf-rs/0.3.0

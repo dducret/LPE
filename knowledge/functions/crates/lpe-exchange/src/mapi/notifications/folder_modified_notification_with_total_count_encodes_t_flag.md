@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_modified_notification_with_total_count_encodes_t_flag
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L391-L422
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L422-L453
 visibility: private
 generated:
   by: okf-rs/0.3.0

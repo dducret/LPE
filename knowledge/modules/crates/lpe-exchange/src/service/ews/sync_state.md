@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: sync_state
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L1-L713
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L1-L778
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -32,6 +32,7 @@ relationships:
 - [collaboration_sync_state_collection_id](../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/collaboration_sync_state_collection_id.md)
 - [requested_sync_collection_id](../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/requested_sync_collection_id.md)
 - [requested_sync_state](../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/requested_sync_state.md)
+- [requested_max_changes](../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/requested_max_changes.md)
 - [mailbox_sync_state_folder_id](../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/mailbox_sync_state_folder_id.md)
 - [sync_state_items_by_id](../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/sync_state_items_by_id.md)
 

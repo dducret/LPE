@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_item_returns_requested_mime_content_without_leaking_bcc_for_normal_mailbox
-resource: crates/lpe-exchange/src/tests/ews.rs#L7991-L8024
+resource: crates/lpe-exchange/src/tests/ews.rs#L8243-L8276
 visibility: private
 generated:
   by: okf-rs/0.3.0

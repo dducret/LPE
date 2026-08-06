@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: request_restriction_bytes
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L227-L233
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L231-L237
 generated:
   by: okf-rs/0.3.0
 relationships:

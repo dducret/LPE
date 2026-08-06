@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_folder_xml
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L704-L732
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L777-L805
 generated:
   by: okf-rs/0.3.0
 relationships:

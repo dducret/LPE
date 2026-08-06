@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: property_names
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_names.rs#L1-L252
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_names.rs#L1-L253
 generated:
   by: okf-rs/0.3.0
 relationships:

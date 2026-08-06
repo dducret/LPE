@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: cached_named_property_can_use_a_well_known_fallback_id
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1113-L1135
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1224-L1246
 visibility: private
 generated:
   by: okf-rs/0.3.0

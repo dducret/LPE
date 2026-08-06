@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_remembers_saved_search_folder_definition
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L746-L772
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L857-L883
 visibility: private
 generated:
   by: okf-rs/0.3.0

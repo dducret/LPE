@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_debug_search_criteria_scope
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L258-L320
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L262-L324
 generated:
   by: okf-rs/0.3.0
 relationships:

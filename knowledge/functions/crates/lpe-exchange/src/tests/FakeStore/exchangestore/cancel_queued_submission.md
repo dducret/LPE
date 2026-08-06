@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: cancel_queued_submission
-resource: crates/lpe-exchange/src/tests/mod.rs#L12025-L12055
+resource: crates/lpe-exchange/src/tests/mod.rs#L12031-L12061
 visibility: private
 generated:
   by: okf-rs/0.3.0

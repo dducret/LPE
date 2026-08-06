@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: store_mapi_sync_checkpoint
-resource: crates/lpe-exchange/src/tests/mod.rs#L7111-L7144
+resource: crates/lpe-exchange/src/tests/mod.rs#L7112-L7145
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_catalog_gate_soap_request
-resource: crates/lpe-exchange/src/tests/ews.rs#L9755-L9759
+resource: crates/lpe-exchange/src/tests/ews.rs#L10007-L10011
 visibility: private
 generated:
   by: okf-rs/0.3.0

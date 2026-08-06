@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_exact_virtual_inbox_debug_associated_config
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1556-L1576
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1390-L1410
 visibility: private
 generated:
   by: okf-rs/0.3.0

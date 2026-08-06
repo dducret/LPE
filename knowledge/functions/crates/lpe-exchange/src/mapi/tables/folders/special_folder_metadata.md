@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_change_number
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_display_name
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_parent_id
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_folder_is_in_ipm_subtree
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value_with_change_number
   - functions/crates/lpe-exchange/src/mapi/tables/tests/microsoft_oxosfld_special_folder_metadata_covers_bounded_list
 ---
@@ -26,5 +27,6 @@ relationships:
 - [serialize_advertised_special_folder_row_with_counts_and_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_advertised_special_folder_row_with_counts_and_change_number.md)
 - [hierarchy_row_display_name](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_display_name.md)
 - [hierarchy_row_parent_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_parent_id.md)
+- [hierarchy_folder_is_in_ipm_subtree](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_folder_is_in_ipm_subtree.md)
 - [special_folder_property_value_with_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value_with_change_number.md)
 - [microsoft_oxosfld_special_folder_metadata_covers_bounded_list](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/microsoft_oxosfld_special_folder_metadata_covers_bounded_list.md)

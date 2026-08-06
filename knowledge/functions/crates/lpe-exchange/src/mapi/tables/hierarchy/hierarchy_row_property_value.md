@@ -1,17 +1,20 @@
 ---
 type: Rust Function
 title: hierarchy_row_property_value
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L463-L484
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L463-L487
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
+  - functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_folder_flags
   - functions/crates/lpe-exchange/src/mapi/properties/mailbox_property_value_with_context_for_account
   - functions/crates/lpe-exchange/src/mapi/properties/public_folder_property_value
   - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_property_value
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value
   called_by:
   - functions/crates/lpe-exchange/src/mapi/tables/diagnostics/outlook_bootstrap_row_invariant_summaries
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_property_is_present
 ---
 
 # Signature
@@ -20,6 +23,8 @@ relationships:
 
 # Calls
 
+- [canonical_property_storage_tag](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag.md)
+- [hierarchy_row_folder_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_folder_flags.md)
 - [mailbox_property_value_with_context_for_account](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/mailbox_property_value_with_context_for_account.md)
 - [public_folder_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/public_folder_property_value.md)
 - [collaboration_folder_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_property_value.md)
@@ -28,3 +33,4 @@ relationships:
 # Called by
 
 - [outlook_bootstrap_row_invariant_summaries](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/diagnostics/outlook_bootstrap_row_invariant_summaries.md)
+- [hierarchy_row_property_is_present](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_property_is_present.md)

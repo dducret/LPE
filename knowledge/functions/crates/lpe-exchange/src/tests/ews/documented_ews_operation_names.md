@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: documented_ews_operation_names
-resource: crates/lpe-exchange/src/tests/ews.rs#L9736-L9738
+resource: crates/lpe-exchange/src/tests/ews.rs#L9988-L9990
 visibility: private
 generated:
   by: okf-rs/0.3.0

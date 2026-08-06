@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4205-L4474
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4205-L4516
 visibility: private
 generated:
   by: okf-rs/0.3.0

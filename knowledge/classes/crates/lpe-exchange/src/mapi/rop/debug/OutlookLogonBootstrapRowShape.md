@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: OutlookLogonBootstrapRowShape
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L528-L533
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L529-L534
 generated:
   by: okf-rs/0.3.0
 ---

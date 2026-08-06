@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_table_email
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8718-L8785
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8791-L8858
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: retention_policy_tag
-resource: crates/lpe-exchange/src/tests/ews.rs#L8970-L8989
+resource: crates/lpe-exchange/src/tests/ews.rs#L9222-L9241
 visibility: private
 generated:
   by: okf-rs/0.3.0

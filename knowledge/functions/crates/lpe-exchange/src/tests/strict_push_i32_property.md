@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_push_i32_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L14494-L14497
+resource: crates/lpe-exchange/src/tests/mod.rs#L14535-L14538
 visibility: private
 generated:
   by: okf-rs/0.3.0

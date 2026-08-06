@@ -10,8 +10,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/position
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_id
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/standard_property_row_bytes
-  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_property_row
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops
   - functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants
@@ -27,8 +26,7 @@ relationships:
 - [position](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/position.md)
 - [hierarchy_row_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_id.md)
 - [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [standard_property_row_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/standard_property_row_bytes.md)
-- [serialize_hierarchy_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row.md)
+- [serialize_hierarchy_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_property_row.md)
 
 # Called by
 

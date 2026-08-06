@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: restore_recoverable_item
-resource: crates/lpe-exchange/src/tests/mod.rs#L11050-L11097
+resource: crates/lpe-exchange/src/tests/mod.rs#L11056-L11103
 visibility: private
 generated:
   by: okf-rs/0.3.0

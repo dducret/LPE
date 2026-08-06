@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_common_views_wlink_target_decoding
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1140-L1248
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1144-L1252
 generated:
   by: okf-rs/0.3.0
 relationships:

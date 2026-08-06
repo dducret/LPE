@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_post_fai_hierarchy_release_without_inbox_contents_context
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L775-L824
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L779-L828
 generated:
   by: okf-rs/0.3.0
 relationships:

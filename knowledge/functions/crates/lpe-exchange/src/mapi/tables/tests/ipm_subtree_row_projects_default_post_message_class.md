@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ipm_subtree_row_projects_default_post_message_class
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9595-L9610
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9668-L9683
 visibility: private
 generated:
   by: okf-rs/0.3.0

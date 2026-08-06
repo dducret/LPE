@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_sync_manifest_counts
-resource: crates/lpe-exchange/src/tests/mod.rs#L12649-L12684
+resource: crates/lpe-exchange/src/tests/mod.rs#L12655-L12690
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: compare_debug_mapi_values
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1611-L1622
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1445-L1456
 visibility: private
 generated:
   by: okf-rs/0.3.0

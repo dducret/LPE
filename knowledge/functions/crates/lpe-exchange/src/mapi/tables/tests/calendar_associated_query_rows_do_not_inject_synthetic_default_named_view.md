@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_associated_query_rows_do_not_inject_synthetic_default_named_view
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7006-L7043
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7079-L7116
 visibility: private
 generated:
   by: okf-rs/0.3.0

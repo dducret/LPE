@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: responses
-resource: crates/lpe-exchange/src/service/ews/responses.rs#L1-L349
+resource: crates/lpe-exchange/src/service/ews/responses.rs#L1-L364
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -29,6 +29,7 @@ relationships:
 - [simple_operation_success_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/simple_operation_success_response.md)
 - [mark_as_junk_success_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/mark_as_junk_success_response.md)
 - [find_item_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/find_item_response.md)
+- [find_item_page_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/find_item_page_response.md)
 - [operation_response_message](../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/operation_response_message.md)
 - [sync_folder_items_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/sync_folder_items_response.md)
 - [unsupported_operation_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/unsupported_operation_response.md)

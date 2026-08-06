@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_password_expiration_date_error_response
-resource: crates/lpe-exchange/src/service/ews/responses.rs#L317-L331
+resource: crates/lpe-exchange/src/service/ews/responses.rs#L332-L346
 generated:
   by: okf-rs/0.3.0
 relationships:

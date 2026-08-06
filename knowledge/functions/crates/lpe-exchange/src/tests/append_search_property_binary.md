@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_search_property_binary
-resource: crates/lpe-exchange/src/tests/mod.rs#L15102-L15111
+resource: crates/lpe-exchange/src/tests/mod.rs#L15143-L15152
 visibility: private
 generated:
   by: okf-rs/0.3.0

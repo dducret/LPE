@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_debug_restriction_property_tags
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L328-L337
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L332-L341
 generated:
   by: okf-rs/0.3.0
 relationships:

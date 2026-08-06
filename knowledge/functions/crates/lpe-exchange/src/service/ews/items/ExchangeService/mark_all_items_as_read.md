@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: mark_all_items_as_read
-resource: crates/lpe-exchange/src/service/ews/items.rs#L729-L780
+resource: crates/lpe-exchange/src/service/ews/items.rs#L743-L794
 generated:
   by: okf-rs/0.3.0
 relationships:

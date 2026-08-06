@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_contents_find_row_matches_outlook_date_window
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4596-L4692
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4669-L4765
 visibility: private
 generated:
   by: okf-rs/0.3.0

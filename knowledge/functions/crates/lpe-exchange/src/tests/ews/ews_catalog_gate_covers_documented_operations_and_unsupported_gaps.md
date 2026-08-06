@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_catalog_gate_covers_documented_operations_and_unsupported_gaps
-resource: crates/lpe-exchange/src/tests/ews.rs#L9596-L9734
+resource: crates/lpe-exchange/src/tests/ews.rs#L9848-L9986
 visibility: private
 generated:
   by: okf-rs/0.3.0

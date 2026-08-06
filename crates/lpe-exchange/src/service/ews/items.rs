@@ -220,31 +220,45 @@ where
                 else {
                     return Ok(find_item_response(String::new()));
                 };
+                if attribute_value_after(request, "IndexedPageItemView", "BasePoint")
+                    .is_some_and(|base_point| !base_point.eq_ignore_ascii_case("Beginning"))
+                {
+                    bail!("FindItem supports IndexedPageItemView only from Beginning");
+                }
+                let offset = ews_usize_attribute(request, "IndexedPageItemView", "Offset")
+                    .unwrap_or(0) as u64;
+                let limit =
+                    ews_usize_attribute(request, "IndexedPageItemView", "MaxEntriesReturned")
+                        .unwrap_or(MAILBOX_QUERY_LIMIT as usize)
+                        .clamp(1, MAILBOX_QUERY_LIMIT as usize) as u64;
                 let query = self
                     .store
                     .query_jmap_email_ids(
                         principal.account_id,
                         Some(mailbox_id),
                         None,
-                        0,
-                        MAILBOX_QUERY_LIMIT,
+                        offset,
+                        limit,
                     )
                     .await?;
                 let emails = self
                     .store
                     .fetch_jmap_emails(principal.account_id, &query.ids)
                     .await?;
-                Ok(find_item_response(
-                    emails
-                        .iter()
-                        .filter(|email| {
-                            email
-                                .mailbox_states
-                                .iter()
-                                .any(|state| state.mailbox_id == mailbox_id)
-                        })
-                        .map(|email| message_summary_xml_for_mailbox(email, mailbox_id))
-                        .collect(),
+                let returned = emails
+                    .iter()
+                    .filter(|email| {
+                        email
+                            .mailbox_states
+                            .iter()
+                            .any(|state| state.mailbox_id == mailbox_id)
+                    })
+                    .map(|email| message_summary_xml_for_mailbox(email, mailbox_id))
+                    .collect();
+                Ok(find_item_page_response(
+                    returned,
+                    query.total,
+                    offset.saturating_add(query.ids.len() as u64) >= query.total,
                 ))
             }
             FolderKind::PublicFolders => {

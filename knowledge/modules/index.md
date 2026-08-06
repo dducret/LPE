@@ -231,6 +231,7 @@
 - [sync_upload_state](../modules/crates/lpe-exchange/src/mapi/dispatch/sync_upload_state.md) — Rust Module
 - [table_controls](../modules/crates/lpe-exchange/src/mapi/dispatch/table_controls.md) — Rust Module
 - [table_diagnostics](../modules/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.md) — Rust Module
+- [hierarchy_response](../modules/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response.md) — Rust Module
 - [table_lifecycle](../modules/crates/lpe-exchange/src/mapi/dispatch/table_lifecycle.md) — Rust Module
 - [table_open](../modules/crates/lpe-exchange/src/mapi/dispatch/table_open.md) — Rust Module
 - [table_validation](../modules/crates/lpe-exchange/src/mapi/dispatch/table_validation.md) — Rust Module

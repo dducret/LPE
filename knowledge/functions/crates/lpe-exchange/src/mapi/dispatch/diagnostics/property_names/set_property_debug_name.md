@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: set_property_debug_name
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_names.rs#L10-L252
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_names.rs#L10-L253
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_release_context_flags_visible_table_setcolumns_without_query_rows
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1860-L1896
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1938-L1974
 visibility: private
 generated:
   by: okf-rs/0.3.0

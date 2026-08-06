@@ -7,6 +7,7 @@ generated:
 relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_folder_row_with_context
+  - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_folder_flags
 ---
 
 # Signature
@@ -16,3 +17,4 @@ relationships:
 # Called by
 
 - [serialize_folder_row_with_context](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_folder_row_with_context.md)
+- [hierarchy_row_folder_flags](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_folder_flags.md)

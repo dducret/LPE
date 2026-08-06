@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fake_contact_phone_by_label
-resource: crates/lpe-exchange/src/tests/mod.rs#L4138-L4143
+resource: crates/lpe-exchange/src/tests/mod.rs#L4139-L4144
 visibility: private
 generated:
   by: okf-rs/0.3.0

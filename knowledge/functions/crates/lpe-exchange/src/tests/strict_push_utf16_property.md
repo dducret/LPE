@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_push_utf16_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L14504-L14509
+resource: crates/lpe-exchange/src/tests/mod.rs#L14545-L14550
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/conversations/find_conversation_response
   - functions/crates/lpe-exchange/src/service/ews/diagnostics/ews_payload_debug_detail
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/get_item
+  - functions/crates/lpe-exchange/src/service/ews/responses/find_item_response
   - functions/crates/lpe-exchange/src/service/ews/xml/count_folder_elements
 ---
 
@@ -21,4 +22,5 @@ relationships:
 - [find_conversation_response](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/find_conversation_response.md)
 - [ews_payload_debug_detail](../../../../../../../functions/crates/lpe-exchange/src/service/ews/diagnostics/ews_payload_debug_detail.md)
 - [get_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/get_item.md)
+- [find_item_response](../../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/find_item_response.md)
 - [count_folder_elements](../../../../../../../functions/crates/lpe-exchange/src/service/ews/xml/count_folder_elements.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_state_items_by_id
-resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L706-L713
+resource: crates/lpe-exchange/src/service/ews/sync_state.rs#L771-L778
 generated:
   by: okf-rs/0.3.0
 relationships:

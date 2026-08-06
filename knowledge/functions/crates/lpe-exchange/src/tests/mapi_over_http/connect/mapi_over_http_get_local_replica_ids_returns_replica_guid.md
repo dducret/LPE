@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_local_replica_ids_returns_replica_guid
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4901-L4961
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4943-L5003
 visibility: private
 generated:
   by: okf-rs/0.3.0
