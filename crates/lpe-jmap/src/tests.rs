@@ -791,6 +791,16 @@ impl FakeStore {
         access
     }
 
+    fn mailbox_is_system(&self, mailbox_id: Uuid) -> bool {
+        self.mailboxes
+            .iter()
+            .find(|mailbox| mailbox.id == mailbox_id)
+            .is_some_and(|mailbox| {
+                let role = mailbox.role.trim();
+                !role.is_empty() && !role.eq_ignore_ascii_case("custom")
+            })
+    }
+
     fn sender_identity() -> SenderIdentity {
         let account = Self::account();
         SenderIdentity {
@@ -1101,6 +1111,9 @@ impl JmapStore for FakeStore {
         input: JmapMailboxUpdateInput,
         _audit: AuditEntryInput,
     ) -> Result<JmapMailbox> {
+        if self.mailbox_is_system(input.mailbox_id) {
+            bail!("system mailbox cannot be modified through JMAP");
+        }
         self.updated_mailboxes.lock().unwrap().push(input.clone());
         Ok(JmapMailbox {
             id: input.mailbox_id,
@@ -1119,9 +1132,12 @@ impl JmapStore for FakeStore {
     async fn destroy_jmap_mailbox(
         &self,
         _account_id: Uuid,
-        _mailbox_id: Uuid,
+        mailbox_id: Uuid,
         _audit: AuditEntryInput,
     ) -> Result<()> {
+        if self.mailbox_is_system(mailbox_id) {
+            bail!("system mailbox cannot be deleted through JMAP");
+        }
         Ok(())
     }
 
@@ -6721,6 +6737,123 @@ async fn mailbox_get_hides_child_creation_for_read_only_shared_mailboxes() {
         "write access is not granted on this mailbox account"
     );
     assert!(store.created_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mailbox_get_rename_and_delete_rights_match_mailbox_set() {
+    let mailbox_id = Uuid::parse_str("53535353-5353-5353-5353-535353535353").unwrap();
+    let cases = [
+        ("owned custom", "custom", None, true, None),
+        (
+            "writable delegate custom",
+            "custom",
+            Some(FakeStore::shared_mailbox_access(false, false)),
+            true,
+            None,
+        ),
+        (
+            "read-only delegate custom",
+            "custom",
+            Some(FakeStore::shared_mailbox_read_only_access(false, false)),
+            false,
+            Some("write access is not granted on this mailbox account"),
+        ),
+        (
+            "owned system folder",
+            "inbox",
+            None,
+            false,
+            Some("system mailbox cannot be modified through JMAP"),
+        ),
+    ];
+
+    for (case, role, delegated_access, may_manage, expected_update_error) in cases {
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: role.to_string(),
+            name: if role == "inbox" {
+                "INBOX".to_string()
+            } else {
+                "Projects".to_string()
+            },
+            sort_order: 10,
+            modseq: 1,
+            total_emails: 0,
+            unread_emails: 0,
+            size_octets: 0,
+            is_subscribed: true,
+        };
+        let (account_id, accessible_mailbox_accounts) = match delegated_access {
+            Some(access) => (
+                FakeStore::shared_account().account_id,
+                vec![FakeStore::mailbox_access(), access],
+            ),
+            None => (FakeStore::account().account_id, Vec::new()),
+        };
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![mailbox],
+            accessible_mailbox_accounts,
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+        let mailbox_id = mailbox_id.to_string();
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Mailbox/get".to_string(),
+                            json!({
+                                "accountId": account_id.to_string(),
+                                "ids": [mailbox_id],
+                                "properties": ["id", "myRights"]
+                            }),
+                            "g".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Mailbox/set".to_string(),
+                            json!({
+                                "accountId": account_id.to_string(),
+                                "update": {(mailbox_id.clone()): {"name": "Renamed"}},
+                                "destroy": [mailbox_id]
+                            }),
+                            "s".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        let rights = &response.method_responses[0].1["list"][0]["myRights"];
+        assert_eq!(rights["mayRename"], may_manage, "{case}");
+        assert_eq!(rights["mayDelete"], may_manage, "{case}");
+
+        if may_manage {
+            assert!(response.method_responses[1].1["updated"][&mailbox_id].is_object());
+            assert!(response.method_responses[1].1["destroyed"]
+                .as_array()
+                .unwrap()
+                .contains(&Value::String(mailbox_id)));
+        } else {
+            let expected_update_error = expected_update_error.unwrap();
+            assert_eq!(
+                response.method_responses[1].1["notUpdated"][&mailbox_id]["description"],
+                expected_update_error,
+                "{case}"
+            );
+            assert_eq!(
+                response.method_responses[1].1["notDestroyed"][&mailbox_id]["description"],
+                expected_update_error.replace("modified", "deleted"),
+                "{case}"
+            );
+        }
+    }
 }
 
 #[tokio::test]

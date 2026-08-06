@@ -520,6 +520,9 @@ fn mailbox_to_value(
         mailbox.is_subscribed,
     );
     if properties.contains("myRights") {
+        // Storage permits JMAP rename/delete only for user-managed (empty or custom) roles.
+        let may_manage_mailbox =
+            mailbox_account_may_write(access) && mailbox_is_user_managed(mailbox);
         object.insert(
             "myRights".to_string(),
             json!({
@@ -529,8 +532,8 @@ fn mailbox_to_value(
                 "maySetSeen": access.may_write,
                 "maySetKeywords": access.may_write,
                 "mayCreateChild": mailbox_account_may_write(access),
-                "mayRename": false,
-                "mayDelete": false,
+                "mayRename": may_manage_mailbox,
+                "mayDelete": may_manage_mailbox,
                 "maySubmit": is_drafts && mailbox_account_may_submit(access),
             }),
         );
@@ -548,6 +551,11 @@ pub(crate) fn mailbox_account_may_write(access: &MailboxAccountAccess) -> bool {
 
 pub(crate) fn mailbox_account_may_draft(access: &MailboxAccountAccess) -> bool {
     mailbox_account_may_write(access) && mailbox_account_may_submit(access)
+}
+
+fn mailbox_is_user_managed(mailbox: &JmapMailbox) -> bool {
+    let role = mailbox.role.trim();
+    role.is_empty() || role.eq_ignore_ascii_case("custom")
 }
 
 pub(crate) fn ensure_mailbox_write(may_write: bool) -> Result<()> {
