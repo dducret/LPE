@@ -3390,6 +3390,7 @@ fn hierarchy_table_projects_user_saved_search_folder() {
         &snapshot,
         &[
             PID_TAG_FOLDER_TYPE,
+            PID_TAG_FOLDER_FLAGS,
             PID_TAG_PARENT_FOLDER_ID,
             PID_TAG_CONTAINER_CLASS_W,
         ],
@@ -3398,6 +3399,11 @@ fn hierarchy_table_projects_user_saved_search_folder() {
     assert_eq!(
         u32::from_le_bytes(serialized[0..4].try_into().unwrap()),
         FOLDER_SEARCH
+    );
+    assert_eq!(
+        u32::from_le_bytes(serialized[4..8].try_into().unwrap()),
+        0x0000_0003,
+        "an IPM search folder combines the IPM and SEARCH flags"
     );
     let mailbox = match row {
         HierarchyRow::Mailbox(mailbox) => mailbox,
@@ -3411,6 +3417,67 @@ fn hierarchy_table_projects_user_saved_search_folder() {
     assert!(serialized
         .windows(class.len())
         .any(|window| window == class));
+}
+
+#[test]
+fn hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection() {
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let mailboxes = snapshot.mailboxes();
+    let ipm_rows = hierarchy_rows(
+        IPM_SUBTREE_FOLDER_ID,
+        &mailboxes,
+        &snapshot,
+        None,
+        &[],
+        Uuid::nil(),
+    );
+    let inbox = *ipm_rows
+        .iter()
+        .find(|row| hierarchy_row_id(row) == INBOX_FOLDER_ID)
+        .expect("Inbox hierarchy row");
+    let columns = [
+        PID_TAG_FOLDER_ID,
+        PID_TAG_FOLDER_XVIEWINFO_E,
+        PID_TAG_FOLDER_FLAGS,
+    ];
+
+    let property_row =
+        serialize_hierarchy_property_row(inbox, &mailboxes, &snapshot, &columns, Uuid::nil());
+    let mut cursor = Cursor::new(property_row.as_slice());
+    assert_eq!(cursor.read_u8().unwrap(), 1, "FlaggedPropertyRow");
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_FOLDER_ID).unwrap(),
+        MapiValue::I64(i64::from_le_bytes(
+            crate::mapi::identity::wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap(),
+        ))
+    );
+    assert_eq!(cursor.read_u8().unwrap(), 0x0A);
+    assert_eq!(cursor.read_u32().unwrap(), ROP_ERROR_NOT_FOUND);
+    assert_eq!(cursor.read_u8().unwrap(), 0);
+    assert_eq!(cursor.read_u32().unwrap(), 0x0000_0005);
+    assert_eq!(cursor.position() as usize, property_row.len());
+
+    let root_rows = hierarchy_rows(
+        ROOT_FOLDER_ID,
+        &mailboxes,
+        &snapshot,
+        None,
+        &[],
+        Uuid::nil(),
+    );
+    for (folder_id, expected_flags) in [
+        (SEARCH_FOLDER_ID, 0x0000_0004),
+        (SPOOLER_QUEUE_FOLDER_ID, 0x0000_0002),
+        (REMINDERS_FOLDER_ID, 0x0000_0002),
+        (IPM_SUBTREE_FOLDER_ID, 0x0000_0005),
+    ] {
+        let row = root_rows
+            .iter()
+            .find(|row| hierarchy_row_id(row) == folder_id)
+            .expect("root hierarchy row");
+        assert_eq!(hierarchy_row_folder_flags(row, &mailboxes), expected_flags);
+    }
 }
 
 #[test]

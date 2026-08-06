@@ -755,6 +755,7 @@ used_for = [
   "PidTagEntryId identity and PtypBinary property tag used by account-scoped special-message GetProps, ICS, and direct FastTransfer projections",
   "PidTagParentEntryId identity and PtypBinary type used to keep direct associated-configuration FastTransfer content coherent with its containing Folder EntryID",
   "PidTagRecordKey identity and PtypBinary type",
+  "PidTagFolderFlags canonical property ID 0x66A8 and PtypInteger32 type for computed hierarchy-row folder classification",
   "Verification that Outlook-observed, unpersisted folder tags 0x36E6001F, 0x36DE0003, 0x36E10003, 0x36EB0102, and 0x672D0003 have no MS-OXPROPS definition and must not receive synthetic projections",
 ]
 sections = [
@@ -777,6 +778,7 @@ sections = [
   "2.621 PidTagBodyHtml",
   "2.655 PidTagCreationTime",
   "2.684 PidTagEntryId",
+  "2.701 PidTagFolderFlags",
   "2.717 PidTagHasAttachments",
   "2.734 PidTagHtml",
   "2.739 PidTagImportance",
@@ -1332,6 +1334,7 @@ used_for = [
   "Durable MAPI folder hierarchy version times and the LocalCommitTimeMax boundary",
   "PidTagLocalCommitTimeMax as the latest change time of a top-level Message or direct child folder, excluding objects inside subfolders",
   "PidTagParentEntryId as the EntryID of the Folder containing a Message or subfolder",
+  "Computed PidTagFolderFlags IPM, SEARCH, and NORMAL bits in Outlook hierarchy rows",
 ]
 sections = [
   "2.2.1.1 RopOpenFolder ROP",
@@ -1357,6 +1360,7 @@ sections = [
   "2.2.1.14.1 RopGetContentsTable ROP Request Buffer",
   "2.2.1.14.2 RopGetContentsTable ROP Response Buffer",
   "2.2.2.2 Folder Object Properties",
+  "2.2.2.2.1.5 PidTagFolderFlags Property",
   "2.2.2.2.1.7 PidTagParentEntryId Property",
   "2.2.2.2.1.9 PidTagHierRev Property",
   "2.2.2.2.1.13 PidTagLocalCommitTime Property",

@@ -257,13 +257,13 @@ pub(in crate::mapi) fn hierarchy_table_row_modified(
     Some(HierarchyTableRowModified {
         folder_id: changed_folder_id,
         insert_after_folder_id,
-        row_data: standard_property_row_bytes(&serialize_hierarchy_row(
+        row_data: serialize_hierarchy_property_row(
             changed_row,
             mailboxes,
             snapshot,
             columns,
             mailbox_guid,
-        )),
+        ),
     })
 }
 
@@ -466,6 +466,9 @@ pub(super) fn hierarchy_row_property_value(
     property_tag: u32,
     mailbox_guid: Uuid,
 ) -> Option<MapiValue> {
+    if canonical_property_storage_tag(property_tag) == PID_TAG_FOLDER_FLAGS {
+        return Some(MapiValue::U32(hierarchy_row_folder_flags(row, mailboxes)));
+    }
     match row {
         HierarchyRow::Mailbox(mailbox) => mailbox_property_value_with_context_for_account(
             mailbox,
@@ -479,6 +482,70 @@ pub(super) fn hierarchy_row_property_value(
         }
         HierarchyRow::Special(folder_id) => {
             special_folder_property_value(*folder_id, property_tag, mailbox_guid)
+        }
+    }
+}
+
+/// [MS-OXCFOLD] section 2.2.2.2.1.5 and [MS-OXPROPS] section 2.701:
+/// PidTagFolderFlags is the bitwise combination of IPM, search, and normal
+/// folder state. Exchange projects the Finder container itself as normal.
+pub(super) fn hierarchy_row_folder_flags(row: &HierarchyRow<'_>, mailboxes: &[JmapMailbox]) -> u32 {
+    const FOLDER_FLAGS_IPM: u32 = 0x0000_0001;
+    const FOLDER_FLAGS_SEARCH: u32 = 0x0000_0002;
+    const FOLDER_FLAGS_NORMAL: u32 = 0x0000_0004;
+
+    let folder_id = hierarchy_row_id(row);
+    let is_ipm = match row {
+        HierarchyRow::Collaboration(_) => true,
+        HierarchyRow::PublicFolder(_) => false,
+        HierarchyRow::Mailbox(_) | HierarchyRow::Special(_) => {
+            hierarchy_folder_is_in_ipm_subtree(folder_id, mailboxes)
+        }
+    };
+    let is_search = match row {
+        HierarchyRow::Mailbox(mailbox) => folder_type(mailbox) == FOLDER_SEARCH,
+        HierarchyRow::Special(folder_id) => matches!(
+            *folder_id,
+            SPOOLER_QUEUE_FOLDER_ID
+                | REMINDERS_FOLDER_ID
+                | TRACKED_MAIL_PROCESSING_FOLDER_ID
+                | TODO_SEARCH_FOLDER_ID
+                | CONTACTS_SEARCH_FOLDER_ID
+        ),
+        HierarchyRow::PublicFolder(_) | HierarchyRow::Collaboration(_) => false,
+    };
+
+    u32::from(is_ipm) * FOLDER_FLAGS_IPM
+        | if is_search {
+            FOLDER_FLAGS_SEARCH
+        } else {
+            FOLDER_FLAGS_NORMAL
+        }
+}
+
+fn hierarchy_folder_is_in_ipm_subtree(folder_id: u64, mailboxes: &[JmapMailbox]) -> bool {
+    let mut current_folder_id = folder_id;
+    let mut visited = HashSet::new();
+    loop {
+        if current_folder_id == IPM_SUBTREE_FOLDER_ID {
+            return true;
+        }
+        if matches!(
+            current_folder_id,
+            0 | ROOT_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID
+        ) || !visited.insert(current_folder_id)
+        {
+            return false;
+        }
+        if let Some(mailbox) = mailboxes
+            .iter()
+            .find(|mailbox| try_mapi_folder_id(mailbox) == Some(current_folder_id))
+        {
+            current_folder_id = mapi_parent_folder_id(mailbox);
+        } else if is_advertised_special_folder(current_folder_id) {
+            current_folder_id = special_folder_metadata(current_folder_id).1;
+        } else {
+            return false;
         }
     }
 }
@@ -700,20 +767,36 @@ pub(super) fn serialize_hierarchy_row(
 ) -> Vec<u8> {
     let local_commit_time_max =
         snapshot.folder_local_commit_time_max(hierarchy_row_id(&row), mailboxes);
-    if let Some(local_commit_time_max) = local_commit_time_max {
-        if columns
-            .iter()
-            .any(|column| canonical_property_storage_tag(*column) == PID_TAG_LOCAL_COMMIT_TIME_MAX)
-        {
-            let mut serialized = Vec::new();
-            for column in columns {
-                if canonical_property_storage_tag(*column) == PID_TAG_LOCAL_COMMIT_TIME_MAX {
-                    write_mapi_value(
+    if columns.iter().any(|column| {
+        let column = canonical_property_storage_tag(*column);
+        column == PID_TAG_FOLDER_FLAGS
+            || (column == PID_TAG_LOCAL_COMMIT_TIME_MAX && local_commit_time_max.is_some())
+    }) {
+        let mut serialized = Vec::new();
+        for column in columns {
+            match canonical_property_storage_tag(*column) {
+                PID_TAG_FOLDER_FLAGS => write_mapi_value(
+                    &mut serialized,
+                    *column,
+                    &MapiValue::U32(hierarchy_row_folder_flags(&row, mailboxes)),
+                ),
+                PID_TAG_LOCAL_COMMIT_TIME_MAX => match local_commit_time_max {
+                    Some(local_commit_time_max) => write_mapi_value(
                         &mut serialized,
                         *column,
                         &MapiValue::U64(local_commit_time_max),
-                    );
-                } else {
+                    ),
+                    None => {
+                        serialized.extend_from_slice(&serialize_hierarchy_row_from_backing_object(
+                            row,
+                            mailboxes,
+                            snapshot,
+                            std::slice::from_ref(column),
+                            mailbox_guid,
+                        ))
+                    }
+                },
+                _ => {
                     serialized.extend_from_slice(&serialize_hierarchy_row_from_backing_object(
                         row,
                         mailboxes,
@@ -723,11 +806,85 @@ pub(super) fn serialize_hierarchy_row(
                     ));
                 }
             }
-            return serialized;
         }
+        return serialized;
     }
 
     serialize_hierarchy_row_from_backing_object(row, mailboxes, snapshot, columns, mailbox_guid)
+}
+
+/// [MS-OXCDATA] sections 2.8.1.2 and 2.11.5: selected hierarchy properties
+/// that are absent use a FlaggedPropertyRow with MAPI_E_NOT_FOUND rather than
+/// a fabricated type default. Exchange does this for PidTagFolderXViewInfoE.
+pub(super) fn serialize_hierarchy_property_row(
+    row: HierarchyRow<'_>,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    columns: &[u32],
+    mailbox_guid: Uuid,
+) -> Vec<u8> {
+    let present = columns
+        .iter()
+        .map(|column| {
+            hierarchy_row_property_is_present(&row, mailboxes, snapshot, *column, mailbox_guid)
+        })
+        .collect::<Vec<_>>();
+    if present.iter().all(|present| *present) {
+        let values = serialize_hierarchy_row(row, mailboxes, snapshot, columns, mailbox_guid);
+        let mut property_row = Vec::new();
+        write_query_rows_property_row(&mut property_row, columns, &values);
+        return property_row;
+    }
+
+    let mut property_row = vec![1];
+    for (column, present) in columns.iter().zip(present) {
+        if present {
+            property_row.push(0);
+            let value = serialize_hierarchy_row(
+                row,
+                mailboxes,
+                snapshot,
+                std::slice::from_ref(column),
+                mailbox_guid,
+            );
+            let mut standard = Vec::new();
+            write_query_rows_property_row(&mut standard, std::slice::from_ref(column), &value);
+            property_row.extend_from_slice(&standard[1..]);
+        } else {
+            property_row.push(0x0A);
+            write_u32(&mut property_row, ROP_ERROR_NOT_FOUND);
+        }
+    }
+    property_row
+}
+
+fn hierarchy_row_property_is_present(
+    row: &HierarchyRow<'_>,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    property_tag: u32,
+    mailbox_guid: Uuid,
+) -> bool {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    if matches!(
+        property_tag,
+        PID_TAG_DISPLAY_NAME_W
+            | PID_TAG_FOLDER_ID
+            | PID_TAG_PARENT_FOLDER_ID
+            | PID_TAG_CONTENT_COUNT
+            | PID_TAG_CONTENT_UNREAD_COUNT
+            | PID_TAG_SUBFOLDERS
+            | PID_TAG_FOLDER_TYPE
+            | PID_TAG_FOLDER_FLAGS
+            | PID_TAG_ACCESS
+    ) {
+        return true;
+    }
+    snapshot
+        .folder_version(hierarchy_row_id(row))
+        .and_then(|version| folder_version_property_value(version, property_tag))
+        .is_some()
+        || hierarchy_row_property_value(row, mailboxes, property_tag, mailbox_guid).is_some()
 }
 
 fn serialize_hierarchy_row_from_backing_object(

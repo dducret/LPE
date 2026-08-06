@@ -371,6 +371,7 @@ mod tests {
             &identity_codec,
             3,
             1,
+            0x0100,
             changed_folder_id,
             insert_after_folder_id,
             &row_data,
@@ -382,6 +383,36 @@ mod tests {
         expected.extend_from_slice(&0x0005u16.to_le_bytes());
         expected.extend_from_slice(&wire_id_bytes_from_object_id(changed_folder_id).unwrap());
         expected.extend_from_slice(&wire_id_bytes_from_object_id(insert_after_folder_id).unwrap());
+        expected.extend_from_slice(&(row_data.len() as u16).to_le_bytes());
+        expected.extend_from_slice(&row_data);
+        assert_eq!(response, expected);
+    }
+
+    #[test]
+    fn new_mail_hierarchy_row_notification_encodes_message_row_keys() {
+        let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
+        let changed_folder_id = 0x0000_0000_0005_0001;
+        let insert_after_folder_id = 0x0000_0000_0004_0001;
+        let row_data = vec![1, 0x11, 0x22];
+
+        let response = rop_hierarchy_table_row_modified_response(
+            &identity_codec,
+            3,
+            0,
+            0xC100,
+            changed_folder_id,
+            insert_after_folder_id,
+            &row_data,
+        )
+        .expect("message-derived hierarchy row notification serializes");
+
+        let mut expected = vec![0x2A, 0x03, 0, 0, 0, 0];
+        expected.extend_from_slice(&0xC100u16.to_le_bytes());
+        expected.extend_from_slice(&0x0005u16.to_le_bytes());
+        expected.extend_from_slice(&wire_id_bytes_from_object_id(changed_folder_id).unwrap());
+        expected.extend_from_slice(&[0; 12]);
+        expected.extend_from_slice(&wire_id_bytes_from_object_id(insert_after_folder_id).unwrap());
+        expected.extend_from_slice(&[0; 12]);
         expected.extend_from_slice(&(row_data.len() as u16).to_le_bytes());
         expected.extend_from_slice(&row_data);
         assert_eq!(response, expected);
@@ -693,23 +724,36 @@ pub(in crate::mapi) fn rop_notify_response(
 }
 
 /// [MS-OXCNOTIF] section 2.2.1.4.1.2: hierarchy TableRowModified uses two
-/// Folder IDs and a PropertyRow. It has neither the message nor search flags.
+/// Folder IDs and a PropertyRow. When Exchange marks a NewMail-derived row
+/// with the message bit, both row keys also carry a zero Message ID/instance.
 pub(in crate::mapi) fn rop_hierarchy_table_row_modified_response(
     identity_codec: &crate::mapi::identity::MapiIdentityCodec,
     notification_handle: u32,
     logon_id: u8,
+    notification_flags: u16,
     changed_folder_id: u64,
     insert_after_folder_id: u64,
     row_data: &[u8],
 ) -> Option<Vec<u8>> {
+    if notification_flags & 0x0FFF != MapiNotificationEventMask::TableModified.as_u16() {
+        return None;
+    }
     let row_data_size = u16::try_from(row_data.len()).ok()?;
     let mut response = vec![0x2A];
     write_u32(&mut response, notification_handle);
     response.push(logon_id);
-    write_u16(&mut response, 0x0100);
+    write_u16(&mut response, notification_flags);
     write_u16(&mut response, 0x0005);
     append_wire_id(&mut response, identity_codec, changed_folder_id);
+    if notification_flags & 0x8000 != 0 {
+        write_u64(&mut response, 0);
+        write_u32(&mut response, 0);
+    }
     append_wire_id(&mut response, identity_codec, insert_after_folder_id);
+    if notification_flags & 0x8000 != 0 {
+        write_u64(&mut response, 0);
+        write_u32(&mut response, 0);
+    }
     write_u16(&mut response, row_data_size);
     response.extend_from_slice(row_data);
     Some(response)

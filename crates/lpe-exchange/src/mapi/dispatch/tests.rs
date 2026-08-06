@@ -1689,6 +1689,84 @@ fn hierarchy_query_rows_wire_summary_decodes_compact_folder_projection() {
 }
 
 #[test]
+fn hierarchy_query_rows_wire_summary_decodes_flagged_folder_projection() {
+    fn append_utf16z(row: &mut Vec<u8>, value: &str) {
+        for unit in value.encode_utf16() {
+            row.extend_from_slice(&unit.to_le_bytes());
+        }
+        row.extend_from_slice(&0u16.to_le_bytes());
+    }
+
+    let columns = vec![
+        PID_TAG_FOLDER_ID,
+        PID_TAG_FOLDER_XVIEWINFO_E,
+        PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_CONTENT_COUNT,
+        PID_TAG_ATTRIBUTE_HIDDEN,
+        PID_TAG_SUBFOLDERS,
+    ];
+    let mut response = vec![0x15, 0, 0, 0, 0, 0, 0, 1, 0];
+    response.push(1);
+    response.push(0);
+    response.extend_from_slice(
+        &crate::mapi::identity::wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap(),
+    );
+    response.push(0x0A);
+    response.extend_from_slice(&0x8004_010fu32.to_le_bytes());
+    response.push(0);
+    append_utf16z(&mut response, "IPF.Note");
+    response.push(0);
+    append_utf16z(&mut response, "Inbox");
+    response.push(0);
+    response.extend_from_slice(&3u32.to_le_bytes());
+    response.push(1);
+    response.push(0);
+    response.push(1);
+
+    let summary = format_hierarchy_query_rows_wire_summary(&response, &columns, 8);
+
+    assert!(summary.contains("total=1"), "{summary}");
+    assert!(summary.contains("decoded=1"), "{summary}");
+    assert!(summary.contains("truncated=false"), "{summary}");
+    assert!(
+        summary.contains(
+            "index=0;row_status=0x01;id=0x0000000000050001;class=IPF.Note;name=Inbox;count=3;type=missing;hidden=missing;subfolders=true"
+        ),
+        "{summary}"
+    );
+    assert!(!summary.contains("parse_error"), "{summary}");
+    assert!(summary.contains("remaining_bytes=0"), "{summary}");
+}
+
+#[test]
+fn hierarchy_response_metrics_decode_standard_and_flagged_rows() {
+    let columns = vec![PID_TAG_CONTENT_COUNT, PID_TAG_FOLDER_ID];
+    let mut response = vec![0x15, 0, 0, 0, 0, 0, 0, 2, 0];
+    response.push(0);
+    response.extend_from_slice(&0u32.to_le_bytes());
+    response.extend_from_slice(
+        &crate::mapi::identity::wire_id_bytes_from_object_id(
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        )
+        .unwrap(),
+    );
+    response.push(1);
+    response.push(0x0A);
+    response.extend_from_slice(&0x8004_010fu32.to_le_bytes());
+    response.push(0);
+    response.extend_from_slice(
+        &crate::mapi::identity::wire_id_bytes_from_object_id(QUICK_STEP_SETTINGS_FOLDER_ID)
+            .unwrap(),
+    );
+
+    let summary = hierarchy_response_metric_summary(&response, &columns);
+
+    assert!(summary.has_conversation_action);
+    assert!(summary.has_quick_step);
+}
+
+#[test]
 fn uploaded_state_delta_anchor_requires_idset_and_cnset_seen() {
     let idset_only = upload_state_marker_bit(0x4017_0003);
     assert!(!uploaded_state_has_delta_anchor(idset_only));

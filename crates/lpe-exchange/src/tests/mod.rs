@@ -13516,12 +13516,47 @@ fn hierarchy_query_display_container_rows(
     let mut offset = query_offset + 9;
     let mut rows = Vec::new();
     for _ in 0..row_count {
-        if response_rops.get(offset) != Some(&0) {
-            return Err("standard property row did not start with success status".into());
-        }
+        let row_status = *response_rops
+            .get(offset)
+            .ok_or("hierarchy property row is missing its status")?;
         offset += 1;
+        if row_status == 1 {
+            if response_rops.get(offset) != Some(&0) {
+                return Err("hierarchy display-name cell is not present".into());
+            }
+            offset += 1;
+        } else if row_status != 0 {
+            return Err("hierarchy property row has an invalid status".into());
+        }
         let display_name = read_rop_utf16z(response_rops, &mut offset)?;
-        let container_class = read_rop_utf16z(response_rops, &mut offset)?;
+        let container_class = if row_status == 1 {
+            match response_rops
+                .get(offset)
+                .copied()
+                .ok_or("hierarchy container-class cell is missing its flag")?
+            {
+                0 => {
+                    offset += 1;
+                    read_rop_utf16z(response_rops, &mut offset)?
+                }
+                1 => {
+                    offset += 1;
+                    String::new()
+                }
+                0x0A => {
+                    offset += 1;
+                    let error_end = offset.saturating_add(4);
+                    response_rops
+                        .get(offset..error_end)
+                        .ok_or("hierarchy container-class error is truncated")?;
+                    offset = error_end;
+                    String::new()
+                }
+                _ => return Err("hierarchy container-class cell has an invalid flag".into()),
+            }
+        } else {
+            read_rop_utf16z(response_rops, &mut offset)?
+        };
         rows.push((display_name, container_class));
     }
     Ok(rows)

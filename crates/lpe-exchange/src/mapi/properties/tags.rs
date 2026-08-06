@@ -55,6 +55,7 @@ pub(in crate::mapi) const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 pub(in crate::mapi) const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 pub(in crate::mapi) const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 pub(in crate::mapi) const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
+pub(in crate::mapi) const PID_TAG_FOLDER_FLAGS: u32 = 0x66A8_0003;
 pub(in crate::mapi) const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 pub(in crate::mapi) const PID_TAG_DEFAULT_VIEW_ENTRY_ID: u32 = 0x3616_0102;
 pub(in crate::mapi) const PID_TAG_ASSOCIATED_CONTENT_COUNT: u32 = 0x3617_0003;

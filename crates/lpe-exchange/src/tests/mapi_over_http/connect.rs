@@ -4320,8 +4320,21 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     // [MS-OXCFOLD] section 2.2.1.13.1; [MS-OXCNOTIF] section 3.1.4.3.
     rops.extend_from_slice(&[0x04, 0x00, 0x01, 0x02, 0x84]); // RopGetHierarchyTable
     rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]); // RopSetColumns
-    rops.extend_from_slice(&4u16.to_le_bytes());
-    for tag in [0x6748_0014u32, 0x3001_001F, 0x3602_0003, 0x3603_0003] {
+    let hierarchy_columns = [
+        0x6748_0014u32,
+        0x3001_001F,
+        0x360A_000B,
+        0x6749_0014,
+        0x36E0_0102,
+        0x670B_0003,
+        0x670A_0040,
+        0x66A8_0003,
+        0x4082_0040,
+        0x3602_0003,
+        0x3603_0003,
+    ];
+    rops.extend_from_slice(&(hierarchy_columns.len() as u16).to_le_bytes());
+    for tag in hierarchy_columns {
         rops.extend_from_slice(&tag.to_le_bytes());
     }
     rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]); // RopQueryRows
@@ -4408,11 +4421,16 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     // Exchange raw/753 targets the active root hierarchy table as well as the
     // whole-store NewMail subscription. The hierarchy row notification is
     // informative, while NewMail is delivered first for the same change.
-    let table_notification_prefix = [0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x05, 0x00];
+    let basic_table_notification_prefix = [0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x05, 0x00];
+    let new_mail_table_notification_prefix = [0x2A, 0x03, 0, 0, 0, 0, 0x00, 0xC1, 0x05, 0x00];
     let table_notification_offsets = response_rops
-        .windows(table_notification_prefix.len())
+        .windows(basic_table_notification_prefix.len())
         .enumerate()
-        .filter_map(|(offset, window)| (window == table_notification_prefix).then_some(offset))
+        .filter_map(|(offset, window)| {
+            (window == basic_table_notification_prefix
+                || window == new_mail_table_notification_prefix)
+                .then_some(offset)
+        })
         .collect::<Vec<_>>();
     assert_eq!(table_notification_offsets.len(), 3);
     let mut table_notification_offset = None;
@@ -4428,7 +4446,14 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
                     == mapi_wire_id_bytes(expected_folder_id)
             })
             .expect("hierarchy table row notification should be present");
-        let row_data_size_offset = offset + 26;
+        let notification_flags =
+            u16::from_le_bytes(response_rops[offset + 6..offset + 8].try_into().unwrap());
+        let row_data_size_offset = offset
+            + if notification_flags & 0x8000 != 0 {
+                50
+            } else {
+                26
+            };
         let row_data_size = u16::from_le_bytes(
             response_rops[row_data_size_offset..row_data_size_offset + 2]
                 .try_into()
@@ -4437,11 +4462,13 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
         let row_data_offset = row_data_size_offset + 2;
         let row_data = &response_rops[row_data_offset..row_data_offset + row_data_size];
         assert!(!row_data.is_empty());
-        assert_eq!(row_data[0], 0);
+        assert_eq!(row_data[0], 1);
         assert!(contains_bytes(row_data, &utf16z(expected_name)));
         assert!(
             row_data.ends_with(&[
+                0,
                 expected_content_count,
+                0,
                 0,
                 0,
                 0,
@@ -4453,7 +4480,10 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
             "{expected_name} hierarchy row did not include the current content or unread count: {row_data:02x?}"
         );
         if expected_folder_id == scoped_inbox_folder_id {
+            assert_eq!(notification_flags, 0xC100);
             table_notification_offset = Some(offset);
+        } else {
+            assert_eq!(notification_flags, 0x0100);
         }
     }
     let table_notification_offset = table_notification_offset.unwrap();

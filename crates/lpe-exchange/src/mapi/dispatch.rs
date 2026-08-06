@@ -1575,6 +1575,7 @@ where
                         snapshot.identity_codec(),
                         notification_handle,
                         logon_id,
+                        event.event_mask,
                         row.folder_id,
                         row.insert_after_folder_id,
                         &row.row_data,

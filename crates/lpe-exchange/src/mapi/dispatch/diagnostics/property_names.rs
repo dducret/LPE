@@ -181,6 +181,7 @@ pub(in crate::mapi::dispatch) fn set_property_debug_name(tag: u32) -> &'static s
         PID_TAG_FOLDER_ID => "PidTagFolderId",
         PID_TAG_PARENT_FOLDER_ID => "PidTagParentFolderId",
         PID_TAG_FOLDER_TYPE => "PidTagFolderType",
+        PID_TAG_FOLDER_FLAGS => "PidTagFolderFlags",
         PID_TAG_CONTENT_COUNT => "PidTagContentCount",
         PID_TAG_CONTENT_UNREAD_COUNT => "PidTagContentUnreadCount",
         PID_TAG_SUBFOLDERS => "PidTagSubfolders",

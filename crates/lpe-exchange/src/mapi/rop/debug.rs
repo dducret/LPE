@@ -104,6 +104,7 @@ pub(in crate::mapi) fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_PARENT_FOLDER_ID => "PidTagParentFolderId",
         PID_TAG_INSTANCE_KEY => "PidTagInstanceKey",
         PID_TAG_FOLDER_TYPE => "PidTagFolderType",
+        PID_TAG_FOLDER_FLAGS => "PidTagFolderFlags",
         OUTLOOK_UNDOCUMENTED_FOLDER_BINARY_120C => "OutlookUndocumentedFolderBinary120C",
         PID_TAG_MESSAGE_CLASS_W | PID_TAG_MESSAGE_CLASS_STRING8 => "PidTagMessageClass",
         PID_TAG_ORIGINAL_MESSAGE_CLASS_W => "PidTagOriginalMessageClass",

@@ -306,7 +306,7 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
 }
 
 #[test]
-fn session_new_mail_delivery_omits_parent_hierarchy_table_notification() {
+fn session_new_mail_delivery_includes_message_derived_parent_hierarchy_table_notification() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
     let mut session = remove_session(&session_id).unwrap();
@@ -367,13 +367,30 @@ fn session_new_mail_delivery_omits_parent_hierarchy_table_notification() {
     );
 
     let (deliveries, _) = session.take_pending_notification_delivery_batch();
-    assert_eq!(deliveries.len(), 1);
-    assert_eq!(deliveries[0].0, notification_handle);
-    assert_eq!(deliveries[0].1, 0);
-    assert_eq!(deliveries[0].2.kind, MapiNotificationKind::Content);
+    assert_eq!(deliveries.len(), 2);
+    let new_mail = deliveries
+        .iter()
+        .find(|(handle, _, _)| *handle == notification_handle)
+        .expect("whole-store NewMail delivery");
+    assert_eq!(new_mail.1, 0);
+    assert_eq!(new_mail.2.kind, MapiNotificationKind::Content);
     assert_eq!(
-        deliveries[0].2.event_mask,
+        new_mail.2.event_mask,
         MapiNotificationEventMask::NewMail.as_u16()
+    );
+    let hierarchy = deliveries
+        .iter()
+        .find(|(handle, _, _)| *handle == hierarchy_handle)
+        .expect("message-derived parent hierarchy row delivery");
+    assert_eq!(hierarchy.1, 0);
+    assert_eq!(hierarchy.2.kind, MapiNotificationKind::Hierarchy);
+    assert_eq!(
+        hierarchy.2.event_mask,
+        MapiNotificationEventMask::TableModified.as_u16() | 0xC000
+    );
+    assert_eq!(
+        hierarchy.2.message_id,
+        Some(crate::mapi::identity::INBOX_FOLDER_ID)
     );
 }
 

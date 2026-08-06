@@ -84,6 +84,7 @@ fn rop_query_rows_response_inner(
             || snapshot.public_folder_for_id(*folder_id).is_some() =>
         {
             start_position = *table_position;
+            rows_are_serialized_property_rows = true;
             let columns = if columns.is_empty() {
                 default_hierarchy_columns()
             } else {
@@ -111,7 +112,13 @@ fn rop_query_rows_response_inner(
             );
             rows.into_iter()
                 .map(|row| {
-                    serialize_hierarchy_row(row, mailboxes, snapshot, &columns, mailbox_guid)
+                    serialize_hierarchy_property_row(
+                        row,
+                        mailboxes,
+                        snapshot,
+                        &columns,
+                        mailbox_guid,
+                    )
                 })
                 .collect::<Vec<_>>()
         }
