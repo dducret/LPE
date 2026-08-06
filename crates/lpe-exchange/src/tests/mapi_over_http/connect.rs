@@ -2980,30 +2980,30 @@ async fn mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthe
 }
 
 #[tokio::test]
-async fn mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection() {
-    let inbox_id = Uuid::parse_str("52525252-5252-4525-9252-525252525203").unwrap();
+async fn mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection() {
+    let trash_id = Uuid::parse_str("52525252-5252-4525-9252-525252525203").unwrap();
     let unchanged_id = Uuid::parse_str("64646464-6464-4646-9646-646464646403").unwrap();
     let changed_id = Uuid::parse_str("65656565-6565-4565-9565-656565656503").unwrap();
     let deleted_id = Uuid::parse_str("67676767-6767-4767-9767-676767676703").unwrap();
-    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
-    inbox.total_emails = 2;
+    let mut trash = FakeStore::mailbox(&trash_id.to_string(), "trash", "Deleted Items");
+    trash.total_emails = 2;
     let mut unchanged = FakeStore::email(
         &unchanged_id.to_string(),
-        &inbox_id.to_string(),
-        "inbox",
+        &trash_id.to_string(),
+        "trash",
         "Client state baseline unchanged",
     );
     unchanged.modseq = 40;
     unchanged.mailbox_states[0].modseq = 40;
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        mailboxes: Arc::new(Mutex::new(vec![trash])),
         emails: Arc::new(Mutex::new(vec![
             unchanged,
             FakeStore::email(
                 &changed_id.to_string(),
-                &inbox_id.to_string(),
-                "inbox",
+                &trash_id.to_string(),
+                "trash",
                 "Client state delta changed",
             ),
         ])),
@@ -3012,7 +3012,7 @@ async fn mapi_over_http_ics_client_state_controls_baseline_versus_delta_selectio
     store
         .store_mapi_sync_checkpoint(
             FakeStore::account().account_id,
-            Some(inbox_id),
+            Some(trash_id),
             MapiCheckpointKind::Content,
             30,
             40,
@@ -3028,7 +3028,12 @@ async fn mapi_over_http_ics_client_state_controls_baseline_versus_delta_selectio
         ..Default::default()
     };
 
-    let baseline_rops = content_sync_response_rops(store.clone(), 5, &[]).await;
+    let baseline_rops = content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::TRASH_FOLDER_ID,
+        &[],
+    )
+    .await;
     assert_eq!(mapi_sync_manifest_counts(&baseline_rops), Some((0, 2)));
     assert!(contains_bytes(
         &baseline_rops,
@@ -3043,6 +3048,20 @@ async fn mapi_over_http_ics_client_state_controls_baseline_versus_delta_selectio
         &mapi_deleted_message_idset_property(&[deleted_id])
     ));
 
+    let baseline_stream = strict_content_sync_transfer_from_response(&baseline_rops).unwrap();
+    let unchanged_change_number = baseline_stream
+        .message_changes
+        .iter()
+        .find(|message| message.subject == "Client state baseline unchanged")
+        .and_then(|message| message.change_number)
+        .unwrap();
+    let changed_change_number = baseline_stream
+        .message_changes
+        .iter()
+        .find(|message| message.subject == "Client state delta changed")
+        .and_then(|message| message.change_number)
+        .unwrap();
+
     let client_state = vec![
         (
             META_TAG_IDSET_GIVEN,
@@ -3052,13 +3071,16 @@ async fn mapi_over_http_ics_client_state_controls_baseline_versus_delta_selectio
                 mapi_message_global_counter(&deleted_id),
             ]),
         ),
-        (META_TAG_CNSET_SEEN, strict_test_replguid_globset(&[40])),
+        (
+            META_TAG_CNSET_SEEN,
+            strict_test_replguid_globset(&[unchanged_change_number]),
+        ),
         (META_TAG_CNSET_SEEN_FAI, Vec::new()),
         (META_TAG_CNSET_READ, Vec::new()),
     ];
     let delta_rops = outlook_content_sync_response_rops_for_store(
         store,
-        crate::mapi::identity::INBOX_FOLDER_ID,
+        crate::mapi::identity::TRASH_FOLDER_ID,
         &client_state,
     )
     .await;
@@ -3069,7 +3091,10 @@ async fn mapi_over_http_ics_client_state_controls_baseline_versus_delta_selectio
     ));
     let delta_stream = strict_content_sync_transfer_from_response(&delta_rops).unwrap();
     assert_eq!(delta_stream.message_changes.len(), 1);
-    assert_eq!(delta_stream.message_changes[0].change_number, Some(41));
+    assert_eq!(
+        delta_stream.message_changes[0].change_number,
+        Some(changed_change_number)
+    );
     assert!(contains_bytes(
         &delta_rops,
         &mapi_deleted_message_idset_property(&[deleted_id])
