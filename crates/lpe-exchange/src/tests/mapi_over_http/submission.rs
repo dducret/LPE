@@ -1,5 +1,133 @@
 use super::*;
 
+async fn submit_new_mapi_message_with_identities(
+    subject: &str,
+    sender: (&str, &str),
+    sent_representing: (&str, &str),
+) -> (SubmitMessageInput, JmapEmail, lpe_storage::AuditEntryInput) {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox"),
+            FakeStore::mailbox("22222222-2222-2222-2222-222222222222", "sent", "Sent"),
+        ])),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let submitted_message_audits = store.submitted_message_audits.clone();
+    let emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, subject);
+    append_mapi_utf16_property(&mut property_values, 0x0C1A_001F, sender.0);
+    append_mapi_utf16_property(&mut property_values, 0x0C1F_001F, sender.1);
+    append_mapi_utf16_property(&mut property_values, 0x0042_001F, sent_representing.0);
+    append_mapi_utf16_property(&mut property_values, 0x0065_001F, sent_representing.1);
+    let recipient = mapi_recipient_row("Bob", "bob@example.test", 0x01);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_create_message(&mut rops, 1, 2, test_mapi_folder_id(5));
+    append_rop_set_properties(&mut rops, 2, 5, &property_values);
+    append_rop_modify_recipients(&mut rops, 2, &[(1, 0x01, recipient.as_slice())]);
+    append_rop_submit_message(&mut rops, 2);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x32, 0x02, 0, 0, 0, 0]));
+
+    let input = submitted_messages.lock().unwrap().pop().unwrap();
+    let audit = submitted_message_audits.lock().unwrap().pop().unwrap();
+    let sent = emails
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|email| email.mailbox_role == "sent" && email.subject == subject)
+        .cloned()
+        .unwrap();
+    (input, sent, audit)
+}
+
+#[tokio::test]
+async fn mapi_over_http_submit_new_message_maps_normal_sender_identity() {
+    let (input, sent, audit) = submit_new_mapi_message_with_identities(
+        "Normal MAPI identity",
+        ("Alice Sender", "alice@example.test"),
+        ("Alice From", "alice@example.test"),
+    )
+    .await;
+
+    assert_eq!(input.account_id, FakeStore::account().account_id);
+    assert_eq!(
+        input.submitted_by_account_id,
+        FakeStore::account().account_id
+    );
+    assert_eq!(input.from_address, "alice@example.test");
+    assert_eq!(input.from_display.as_deref(), Some("Alice From"));
+    assert_eq!(input.sender_address, None);
+    assert_eq!(input.sender_display, None);
+    assert_eq!(sent.from_address, input.from_address);
+    assert_eq!(sent.sender_address, None);
+    assert_eq!(sent.submitted_by_account_id, input.submitted_by_account_id);
+    assert_eq!(audit.actor, "alice@example.test");
+}
+
+#[tokio::test]
+async fn mapi_over_http_submit_new_message_maps_send_as_identity() {
+    let (input, sent, audit) = submit_new_mapi_message_with_identities(
+        "Send as MAPI identity",
+        ("Shared Sender", "shared@example.test"),
+        ("Shared From", "shared@example.test"),
+    )
+    .await;
+
+    assert_eq!(input.from_address, "shared@example.test");
+    assert_eq!(input.from_display.as_deref(), Some("Shared From"));
+    assert_eq!(input.sender_address, None);
+    assert_eq!(input.sender_display, None);
+    assert_eq!(sent.from_address, input.from_address);
+    assert_eq!(sent.sender_address, None);
+    assert_eq!(sent.submitted_by_account_id, input.submitted_by_account_id);
+    assert_eq!(audit.actor, "alice@example.test");
+}
+
+#[tokio::test]
+async fn mapi_over_http_submit_new_message_maps_send_on_behalf_identity() {
+    let (input, sent, audit) = submit_new_mapi_message_with_identities(
+        "Send on behalf MAPI identity",
+        ("Alice Sender", "alice@example.test"),
+        ("Shared From", "shared@example.test"),
+    )
+    .await;
+
+    assert_eq!(input.from_address, "shared@example.test");
+    assert_eq!(input.from_display.as_deref(), Some("Shared From"));
+    assert_eq!(input.sender_address.as_deref(), Some("alice@example.test"));
+    assert_eq!(input.sender_display.as_deref(), Some("Alice Sender"));
+    assert_eq!(sent.from_address, input.from_address);
+    assert_eq!(sent.sender_address, input.sender_address);
+    assert_eq!(sent.sender_display, input.sender_display);
+    assert_eq!(sent.submitted_by_account_id, input.submitted_by_account_id);
+    assert_eq!(audit.actor, "alice@example.test");
+}
+
 #[tokio::test]
 async fn mapi_over_http_microsoft_subrestriction_matches_message_recipients() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
@@ -821,16 +949,7 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut property_values = Vec::new();
     append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Submit from MAPI");
@@ -1914,16 +2033,7 @@ async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Drafts

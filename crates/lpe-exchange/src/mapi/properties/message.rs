@@ -540,11 +540,34 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
         &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
     );
     let body_text = pending_body_text_property(properties);
-    let from_address =
-        optional_pending_submit_address(properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
-            .unwrap_or_else(|| principal.email.clone());
-    let from_display = optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W])
-        .or_else(|| Some(principal.display_name.clone()));
+    // [MS-OXOMSG] sections 2.2.1.49 and 2.2.1.55 distinguish the sending
+    // mailbox owner from the end user the message represents.
+    let from_address = optional_pending_submit_address(
+        properties,
+        &[
+            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W,
+            PID_TAG_SENT_REPRESENTING_SMTP_ADDRESS_W,
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            PID_TAG_SENDER_SMTP_ADDRESS_W,
+        ],
+    )
+    .unwrap_or_else(|| principal.email.clone());
+    let from_display = optional_pending_text_property(
+        properties,
+        &[PID_TAG_SENT_REPRESENTING_NAME_W, PID_TAG_SENDER_NAME_W],
+    )
+    .or_else(|| Some(principal.display_name.clone()));
+    let sender_address = optional_pending_submit_address(
+        properties,
+        &[
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            PID_TAG_SENDER_SMTP_ADDRESS_W,
+        ],
+    )
+    .filter(|sender_address| sender_address != &from_address);
+    let sender_display = sender_address
+        .as_ref()
+        .and_then(|_| optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W]));
     let internet_message_id =
         optional_pending_text_property(properties, &[PID_TAG_INTERNET_MESSAGE_ID_W]);
     let (to, cc, bcc) = pending_recipients_for_import(recipients);
@@ -556,8 +579,8 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
         source: "mapi-submit-message".to_string(),
         from_display,
         from_address,
-        sender_display: None,
-        sender_address: None,
+        sender_display,
+        sender_address,
         to,
         cc,
         bcc,

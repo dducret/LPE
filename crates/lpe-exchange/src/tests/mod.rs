@@ -3956,6 +3956,7 @@ struct FakeStore {
     attachment_contents: Arc<Mutex<HashMap<String, ActiveSyncAttachmentContent>>>,
     created_attachments: Arc<Mutex<Vec<AttachmentUploadInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
+    submitted_message_audits: Arc<Mutex<Vec<lpe_storage::AuditEntryInput>>>,
     submitted_draft_messages: Arc<Mutex<Vec<Uuid>>>,
     cancelled_submissions: Arc<Mutex<Vec<Uuid>>>,
     submission_cancel_results: Arc<Mutex<HashMap<Uuid, CancelSubmissionResult>>>,
@@ -11941,9 +11942,10 @@ impl ExchangeStore for FakeStore {
     fn submit_message<'a>(
         &'a self,
         input: SubmitMessageInput,
-        _audit: lpe_storage::AuditEntryInput,
+        audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, SubmittedMessage> {
         self.submitted_messages.lock().unwrap().push(input.clone());
+        self.submitted_message_audits.lock().unwrap().push(audit);
         let sent_mailbox = self
             .mailboxes
             .lock()
