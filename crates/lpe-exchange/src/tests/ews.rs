@@ -50,6 +50,105 @@ async fn find_folder_lists_contact_and_calendar_folders() {
 }
 
 #[tokio::test]
+async fn find_folder_projects_collaboration_effective_rights() {
+    let mut writable_delegate = FakeStore::collection("delegate-calendar", "calendar", "Team");
+    writable_delegate.is_owned = false;
+    writable_delegate.rights = CollaborationRights {
+        may_read: true,
+        may_write: true,
+        may_delete: true,
+        may_share: false,
+    };
+    let mut read_only_delegate = FakeStore::collection("delegate-tasks", "tasks", "Tasks");
+    read_only_delegate.is_owned = false;
+    read_only_delegate.rights = CollaborationRights {
+        may_read: true,
+        may_write: false,
+        may_delete: false,
+        may_share: false,
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        calendar_collections: Arc::new(Mutex::new(vec![writable_delegate])),
+        task_collections: Arc::new(Mutex::new(vec![read_only_delegate])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindFolder /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert_eq!(
+        effective_rights_for_folder(&body, "default"),
+        concat!(
+            "<t:EffectiveRights>",
+            "<t:CreateAssociated>false</t:CreateAssociated>",
+            "<t:CreateContents>true</t:CreateContents>",
+            "<t:CreateHierarchy>true</t:CreateHierarchy>",
+            "<t:Delete>true</t:Delete>",
+            "<t:Modify>true</t:Modify>",
+            "<t:Read>true</t:Read>",
+            "<t:ViewPrivateItems>true</t:ViewPrivateItems>",
+            "</t:EffectiveRights>"
+        )
+    );
+    assert_eq!(
+        effective_rights_for_folder(&body, "delegate-calendar"),
+        concat!(
+            "<t:EffectiveRights>",
+            "<t:CreateAssociated>false</t:CreateAssociated>",
+            "<t:CreateContents>true</t:CreateContents>",
+            "<t:CreateHierarchy>false</t:CreateHierarchy>",
+            "<t:Delete>true</t:Delete>",
+            "<t:Modify>true</t:Modify>",
+            "<t:Read>true</t:Read>",
+            "<t:ViewPrivateItems>true</t:ViewPrivateItems>",
+            "</t:EffectiveRights>"
+        )
+    );
+    assert_eq!(
+        effective_rights_for_folder(&body, "delegate-tasks"),
+        concat!(
+            "<t:EffectiveRights>",
+            "<t:CreateAssociated>false</t:CreateAssociated>",
+            "<t:CreateContents>false</t:CreateContents>",
+            "<t:CreateHierarchy>false</t:CreateHierarchy>",
+            "<t:Delete>false</t:Delete>",
+            "<t:Modify>false</t:Modify>",
+            "<t:Read>true</t:Read>",
+            "<t:ViewPrivateItems>false</t:ViewPrivateItems>",
+            "</t:EffectiveRights>"
+        )
+    );
+}
+
+fn effective_rights_for_folder<'a>(body: &'a str, folder_id: &str) -> &'a str {
+    let folder = body
+        .split_once(&format!(r#"<t:FolderId Id="{folder_id}""#))
+        .expect("folder should be present in the EWS response")
+        .1;
+    let start = folder
+        .find("<t:EffectiveRights>")
+        .expect("folder should include effective rights");
+    let end = start
+        + folder[start..]
+            .find("</t:EffectiveRights>")
+            .expect("effective rights should be complete")
+        + "</t:EffectiveRights>".len();
+    &folder[start..end]
+}
+
+#[tokio::test]
 async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

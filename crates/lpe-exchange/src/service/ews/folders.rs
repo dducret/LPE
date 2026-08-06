@@ -755,13 +755,13 @@ pub(in crate::service) fn folder_xml(
             "<t:TotalCount>0</t:TotalCount>",
             "<t:ChildFolderCount>0</t:ChildFolderCount>",
             "<t:EffectiveRights>",
-            "<t:CreateAssociated>true</t:CreateAssociated>",
-            "<t:CreateContents>true</t:CreateContents>",
-            "<t:CreateHierarchy>true</t:CreateHierarchy>",
-            "<t:Delete>true</t:Delete>",
-            "<t:Modify>true</t:Modify>",
-            "<t:Read>true</t:Read>",
-            "<t:ViewPrivateItems>true</t:ViewPrivateItems>",
+            "<t:CreateAssociated>false</t:CreateAssociated>",
+            "<t:CreateContents>{may_write}</t:CreateContents>",
+            "<t:CreateHierarchy>{may_share}</t:CreateHierarchy>",
+            "<t:Delete>{may_delete}</t:Delete>",
+            "<t:Modify>{may_write}</t:Modify>",
+            "<t:Read>{may_read}</t:Read>",
+            "<t:ViewPrivateItems>{may_view_private_items}</t:ViewPrivateItems>",
             "</t:EffectiveRights>",
             "<t:UnreadCount>0</t:UnreadCount>",
             "</t:{element}>"
@@ -771,6 +771,11 @@ pub(in crate::service) fn folder_xml(
         change_key = escape_xml(&folder_change_key(&collection.id)),
         display = escape_xml(&collection.display_name),
         class = class,
+        may_read = collection.rights.may_read,
+        may_write = collection.rights.may_write,
+        may_delete = collection.rights.may_delete,
+        may_share = collection.rights.may_share,
+        may_view_private_items = collection.is_owned || collection.rights.may_write,
     )
 }
 
