@@ -277,10 +277,59 @@ macro_rules! store_impl_public_address_im {
                     ) AS old_calendar_role,
                     calendar_event.id AS live_calendar_event_id,
                     calendar_event.title AS calendar_event_subject,
+                    CASE
+                        WHEN log.object_kind = 'calendar_event'
+                         AND log.change_kind IN ('created', 'destroyed')
+                         AND calendar_event.id IS NOT NULL
+                         AND (
+                             calendar_event.owner_account_id = $3
+                             OR EXISTS (
+                                 SELECT 1
+                                 FROM calendar_grants notification_grant
+                                 WHERE notification_grant.tenant_id = calendar_event.tenant_id
+                                   AND notification_grant.owner_account_id = calendar_event.owner_account_id
+                                   AND notification_grant.calendar_id = calendar_event.calendar_id
+                                   AND notification_grant.grantee_account_id = $3
+                                   AND notification_grant.may_read = TRUE
+                             )
+                         )
+                        THEN (
+                            SELECT COUNT(*)::integer
+                            FROM calendar_events counted_event
+                            WHERE counted_event.tenant_id = calendar_event.tenant_id
+                              AND counted_event.owner_account_id = calendar_event.owner_account_id
+                              AND counted_event.calendar_id = calendar_event.calendar_id
+                              AND counted_event.lifecycle_state = 'active'
+                        )
+                    END AS calendar_total_messages,
                     calendar_collection.display_name AS calendar_collection_name,
                     contact.contact_book_id AS contact_book_id,
                     contact_book.role AS contact_book_role,
                     contact.display_name AS contact_name,
+                    CASE
+                        WHEN log.object_kind = 'contact'
+                         AND log.change_kind = 'created'
+                         AND contact.id IS NOT NULL
+                         AND (
+                             contact.owner_account_id = $3
+                             OR EXISTS (
+                                 SELECT 1
+                                 FROM contact_book_grants notification_grant
+                                 WHERE notification_grant.tenant_id = contact.tenant_id
+                                   AND notification_grant.owner_account_id = contact.owner_account_id
+                                   AND notification_grant.contact_book_id = contact.contact_book_id
+                                   AND notification_grant.grantee_account_id = $3
+                                   AND notification_grant.may_read = TRUE
+                             )
+                         )
+                        THEN (
+                            SELECT COUNT(*)::integer
+                            FROM contacts counted_contact
+                            WHERE counted_contact.tenant_id = contact.tenant_id
+                              AND counted_contact.owner_account_id = contact.owner_account_id
+                              AND counted_contact.contact_book_id = contact.contact_book_id
+                        )
+                    END AS contact_total_messages,
                     scope_identity.mapi_object_id AS scope_mapi_object_id,
                     scope_parent_identity.mapi_object_id AS scope_parent_mapi_object_id,
                     object_identity.mapi_object_id AS object_mapi_object_id,

@@ -1487,6 +1487,44 @@ fn folder_default_named_views_do_not_materialize_without_persisted_selection() {
 }
 
 #[test]
+fn persisted_default_named_view_requires_one_matching_folder_view() {
+    let config = |id, subject: &str| crate::store::MapiAssociatedConfigRecord {
+        id,
+        account_id: Uuid::nil(),
+        folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+        message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+        subject: subject.to_string(),
+        properties_json: serde_json::json!({}),
+    };
+    let compact_id = Uuid::from_u128(0x6d617069_7465_7374_8000_000000000001);
+    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        config(compact_id, "Compact"),
+        config(
+            Uuid::from_u128(0x6d617069_7465_7374_8000_000000000002),
+            "Messages",
+        ),
+    ]);
+
+    assert_eq!(
+        snapshot
+            .default_folder_named_view_config(crate::mapi::identity::INBOX_FOLDER_ID)
+            .map(|message| message.canonical_id),
+        Some(compact_id)
+    );
+
+    let ambiguous = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+        config(compact_id, "Compact"),
+        config(
+            Uuid::from_u128(0x6d617069_7465_7374_8000_000000000003),
+            "Compact",
+        ),
+    ]);
+    assert!(ambiguous
+        .default_folder_named_view_config(crate::mapi::identity::INBOX_FOLDER_ID)
+        .is_none());
+}
+
+#[test]
 fn legacy_default_named_view_alias_does_not_materialize_a_message() {
     let snapshot = MapiMailStoreSnapshot::empty();
 

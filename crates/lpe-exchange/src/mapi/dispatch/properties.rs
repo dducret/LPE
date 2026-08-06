@@ -288,13 +288,13 @@ pub(super) async fn append_get_properties_specific_response<S>(
         .any(|tag| property_ids_match(*tag, PID_TAG_DEFAULT_VIEW_ENTRY_ID))
     {
         if let Some(MapiObject::Folder { folder_id, .. }) = object.as_ref() {
-            if let Some(view) = debug_advertised_default_named_view(snapshot, *folder_id) {
+            if let Some(view) = snapshot.default_folder_named_view_config(*folder_id) {
                 session.record_default_view_advertised(
                     request_id,
                     *folder_id,
                     view.folder_id,
                     view.id,
-                    &view.name,
+                    &view.subject,
                 );
                 tracing::info!(
                     rca_debug = true,
@@ -308,7 +308,7 @@ pub(super) async fn append_get_properties_specific_response<S>(
                     folder_role = debug_role_for_folder_id(*folder_id),
                     advertised_default_view_folder_id = %format!("0x{:016x}", view.folder_id),
                     advertised_default_view_message_id = %format!("0x{:016x}", view.id),
-                    advertised_default_view_name = %view.name,
+                    advertised_default_view_name = %view.subject,
                     default_view_advertisement_state =
                         %session.default_view_advertisement_state(),
                     "rca debug mapi default view advertised"

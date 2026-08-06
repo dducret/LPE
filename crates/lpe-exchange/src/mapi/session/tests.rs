@@ -381,6 +381,63 @@ fn session_retains_collaboration_content_changes_for_active_root_depth_hierarchy
 }
 
 #[test]
+fn session_derives_counted_folder_modified_notification_for_collaboration_content_create() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let notification_handle = 77;
+    session.handles.insert(
+        notification_handle,
+        MapiObject::NotificationSubscription {
+            registration: crate::mapi::notifications::MapiNotificationRegistration {
+                logon_id: 0,
+                notification_types: MapiNotificationEventMask::ObjectModified.as_u16(),
+                folder_id: None,
+            },
+        },
+    );
+    session.record_notification(
+        MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            MapiNotificationEventMask::ObjectCreated.as_u16(),
+            crate::mapi::identity::CONTACTS_FOLDER_ID,
+            Some(0x0000_0000_0044_0001),
+            None,
+            1,
+            1,
+            Some(5),
+            None,
+            "created".to_string(),
+            None,
+            None,
+            Some("Test contact".to_string()),
+            None,
+        )
+        .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+    );
+
+    let (deliveries, _) = session.take_pending_notification_delivery_batch();
+    assert_eq!(deliveries.len(), 1);
+    let (handle, logon_id, event) = &deliveries[0];
+    assert_eq!(*handle, notification_handle);
+    assert_eq!(event.kind, MapiNotificationKind::Hierarchy);
+    assert_eq!(
+        event.event_mask,
+        MapiNotificationEventMask::ObjectModified.as_u16()
+    );
+    assert_eq!(event.notification_total_messages(), Some(5));
+    let response = crate::mapi::notifications::rop_notify_response(
+        &crate::mapi::identity::MapiIdentityCodec::legacy_for_tests(),
+        *handle,
+        *logon_id,
+        event,
+    )
+    .expect("derived ObjectModified notification serializes");
+    assert_eq!(&response[6..8], &0x1010u16.to_le_bytes());
+    assert_eq!(&response[18..22], &5u32.to_le_bytes());
+}
+
+#[test]
 fn session_delivers_only_complete_message_moves_and_copies_to_subscriptions() {
     for (event_mask, change_kind) in [
         (MapiNotificationEventMask::ObjectMoved, "moved"),

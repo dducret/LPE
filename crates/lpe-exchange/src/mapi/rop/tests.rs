@@ -4138,6 +4138,95 @@ fn undocumented_folder_binary_120c_returns_empty_binary() {
 }
 
 #[test]
+fn folder_default_view_entry_id_resolves_persisted_named_view_fai() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::from_u128(0xea339446_27b9_4a9c_b0de_873f03a35376),
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let canonical_id = Uuid::from_u128(0x339f0e1c_3b36_3dbf_48e7_40810975ab7e);
+    let config_id = crate::mapi::identity::mapi_store_id(0x264);
+    let change_number = 0x264;
+    let source_key = crate::mapi::identity::source_key_for_object_id(config_id);
+    crate::mapi::identity::remember_mapi_identity(canonical_id, config_id);
+    let snapshot = MapiMailStoreSnapshot::empty()
+        .with_associated_configs(vec![crate::store::MapiAssociatedConfigRecord {
+            id: canonical_id,
+            account_id: principal.account_id,
+            folder_id: INBOX_FOLDER_ID,
+            message_class: "IPM.Microsoft.FolderDesign.NamedView".to_string(),
+            subject: "Compact".to_string(),
+            properties_json: serde_json::json!({}),
+        }])
+        .with_associated_config_identity_ids(vec![
+            crate::mapi_store::MapiAssociatedConfigIdentity {
+                record: crate::store::MapiIdentityRecord {
+                    object_kind: crate::store::MapiIdentityObjectKind::AssociatedConfig,
+                    canonical_id,
+                    object_id: config_id,
+                    change_number,
+                    source_key,
+                    change_key: crate::mapi_mailstore::change_key_for_change_number(change_number),
+                    predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(
+                        change_number,
+                    ),
+                    last_modification_time: crate::mapi_mailstore::filetime_from_change_number(
+                        change_number,
+                    ),
+                },
+            },
+        ]);
+    let folder = MapiObject::Folder {
+        folder_id: INBOX_FOLDER_ID,
+        properties: HashMap::new(),
+    };
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&4096u16.to_le_bytes());
+    payload.extend_from_slice(&1u16.to_le_bytes());
+    payload.extend_from_slice(&PID_TAG_DEFAULT_VIEW_ENTRY_ID.to_le_bytes());
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesSpecific as u8,
+        input_handle_index: Some(1),
+        output_handle_index: None,
+        payload,
+    };
+
+    assert!(!fallback_default_specific_property(
+        Some(&folder),
+        &principal,
+        &[],
+        &[],
+        &snapshot,
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+    ));
+
+    let response = rop_get_properties_specific_response(
+        &request,
+        Some(&folder),
+        &principal,
+        &[],
+        &[],
+        &snapshot,
+    );
+    let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        principal.account_id,
+        INBOX_FOLDER_ID,
+        config_id,
+    )
+    .expect("persisted named view entry id");
+
+    assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
+    assert_eq!(
+        u16::from_le_bytes(response[7..9].try_into().unwrap()),
+        expected_entry_id.len() as u16
+    );
+    assert_eq!(&response[9..], expected_entry_id.as_slice());
+}
+
+#[test]
 fn fallback_property_errors_for_debug_match_wire_error_codes() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),

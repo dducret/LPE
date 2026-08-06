@@ -266,6 +266,11 @@ impl MapiNotificationEvent {
     }
 
     #[cfg(test)]
+    pub(crate) fn notification_total_messages(&self) -> Option<i32> {
+        self.total_messages
+    }
+
+    #[cfg(test)]
     pub(crate) fn notification_test_shape(
         &self,
     ) -> (
@@ -380,6 +385,39 @@ mod tests {
         expected.extend_from_slice(&(row_data.len() as u16).to_le_bytes());
         expected.extend_from_slice(&row_data);
         assert_eq!(response, expected);
+    }
+
+    #[test]
+    fn folder_modified_notification_with_total_count_encodes_t_flag() {
+        let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
+        let folder_id = 0x0000_0000_000f_0001;
+        let event = MapiNotificationEvent::canonical(
+            MapiNotificationKind::Hierarchy,
+            MapiNotificationEventMask::ObjectModified.as_u16(),
+            folder_id,
+            Some(0x0000_0000_0005_0001),
+            None,
+            1,
+            1,
+            Some(5),
+            None,
+            "created".to_string(),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let response = rop_notify_response(&identity_codec, 3, 0, &event)
+            .expect("ObjectModified notification serializes");
+
+        assert_eq!(&response[6..8], &0x1010u16.to_le_bytes());
+        assert_eq!(
+            &response[8..16],
+            &wire_id_bytes_from_object_id(folder_id).unwrap()
+        );
+        assert_eq!(&response[16..18], &0u16.to_le_bytes());
+        assert_eq!(&response[18..22], &5u32.to_le_bytes());
     }
 
     #[test]

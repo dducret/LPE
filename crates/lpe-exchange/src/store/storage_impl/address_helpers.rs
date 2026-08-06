@@ -378,6 +378,10 @@ fn mapi_notification_event_from_change_row(
                 .try_get::<Option<Uuid>, _>("old_calendar_id")
                 .ok()
                 .flatten();
+            let total_messages = row
+                .try_get::<Option<i32>, _>("calendar_total_messages")
+                .ok()
+                .flatten();
             let notification = mapi_calendar_notification_event(
                 MapiCalendarNotificationData {
                     cursor,
@@ -391,6 +395,7 @@ fn mapi_notification_event_from_change_row(
                     old_calendar_role: old_calendar_role.as_deref(),
                     event_id,
                     event_mapi_object_id,
+                    total_messages,
                     subject: row
                         .try_get::<Option<String>, _>("calendar_event_subject")
                         .ok()
@@ -440,7 +445,9 @@ fn mapi_notification_event_from_change_row(
                     None,
                     cursor,
                     modseq,
-                    None,
+                    row.try_get::<Option<i32>, _>("contact_total_messages")
+                        .ok()
+                        .flatten(),
                     None,
                     change_kind,
                     None,
@@ -748,6 +755,7 @@ struct MapiCalendarNotificationData<'a> {
     old_calendar_role: Option<&'a str>,
     event_id: Uuid,
     event_mapi_object_id: u64,
+    total_messages: Option<i32>,
     subject: Option<String>,
 }
 
@@ -794,7 +802,7 @@ fn mapi_calendar_notification_event(
             old_folder_id,
             data.cursor,
             data.modseq,
-            None,
+            data.total_messages,
             None,
             data.change_kind.to_string(),
             None,
@@ -1199,7 +1207,7 @@ mod notification_tests {
         let event_id = Uuid::from_u128(0x5060);
         let event_mapi_object_id = 0x0000_0000_1234_0001;
         let calendar_folder_ids = HashMap::new();
-        let event = |change_kind| {
+        let event = |change_kind, total_messages| {
             mapi_calendar_notification_event(
                 MapiCalendarNotificationData {
                     cursor: 42,
@@ -1213,6 +1221,7 @@ mod notification_tests {
                     old_calendar_role: None,
                     event_id,
                     event_mapi_object_id,
+                    total_messages,
                     subject: Some("Outlook Calendar regression".to_string()),
                 },
                 &calendar_folder_ids,
@@ -1223,12 +1232,12 @@ mod notification_tests {
         // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2 define the bounded
         // FolderId/MessageId fields for these non-move object notifications.
         // The durable principal-scoped Event identity supplies those values.
-        for (change_kind, expected_mask) in [
-            ("created", 0x0004),
-            ("updated", 0x0010),
-            ("destroyed", 0x0008),
+        for (change_kind, expected_mask, total_messages) in [
+            ("created", 0x0004, Some(5)),
+            ("updated", 0x0010, None),
+            ("destroyed", 0x0008, Some(0)),
         ] {
-            let notification = event(change_kind);
+            let notification = event(change_kind, total_messages);
             assert_eq!(
                 notification.notification_test_shape(),
                 (
@@ -1243,6 +1252,7 @@ mod notification_tests {
             );
             assert_eq!(notification.canonical_folder_id(), Some(calendar_id));
             assert_eq!(notification.canonical_message_id(), Some(event_id));
+            assert_eq!(notification.notification_total_messages(), total_messages);
             assert_eq!(
                 notification.parent_folder_id(),
                 Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
@@ -1279,6 +1289,7 @@ mod notification_tests {
                 old_calendar_role: Some("calendar"),
                 event_id: Uuid::from_u128(0xd0e0),
                 event_mapi_object_id,
+                total_messages: None,
                 subject: Some("Calendar move regression".to_string()),
             },
             &calendar_folder_ids,

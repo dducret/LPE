@@ -1486,6 +1486,14 @@ fn serialize_session_folder_row(
     let mut row = Vec::new();
     for column in columns {
         let storage_tag = canonical_property_storage_tag(*column);
+        if storage_tag == PID_TAG_DEFAULT_VIEW_ENTRY_ID {
+            if let Some(value) =
+                persisted_default_folder_view_entry_id(snapshot, principal.account_id, folder_id)
+            {
+                write_mapi_value(&mut row, *column, &value);
+                continue;
+            }
+        }
         if storage_tag == PID_TAG_FOLDER_TYPE
             && snapshot
                 .search_folder_definition_for_folder_id(folder_id)

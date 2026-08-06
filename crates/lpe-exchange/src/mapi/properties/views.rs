@@ -94,6 +94,16 @@ pub(in crate::mapi) fn default_folder_view_entry_id(
     None
 }
 
+pub(in crate::mapi) fn persisted_default_folder_view_entry_id(
+    snapshot: &crate::mapi_store::MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
+    folder_id: u64,
+) -> Option<MapiValue> {
+    let view = snapshot.default_folder_named_view_config(folder_id)?;
+    crate::mapi::identity::message_entry_id_from_object_ids(mailbox_guid, folder_id, view.id)
+        .map(MapiValue::Binary)
+}
+
 pub(in crate::mapi) fn default_view_uses_common_views(
     container_class: &str,
     folder_id: u64,

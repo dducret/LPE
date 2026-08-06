@@ -885,6 +885,10 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
         calendar_id,
         event_id,
     );
+    assert_eq!(
+        owner_created.events[0].notification_total_messages(),
+        Some(1)
+    );
     let grantee_created = storage
         .poll_mapi_notifications(grantee_account_id, baseline_cursor)
         .await?;
@@ -896,6 +900,10 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
         grantee_ids.1,
         calendar_id,
         event_id,
+    );
+    assert_eq!(
+        grantee_created.events[0].notification_total_messages(),
+        Some(1)
     );
     assert_outsider_has_no_notifications(&storage, outsider_account_id, baseline_cursor).await?;
 
@@ -938,6 +946,7 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
         calendar_id,
         event_id,
     );
+    assert_eq!(owner_updated.events[0].notification_total_messages(), None);
     let grantee_updated = storage
         .poll_mapi_notifications(grantee_account_id, created_cursor)
         .await?;
@@ -949,6 +958,10 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
         grantee_ids.1,
         calendar_id,
         event_id,
+    );
+    assert_eq!(
+        grantee_updated.events[0].notification_total_messages(),
+        None
     );
     assert_outsider_has_no_notifications(&storage, outsider_account_id, created_cursor).await?;
 
@@ -1052,6 +1065,10 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
         )
     );
     assert_eq!(
+        owner_deleted.events[0].notification_total_messages(),
+        Some(0)
+    );
+    assert_eq!(
         owner_deleted.events[1].notification_test_shape(),
         (
             MapiNotificationKind::Content,
@@ -1063,6 +1080,7 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
             Some("deleted_calendar_event"),
         )
     );
+    assert_eq!(owner_deleted.events[1].notification_total_messages(), None);
     let grantee_deleted = storage
         .poll_mapi_notifications(grantee_account_id, updated_cursor)
         .await?;
@@ -1081,6 +1099,10 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
         )
     );
     assert_eq!(
+        grantee_deleted.events[0].notification_total_messages(),
+        Some(0)
+    );
+    assert_eq!(
         grantee_deleted.events[1].notification_test_shape(),
         (
             MapiNotificationKind::Content,
@@ -1091,6 +1113,10 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
             Some(grantee_ids.1),
             Some("deleted_calendar_event"),
         )
+    );
+    assert_eq!(
+        grantee_deleted.events[1].notification_total_messages(),
+        None
     );
     assert_outsider_has_no_notifications(&storage, outsider_account_id, updated_cursor).await?;
 
@@ -1159,6 +1185,107 @@ async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgre
     // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2 require the
     // ObjectCreated/ObjectModified/ObjectDeleted/ObjectMoved message
     // notifications above to retain each principal's exact old/new IDs.
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_contact_notification_create_carries_current_total_in_postgresql() -> anyhow::Result<()>
+{
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let contact_id = Uuid::parse_str("82828282-8282-4282-9282-828282828282")?;
+    let baseline_cursor = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    storage
+        .create_accessible_contact(
+            account_id,
+            Some("default"),
+            lpe_storage::UpsertClientContactInput {
+                id: Some(contact_id),
+                account_id,
+                name: "Notification Contact".to_string(),
+                email: "notification-contact@example.test".to_string(),
+                ..Default::default()
+            },
+        )
+        .await?;
+    let created_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT cursor
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'contact'
+          AND object_id = $2
+          AND change_kind = 'created'
+          AND cursor > $3
+        "#,
+    )
+    .bind(account_id)
+    .bind(contact_id)
+    .bind(baseline_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    let created = storage
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+    assert!(created.event_pending);
+    assert_eq!(created.events.len(), 1);
+    let created_event = &created.events[0];
+    assert_eq!(created_event.change_cursor(), Some(created_cursor));
+    let (kind, event_mask, folder_id, message_id, old_folder_id, old_message_id, object_kind) =
+        created_event.notification_test_shape();
+    assert_eq!(kind, MapiNotificationKind::Content);
+    assert_eq!(event_mask, 0x0004);
+    assert_eq!(folder_id, crate::mapi::identity::CONTACTS_FOLDER_ID);
+    assert!(message_id.is_some());
+    assert_eq!(old_folder_id, None);
+    assert_eq!(old_message_id, None);
+    assert_eq!(object_kind, Some("contact"));
+    assert_eq!(created_event.canonical_message_id(), Some(contact_id));
+    assert_eq!(created_event.notification_total_messages(), Some(1));
+
+    storage
+        .update_accessible_contact(
+            account_id,
+            contact_id,
+            lpe_storage::UpsertClientContactInput {
+                id: Some(contact_id),
+                account_id,
+                name: "Notification Contact Updated".to_string(),
+                email: "notification-contact-updated@example.test".to_string(),
+                ..Default::default()
+            },
+        )
+        .await?;
+    let updated_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT cursor
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'contact'
+          AND object_id = $2
+          AND change_kind = 'updated'
+          AND cursor > $3
+        "#,
+    )
+    .bind(account_id)
+    .bind(contact_id)
+    .bind(created_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    let updated = storage
+        .poll_mapi_notifications(account_id, created_cursor)
+        .await?;
+    assert_eq!(updated.events.len(), 1);
+    assert_eq!(updated.events[0].change_cursor(), Some(updated_cursor));
+    assert_eq!(updated.events[0].notification_total_messages(), None);
+
     fixture.cleanup().await?;
     Ok(())
 }

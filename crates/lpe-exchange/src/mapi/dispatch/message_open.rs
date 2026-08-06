@@ -362,6 +362,10 @@ pub(super) fn append_open_message_response(
                 saved_message: Some(message.clone()),
             },
         );
+        let opened_advertised_default_view = message
+            .message_class
+            .eq_ignore_ascii_case("IPM.Microsoft.FolderDesign.NamedView")
+            && session.record_default_view_opened(request_id, folder_id, message.id);
         if folder_id == INBOX_FOLDER_ID
             && (crate::mapi_store::is_outlook_configuration_message_class(&message.message_class)
                 || message.message_class == "IPM.ExtendedRule.Message")
@@ -413,6 +417,7 @@ pub(super) fn append_open_message_response(
             associated_config_canonical_id = %message.canonical_id,
             associated_config_class = %message.message_class,
             associated_config_subject = %message.subject,
+            opened_advertised_default_view,
             open_message_payload_preview = %hex_preview(&request.payload, 48),
             open_message_response_bytes = response.len(),
             open_message_response_preview = %hex_preview(&response, 96),

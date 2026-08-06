@@ -1335,6 +1335,22 @@ impl MapiMailStoreSnapshot {
         None
     }
 
+    pub(crate) fn default_folder_named_view_config(
+        &self,
+        folder_id: u64,
+    ) -> Option<MapiAssociatedConfigMessage> {
+        let default_name = outlook_default_folder_named_view_name(folder_id);
+        let mut matching_views = self.associated_configs.iter().filter(|message| {
+            message.folder_id == folder_id
+                && message
+                    .message_class
+                    .eq_ignore_ascii_case("IPM.Microsoft.FolderDesign.NamedView")
+                && message.subject.eq_ignore_ascii_case(default_name)
+        });
+        let view = matching_views.next()?.clone();
+        matching_views.next().is_none().then_some(view)
+    }
+
     pub(crate) fn associated_config_messages_for_folder(
         &self,
         folder_id: u64,
