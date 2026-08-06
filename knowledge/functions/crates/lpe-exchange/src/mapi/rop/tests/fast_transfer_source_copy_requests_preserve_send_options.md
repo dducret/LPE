@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_source_copy_requests_preserve_send_options
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5345-L5377
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5434-L5466
 visibility: private
 generated:
   by: okf-rs/0.3.0

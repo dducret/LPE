@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_notification_identity_never_falls_back_to_another_principal_cache_entry
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1291-L1309
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1302-L1320
 visibility: private
 generated:
   by: okf-rs/0.3.0

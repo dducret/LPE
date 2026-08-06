@@ -133,6 +133,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/tests/inbox_getprops_preserves_explicit_archive_and_offline_reminders_values
   - functions/crates/lpe-exchange/src/mapi/rop/tests/newly_created_associated_message_getprops_uses_new_message_contract
   - functions/crates/lpe-exchange/src/mapi/rop/tests/undocumented_folder_binary_120c_returns_empty_binary
+  - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai
   - functions/crates/lpe-exchange/src/mapi/rop/tests/fallback_property_errors_for_debug_match_wire_error_codes
   - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_type_getprops_contract_reports_loaded_inbox
   - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_type_getprops_contract_flags_inbox_without_snapshot
@@ -254,6 +255,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_store/tests/empty_conversation_action_settings_exposes_no_synthetic_rows
   - functions/crates/lpe-exchange/src/mapi_store/tests/empty_common_views_exposes_no_synthetic_fai
   - functions/crates/lpe-exchange/src/mapi_store/tests/folder_default_named_views_do_not_materialize_without_persisted_selection
+  - functions/crates/lpe-exchange/src/mapi_store/tests/persisted_default_named_view_requires_one_matching_folder_view
   - functions/crates/lpe-exchange/src/mapi_store/tests/legacy_default_named_view_alias_does_not_materialize_a_message
   - functions/crates/lpe-exchange/src/mapi_store/tests/sent_common_views_default_view_does_not_materialize_folder_local_message
   - functions/crates/lpe-exchange/src/mapi_store/tests/folder_local_default_named_view_ids_are_not_openable
@@ -405,6 +407,7 @@ relationships:
 - [inbox_getprops_preserves_explicit_archive_and_offline_reminders_values](../../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/inbox_getprops_preserves_explicit_archive_and_offline_reminders_values.md)
 - [newly_created_associated_message_getprops_uses_new_message_contract](../../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/newly_created_associated_message_getprops_uses_new_message_contract.md)
 - [undocumented_folder_binary_120c_returns_empty_binary](../../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/undocumented_folder_binary_120c_returns_empty_binary.md)
+- [folder_default_view_entry_id_resolves_persisted_named_view_fai](../../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai.md)
 - [fallback_property_errors_for_debug_match_wire_error_codes](../../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/fallback_property_errors_for_debug_match_wire_error_codes.md)
 - [folder_type_getprops_contract_reports_loaded_inbox](../../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_type_getprops_contract_reports_loaded_inbox.md)
 - [folder_type_getprops_contract_flags_inbox_without_snapshot](../../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_type_getprops_contract_flags_inbox_without_snapshot.md)
@@ -526,6 +529,7 @@ relationships:
 - [empty_conversation_action_settings_exposes_no_synthetic_rows](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/empty_conversation_action_settings_exposes_no_synthetic_rows.md)
 - [empty_common_views_exposes_no_synthetic_fai](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/empty_common_views_exposes_no_synthetic_fai.md)
 - [folder_default_named_views_do_not_materialize_without_persisted_selection](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/folder_default_named_views_do_not_materialize_without_persisted_selection.md)
+- [persisted_default_named_view_requires_one_matching_folder_view](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/persisted_default_named_view_requires_one_matching_folder_view.md)
 - [legacy_default_named_view_alias_does_not_materialize_a_message](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/legacy_default_named_view_alias_does_not_materialize_a_message.md)
 - [sent_common_views_default_view_does_not_materialize_folder_local_message](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/sent_common_views_default_view_does_not_materialize_folder_local_message.md)
 - [folder_local_default_named_view_ids_are_not_openable](../../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/folder_local_default_named_view_ids_are_not_openable.md)

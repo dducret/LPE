@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_task_view_definition
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L444-L483
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L454-L493
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_projects_outlook_contact_books_into_fixed_mapi_folders
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2240-L2358
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2284-L2402
 visibility: private
 generated:
   by: okf-rs/0.3.0

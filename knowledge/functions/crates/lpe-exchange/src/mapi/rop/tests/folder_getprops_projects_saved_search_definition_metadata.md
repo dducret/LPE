@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_getprops_projects_saved_search_definition_metadata
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4685-L4784
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4774-L4873
 visibility: private
 generated:
   by: okf-rs/0.3.0

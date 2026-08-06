@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ps_mapi_lid_maps_directly_even_in_named_property_range
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1081-L1092
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1138-L1149
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: create_notification_mailbox
-resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1274-L1293
+resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1401-L1420
 visibility: private
 generated:
   by: okf-rs/0.3.0

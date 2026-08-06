@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_projects_distinct_supported_module_shortcuts_in_startup_table
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2024-L2108
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2068-L2152
 visibility: private
 generated:
   by: okf-rs/0.3.0

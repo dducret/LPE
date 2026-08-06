@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_does_not_treat_findrow_delivered_fai_as_abandoned
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L592-L611
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L649-L668
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_type_getprops_contract_prefers_saved_search_definition
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4504-L4562
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4593-L4651
 visibility: private
 generated:
   by: okf-rs/0.3.0

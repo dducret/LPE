@@ -54,6 +54,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/identity/message_entry_id_uses_private_mailbox_shape_with_source_key_counters
   - functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags
   - functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_table_row_modified_notification_encodes_current_row
+  - functions/crates/lpe-exchange/src/mapi/notifications/folder_modified_notification_with_total_count_encodes_t_flag
   - functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags
   - functions/crates/lpe-exchange/src/mapi/notifications/object_moved_and_copied_notifications_preserve_source_message_id
   - functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately
@@ -71,10 +72,12 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/tests/associated_config_missing_binary_property_opens_writable_stream
   - functions/crates/lpe-exchange/src/mapi/properties/views/view_descriptor_all_property_tags
   - functions/crates/lpe-exchange/src/mapi/rop/tests/inbox_getprops_captured_unpersisted_folder_values_are_absent
+  - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai
   - functions/crates/lpe-exchange/src/mapi/rop/tests/outlook_sync_import_message_move_decodes_length_prefixed_gids
   - functions/crates/lpe-exchange/src/mapi/session/lifecycle/begin_active_session_request_for_test
   - functions/crates/lpe-exchange/src/mapi/session/tests/connect_rejects_an_expired_session_context
   - functions/crates/lpe-exchange/src/mapi/session/tests/reconnect_session_replaces_the_prior_emsmdb_context
+  - functions/crates/lpe-exchange/src/mapi/session/tests/session_derives_counted_folder_modified_notification_for_collaboration_content_create
   - functions/crates/lpe-exchange/src/mapi/session/tests/notification_subscription_preserves_rop_logon_id_through_rop_notify
   - functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_includes_long_term_id_source_in_trailing_replid_form
   - functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_resolves_learned_special_folder_aliases
@@ -483,6 +486,7 @@ relationships:
 - [message_entry_id_uses_private_mailbox_shape_with_source_key_counters](../../../../../../functions/crates/lpe-exchange/src/mapi/identity/message_entry_id_uses_private_mailbox_shape_with_source_key_counters.md)
 - [new_mail_notification_with_message_id_encodes_exchange_zero_message_flags](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags.md)
 - [hierarchy_table_row_modified_notification_encodes_current_row](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_table_row_modified_notification_encodes_current_row.md)
+- [folder_modified_notification_with_total_count_encodes_t_flag](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/folder_modified_notification_with_total_count_encodes_t_flag.md)
 - [new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags.md)
 - [object_moved_and_copied_notifications_preserve_source_message_id](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/object_moved_and_copied_notifications_preserve_source_message_id.md)
 - [hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately.md)
@@ -500,10 +504,12 @@ relationships:
 - [associated_config_missing_binary_property_opens_writable_stream](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/associated_config_missing_binary_property_opens_writable_stream.md)
 - [view_descriptor_all_property_tags](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/view_descriptor_all_property_tags.md)
 - [inbox_getprops_captured_unpersisted_folder_values_are_absent](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/inbox_getprops_captured_unpersisted_folder_values_are_absent.md)
+- [folder_default_view_entry_id_resolves_persisted_named_view_fai](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai.md)
 - [outlook_sync_import_message_move_decodes_length_prefixed_gids](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/outlook_sync_import_message_move_decodes_length_prefixed_gids.md)
 - [begin_active_session_request_for_test](../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/begin_active_session_request_for_test.md)
 - [connect_rejects_an_expired_session_context](../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/connect_rejects_an_expired_session_context.md)
 - [reconnect_session_replaces_the_prior_emsmdb_context](../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/reconnect_session_replaces_the_prior_emsmdb_context.md)
+- [session_derives_counted_folder_modified_notification_for_collaboration_content_create](../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_derives_counted_folder_modified_notification_for_collaboration_content_create.md)
 - [notification_subscription_preserves_rop_logon_id_through_rop_notify](../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/notification_subscription_preserves_rop_logon_id_through_rop_notify.md)
 - [access_plan_includes_long_term_id_source_in_trailing_replid_form](../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_includes_long_term_id_source_in_trailing_replid_form.md)
 - [access_plan_resolves_learned_special_folder_aliases](../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/tests/access_plan_resolves_learned_special_folder_aliases.md)

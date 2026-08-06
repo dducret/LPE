@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_uses_allocated_identities_for_custom_and_shared_collaboration_folders
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2440-L2529
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2484-L2573
 visibility: private
 generated:
   by: okf-rs/0.3.0

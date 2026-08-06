@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_getprops_returns_search_type_for_saved_search_definition
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4609-L4663
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4698-L4752
 visibility: private
 generated:
   by: okf-rs/0.3.0

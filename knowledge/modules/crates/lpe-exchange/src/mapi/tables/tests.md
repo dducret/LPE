@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1-L10256
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1-L10253
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -201,7 +201,7 @@ relationships:
 - [reminders_folder_projects_default_post_message_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/reminders_folder_projects_default_post_message_class.md)
 - [special_folder_property_projects_record_key](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/special_folder_property_projects_record_key.md)
 - [special_folder_property_omits_unconfigured_archive_policy_identities](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/special_folder_property_omits_unconfigured_archive_policy_identities.md)
-- [special_folder_property_projects_only_the_inbox_default_view](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/special_folder_property_projects_only_the_inbox_default_view.md)
+- [special_folder_property_omits_unpersisted_default_views](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/special_folder_property_omits_unpersisted_default_views.md)
 - [configuration_special_folder_projects_default_post_message_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/configuration_special_folder_projects_default_post_message_class.md)
 - [ipm_subtree_row_projects_default_post_message_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_row_projects_default_post_message_class.md)
 - [ms_oxosfld_none_container_classes_serialize_as_empty_strings](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/ms_oxosfld_none_container_classes_serialize_as_empty_strings.md)

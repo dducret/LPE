@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxctabl_sort_and_query_rows_examples_parse_through_typed_parser
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5409-L5439
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5498-L5528
 visibility: private
 generated:
   by: okf-rs/0.3.0

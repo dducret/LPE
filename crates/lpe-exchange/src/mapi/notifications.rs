@@ -391,11 +391,12 @@ mod tests {
     fn folder_modified_notification_with_total_count_encodes_t_flag() {
         let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
         let folder_id = 0x0000_0000_000f_0001;
+        let changed_folder_id = 0x0000_0000_0005_0001;
         let event = MapiNotificationEvent::canonical(
             MapiNotificationKind::Hierarchy,
             MapiNotificationEventMask::ObjectModified.as_u16(),
             folder_id,
-            Some(0x0000_0000_0005_0001),
+            Some(changed_folder_id),
             None,
             1,
             1,
@@ -414,7 +415,7 @@ mod tests {
         assert_eq!(&response[6..8], &0x1010u16.to_le_bytes());
         assert_eq!(
             &response[8..16],
-            &wire_id_bytes_from_object_id(folder_id).unwrap()
+            &wire_id_bytes_from_object_id(changed_folder_id).unwrap()
         );
         assert_eq!(&response[16..18], &0u16.to_le_bytes());
         assert_eq!(&response[18..22], &5u32.to_le_bytes());

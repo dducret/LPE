@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_preserves_distinct_persisted_navigation_shortcuts_with_matching_properties
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1744-L1852
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1788-L1896
 visibility: private
 generated:
   by: okf-rs/0.3.0

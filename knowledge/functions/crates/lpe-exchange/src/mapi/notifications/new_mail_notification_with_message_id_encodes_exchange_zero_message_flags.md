@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: new_mail_notification_with_message_id_encodes_exchange_zero_message_flags
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L315-L356
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L320-L361
 visibility: private
 generated:
   by: okf-rs/0.3.0

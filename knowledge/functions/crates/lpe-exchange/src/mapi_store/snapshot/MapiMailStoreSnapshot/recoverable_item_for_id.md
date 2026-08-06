@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: recoverable_item_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1480-L1488
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1496-L1504
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_old_parent_requires_explicit_metadata_but_preserves_root
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1111-L1135
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1119-L1143
 visibility: private
 generated:
   by: okf-rs/0.3.0

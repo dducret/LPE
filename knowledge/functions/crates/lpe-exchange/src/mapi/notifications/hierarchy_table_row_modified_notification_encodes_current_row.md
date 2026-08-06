@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_table_row_modified_notification_encodes_current_row
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L359-L383
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L364-L388
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_notification_event_from_change_row
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L144-L670
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L144-L677
 visibility: private
 generated:
   by: okf-rs/0.3.0

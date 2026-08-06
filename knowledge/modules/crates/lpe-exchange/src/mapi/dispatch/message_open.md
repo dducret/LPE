@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: message_open
-resource: crates/lpe-exchange/src/mapi/dispatch/message_open.rs#L1-L567
+resource: crates/lpe-exchange/src/mapi/dispatch/message_open.rs#L1-L572
 generated:
   by: okf-rs/0.3.0
 relationships:

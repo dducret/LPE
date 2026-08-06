@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: attachment_row_projects_microsoft_message_attachment_example_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9655-L9747
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9652-L9744
 visibility: private
 generated:
   by: okf-rs/0.3.0

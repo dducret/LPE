@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_ignores_blank_mapi_bounded_user_saved_search_folder
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2806-L2847
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2850-L2891
 visibility: private
 generated:
   by: okf-rs/0.3.0

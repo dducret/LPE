@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_remembers_deleted_advertised_special_folder
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L614-L624
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L671-L681
 visibility: private
 generated:
   by: okf-rs/0.3.0

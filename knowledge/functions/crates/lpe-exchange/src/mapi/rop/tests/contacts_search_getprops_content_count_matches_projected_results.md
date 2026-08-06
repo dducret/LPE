@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_search_getprops_content_count_matches_projected_results
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4905-L5001
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4994-L5090
 visibility: private
 generated:
   by: okf-rs/0.3.0

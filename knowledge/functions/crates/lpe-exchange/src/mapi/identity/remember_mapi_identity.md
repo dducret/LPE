@@ -55,6 +55,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/tests/message_body_getprops_contract_reports_canonical_body_shape
   - functions/crates/lpe-exchange/src/mapi/rop/tests/microsoft_oxcdata_property_row_example_streams_oversized_body
   - functions/crates/lpe-exchange/src/mapi/rop/tests/persisted_message_getprops_returns_body_values
+  - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai
   - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_type_getprops_contract_reports_loaded_inbox
   - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_type_getprops_contract_prefers_saved_search_definition
   - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_type_getprops_contract_accepts_projected_search_folder_role
@@ -185,6 +186,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_store/tests/mailbox_backed_suggested_contacts_does_not_invent_osc_contact_sync
   - functions/crates/lpe-exchange/src/mapi_store/tests/distinct_associated_fai_with_same_class_and_subject_survive_snapshot_projection
   - functions/crates/lpe-exchange/src/mapi_store/tests/modeled_virtual_associated_config_identity_opens_via_dynamic_id
+  - functions/crates/lpe-exchange/src/mapi_store/tests/persisted_default_named_view_requires_one_matching_folder_view
   - functions/crates/lpe-exchange/src/mapi_store/tests/common_views_preserves_persisted_calendar_group_and_shortcut_identity
   - functions/crates/lpe-exchange/src/mapi_store/tests/common_views_preserves_distinct_persisted_navigation_shortcuts_with_matching_properties
   - functions/crates/lpe-exchange/src/mapi_store/tests/common_views_does_not_materialize_mail_group_header_for_persisted_favorite_links
@@ -295,6 +297,7 @@ relationships:
 - [message_body_getprops_contract_reports_canonical_body_shape](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/message_body_getprops_contract_reports_canonical_body_shape.md)
 - [microsoft_oxcdata_property_row_example_streams_oversized_body](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/microsoft_oxcdata_property_row_example_streams_oversized_body.md)
 - [persisted_message_getprops_returns_body_values](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/persisted_message_getprops_returns_body_values.md)
+- [folder_default_view_entry_id_resolves_persisted_named_view_fai](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai.md)
 - [folder_type_getprops_contract_reports_loaded_inbox](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_type_getprops_contract_reports_loaded_inbox.md)
 - [folder_type_getprops_contract_prefers_saved_search_definition](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_type_getprops_contract_prefers_saved_search_definition.md)
 - [folder_type_getprops_contract_accepts_projected_search_folder_role](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_type_getprops_contract_accepts_projected_search_folder_role.md)
@@ -425,6 +428,7 @@ relationships:
 - [mailbox_backed_suggested_contacts_does_not_invent_osc_contact_sync](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/mailbox_backed_suggested_contacts_does_not_invent_osc_contact_sync.md)
 - [distinct_associated_fai_with_same_class_and_subject_survive_snapshot_projection](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/distinct_associated_fai_with_same_class_and_subject_survive_snapshot_projection.md)
 - [modeled_virtual_associated_config_identity_opens_via_dynamic_id](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/modeled_virtual_associated_config_identity_opens_via_dynamic_id.md)
+- [persisted_default_named_view_requires_one_matching_folder_view](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/persisted_default_named_view_requires_one_matching_folder_view.md)
 - [common_views_preserves_persisted_calendar_group_and_shortcut_identity](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/common_views_preserves_persisted_calendar_group_and_shortcut_identity.md)
 - [common_views_preserves_distinct_persisted_navigation_shortcuts_with_matching_properties](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/common_views_preserves_distinct_persisted_navigation_shortcuts_with_matching_properties.md)
 - [common_views_does_not_materialize_mail_group_header_for_persisted_favorite_links](../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/common_views_does_not_materialize_mail_group_header_for_persisted_favorite_links.md)

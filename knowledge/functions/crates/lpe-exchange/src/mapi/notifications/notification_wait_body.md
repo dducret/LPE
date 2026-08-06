@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notification_wait_body
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L628-L635
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L667-L674
 generated:
   by: okf-rs/0.3.0
 relationships:

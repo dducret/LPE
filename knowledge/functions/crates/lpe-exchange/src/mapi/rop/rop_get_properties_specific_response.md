@@ -39,6 +39,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/tests/inbox_getprops_preserves_explicit_archive_and_offline_reminders_values
   - functions/crates/lpe-exchange/src/mapi/rop/tests/newly_created_associated_message_getprops_uses_new_message_contract
   - functions/crates/lpe-exchange/src/mapi/rop/tests/undocumented_folder_binary_120c_returns_empty_binary
+  - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai
   - functions/crates/lpe-exchange/src/mapi/rop/tests/contacts_search_getprops_content_count_matches_projected_results
 ---
 
@@ -83,4 +84,5 @@ relationships:
 - [inbox_getprops_preserves_explicit_archive_and_offline_reminders_values](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/inbox_getprops_preserves_explicit_archive_and_offline_reminders_values.md)
 - [newly_created_associated_message_getprops_uses_new_message_contract](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/newly_created_associated_message_getprops_uses_new_message_contract.md)
 - [undocumented_folder_binary_120c_returns_empty_binary](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/undocumented_folder_binary_120c_returns_empty_binary.md)
+- [folder_default_view_entry_id_resolves_persisted_named_view_fai](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai.md)
 - [contacts_search_getprops_content_count_matches_projected_results](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/contacts_search_getprops_content_count_matches_projected_results.md)

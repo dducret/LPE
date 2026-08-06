@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_type_getprops_contract_accepts_advertised_search_folder
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4456-L4501
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4545-L4590
 visibility: private
 generated:
   by: okf-rs/0.3.0

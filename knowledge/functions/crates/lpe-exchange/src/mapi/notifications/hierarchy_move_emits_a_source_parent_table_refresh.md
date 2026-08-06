@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_move_emits_a_source_parent_table_refresh
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L522-L557
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L561-L596
 visibility: private
 generated:
   by: okf-rs/0.3.0

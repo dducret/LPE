@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_unique_associated_config_change
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1335-L1349
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1346-L1360
 visibility: private
 generated:
   by: okf-rs/0.3.0

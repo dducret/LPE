@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_type_getprops_contract_flags_inbox_without_snapshot
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4426-L4453
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4515-L4542
 visibility: private
 generated:
   by: okf-rs/0.3.0

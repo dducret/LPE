@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_contact_view_definition
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L412-L442
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L422-L452
 visibility: private
 generated:
   by: okf-rs/0.3.0

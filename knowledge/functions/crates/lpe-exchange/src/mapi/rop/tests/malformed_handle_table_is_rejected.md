@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: malformed_handle_table_is_rejected
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5612-L5618
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5701-L5707
 generated:
   by: okf-rs/0.3.0
 ---

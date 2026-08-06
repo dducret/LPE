@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: view_descriptor_binary
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L599-L642
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L609-L652
 generated:
   by: okf-rs/0.3.0
 relationships:

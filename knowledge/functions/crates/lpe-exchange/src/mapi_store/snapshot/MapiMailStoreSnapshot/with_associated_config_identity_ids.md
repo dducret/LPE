@@ -8,6 +8,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/apply_associated_config_identities
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai
   - functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan
   - functions/crates/lpe-exchange/src/mapi_store/T/mapistore/load_mapi_mail_store
   - functions/crates/lpe-exchange/src/mapi_store/tests/contacts_project_exactly_the_persisted_contact_link_fai
@@ -26,6 +27,7 @@ relationships:
 
 # Called by
 
+- [folder_default_view_entry_id_resolves_persisted_named_view_fai](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai.md)
 - [load_mapi_store_for_access_plan](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan.md)
 - [load_mapi_mail_store](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/T/mapistore/load_mapi_mail_store.md)
 - [contacts_project_exactly_the_persisted_contact_link_fai](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/contacts_project_exactly_the_persisted_contact_link_fai.md)

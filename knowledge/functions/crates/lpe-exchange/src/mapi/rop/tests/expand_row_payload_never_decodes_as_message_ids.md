@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: expand_row_payload_never_decodes_as_message_ids
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5491-L5505
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5580-L5594
 generated:
   by: okf-rs/0.3.0
 relationships:

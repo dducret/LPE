@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: notifications
-resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1-L1823
+resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1-L1950
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -26,6 +26,7 @@ relationships:
 - [mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql.md)
 - [mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql.md)
 - [mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgresql.md)
+- [mapi_contact_notification_create_carries_current_total_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_contact_notification_create_carries_current_total_in_postgresql.md)
 - [mapi_navigation_shortcut_notifications_are_durable_across_storage_instances_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_navigation_shortcut_notifications_are_durable_across_storage_instances_in_postgresql.md)
 - [create_notification_mailbox](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/create_notification_mailbox.md)
 - [mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql.md)

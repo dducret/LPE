@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: note_and_journal_message_handles_serialize_object_properties
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5673-L5773
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5762-L5862
 generated:
   by: okf-rs/0.3.0
 relationships:

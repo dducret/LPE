@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_wire_id
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L824-L834
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L863-L873
 visibility: private
 generated:
   by: okf-rs/0.3.0

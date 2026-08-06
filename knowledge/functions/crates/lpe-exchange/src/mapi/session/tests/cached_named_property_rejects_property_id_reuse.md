@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: cached_named_property_rejects_property_id_reuse
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L964-L987
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1021-L1044
 visibility: private
 generated:
   by: okf-rs/0.3.0

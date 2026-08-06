@@ -1497,12 +1497,21 @@ fn persisted_default_named_view_requires_one_matching_folder_view() {
         properties_json: serde_json::json!({}),
     };
     let compact_id = Uuid::from_u128(0x6d617069_7465_7374_8000_000000000001);
+    let messages_id = Uuid::from_u128(0x6d617069_7465_7374_8000_000000000002);
+    let duplicate_id = Uuid::from_u128(0x6d617069_7465_7374_8000_000000000003);
+    for (canonical_id, global_counter) in [
+        (compact_id, 0x7fff_ff01),
+        (messages_id, 0x7fff_ff02),
+        (duplicate_id, 0x7fff_ff03),
+    ] {
+        crate::mapi::identity::remember_mapi_identity(
+            canonical_id,
+            crate::mapi::identity::mapi_store_id(global_counter),
+        );
+    }
     let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
         config(compact_id, "Compact"),
-        config(
-            Uuid::from_u128(0x6d617069_7465_7374_8000_000000000002),
-            "Messages",
-        ),
+        config(messages_id, "Messages"),
     ]);
 
     assert_eq!(
@@ -1514,10 +1523,7 @@ fn persisted_default_named_view_requires_one_matching_folder_view() {
 
     let ambiguous = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
         config(compact_id, "Compact"),
-        config(
-            Uuid::from_u128(0x6d617069_7465_7374_8000_000000000003),
-            "Compact",
-        ),
+        config(duplicate_id, "Compact"),
     ]);
     assert!(ambiguous
         .default_folder_named_view_config(crate::mapi::identity::INBOX_FOLDER_ID)

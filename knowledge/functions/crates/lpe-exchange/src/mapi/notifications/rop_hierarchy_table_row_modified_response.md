@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rop_hierarchy_table_row_modified_response
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L658-L677
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L697-L716
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: allocate_output_handle_does_not_reuse_old_low_slot_handle
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L888-L919
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L945-L976
 visibility: private
 generated:
   by: okf-rs/0.3.0

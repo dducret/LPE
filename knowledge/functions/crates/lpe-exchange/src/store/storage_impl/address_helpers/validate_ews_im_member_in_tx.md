@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_ews_im_member_in_tx
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1415-L1491
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1426-L1502
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: golden_set_columns_rop_round_trips_through_typed_parser
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5305-L5323
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5394-L5412
 generated:
   by: okf-rs/0.3.0
 relationships:

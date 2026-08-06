@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_move_notifies_the_source_subscription_and_refreshes_both_parent_tables
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L436-L516
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L493-L573
 visibility: private
 generated:
   by: okf-rs/0.3.0

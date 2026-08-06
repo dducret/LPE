@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: cached_well_known_named_property_keeps_registered_dynamic_id
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1012-L1031
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L1069-L1088
 visibility: private
 generated:
   by: okf-rs/0.3.0

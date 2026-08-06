@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: golden_open_folder_rop_round_trips_through_typed_parser
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5280-L5302
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5369-L5391
 generated:
   by: okf-rs/0.3.0
 relationships:

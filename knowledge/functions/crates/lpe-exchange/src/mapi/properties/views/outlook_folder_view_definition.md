@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_folder_view_definition
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L282-L301
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L292-L311
 generated:
   by: okf-rs/0.3.0
 relationships:

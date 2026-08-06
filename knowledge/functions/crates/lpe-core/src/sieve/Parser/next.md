@@ -72,6 +72,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/transport/headers/is_mapi_content_type
   - functions/crates/lpe-exchange/src/mapi/transport/tests/execute_response_uses_one_exchange_chunked_processing_and_done_frame
   - functions/crates/lpe-exchange/src/mapi/transport/tests/accepted_response_rotates_the_mapi_sequence_cookie
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/default_folder_named_view_config
   - functions/crates/lpe-exchange/src/service/ExchangeService/create_folder
   - functions/crates/lpe-exchange/src/service/ExchangeService/create_folder_path
   - functions/crates/lpe-exchange/src/service/ExchangeService/copy_folder
@@ -430,6 +431,7 @@ relationships:
 - [is_mapi_content_type](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/headers/is_mapi_content_type.md)
 - [execute_response_uses_one_exchange_chunked_processing_and_done_frame](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/execute_response_uses_one_exchange_chunked_processing_and_done_frame.md)
 - [accepted_response_rotates_the_mapi_sequence_cookie](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/tests/accepted_response_rotates_the_mapi_sequence_cookie.md)
+- [default_folder_named_view_config](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/default_folder_named_view_config.md)
 - [create_folder](../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/create_folder.md)
 - [create_folder_path](../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/create_folder_path.md)
 - [copy_folder](../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/copy_folder.md)

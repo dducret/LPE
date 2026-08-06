@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: messages
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1554-L1556
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1570-L1572
 generated:
   by: okf-rs/0.3.0
 relationships:

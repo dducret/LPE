@@ -21,7 +21,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_inbox_view_descriptor_set_columns_behavior_contract
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_default_view_table_compatibility_contract
   - functions/crates/lpe-exchange/src/mapi/dispatch/folder_open/append_open_folder_response
-  - functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_get_properties_specific_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_inbox_fai_handoff_visibility_context
 ---
 
@@ -48,5 +47,4 @@ relationships:
 - [format_inbox_view_descriptor_set_columns_behavior_contract](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_inbox_view_descriptor_set_columns_behavior_contract.md)
 - [format_default_view_table_compatibility_contract](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_default_view_table_compatibility_contract.md)
 - [append_open_folder_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/folder_open/append_open_folder_response.md)
-- [append_get_properties_specific_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/properties/append_get_properties_specific_response.md)
 - [format_inbox_fai_handoff_visibility_context](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/format_inbox_fai_handoff_visibility_context.md)

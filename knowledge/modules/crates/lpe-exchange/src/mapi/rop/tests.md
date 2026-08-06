@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1-L5826
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1-L5915
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -87,6 +87,7 @@ relationships:
 - [inbox_getprops_preserves_explicit_archive_and_offline_reminders_values](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/inbox_getprops_preserves_explicit_archive_and_offline_reminders_values.md)
 - [newly_created_associated_message_getprops_uses_new_message_contract](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/newly_created_associated_message_getprops_uses_new_message_contract.md)
 - [undocumented_folder_binary_120c_returns_empty_binary](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/undocumented_folder_binary_120c_returns_empty_binary.md)
+- [folder_default_view_entry_id_resolves_persisted_named_view_fai](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai.md)
 - [fallback_property_errors_for_debug_match_wire_error_codes](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/fallback_property_errors_for_debug_match_wire_error_codes.md)
 - [folder_deleted_count_total_zero_is_modeled_not_fallback](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_deleted_count_total_zero_is_modeled_not_fallback.md)
 - [logon_empty_pst_path_is_modeled_not_fallback](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/logon_empty_pst_path_is_modeled_not_fallback.md)

@@ -1,15 +1,16 @@
 ---
 type: Rust Function
 title: serialize_session_folder_row
-resource: crates/lpe-exchange/src/mapi/rop.rs#L1478-L1602
+resource: crates/lpe-exchange/src/mapi/rop.rs#L1478-L1610
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag
-  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/search_folder_definition_for_folder_id
+  - functions/crates/lpe-exchange/src/mapi/properties/views/persisted_default_folder_view_entry_id
   - functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/search_folder_definition_for_folder_id
   - functions/crates/lpe-exchange/src/mapi/properties/folder/folder_local_commit_time_max_property_value
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/folder_version
   - functions/crates/lpe-exchange/src/mapi/properties/folder_version_property_value
@@ -39,8 +40,9 @@ relationships:
 # Calls
 
 - [canonical_property_storage_tag](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag.md)
-- [search_folder_definition_for_folder_id](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/search_folder_definition_for_folder_id.md)
+- [persisted_default_folder_view_entry_id](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/persisted_default_folder_view_entry_id.md)
 - [write_mapi_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value.md)
+- [search_folder_definition_for_folder_id](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/search_folder_definition_for_folder_id.md)
 - [folder_local_commit_time_max_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/folder/folder_local_commit_time_max_property_value.md)
 - [folder_version](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/folder_version.md)
 - [folder_version_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/folder_version_property_value.md)

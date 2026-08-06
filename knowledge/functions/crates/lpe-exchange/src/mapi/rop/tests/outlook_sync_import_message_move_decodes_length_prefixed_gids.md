@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_sync_import_message_move_decodes_length_prefixed_gids
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5508-L5545
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5597-L5634
 generated:
   by: okf-rs/0.3.0
 relationships:

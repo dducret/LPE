@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: log_view_definition_diagnostics
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L711-L733
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L721-L743
 generated:
   by: okf-rs/0.3.0
 relationships:

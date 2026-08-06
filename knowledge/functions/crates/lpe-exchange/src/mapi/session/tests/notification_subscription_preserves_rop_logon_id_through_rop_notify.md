@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notification_subscription_preserves_rop_logon_id_through_rop_notify
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L519-L568
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L576-L625
 visibility: private
 generated:
   by: okf-rs/0.3.0

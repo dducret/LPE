@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: notifications
-resource: crates/lpe-exchange/src/mapi/notifications.rs#L1-L881
+resource: crates/lpe-exchange/src/mapi/notifications.rs#L1-L920
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -36,11 +36,13 @@ relationships:
 - [source_hierarchy_table_event](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/source_hierarchy_table_event.md)
 - [old_parent_folder_id](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/old_parent_folder_id.md)
 - [parent_folder_id](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/parent_folder_id.md)
+- [notification_total_messages](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/notification_total_messages.md)
 - [notification_test_shape](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/notification_test_shape.md)
 - [rop_register_notification_response](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/rop_register_notification_response.md)
 - [register_notification_success_response_matches_microsoft_wire_shape](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/register_notification_success_response_matches_microsoft_wire_shape.md)
 - [new_mail_notification_with_message_id_encodes_exchange_zero_message_flags](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags.md)
 - [hierarchy_table_row_modified_notification_encodes_current_row](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_table_row_modified_notification_encodes_current_row.md)
+- [folder_modified_notification_with_total_count_encodes_t_flag](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/folder_modified_notification_with_total_count_encodes_t_flag.md)
 - [new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_without_message_class_defaults_to_ipm_note_and_zero_message_flags.md)
 - [object_moved_and_copied_notifications_preserve_source_message_id](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/object_moved_and_copied_notifications_preserve_source_message_id.md)
 - [hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately](../../../../../functions/crates/lpe-exchange/src/mapi/notifications/hierarchy_moved_and_copied_notifications_encode_old_folder_and_parent_separately.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: supported_rop_uses_enum_classification_without_terminal_stop
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5580-L5593
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5669-L5682
 generated:
   by: okf-rs/0.3.0
 relationships:

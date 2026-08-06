@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_sync_import_deletes_consumes_multibinary_source_keys
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5548-L5570
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5637-L5659
 generated:
   by: okf-rs/0.3.0
 relationships:

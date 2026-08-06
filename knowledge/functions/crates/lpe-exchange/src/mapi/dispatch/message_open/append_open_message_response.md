@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_open_message_response
-resource: crates/lpe-exchange/src/mapi/dispatch/message_open.rs#L3-L527
+resource: crates/lpe-exchange/src/mapi/dispatch/message_open.rs#L3-L532
 generated:
   by: okf-rs/0.3.0
 relationships:

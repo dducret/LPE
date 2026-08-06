@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_mail_view_definition
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L171-L280
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L181-L290
 generated:
   by: okf-rs/0.3.0
 relationships:

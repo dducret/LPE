@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: views
-resource: crates/lpe-exchange/src/mapi/properties/views.rs#L1-L783
+resource: crates/lpe-exchange/src/mapi/properties/views.rs#L1-L793
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -16,6 +16,7 @@ relationships:
 - [default_view_supported_container_class](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/default_view_supported_container_class.md)
 - [default_view_supported_folder](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/default_view_supported_folder.md)
 - [default_folder_view_entry_id](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/default_folder_view_entry_id.md)
+- [persisted_default_folder_view_entry_id](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/persisted_default_folder_view_entry_id.md)
 - [default_view_uses_common_views](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/default_view_uses_common_views.md)
 - [default_common_views_named_view_id](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/views/default_common_views_named_view_id.md)
 - [ViewDefinitionKind](../../../../../../classes/crates/lpe-exchange/src/mapi/properties/views/ViewDefinitionKind.md)

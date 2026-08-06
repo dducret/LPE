@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_unified_messaging_call_from_row
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1637-L1650
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1648-L1661
 visibility: private
 generated:
   by: okf-rs/0.3.0

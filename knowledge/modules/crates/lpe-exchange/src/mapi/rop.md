@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: rop
-resource: crates/lpe-exchange/src/mapi/rop.rs#L1-L1615
+resource: crates/lpe-exchange/src/mapi/rop.rs#L1-L1623
 generated:
   by: okf-rs/0.3.0
 relationships:

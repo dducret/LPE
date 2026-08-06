@@ -9453,13 +9453,10 @@ fn special_folder_property_omits_unconfigured_archive_policy_identities() {
 }
 
 #[test]
-fn special_folder_property_projects_only_the_inbox_default_view() {
+fn special_folder_property_omits_unpersisted_default_views() {
     let account_id = Uuid::from_u128(0xaaaaaaaa_aaaa_4aaa_8aaa_aaaaaaaaaaaa);
-    assert!(matches!(
-        special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_DEFAULT_VIEW_ENTRY_ID, account_id),
-        Some(MapiValue::Binary(_))
-    ));
     for folder_id in [
+        INBOX_FOLDER_ID,
         OUTBOX_FOLDER_ID,
         SENT_FOLDER_ID,
         TRASH_FOLDER_ID,

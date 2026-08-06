@@ -23,7 +23,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/log_get_properties_view_response_debug
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/log_get_properties_default_folder_response_debug
   - functions/crates/lpe-exchange/src/mapi/dispatch/property_tags/property_ids_match
-  - functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_advertised_default_named_view
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/default_folder_named_view_config
   - functions/crates/lpe-exchange/src/mapi/session/MapiSession/record_default_view_advertised
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract/log_calendar_view_contract_fingerprint
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/post_hierarchy/post_hierarchy_getprops_contract
@@ -66,7 +66,7 @@ relationships:
 - [log_get_properties_view_response_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/log_get_properties_view_response_debug.md)
 - [log_get_properties_default_folder_response_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/property_responses/log_get_properties_default_folder_response_debug.md)
 - [property_ids_match](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/property_tags/property_ids_match.md)
-- [debug_advertised_default_named_view](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/debug_advertised_default_named_view.md)
+- [default_folder_named_view_config](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/default_folder_named_view_config.md)
 - [record_default_view_advertised](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/MapiSession/record_default_view_advertised.md)
 - [log_calendar_view_contract_fingerprint](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract/log_calendar_view_contract_fingerprint.md)
 - [post_hierarchy_getprops_contract](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/post_hierarchy/post_hierarchy_getprops_contract.md)

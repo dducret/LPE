@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: response_handle_table_can_echo_released_input_slots
-resource: crates/lpe-exchange/src/mapi/session/tests.rs#L792-L796
+resource: crates/lpe-exchange/src/mapi/session/tests.rs#L849-L853
 visibility: private
 generated:
   by: okf-rs/0.3.0

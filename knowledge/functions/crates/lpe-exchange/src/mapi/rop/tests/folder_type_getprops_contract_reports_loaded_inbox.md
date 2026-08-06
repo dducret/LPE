@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_type_getprops_contract_reports_loaded_inbox
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4380-L4423
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4469-L4512
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: snapshot
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1-L1569
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1-L1585
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -104,6 +104,7 @@ relationships:
 - [common_view_named_view_message_for_id](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/common_view_named_view_message_for_id.md)
 - [named_view_message_for_folder_and_id](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/named_view_message_for_folder_and_id.md)
 - [default_folder_named_view_message](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/default_folder_named_view_message.md)
+- [default_folder_named_view_config](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/default_folder_named_view_config.md)
 - [associated_config_messages_for_folder](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/associated_config_messages_for_folder.md)
 - [associated_config_message_for_id](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/associated_config_message_for_id.md)
 - [associated_config_message_for_identity_id](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/associated_config_message_for_identity_id.md)

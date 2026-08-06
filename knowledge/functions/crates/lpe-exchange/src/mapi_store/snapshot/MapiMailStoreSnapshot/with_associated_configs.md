@@ -18,6 +18,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/associated_config_wire_summary_uses_requested_position
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/associated_config_debug_summaries_honor_table_restriction
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/folders/folder_properties_for_open_reports_inbox_associated_content_count
+  - functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai
   - functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan
   - functions/crates/lpe-exchange/src/mapi/sync/tests/inbox_fai_fasttransfer_boundaries_export_only_persisted_fai
   - functions/crates/lpe-exchange/src/mapi/sync/tests/empty_persisted_inbox_named_view_is_exported_by_fai_sync
@@ -48,6 +49,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_store/tests/contacts_project_exactly_the_persisted_contact_link_fai
   - functions/crates/lpe-exchange/src/mapi_store/tests/distinct_associated_fai_with_same_class_and_subject_survive_snapshot_projection
   - functions/crates/lpe-exchange/src/mapi_store/tests/modeled_virtual_associated_config_identity_opens_via_dynamic_id
+  - functions/crates/lpe-exchange/src/mapi_store/tests/persisted_default_named_view_requires_one_matching_folder_view
 ---
 
 # Signature
@@ -70,6 +72,7 @@ relationships:
 - [associated_config_wire_summary_uses_requested_position](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/associated_config_wire_summary_uses_requested_position.md)
 - [associated_config_debug_summaries_honor_table_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/associated_config_debug_summaries_honor_table_restriction.md)
 - [folder_properties_for_open_reports_inbox_associated_content_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/folders/folder_properties_for_open_reports_inbox_associated_content_count.md)
+- [folder_default_view_entry_id_resolves_persisted_named_view_fai](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/folder_default_view_entry_id_resolves_persisted_named_view_fai.md)
 - [load_mapi_store_for_access_plan](../../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan.md)
 - [inbox_fai_fasttransfer_boundaries_export_only_persisted_fai](../../../../../../../functions/crates/lpe-exchange/src/mapi/sync/tests/inbox_fai_fasttransfer_boundaries_export_only_persisted_fai.md)
 - [empty_persisted_inbox_named_view_is_exported_by_fai_sync](../../../../../../../functions/crates/lpe-exchange/src/mapi/sync/tests/empty_persisted_inbox_named_view_is_exported_by_fai_sync.md)
@@ -100,3 +103,4 @@ relationships:
 - [contacts_project_exactly_the_persisted_contact_link_fai](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/contacts_project_exactly_the_persisted_contact_link_fai.md)
 - [distinct_associated_fai_with_same_class_and_subject_survive_snapshot_projection](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/distinct_associated_fai_with_same_class_and_subject_survive_snapshot_projection.md)
 - [modeled_virtual_associated_config_identity_opens_via_dynamic_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/modeled_virtual_associated_config_identity_opens_via_dynamic_id.md)
+- [persisted_default_named_view_requires_one_matching_folder_view](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/persisted_default_named_view_requires_one_matching_folder_view.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_calendar_notification_folder_identity_ids_from_row
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L825-L893
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L833-L901
 visibility: private
 generated:
   by: okf-rs/0.3.0
