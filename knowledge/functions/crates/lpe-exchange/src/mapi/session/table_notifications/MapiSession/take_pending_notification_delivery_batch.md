@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: take_pending_notification_delivery_batch
-resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L92-L206
+resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L111-L225
 generated:
   by: okf-rs/0.3.0
 relationships:

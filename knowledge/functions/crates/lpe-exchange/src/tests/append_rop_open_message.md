@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_open_message
-resource: crates/lpe-exchange/src/tests/mod.rs#L15475-L15483
+resource: crates/lpe-exchange/src/tests/mod.rs#L15543-L15551
 visibility: private
 generated:
   by: okf-rs/0.3.0

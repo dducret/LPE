@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_message_flags
-resource: crates/lpe-exchange/src/tests/mod.rs#L4059-L4068
+resource: crates/lpe-exchange/src/tests/mod.rs#L4127-L4136
 visibility: private
 generated:
   by: okf-rs/0.3.0

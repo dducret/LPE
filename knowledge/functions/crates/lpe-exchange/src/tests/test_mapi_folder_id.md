@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_mapi_folder_id
-resource: crates/lpe-exchange/src/tests/mod.rs#L15625-L15627
+resource: crates/lpe-exchange/src/tests/mod.rs#L15693-L15695
 visibility: private
 generated:
   by: okf-rs/0.3.0

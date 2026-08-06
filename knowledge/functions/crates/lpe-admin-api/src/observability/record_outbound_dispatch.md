@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_outbound_dispatch
-resource: crates/lpe-admin-api/src/observability.rs#L202-L209
+resource: crates/lpe-admin-api/src/observability.rs#L203-L210
 generated:
   by: okf-rs/0.3.0
 relationships:

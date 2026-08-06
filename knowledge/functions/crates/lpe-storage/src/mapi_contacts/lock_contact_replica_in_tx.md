@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: lock_contact_replica_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L847-L855
+resource: crates/lpe-storage/src/mapi_contacts.rs#L914-L922
 visibility: private
 generated:
   by: okf-rs/0.3.0

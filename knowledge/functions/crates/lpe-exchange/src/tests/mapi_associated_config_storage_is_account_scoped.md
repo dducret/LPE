@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_associated_config_storage_is_account_scoped
-resource: crates/lpe-exchange/src/tests/mod.rs#L705-L773
+resource: crates/lpe-exchange/src/tests/mod.rs#L773-L841
 visibility: private
 generated:
   by: okf-rs/0.3.0

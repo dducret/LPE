@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_or_allocate_mapi_identities
-resource: crates/lpe-exchange/src/tests/mod.rs#L5918-L6088
+resource: crates/lpe-exchange/src/tests/mod.rs#L5986-L6156
 visibility: private
 generated:
   by: okf-rs/0.3.0

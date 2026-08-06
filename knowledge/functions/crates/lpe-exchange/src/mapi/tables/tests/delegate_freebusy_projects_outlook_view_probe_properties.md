@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delegate_freebusy_projects_outlook_view_probe_properties
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7481-L7553
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7539-L7611
 visibility: private
 generated:
   by: okf-rs/0.3.0

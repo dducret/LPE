@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_book_role
-resource: crates/lpe-storage/src/mapi_contacts.rs#L447-L454
+resource: crates/lpe-storage/src/mapi_contacts.rs#L514-L521
 visibility: private
 generated:
   by: okf-rs/0.3.0

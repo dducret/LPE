@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_custom_properties
-resource: crates/lpe-storage/src/mapi_contacts.rs#L456-L467
+resource: crates/lpe-storage/src/mapi_contacts.rs#L523-L534
 visibility: private
 generated:
   by: okf-rs/0.3.0

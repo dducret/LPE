@@ -3,7 +3,7 @@ use lpe_admin_api::{
     bootstrap_admin, bootstrap_admin_request_from_env,
     bootstrap_admin_request_from_env_or_defaults, ha_allows_active_work, ha_current_role,
     init_observability, integration_shared_secret, observe_outbound_worker_dispatch,
-    observe_outbound_worker_poll, router,
+    observe_outbound_worker_poll, observe_outbound_worker_poll_failure, router,
 };
 use lpe_domain::{
     OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, SignedIntegrationHeaders,
@@ -226,7 +226,15 @@ async fn run_outbound_worker(storage: Storage) -> Result<()> {
             }
         };
 
-        let batch = storage.fetch_outbound_handoff_batch(batch_size).await?;
+        let batch = match storage.fetch_outbound_handoff_batch(batch_size).await {
+            Ok(batch) => batch,
+            Err(error) => {
+                observe_outbound_worker_poll_failure();
+                warn!(error = %error, "lpe outbound worker failed to fetch the outbound queue; retrying");
+                sleep(Duration::from_millis(interval_ms)).await;
+                continue;
+            }
+        };
         observe_outbound_worker_poll(batch.len());
         if batch.is_empty() {
             sleep(Duration::from_millis(interval_ms)).await;
@@ -384,16 +392,66 @@ async fn send_outbound_handoff(
 
 #[cfg(test)]
 mod tests {
-    use super::send_outbound_handoff;
+    use super::{run_outbound_worker, send_outbound_handoff};
     use axum::{extract::State, http::HeaderMap, routing::post, Json, Router};
     use lpe_domain::{
         OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, SignedIntegrationHeaders,
         TransportDeliveryStatus, TransportRecipient, INTEGRATION_KEY_HEADER,
         INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER, INTEGRATION_TIMESTAMP_HEADER,
     };
-    use std::sync::{Arc, Mutex};
+    use lpe_storage::Storage;
+    use sqlx::postgres::PgPoolOptions;
+    use std::{
+        env,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
     use tokio::net::TcpListener;
     use uuid::Uuid;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[tokio::test]
+    async fn outbound_worker_retries_after_a_closed_pool_failure() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let previous_secret = env::var_os("LPE_INTEGRATION_SHARED_SECRET");
+        let previous_role_file = env::var_os("LPE_HA_ROLE_FILE");
+        let previous_interval = env::var_os("LPE_OUTBOUND_WORKER_INTERVAL_MS");
+        env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        env::remove_var("LPE_HA_ROLE_FILE");
+        env::set_var("LPE_OUTBOUND_WORKER_INTERVAL_MS", "250");
+
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://lpe:password@127.0.0.1:1/lpe")
+            .unwrap();
+        pool.close().await;
+        let mut worker = tokio::spawn(run_outbound_worker(Storage::new(pool)));
+        let worker_is_still_running = tokio::time::timeout(Duration::from_millis(300), &mut worker)
+            .await
+            .is_err();
+        if worker_is_still_running {
+            worker.abort();
+            let _ = worker.await;
+        }
+
+        match previous_secret {
+            Some(value) => env::set_var("LPE_INTEGRATION_SHARED_SECRET", value),
+            None => env::remove_var("LPE_INTEGRATION_SHARED_SECRET"),
+        }
+        match previous_role_file {
+            Some(value) => env::set_var("LPE_HA_ROLE_FILE", value),
+            None => env::remove_var("LPE_HA_ROLE_FILE"),
+        }
+        match previous_interval {
+            Some(value) => env::set_var("LPE_OUTBOUND_WORKER_INTERVAL_MS", value),
+            None => env::remove_var("LPE_OUTBOUND_WORKER_INTERVAL_MS"),
+        }
+
+        assert!(worker_is_still_running);
+    }
 
     #[tokio::test]
     async fn handoff_client_posts_json_and_header() {

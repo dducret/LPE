@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_row_content_count
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L425-L432
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L423-L430
 visibility: private
 generated:
   by: okf-rs/0.3.0

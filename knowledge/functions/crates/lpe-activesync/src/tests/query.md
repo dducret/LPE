@@ -239,6 +239,7 @@ relationships:
   - functions/crates/lpe-storage/src/mailboxes/Storage/rename_imap_mailbox
   - functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription
   - functions/crates/lpe-storage/src/mailboxes/Storage/destroy_jmap_mailbox
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/commit_existing_contact_import_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/insert_contact_in_tx
@@ -653,6 +654,7 @@ relationships:
 - [rename_imap_mailbox](../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/rename_imap_mailbox.md)
 - [set_mailbox_subscription](../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription.md)
 - [destroy_jmap_mailbox](../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/destroy_jmap_mailbox.md)
+- [rotate_active_mapi_contact_identities_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx.md)
 - [commit_existing_contact_import_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/commit_existing_contact_import_in_tx.md)
 - [allocate_contact_identity_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx.md)
 - [insert_contact_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/insert_contact_in_tx.md)

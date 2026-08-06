@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sent_default_view_sort_orders_by_client_submit_time
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L176-L204
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L177-L205
 visibility: private
 generated:
   by: okf-rs/0.3.0

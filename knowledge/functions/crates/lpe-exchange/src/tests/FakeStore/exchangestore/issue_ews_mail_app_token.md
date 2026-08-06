@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: issue_ews_mail_app_token
-resource: crates/lpe-exchange/src/tests/mod.rs#L5666-L5705
+resource: crates/lpe-exchange/src/tests/mod.rs#L5734-L5773
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1524,6 +1524,7 @@
 - [notes_journal_reminder_and_search_folder_routes_are_registered](../functions/crates/lpe-admin-api/src/app/notes_journal_reminder_and_search_folder_routes_are_registered.md) — Rust Function
 - [observe_outbound_worker_dispatch](../functions/crates/lpe-admin-api/src/app/observe_outbound_worker_dispatch.md) — Rust Function
 - [observe_outbound_worker_poll](../functions/crates/lpe-admin-api/src/app/observe_outbound_worker_poll.md) — Rust Function
+- [observe_outbound_worker_poll_failure](../functions/crates/lpe-admin-api/src/app/observe_outbound_worker_poll_failure.md) — Rust Function
 - [protocol_router](../functions/crates/lpe-admin-api/src/app/protocol_router.md) — Rust Function
 - [pst_upload_validation_accepts_valid_pst_like_file](../functions/crates/lpe-admin-api/src/app/pst_upload_validation_accepts_valid_pst_like_file.md) — Rust Function
 - [pst_upload_validation_rejects_extension_and_type_mismatch](../functions/crates/lpe-admin-api/src/app/pst_upload_validation_rejects_extension_and_type_mismatch.md) — Rust Function
@@ -1751,6 +1752,7 @@
 - [record_mail_submission](../functions/crates/lpe-admin-api/src/observability/record_mail_submission.md) — Rust Function
 - [record_outbound_dispatch](../functions/crates/lpe-admin-api/src/observability/record_outbound_dispatch.md) — Rust Function
 - [record_outbound_worker_poll](../functions/crates/lpe-admin-api/src/observability/record_outbound_worker_poll.md) — Rust Function
+- [record_outbound_worker_poll_failure](../functions/crates/lpe-admin-api/src/observability/record_outbound_worker_poll_failure.md) — Rust Function
 - [record_security_event](../functions/crates/lpe-admin-api/src/observability/record_security_event.md) — Rust Function
 - [render_metrics](../functions/crates/lpe-admin-api/src/observability/render_metrics.md) — Rust Function
 - [safe_header](../functions/crates/lpe-admin-api/src/observability/safe_header.md) — Rust Function
@@ -2062,6 +2064,7 @@
 - [handoff_client_posts_json_and_header](../functions/crates/lpe-cli/src/handoff_client_posts_json_and_header.md) — Rust Function
 - [log_startup_fingerprint](../functions/crates/lpe-cli/src/log_startup_fingerprint.md) — Rust Function
 - [main](../functions/crates/lpe-cli/src/main.md) — Rust Function
+- [outbound_worker_retries_after_a_closed_pool_failure](../functions/crates/lpe-cli/src/outbound_worker_retries_after_a_closed_pool_failure.md) — Rust Function
 - [run_bootstrap_admin_command](../functions/crates/lpe-cli/src/run_bootstrap_admin_command.md) — Rust Function
 - [run_jmap_journal_purge_worker](../functions/crates/lpe-cli/src/run_jmap_journal_purge_worker.md) — Rust Function
 - [run_outbound_worker](../functions/crates/lpe-cli/src/run_outbound_worker.md) — Rust Function
@@ -5104,6 +5107,7 @@
 - [has_notification_target](../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/has_notification_target.md) — Rust Method
 - [has_notification_targets](../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/has_notification_targets.md) — Rust Method
 - [matching_notifications](../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/matching_notifications.md) — Rust Method
+- [pending_collaboration_hierarchy_notification_requires_contents](../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/pending_collaboration_hierarchy_notification_requires_contents.md) — Rust Method
 - [pending_notification_count](../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/pending_notification_count.md) — Rust Method
 - [record_notification](../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/record_notification.md) — Rust Method
 - [remember_table_notification_eligibility](../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/remember_table_notification_eligibility.md) — Rust Method
@@ -5725,7 +5729,7 @@
 - [contents_find_row_matches_message_search_key](../functions/crates/lpe-exchange/src/mapi/tables/tests/contents_find_row_matches_message_search_key.md) — Rust Function
 - [conversation_action_settings_find_row_honors_restriction](../functions/crates/lpe-exchange/src/mapi/tables/tests/conversation_action_settings_find_row_honors_restriction.md) — Rust Function
 - [conversation_action_settings_normal_contents_stays_empty_when_folder_row_has_count](../functions/crates/lpe-exchange/src/mapi/tables/tests/conversation_action_settings_normal_contents_stays_empty_when_folder_row_has_count.md) — Rust Function
-- [custom_collaboration_folders_are_only_ipm_subtree_children](../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_only_ipm_subtree_children.md) — Rust Function
+- [custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants](../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants.md) — Rust Function
 - [default_associated_config_columns_cover_required_configuration_contract](../functions/crates/lpe-exchange/src/mapi/tables/tests/default_associated_config_columns_cover_required_configuration_contract.md) — Rust Function
 - [default_contacts_contents_table_uses_contact_rows_and_columns](../functions/crates/lpe-exchange/src/mapi/tables/tests/default_contacts_contents_table_uses_contact_rows_and_columns.md) — Rust Function
 - [default_contents_columns_cover_table_projection_contract](../functions/crates/lpe-exchange/src/mapi/tables/tests/default_contents_columns_cover_table_projection_contract.md) — Rust Function
@@ -8252,6 +8256,7 @@
 - [insert_notification_account](../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/insert_notification_account.md) — Rust Function
 - [mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql](../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql.md) — Rust Function
 - [mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgresql](../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgresql.md) — Rust Function
+- [mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql](../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql.md) — Rust Function
 - [mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql](../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql.md) — Rust Function
 - [mapi_imap_cross_parent_rename_replays_a_hierarchy_move_in_postgresql](../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_imap_cross_parent_rename_replays_a_hierarchy_move_in_postgresql.md) — Rust Function
 - [mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql](../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql.md) — Rust Function
@@ -8763,6 +8768,7 @@
 - [postgres_mapi_audit](../functions/crates/lpe-exchange/src/tests/postgres_mapi_audit.md) — Rust Function
 - [postgres_mapi_calendar_fixture](../functions/crates/lpe-exchange/src/tests/postgres_mapi_calendar_fixture.md) — Rust Function
 - [postgres_mapi_calendar_fixture_drop_cleans_temporary_schema](../functions/crates/lpe-exchange/src/tests/postgres_mapi_calendar_fixture_drop_cleans_temporary_schema.md) — Rust Function
+- [postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync](../functions/crates/lpe-exchange/src/tests/postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync.md) — Rust Function
 - [postgres_mapi_contacts_local_commit_time_tracks_canonical_update](../functions/crates/lpe-exchange/src/tests/postgres_mapi_contacts_local_commit_time_tracks_canonical_update.md) — Rust Function
 - [postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_lineage](../functions/crates/lpe-exchange/src/tests/postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_lineage.md) — Rust Function
 - [postgres_mapi_mailbox_commit_time](../functions/crates/lpe-exchange/src/tests/postgres_mapi_mailbox_commit_time.md) — Rust Function
@@ -10648,6 +10654,7 @@
 - [fmt](../functions/crates/lpe-storage/src/mapi_contacts/MapiContactImportObjectDeleted/std-fmt-display/fmt.md) — Rust Method
 - [from_input](../functions/crates/lpe-storage/src/mapi_contacts/NormalizedContact/from_input.md) — Rust Method
 - [create_mapi_contact](../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md) — Rust Method
+- [rotate_active_mapi_contact_identities_in_tx](../functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx.md) — Rust Method
 - [allocate_contact_identity_in_tx](../functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx.md) — Rust Function
 - [allocate_next_contact_change_number_in_tx](../functions/crates/lpe-storage/src/mapi_contacts/allocate_next_contact_change_number_in_tx.md) — Rust Function
 - [commit_existing_contact_import_in_tx](../functions/crates/lpe-storage/src/mapi_contacts/commit_existing_contact_import_in_tx.md) — Rust Function

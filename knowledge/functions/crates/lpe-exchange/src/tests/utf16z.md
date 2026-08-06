@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: utf16z
-resource: crates/lpe-exchange/src/tests/mod.rs#L14801-L14808
+resource: crates/lpe-exchange/src/tests/mod.rs#L14869-L14876
 visibility: private
 generated:
   by: okf-rs/0.3.0

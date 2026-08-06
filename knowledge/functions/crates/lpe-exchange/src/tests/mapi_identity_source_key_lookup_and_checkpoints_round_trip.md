@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_identity_source_key_lookup_and_checkpoints_round_trip
-resource: crates/lpe-exchange/src/tests/mod.rs#L2504-L2558
+resource: crates/lpe-exchange/src/tests/mod.rs#L2572-L2626
 visibility: private
 generated:
   by: okf-rs/0.3.0

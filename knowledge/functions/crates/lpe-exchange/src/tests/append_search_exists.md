@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_search_exists
-resource: crates/lpe-exchange/src/tests/mod.rs#L15045-L15048
+resource: crates/lpe-exchange/src/tests/mod.rs#L15113-L15116
 visibility: private
 generated:
   by: okf-rs/0.3.0

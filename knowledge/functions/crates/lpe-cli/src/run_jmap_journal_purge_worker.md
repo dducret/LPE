@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: run_jmap_journal_purge_worker
-resource: crates/lpe-cli/src/main.rs#L244-L282
+resource: crates/lpe-cli/src/main.rs#L252-L290
 visibility: private
 generated:
   by: okf-rs/0.3.0

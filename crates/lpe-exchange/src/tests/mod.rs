@@ -562,6 +562,74 @@ async fn postgres_mapi_contacts_local_commit_time_tracks_canonical_update() {
 }
 
 #[tokio::test]
+async fn postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let account_id = fixture.account_id;
+    let contact = fixture
+        .storage
+        .create_accessible_contact(
+            account_id,
+            Some("default"),
+            UpsertClientContactInput {
+                account_id,
+                name: "Élodie Durand".to_string(),
+                email: "elodie@example.test".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let first_snapshot = fixture
+        .storage
+        .load_mapi_mail_store(account_id, 500)
+        .await
+        .unwrap();
+    let first_identity = first_snapshot
+        .contacts_for_folder(crate::mapi::identity::CONTACTS_FOLDER_ID)
+        .into_iter()
+        .find(|item| item.canonical_id == contact.id)
+        .and_then(|item| item.durable_identity.as_ref())
+        .cloned()
+        .expect("MAPI Contact identity must exist after the baseline sync snapshot");
+
+    fixture
+        .storage
+        .update_accessible_contact(
+            account_id,
+            contact.id,
+            UpsertClientContactInput {
+                account_id,
+                name: "Élodie Durand".to_string(),
+                email: "elodie.durand@example.test".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let updated_snapshot = fixture
+        .storage
+        .load_mapi_mail_store(account_id, 500)
+        .await
+        .unwrap();
+    let updated_identity = updated_snapshot
+        .contacts_for_folder(crate::mapi::identity::CONTACTS_FOLDER_ID)
+        .into_iter()
+        .find(|item| item.canonical_id == contact.id)
+        .and_then(|item| item.durable_identity.as_ref())
+        .cloned()
+        .expect("updated MAPI Contact identity must remain available for incremental sync");
+
+    assert_eq!(updated_identity.object_id, first_identity.object_id);
+    assert_eq!(updated_identity.source_key, first_identity.source_key);
+    assert!(updated_identity.change_number > first_identity.change_number);
+    assert_ne!(updated_identity.change_key, first_identity.change_key);
+
+    fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
 async fn mapi_identity_mapping_survives_restart_style_store_reload() {
     let account = FakeStore::account();
     let store = FakeStore {

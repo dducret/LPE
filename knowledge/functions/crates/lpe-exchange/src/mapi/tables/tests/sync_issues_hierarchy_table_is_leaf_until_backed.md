@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_issues_hierarchy_table_is_leaf_until_backed
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1062-L1088
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1063-L1089
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -118,6 +118,73 @@ struct ExistingContactIdentityCommit {
 }
 
 impl Storage {
+    pub(crate) async fn rotate_active_mapi_contact_identities_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        contact_id: Uuid,
+    ) -> Result<()> {
+        let identities = sqlx::query(
+            r#"
+            SELECT account_id, mapi_change_number, predecessor_change_list
+            FROM mapi_object_identities
+            WHERE tenant_id = $1
+              AND object_kind = 'contact'
+              AND canonical_id = $2
+              AND deleted_at IS NULL
+            ORDER BY account_id
+            FOR UPDATE
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(contact_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        for identity in identities {
+            let account_id = identity.get::<Uuid, _>("account_id");
+            let current_change_number = identity.get::<i64, _>("mapi_change_number");
+            if current_change_number <= 0
+                || current_change_number as u64 >= FIRST_RESERVED_HIGH_GLOBAL_COUNTER
+            {
+                bail!("stored MAPI Contact change number is outside the dynamic GLOBCNT range");
+            }
+            let predecessor_change_list = identity.get::<Vec<u8>, _>("predecessor_change_list");
+            let (store_identity, change_number) =
+                allocate_mapi_store_global_counter_in_tx(tx).await?;
+            ensure_mapi_mailbox_replica_in_tx(tx, *tenant_id, account_id, store_identity).await?;
+            let change_key = mapi_change_key(store_identity.replica_guid, change_number);
+            let predecessor_change_list =
+                merge_predecessor_change_list(&predecessor_change_list, &change_key)?;
+            let updated = sqlx::query(
+                r#"
+                UPDATE mapi_object_identities
+                SET mapi_change_number = $4,
+                    change_key = $5,
+                    predecessor_change_list = $6,
+                    updated_at = NOW()
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND object_kind = 'contact'
+                  AND canonical_id = $3
+                  AND deleted_at IS NULL
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(contact_id)
+            .bind(change_number as i64)
+            .bind(&change_key)
+            .bind(&predecessor_change_list)
+            .execute(&mut **tx)
+            .await?;
+            if updated.rows_affected() != 1 {
+                bail!("MAPI Contact identity disappeared during version rotation");
+            }
+        }
+        Ok(())
+    }
+
     pub async fn create_mapi_contact(
         &self,
         input: MapiContactCreateInput,

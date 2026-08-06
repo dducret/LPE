@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: trace_id_from_headers
-resource: crates/lpe-admin-api/src/observability.rs#L69-L77
+resource: crates/lpe-admin-api/src/observability.rs#L70-L78
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_get_search_criteria_round_trips_attachment_exists
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5379-L5471
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5439-L5531
 visibility: private
 generated:
   by: okf-rs/0.3.0

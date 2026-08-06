@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_ews_message_tracking_reports
-resource: crates/lpe-exchange/src/tests/mod.rs#L5279-L5323
+resource: crates/lpe-exchange/src/tests/mod.rs#L5347-L5391
 visibility: private
 generated:
   by: okf-rs/0.3.0

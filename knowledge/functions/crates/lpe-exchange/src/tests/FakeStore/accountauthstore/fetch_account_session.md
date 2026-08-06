@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_account_session
-resource: crates/lpe-exchange/src/tests/mod.rs#L4687-L4693
+resource: crates/lpe-exchange/src/tests/mod.rs#L4755-L4761
 visibility: private
 generated:
   by: okf-rs/0.3.0

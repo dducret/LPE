@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: copy_jmap_email
-resource: crates/lpe-exchange/src/tests/mod.rs#L11492-L11528
+resource: crates/lpe-exchange/src/tests/mod.rs#L11560-L11596
 visibility: private
 generated:
   by: okf-rs/0.3.0

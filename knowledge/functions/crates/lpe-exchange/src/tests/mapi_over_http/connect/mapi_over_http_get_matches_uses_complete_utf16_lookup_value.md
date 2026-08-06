@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_matches_uses_complete_utf16_lookup_value
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5874-L5919
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5934-L5979
 visibility: private
 generated:
   by: okf-rs/0.3.0

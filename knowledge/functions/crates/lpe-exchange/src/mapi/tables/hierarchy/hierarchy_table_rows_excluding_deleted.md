@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_table_rows_excluding_deleted
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L133-L184
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L135-L182
 generated:
   by: okf-rs/0.3.0
 relationships:

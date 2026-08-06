@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: response_rops_and_handles_from_execute_body
-resource: crates/lpe-exchange/src/tests/mod.rs#L15525-L15543
+resource: crates/lpe-exchange/src/tests/mod.rs#L15593-L15611
 visibility: private
 generated:
   by: okf-rs/0.3.0

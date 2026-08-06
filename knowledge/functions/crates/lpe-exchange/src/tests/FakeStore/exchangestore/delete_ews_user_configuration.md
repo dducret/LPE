@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_ews_user_configuration
-resource: crates/lpe-exchange/src/tests/mod.rs#L5064-L5085
+resource: crates/lpe-exchange/src/tests/mod.rs#L5132-L5153
 visibility: private
 generated:
   by: okf-rs/0.3.0

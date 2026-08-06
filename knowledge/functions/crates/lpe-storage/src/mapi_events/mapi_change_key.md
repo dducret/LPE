@@ -7,6 +7,7 @@ generated:
 relationships:
   called_by:
   - functions/crates/lpe-storage/src/collaboration/deleted_events/rekey_active_event_identities_in_tx
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/imported_identity
   - functions/crates/lpe-storage/src/mapi_contacts/imported_contact_change_key_must_use_a_foreign_identifier
@@ -26,6 +27,7 @@ relationships:
 # Called by
 
 - [rekey_active_event_identities_in_tx](../../../../../functions/crates/lpe-storage/src/collaboration/deleted_events/rekey_active_event_identities_in_tx.md)
+- [rotate_active_mapi_contact_identities_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx.md)
 - [allocate_contact_identity_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx.md)
 - [imported_identity](../../../../../functions/crates/lpe-storage/src/mapi_contacts/imported_identity.md)
 - [imported_contact_change_key_must_use_a_foreign_identifier](../../../../../functions/crates/lpe-storage/src/mapi_contacts/imported_contact_change_key_must_use_a_foreign_identifier.md)

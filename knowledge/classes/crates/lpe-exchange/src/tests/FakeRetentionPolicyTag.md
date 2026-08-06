@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: FakeRetentionPolicyTag
-resource: crates/lpe-exchange/src/tests/mod.rs#L3985-L3989
+resource: crates/lpe-exchange/src/tests/mod.rs#L4053-L4057
 visibility: private
 generated:
   by: okf-rs/0.3.0

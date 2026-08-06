@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: should_log_outlook_http_route_gap
-resource: crates/lpe-admin-api/src/observability.rs#L148-L170
+resource: crates/lpe-admin-api/src/observability.rs#L149-L171
 visibility: private
 generated:
   by: okf-rs/0.3.0

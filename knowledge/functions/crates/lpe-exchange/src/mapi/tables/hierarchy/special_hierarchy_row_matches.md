@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_hierarchy_row_matches
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L526-L534
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L524-L532
 generated:
   by: okf-rs/0.3.0
 relationships:

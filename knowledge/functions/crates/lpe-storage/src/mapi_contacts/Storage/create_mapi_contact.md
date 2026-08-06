@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_mapi_contact
-resource: crates/lpe-storage/src/mapi_contacts.rs#L121-L366
+resource: crates/lpe-storage/src/mapi_contacts.rs#L188-L433
 generated:
   by: okf-rs/0.3.0
 relationships:

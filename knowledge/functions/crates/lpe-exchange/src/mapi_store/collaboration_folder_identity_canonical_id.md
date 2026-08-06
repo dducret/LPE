@@ -9,7 +9,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_store/collaboration_folder_identity_canonical_id_for_collection
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/sync_mailboxes_with_collaboration_counts
-  - functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_only_ipm_subtree_children
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants
   - functions/crates/lpe-exchange/src/mapi/tables/tests/dynamic_contacts_associated_find_row_does_not_invent_osc_contact_sync_config
   - functions/crates/lpe-exchange/src/mapi_store/collaboration_folder_identity_requests
   - functions/crates/lpe-exchange/src/mapi_store/tests/dynamic_contact_folder_exposes_only_persisted_associated_config
@@ -28,7 +28,7 @@ relationships:
 # Called by
 
 - [sync_mailboxes_with_collaboration_counts](../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/sync_mailboxes_with_collaboration_counts.md)
-- [custom_collaboration_folders_are_only_ipm_subtree_children](../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_only_ipm_subtree_children.md)
+- [custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants](../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants.md)
 - [dynamic_contacts_associated_find_row_does_not_invent_osc_contact_sync_config](../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/dynamic_contacts_associated_find_row_does_not_invent_osc_contact_sync_config.md)
 - [collaboration_folder_identity_requests](../../../../../functions/crates/lpe-exchange/src/mapi_store/collaboration_folder_identity_requests.md)
 - [dynamic_contact_folder_exposes_only_persisted_associated_config](../../../../../functions/crates/lpe-exchange/src/mapi_store/tests/dynamic_contact_folder_exposes_only_persisted_associated_config.md)

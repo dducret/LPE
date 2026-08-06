@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: merge_contact_predecessor_change_lists
-resource: crates/lpe-storage/src/mapi_contacts.rs#L821-L845
+resource: crates/lpe-storage/src/mapi_contacts.rs#L888-L912
 visibility: private
 generated:
   by: okf-rs/0.3.0

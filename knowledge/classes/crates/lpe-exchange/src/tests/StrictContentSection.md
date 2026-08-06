@@ -1,7 +1,7 @@
 ---
 type: Rust Enum
 title: StrictContentSection
-resource: crates/lpe-exchange/src/tests/mod.rs#L13753-L13764
+resource: crates/lpe-exchange/src/tests/mod.rs#L13821-L13832
 visibility: private
 generated:
   by: okf-rs/0.3.0

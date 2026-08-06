@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_mapi_i64_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L14870-L14873
+resource: crates/lpe-exchange/src/tests/mod.rs#L14938-L14941
 visibility: private
 generated:
   by: okf-rs/0.3.0

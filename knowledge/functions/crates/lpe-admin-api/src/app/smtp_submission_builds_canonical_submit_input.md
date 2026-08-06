@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: smtp_submission_builds_canonical_submit_input
-resource: crates/lpe-admin-api/src/app.rs#L808-L874
+resource: crates/lpe-admin-api/src/app.rs#L812-L878
 visibility: private
 generated:
   by: okf-rs/0.3.0

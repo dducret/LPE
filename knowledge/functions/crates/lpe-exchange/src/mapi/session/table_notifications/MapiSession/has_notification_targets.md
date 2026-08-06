@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: has_notification_targets
-resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L82-L90
+resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L101-L109
 generated:
   by: okf-rs/0.3.0
 relationships:

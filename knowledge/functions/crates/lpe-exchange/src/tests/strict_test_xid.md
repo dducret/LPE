@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_test_xid
-resource: crates/lpe-exchange/src/tests/mod.rs#L13600-L13604
+resource: crates/lpe-exchange/src/tests/mod.rs#L13668-L13672
 visibility: private
 generated:
   by: okf-rs/0.3.0

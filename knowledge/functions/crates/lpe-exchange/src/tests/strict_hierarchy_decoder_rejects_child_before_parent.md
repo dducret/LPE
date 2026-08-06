@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_decoder_rejects_child_before_parent
-resource: crates/lpe-exchange/src/tests/mod.rs#L14565-L14574
+resource: crates/lpe-exchange/src/tests/mod.rs#L14633-L14642
 visibility: private
 generated:
   by: okf-rs/0.3.0

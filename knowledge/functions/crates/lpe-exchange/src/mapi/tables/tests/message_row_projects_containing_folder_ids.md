@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_row_projects_containing_folder_ids
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8754-L8780
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8812-L8838
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_decode_hierarchy_sync_stream
-resource: crates/lpe-exchange/src/tests/mod.rs#L12888-L13062
+resource: crates/lpe-exchange/src/tests/mod.rs#L12956-L13130
 visibility: private
 generated:
   by: okf-rs/0.3.0

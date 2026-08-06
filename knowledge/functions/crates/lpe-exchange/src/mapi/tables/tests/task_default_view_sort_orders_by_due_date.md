@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_default_view_sort_orders_by_due_date
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L104-L137
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L105-L138
 visibility: private
 generated:
   by: okf-rs/0.3.0

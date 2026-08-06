@@ -277,6 +277,7 @@ macro_rules! store_impl_public_address_im {
                     ) AS old_calendar_role,
                     calendar_event.id AS live_calendar_event_id,
                     calendar_event.title AS calendar_event_subject,
+                    calendar_collection.display_name AS calendar_collection_name,
                     contact.contact_book_id AS contact_book_id,
                     contact_book.role AS contact_book_role,
                     contact.display_name AS contact_name,
@@ -363,6 +364,12 @@ macro_rules! store_impl_public_address_im {
                  AND calendar_event.owner_account_id = log.account_id
                  AND calendar_event.id = log.object_id
                  AND log.object_kind IN ('calendar_event', 'deleted_calendar_event')
+                LEFT JOIN calendars calendar_collection
+                  ON calendar_collection.tenant_id = log.tenant_id
+                 AND calendar_collection.owner_account_id = log.account_id
+                 AND calendar_collection.id = log.object_id
+                 AND calendar_collection.role = 'custom'
+                 AND log.object_kind = 'calendar'
                 LEFT JOIN calendars event_calendar
                   ON event_calendar.tenant_id = log.tenant_id
                  AND event_calendar.owner_account_id = log.account_id
@@ -480,7 +487,7 @@ macro_rules! store_impl_public_address_im {
                   AND (log.retained_until IS NULL OR log.retained_until > NOW())
                   AND log.object_kind IN (
                       'mailbox', 'mailbox_message', 'attachment', 'contact', 'calendar_event',
-                      'deleted_calendar_event', 'navigation_shortcut', 'associated_config'
+                      'deleted_calendar_event', 'calendar', 'navigation_shortcut', 'associated_config'
                   )
                 ORDER BY log.cursor ASC
                 LIMIT 101
@@ -492,6 +499,7 @@ macro_rules! store_impl_public_address_im {
             .fetch_all(self.pool())
             .await?;
             let mut notification_identity_requests = Vec::new();
+            let mut deleted_calendar_folder_identity_ids = Vec::new();
             for row in &rows {
                 let object_kind = row.get::<String, _>("object_kind");
                 if object_kind == "mailbox" {
@@ -573,7 +581,10 @@ macro_rules! store_impl_public_address_im {
                         });
                     }
                 }
-                if object_kind != "calendar_event" && object_kind != "deleted_calendar_event" {
+                if object_kind != "calendar"
+                    && object_kind != "calendar_event"
+                    && object_kind != "deleted_calendar_event"
+                {
                     continue;
                 }
                 if object_kind == "calendar_event"
@@ -604,9 +615,15 @@ macro_rules! store_impl_public_address_im {
                         });
                     }
                 }
-                for canonical_id in
-                    mapi_calendar_notification_folder_identity_ids_from_row(row)
-                {
+                let destroyed_calendar = object_kind == "calendar"
+                    && row.get::<String, _>("change_kind") == "destroyed";
+                for canonical_id in mapi_calendar_notification_folder_identity_ids_from_row(row) {
+                    if destroyed_calendar {
+                        if !deleted_calendar_folder_identity_ids.contains(&canonical_id) {
+                            deleted_calendar_folder_identity_ids.push(canonical_id);
+                        }
+                        continue;
+                    }
                     if notification_identity_requests.iter().any(
                         |request: &MapiIdentityRequest| {
                             request.object_kind == MapiIdentityObjectKind::Mailbox
@@ -653,6 +670,20 @@ macro_rules! store_impl_public_address_im {
                         identity.object_id,
                         Some(identity.source_key),
                     );
+                }
+            }
+            for canonical_id in deleted_calendar_folder_identity_ids {
+                if let Some(folder_id) = ExchangeStore::fetch_mapi_object_ids_for_deleted_changes(
+                    self,
+                    account_id,
+                    MapiIdentityObjectKind::Mailbox,
+                    std::slice::from_ref(&canonical_id),
+                )
+                .await?
+                .into_iter()
+                .next()
+                {
+                    calendar_folder_ids.insert(canonical_id, folder_id);
                 }
             }
             let truncated = rows.len() > 100;

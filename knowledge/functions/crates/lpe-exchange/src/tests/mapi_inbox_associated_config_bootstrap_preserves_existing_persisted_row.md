@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row
-resource: crates/lpe-exchange/src/tests/mod.rs#L662-L702
+resource: crates/lpe-exchange/src/tests/mod.rs#L730-L770
 visibility: private
 generated:
   by: okf-rs/0.3.0

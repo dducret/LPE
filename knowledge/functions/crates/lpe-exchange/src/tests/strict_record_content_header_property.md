@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_record_content_header_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L14126-L14165
+resource: crates/lpe-exchange/src/tests/mod.rs#L14194-L14233
 visibility: private
 generated:
   by: okf-rs/0.3.0

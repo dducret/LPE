@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_message_row_projects_outlook_inbox_view_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8926-L9060
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8984-L9118
 visibility: private
 generated:
   by: okf-rs/0.3.0

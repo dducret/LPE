@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_delegate_freebusy_messages
-resource: crates/lpe-exchange/src/tests/mod.rs#L7702-L7708
+resource: crates/lpe-exchange/src/tests/mod.rs#L7770-L7776
 visibility: private
 generated:
   by: okf-rs/0.3.0

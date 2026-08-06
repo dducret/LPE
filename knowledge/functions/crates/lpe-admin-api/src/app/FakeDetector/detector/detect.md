@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: detect
-resource: crates/lpe-admin-api/src/app.rs#L509-L511
+resource: crates/lpe-admin-api/src/app.rs#L513-L515
 visibility: private
 generated:
   by: okf-rs/0.3.0

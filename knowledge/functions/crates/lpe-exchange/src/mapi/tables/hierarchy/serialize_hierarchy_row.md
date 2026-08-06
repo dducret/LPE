@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_hierarchy_row
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L696-L733
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L694-L731
 generated:
   by: okf-rs/0.3.0
 relationships:

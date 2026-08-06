@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_client_events
-resource: crates/lpe-storage/src/workspace.rs#L831-L868
+resource: crates/lpe-storage/src/workspace.rs#L833-L870
 generated:
   by: okf-rs/0.3.0
 relationships:

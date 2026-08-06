@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_hierarchy_movement_source_ids
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L682-L694
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L715-L727
 visibility: private
 generated:
   by: okf-rs/0.3.0

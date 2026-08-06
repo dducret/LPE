@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L368-L491
+resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L505-L628
 visibility: private
 generated:
   by: okf-rs/0.3.0

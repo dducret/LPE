@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_jmap_mailbox
-resource: crates/lpe-exchange/src/tests/mod.rs#L10784-L10811
+resource: crates/lpe-exchange/src/tests/mod.rs#L10852-L10879
 visibility: private
 generated:
   by: okf-rs/0.3.0

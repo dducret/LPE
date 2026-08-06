@@ -13,7 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/contacts_search_hierarchy_row_belongs_to_search_folder
   - functions/crates/lpe-exchange/src/mapi/tables/tests/persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy
   - functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder
-  - functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_only_ipm_subtree_children
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants
   - functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders
 ---
 
@@ -32,5 +32,5 @@ relationships:
 - [contacts_search_hierarchy_row_belongs_to_search_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/contacts_search_hierarchy_row_belongs_to_search_folder.md)
 - [persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy.md)
 - [hierarchy_table_projects_user_saved_search_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder.md)
-- [custom_collaboration_folders_are_only_ipm_subtree_children](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_only_ipm_subtree_children.md)
+- [custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants.md)
 - [ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders.md)

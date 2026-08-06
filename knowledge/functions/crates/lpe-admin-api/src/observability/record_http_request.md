@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_http_request
-resource: crates/lpe-admin-api/src/observability.rs#L227-L235
+resource: crates/lpe-admin-api/src/observability.rs#L234-L242
 visibility: private
 generated:
   by: okf-rs/0.3.0

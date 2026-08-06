@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: body_paragraphs
-resource: crates/lpe-storage/src/workspace.rs#L1317-L1330
+resource: crates/lpe-storage/src/workspace.rs#L1326-L1339
 visibility: private
 generated:
   by: okf-rs/0.3.0

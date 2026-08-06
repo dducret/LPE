@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_contents_find_row_matches_display_name
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4442-L4535
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4500-L4593
 visibility: private
 generated:
   by: okf-rs/0.3.0

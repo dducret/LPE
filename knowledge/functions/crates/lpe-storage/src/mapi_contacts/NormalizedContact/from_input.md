@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: from_input
-resource: crates/lpe-storage/src/mapi_contacts.rs#L390-L444
+resource: crates/lpe-storage/src/mapi_contacts.rs#L457-L511
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: send_outbound_handoff
-resource: crates/lpe-cli/src/main.rs#L354-L383
+resource: crates/lpe-cli/src/main.rs#L362-L391
 visibility: private
 generated:
   by: okf-rs/0.3.0

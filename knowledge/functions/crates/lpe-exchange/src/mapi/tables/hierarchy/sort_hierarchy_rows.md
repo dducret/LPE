@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sort_hierarchy_rows
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L329-L356
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L327-L354
 visibility: private
 generated:
   by: okf-rs/0.3.0

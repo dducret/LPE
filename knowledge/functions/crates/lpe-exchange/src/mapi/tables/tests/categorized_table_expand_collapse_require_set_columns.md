@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: categorized_table_expand_collapse_require_set_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9827-L9885
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9885-L9943
 visibility: private
 generated:
   by: okf-rs/0.3.0

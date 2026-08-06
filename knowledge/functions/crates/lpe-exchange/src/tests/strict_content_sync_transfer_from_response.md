@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_content_sync_transfer_from_response
-resource: crates/lpe-exchange/src/tests/mod.rs#L13766-L13783
+resource: crates/lpe-exchange/src/tests/mod.rs#L13834-L13851
 visibility: private
 generated:
   by: okf-rs/0.3.0

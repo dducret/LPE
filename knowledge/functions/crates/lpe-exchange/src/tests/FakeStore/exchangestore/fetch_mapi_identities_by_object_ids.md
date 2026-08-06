@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_identities_by_object_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L6717-L6727
+resource: crates/lpe-exchange/src/tests/mod.rs#L6785-L6795
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects
-resource: crates/lpe-exchange/src/tests/mod.rs#L840-L888
+resource: crates/lpe-exchange/src/tests/mod.rs#L908-L956
 visibility: private
 generated:
   by: okf-rs/0.3.0

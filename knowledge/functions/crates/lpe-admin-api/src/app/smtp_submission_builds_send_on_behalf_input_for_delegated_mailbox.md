@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: smtp_submission_builds_send_on_behalf_input_for_delegated_mailbox
-resource: crates/lpe-admin-api/src/app.rs#L940-L1005
+resource: crates/lpe-admin-api/src/app.rs#L944-L1009
 visibility: private
 generated:
   by: okf-rs/0.3.0

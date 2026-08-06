@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: detect
-resource: crates/lpe-exchange/src/tests/mod.rs#L4194-L4196
+resource: crates/lpe-exchange/src/tests/mod.rs#L4262-L4264
 visibility: private
 generated:
   by: okf-rs/0.3.0

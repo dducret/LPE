@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_mapi_associated_config
-resource: crates/lpe-exchange/src/tests/mod.rs#L10281-L10331
+resource: crates/lpe-exchange/src/tests/mod.rs#L10349-L10399
 visibility: private
 generated:
   by: okf-rs/0.3.0

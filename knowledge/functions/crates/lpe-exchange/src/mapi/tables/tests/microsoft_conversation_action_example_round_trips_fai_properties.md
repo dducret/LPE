@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_conversation_action_example_round_trips_fai_properties
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5983-L6103
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6041-L6161
 visibility: private
 generated:
   by: okf-rs/0.3.0

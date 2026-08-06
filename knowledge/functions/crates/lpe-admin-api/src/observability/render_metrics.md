@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: render_metrics
-resource: crates/lpe-admin-api/src/observability.rs#L237-L460
+resource: crates/lpe-admin-api/src/observability.rs#L244-L476
 visibility: private
 generated:
   by: okf-rs/0.3.0

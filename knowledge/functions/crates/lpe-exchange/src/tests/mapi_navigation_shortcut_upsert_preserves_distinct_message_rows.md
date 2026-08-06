@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_navigation_shortcut_upsert_preserves_distinct_message_rows
-resource: crates/lpe-exchange/src/tests/mod.rs#L1079-L1321
+resource: crates/lpe-exchange/src/tests/mod.rs#L1147-L1389
 visibility: private
 generated:
   by: okf-rs/0.3.0

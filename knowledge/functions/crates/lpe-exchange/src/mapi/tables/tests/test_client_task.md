@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_client_task
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L27-L51
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L28-L52
 visibility: private
 generated:
   by: okf-rs/0.3.0

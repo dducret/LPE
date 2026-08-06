@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fake_store_custom_property_values_survive_restart_style_clone
-resource: crates/lpe-exchange/src/tests/mod.rs#L11991-L12055
+resource: crates/lpe-exchange/src/tests/mod.rs#L12059-L12123
 visibility: private
 generated:
   by: okf-rs/0.3.0

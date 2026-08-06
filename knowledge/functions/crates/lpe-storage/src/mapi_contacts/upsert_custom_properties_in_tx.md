@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upsert_custom_properties_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1255-L1288
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1322-L1355
 visibility: private
 generated:
   by: okf-rs/0.3.0

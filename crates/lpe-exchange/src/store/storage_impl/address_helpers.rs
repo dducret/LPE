@@ -294,6 +294,39 @@ fn mapi_notification_event_from_change_row(
             })
             .map(|event| event.with_old_parent_folder_id(old_parent_folder_id))
         }
+        "calendar" => {
+            let calendar_id = row.try_get::<Uuid, _>("object_id").ok()?;
+            let folder_id = mapi_calendar_notification_folder_id(
+                &calendar_id.to_string(),
+                calendar_folder_ids,
+            )?;
+            // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2: a Calendar
+            // collection is a hierarchy object below the IPM subtree, not a
+            // Calendar-item content notification.
+            Some(
+                MapiNotificationEvent::canonical(
+                    MapiNotificationKind::Hierarchy,
+                    mapi_notification_event_mask_for_change(&change_kind, false),
+                    crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                    Some(folder_id),
+                    None,
+                    cursor,
+                    modseq,
+                    None,
+                    None,
+                    change_kind,
+                    row.try_get::<Option<String>, _>("calendar_collection_name")
+                        .ok()
+                        .flatten(),
+                    None,
+                    None,
+                    None,
+                )
+                .with_canonical_ids(Some(calendar_id), Some(calendar_id))
+                .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID))
+                .with_object_kind("calendar"),
+            )
+        }
         "calendar_event" => {
             let event_id = row.try_get::<Uuid, _>("object_id").ok();
             let owner_account_id = row.try_get::<Uuid, _>("owner_account_id").ok();
@@ -792,6 +825,17 @@ fn mapi_calendar_notification_folder_id(
 fn mapi_calendar_notification_folder_identity_ids_from_row(
     row: &sqlx::postgres::PgRow,
 ) -> Vec<Uuid> {
+    if row.get::<String, _>("object_kind") == "calendar" {
+        let Some(calendar_id) = row.try_get::<Option<Uuid>, _>("object_id").ok().flatten() else {
+            return Vec::new();
+        };
+        return crate::mapi_store::collaboration_folder_identity_canonical_id_for_collection(
+            crate::mapi_store::MapiCollaborationFolderKind::Calendar,
+            &calendar_id.to_string(),
+        )
+        .into_iter()
+        .collect();
+    }
     let Some(notification_account_id) = row
         .try_get::<Option<Uuid>, _>("notification_account_id")
         .ok()

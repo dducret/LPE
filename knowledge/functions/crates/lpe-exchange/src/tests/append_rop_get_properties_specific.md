@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_get_properties_specific
-resource: crates/lpe-exchange/src/tests/mod.rs#L15641-L15649
+resource: crates/lpe-exchange/src/tests/mod.rs#L15709-L15717
 visibility: private
 generated:
   by: okf-rs/0.3.0

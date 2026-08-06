@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_contact_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1145-L1224
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1212-L1291
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -95,7 +95,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/query_position_counts_categorized_content_rows
   - functions/crates/lpe-exchange/src/mapi/tables/tests/categorized_keywords_project_multivalue_instances_and_table_row_metadata
   - functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder
-  - functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_only_ipm_subtree_children
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants
   - functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders
   - functions/crates/lpe-exchange/src/mapi/tables/tests/deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy
   - functions/crates/lpe-exchange/src/mapi/tables/tests/real_quick_step_folder_projects_configuration_class
@@ -335,7 +335,7 @@ relationships:
 - [query_position_counts_categorized_content_rows](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/query_position_counts_categorized_content_rows.md)
 - [categorized_keywords_project_multivalue_instances_and_table_row_metadata](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/categorized_keywords_project_multivalue_instances_and_table_row_metadata.md)
 - [hierarchy_table_projects_user_saved_search_folder](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder.md)
-- [custom_collaboration_folders_are_only_ipm_subtree_children](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_only_ipm_subtree_children.md)
+- [custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants.md)
 - [ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders.md)
 - [deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy.md)
 - [real_quick_step_folder_projects_configuration_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/real_quick_step_folder_projects_configuration_class.md)

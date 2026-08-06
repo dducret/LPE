@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: observability
-resource: crates/lpe-admin-api/src/observability.rs#L1-L524
+resource: crates/lpe-admin-api/src/observability.rs#L1-L541
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -31,6 +31,7 @@ relationships:
 - [record_inbound_delivery](../../../../functions/crates/lpe-admin-api/src/observability/record_inbound_delivery.md)
 - [record_outbound_dispatch](../../../../functions/crates/lpe-admin-api/src/observability/record_outbound_dispatch.md)
 - [record_outbound_worker_poll](../../../../functions/crates/lpe-admin-api/src/observability/record_outbound_worker_poll.md)
+- [record_outbound_worker_poll_failure](../../../../functions/crates/lpe-admin-api/src/observability/record_outbound_worker_poll_failure.md)
 - [record_security_event](../../../../functions/crates/lpe-admin-api/src/observability/record_security_event.md)
 - [record_http_request](../../../../functions/crates/lpe-admin-api/src/observability/record_http_request.md)
 - [render_metrics](../../../../functions/crates/lpe-admin-api/src/observability/render_metrics.md)

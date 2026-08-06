@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_full_snapshot_persists_virtual_special_folder_version_identity
-resource: crates/lpe-exchange/src/tests/mod.rs#L2438-L2501
+resource: crates/lpe-exchange/src/tests/mod.rs#L2506-L2569
 visibility: private
 generated:
   by: okf-rs/0.3.0

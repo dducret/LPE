@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_inbox_associated_config_bootstrap_inserts_no_defaults
-resource: crates/lpe-exchange/src/tests/mod.rs#L605-L659
+resource: crates/lpe-exchange/src/tests/mod.rs#L673-L727
 visibility: private
 generated:
   by: okf-rs/0.3.0

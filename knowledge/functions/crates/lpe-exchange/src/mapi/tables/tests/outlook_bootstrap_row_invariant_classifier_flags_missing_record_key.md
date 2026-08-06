@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_bootstrap_row_invariant_classifier_flags_missing_record_key
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L446-L468
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L447-L469
 visibility: private
 generated:
   by: okf-rs/0.3.0

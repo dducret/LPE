@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_public_folder_permission
-resource: crates/lpe-exchange/src/tests/mod.rs#L6456-L6532
+resource: crates/lpe-exchange/src/tests/mod.rs#L6524-L6600
 visibility: private
 generated:
   by: okf-rs/0.3.0

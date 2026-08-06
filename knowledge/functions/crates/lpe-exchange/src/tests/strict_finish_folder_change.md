@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_finish_folder_change
-resource: crates/lpe-exchange/src/tests/mod.rs#L13272-L13373
+resource: crates/lpe-exchange/src/tests/mod.rs#L13340-L13441
 visibility: private
 generated:
   by: okf-rs/0.3.0

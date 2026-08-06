@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_navigation_shortcut_notifications_are_durable_across_storage_instances_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1030-L1135
+resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1167-L1272
 visibility: private
 generated:
   by: okf-rs/0.3.0

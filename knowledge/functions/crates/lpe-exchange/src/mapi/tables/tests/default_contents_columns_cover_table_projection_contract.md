@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_contents_columns_cover_table_projection_contract
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L471-L498
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L472-L499
 visibility: private
 generated:
   by: okf-rs/0.3.0

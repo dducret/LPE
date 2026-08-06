@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: log_sync_issues_hierarchy_query_rows
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L536-L597
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L534-L595
 generated:
   by: okf-rs/0.3.0
 relationships:

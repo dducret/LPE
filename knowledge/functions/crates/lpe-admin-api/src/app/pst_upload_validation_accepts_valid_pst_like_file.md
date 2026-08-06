@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pst_upload_validation_accepts_valid_pst_like_file
-resource: crates/lpe-admin-api/src/app.rs#L525-L552
+resource: crates/lpe-admin-api/src/app.rs#L529-L556
 visibility: private
 generated:
   by: okf-rs/0.3.0

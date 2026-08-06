@@ -79,6 +79,25 @@ impl MapiSession {
         self.pending_notifications.len()
     }
 
+    pub(in crate::mapi) fn pending_collaboration_hierarchy_notification_requires_contents(
+        &self,
+    ) -> bool {
+        self.pending_notifications.iter().any(|event| {
+            if !matches!(event.object_kind, Some("contact" | "calendar_event")) {
+                return false;
+            }
+            let hierarchy_table_event = folder_counts_modified_event(event)
+                .as_ref()
+                .and_then(folder_counts_hierarchy_table_event);
+            hierarchy_table_event.is_some_and(|hierarchy_table_event| {
+                self.handles.iter().any(|(handle, object)| {
+                    self.table_notification_active_handles.contains(handle)
+                        && table_matches_event(object, &hierarchy_table_event)
+                })
+            })
+        })
+    }
+
     pub(in crate::mapi) fn has_notification_targets(&self) -> bool {
         self.handles
             .values()

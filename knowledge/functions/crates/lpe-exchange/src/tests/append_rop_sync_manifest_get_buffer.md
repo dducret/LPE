@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_sync_manifest_get_buffer
-resource: crates/lpe-exchange/src/tests/mod.rs#L15133-L15140
+resource: crates/lpe-exchange/src/tests/mod.rs#L15201-L15208
 visibility: private
 generated:
   by: okf-rs/0.3.0

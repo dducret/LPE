@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_changed_event
-resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L245-L249
+resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L264-L268
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_private_logon_rops
-resource: crates/lpe-exchange/src/tests/mod.rs#L12364-L12373
+resource: crates/lpe-exchange/src/tests/mod.rs#L12432-L12441
 visibility: private
 generated:
   by: okf-rs/0.3.0

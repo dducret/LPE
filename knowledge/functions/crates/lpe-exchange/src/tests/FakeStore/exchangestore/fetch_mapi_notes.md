@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_notes
-resource: crates/lpe-exchange/src/tests/mod.rs#L9462-L9465
+resource: crates/lpe-exchange/src/tests/mod.rs#L9530-L9533
 visibility: private
 generated:
   by: okf-rs/0.3.0

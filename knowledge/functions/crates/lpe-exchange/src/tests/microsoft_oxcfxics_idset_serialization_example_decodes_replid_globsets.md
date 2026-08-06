@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxcfxics_idset_serialization_example_decodes_replid_globsets
-resource: crates/lpe-exchange/src/tests/mod.rs#L14404-L14418
+resource: crates/lpe-exchange/src/tests/mod.rs#L14472-L14486
 visibility: private
 generated:
   by: okf-rs/0.3.0

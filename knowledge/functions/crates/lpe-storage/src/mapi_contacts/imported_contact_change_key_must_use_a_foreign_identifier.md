@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: imported_contact_change_key_must_use_a_foreign_identifier
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1054-L1074
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1121-L1141
 visibility: private
 generated:
   by: okf-rs/0.3.0

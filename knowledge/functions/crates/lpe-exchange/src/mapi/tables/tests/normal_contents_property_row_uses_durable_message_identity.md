@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_contents_property_row_uses_durable_message_identity
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8783-L8861
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8841-L8919
 visibility: private
 generated:
   by: okf-rs/0.3.0

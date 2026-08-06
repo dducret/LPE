@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_update_is_unchanged
-resource: crates/lpe-storage/src/workspace.rs#L1163-L1207
+resource: crates/lpe-storage/src/workspace.rs#L1172-L1216
 visibility: private
 generated:
   by: okf-rs/0.3.0

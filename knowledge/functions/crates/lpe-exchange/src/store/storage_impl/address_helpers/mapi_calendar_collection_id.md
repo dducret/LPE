@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_calendar_collection_id
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L851-L864
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L895-L908
 visibility: private
 generated:
   by: okf-rs/0.3.0

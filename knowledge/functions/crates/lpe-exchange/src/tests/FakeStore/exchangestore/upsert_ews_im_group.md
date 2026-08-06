@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_ews_im_group
-resource: crates/lpe-exchange/src/tests/mod.rs#L7548-L7572
+resource: crates/lpe-exchange/src/tests/mod.rs#L7616-L7640
 visibility: private
 generated:
   by: okf-rs/0.3.0

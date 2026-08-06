@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_sync_checkpoint_from_row
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1269-L1283
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1313-L1327
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_update_merges_missing_rich_fields
-resource: crates/lpe-storage/src/workspace.rs#L1470-L1508
+resource: crates/lpe-storage/src/workspace.rs#L1479-L1517
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_default_calendar_folder_identity_is_persisted
-resource: crates/lpe-exchange/src/tests/mod.rs#L2244-L2309
+resource: crates/lpe-exchange/src/tests/mod.rs#L2312-L2377
 visibility: private
 generated:
   by: okf-rs/0.3.0

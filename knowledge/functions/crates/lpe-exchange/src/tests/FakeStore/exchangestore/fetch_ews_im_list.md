@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_ews_im_list
-resource: crates/lpe-exchange/src/tests/mod.rs#L7539-L7546
+resource: crates/lpe-exchange/src/tests/mod.rs#L7607-L7614
 visibility: private
 generated:
   by: okf-rs/0.3.0

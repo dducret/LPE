@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_accessible_event
-resource: crates/lpe-exchange/src/tests/mod.rs#L8860-L8898
+resource: crates/lpe-exchange/src/tests/mod.rs#L8928-L8966
 visibility: private
 generated:
   by: okf-rs/0.3.0

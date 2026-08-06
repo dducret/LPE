@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: query_jmap_email_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L10832-L10863
+resource: crates/lpe-exchange/src/tests/mod.rs#L10900-L10931
 visibility: private
 generated:
   by: okf-rs/0.3.0

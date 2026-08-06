@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_account_principal
-resource: crates/lpe-exchange/src/tests/mod.rs#L12411-L12421
+resource: crates/lpe-exchange/src/tests/mod.rs#L12479-L12489
 visibility: private
 generated:
   by: okf-rs/0.3.0

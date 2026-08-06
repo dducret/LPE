@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: insert_ews_im_member_in_tx
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1449-L1578
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L1493-L1622
 visibility: private
 generated:
   by: okf-rs/0.3.0

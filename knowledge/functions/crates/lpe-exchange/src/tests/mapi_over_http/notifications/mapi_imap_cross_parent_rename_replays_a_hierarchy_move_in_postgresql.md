@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_imap_cross_parent_rename_replays_a_hierarchy_move_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1570-L1686
+resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1707-L1823
 visibility: private
 generated:
   by: okf-rs/0.3.0

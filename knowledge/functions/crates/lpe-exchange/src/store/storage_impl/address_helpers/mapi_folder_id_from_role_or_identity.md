@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_folder_id_from_role_or_identity
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L866-L870
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L910-L914
 visibility: private
 generated:
   by: okf-rs/0.3.0

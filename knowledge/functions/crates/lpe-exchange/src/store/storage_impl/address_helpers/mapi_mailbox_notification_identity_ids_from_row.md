@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_mailbox_notification_identity_ids_from_row
-resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L899-L970
+resource: crates/lpe-exchange/src/store/storage_impl/address_helpers.rs#L943-L1014
 visibility: private
 generated:
   by: okf-rs/0.3.0

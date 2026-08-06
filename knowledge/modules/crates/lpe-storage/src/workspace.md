@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: workspace
-resource: crates/lpe-storage/src/workspace.rs#L1-L1542
+resource: crates/lpe-storage/src/workspace.rs#L1-L1551
 generated:
   by: okf-rs/0.3.0
 relationships:

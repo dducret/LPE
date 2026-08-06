@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_invariant_uses_mailbox_guid_entry_id
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L296-L329
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L297-L330
 visibility: private
 generated:
   by: okf-rs/0.3.0

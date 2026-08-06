@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: StrictContentMessageChange
-resource: crates/lpe-exchange/src/tests/mod.rs#L13718-L13732
+resource: crates/lpe-exchange/src/tests/mod.rs#L13786-L13800
 visibility: private
 generated:
   by: okf-rs/0.3.0

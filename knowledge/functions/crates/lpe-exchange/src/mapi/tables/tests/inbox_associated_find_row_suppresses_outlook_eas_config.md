@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_find_row_suppresses_outlook_eas_config
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5220-L5222
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5278-L5280
 visibility: private
 generated:
   by: okf-rs/0.3.0

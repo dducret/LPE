@@ -81,6 +81,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_hierarchy_change_accepts_existing_deleted_items
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect
   - functions/crates/lpe-exchange/src/tests/postgres_mapi_contacts_local_commit_time_tracks_canonical_update
+  - functions/crates/lpe-exchange/src/tests/postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync
   - functions/crates/lpe-exchange/src/tests/mapi_identity_mapping_survives_restart_style_store_reload
   - functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_inserts_no_defaults
   - functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row
@@ -175,6 +176,7 @@ relationships:
 - [mapi_over_http_sync_import_hierarchy_change_accepts_existing_deleted_items](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_hierarchy_change_accepts_existing_deleted_items.md)
 - [mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect.md)
 - [postgres_mapi_contacts_local_commit_time_tracks_canonical_update](../../../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_contacts_local_commit_time_tracks_canonical_update.md)
+- [postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync](../../../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync.md)
 - [mapi_identity_mapping_survives_restart_style_store_reload](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_identity_mapping_survives_restart_style_store_reload.md)
 - [mapi_inbox_associated_config_bootstrap_inserts_no_defaults](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_inserts_no_defaults.md)
 - [mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_inbox_associated_config_bootstrap_preserves_existing_persisted_row.md)

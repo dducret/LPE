@@ -179,6 +179,143 @@ async fn assert_outsider_has_no_notifications(
 }
 
 #[tokio::test]
+async fn mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2 require a custom
+    // Calendar folder to keep its FID across its hierarchy create/delete
+    // notifications.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let baseline_cursor = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    let collection = storage
+        .create_accessible_calendar_collection(account_id, "Notification Calendar")
+        .await?;
+    let calendar_id = Uuid::parse_str(&collection.id)?;
+    let created_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT cursor
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'calendar'
+          AND object_id = $2
+          AND change_kind = 'created'
+          AND cursor > $3
+        ORDER BY cursor DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(account_id)
+    .bind(calendar_id)
+    .bind(baseline_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    let folder_canonical_id =
+        crate::mapi_store::collaboration_folder_identity_canonical_id_for_collection(
+            crate::mapi_store::MapiCollaborationFolderKind::Calendar,
+            &collection.id,
+        )
+        .expect("custom Calendar folder canonical identity");
+    let identity_before_poll = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT mapi_object_id
+        FROM mapi_object_identities
+        WHERE account_id = $1
+          AND object_kind = 'mailbox'
+          AND canonical_id = $2
+        "#,
+    )
+    .bind(account_id)
+    .bind(folder_canonical_id)
+    .fetch_optional(storage.pool())
+    .await?;
+    assert!(identity_before_poll.is_none());
+
+    let created = storage
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+    assert!(created.event_pending);
+    assert_eq!(created.cursor, Some(created_cursor));
+    assert_eq!(created.events.len(), 1);
+    let folder_id = created.events[0]
+        .notification_test_shape()
+        .3
+        .expect("custom Calendar hierarchy FID");
+    assert_eq!(
+        created.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Hierarchy,
+            0x0004,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            Some(folder_id),
+            None,
+            None,
+            Some("calendar"),
+        )
+    );
+    assert_eq!(created.events[0].canonical_folder_id(), Some(calendar_id));
+    assert_eq!(created.events[0].canonical_message_id(), Some(calendar_id));
+    assert_eq!(
+        created.events[0].parent_folder_id(),
+        Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
+
+    storage
+        .delete_accessible_calendar_collection(account_id, &collection.id)
+        .await?;
+    let deleted_cursor = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT cursor
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND object_kind = 'calendar'
+          AND object_id = $2
+          AND change_kind = 'destroyed'
+          AND cursor > $3
+        ORDER BY cursor DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(account_id)
+    .bind(calendar_id)
+    .bind(created_cursor)
+    .fetch_one(storage.pool())
+    .await?;
+    let deleted = storage
+        .poll_mapi_notifications(account_id, created_cursor)
+        .await?;
+    assert!(deleted.event_pending);
+    assert_eq!(deleted.cursor, Some(deleted_cursor));
+    assert_eq!(deleted.events.len(), 1);
+    assert_eq!(
+        deleted.events[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Hierarchy,
+            0x0008,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            Some(folder_id),
+            None,
+            None,
+            Some("calendar"),
+        )
+    );
+    assert_eq!(deleted.events[0].canonical_folder_id(), Some(calendar_id));
+    assert_eq!(deleted.events[0].canonical_message_id(), Some(calendar_id));
+    assert_eq!(
+        deleted.events[0].parent_folder_id(),
+        Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql(
 ) -> anyhow::Result<()> {
     // [MS-OXCNOTIF] sections 2.2.1.1 and 4 require NewMail to carry the

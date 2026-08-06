@@ -574,6 +574,8 @@ impl Storage {
         if versioned.rows_affected() != 1 {
             bail!("contact disappeared before version assignment");
         }
+        self.rotate_active_mapi_contact_identities_in_tx(&mut tx, &tenant_id, contact_id)
+            .await?;
         sqlx::query(
             r#"
             UPDATE contact_books
@@ -886,12 +888,19 @@ impl Storage {
                 to_char(starts_at AT TIME ZONE COALESCE(NULLIF(time_zone, ''), 'UTC'), 'HH24:MI') AS time,
                 time_zone,
                 GREATEST(0, EXTRACT(EPOCH FROM (ends_at - starts_at))::int / 60) AS duration_minutes,
+                all_day,
+                status,
+                sequence,
                 COALESCE(recurrence_rule, '') AS recurrence_rule,
+                recurrence_json::text AS recurrence_json,
+                recurrence_exceptions_json::text AS recurrence_exceptions_json,
                 title,
                 location,
+                organizer_json::text AS organizer_json,
                 COALESCE(source_payload_json->>'attendees', '') AS attendees,
                 attendees_json::text AS attendees_json,
-                body_text AS notes
+                body_text AS notes,
+                COALESCE(body_html, '') AS body_html
             FROM calendar_events
             WHERE tenant_id = $1
               AND owner_account_id = $2

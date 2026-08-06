@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: mailbox
-resource: crates/lpe-exchange/src/tests/mod.rs#L4252-L4265
+resource: crates/lpe-exchange/src/tests/mod.rs#L4320-L4333
 visibility: private
 generated:
   by: okf-rs/0.3.0

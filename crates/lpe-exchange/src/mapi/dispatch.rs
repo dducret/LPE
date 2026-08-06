@@ -509,11 +509,19 @@ where
             session_context_cookies(endpoint, &session_id, false),
         );
     }
-    let access_plan = crate::mapi::identity::with_current_mapi_identity_codec(
+    let mut access_plan = crate::mapi::identity::with_current_mapi_identity_codec(
         identity_scope.codec.clone(),
         async { plan_mapi_store_access(&session, &execute.rop_buffer) },
     )
     .await;
+    // [MS-OXCMAPIHTTP] section 2.2.4.4.2: NotificationWait can already have
+    // queued a Contact or Calendar change when Outlook sends its release-only
+    // Execute. The active root
+    // hierarchy row needs the current collaboration item count, even though
+    // the ROP itself does not open that folder.
+    if session.pending_collaboration_hierarchy_notification_requires_contents() {
+        access_plan.requires_associated_contents = true;
+    }
     log_execute_store_access_debug(endpoint, principal, headers, request_id, &access_plan);
     let mut snapshot = match crate::mapi::identity::with_current_mapi_request_identity_scope(
         request_identity_scope.clone(),

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_contents_invariant_accepts_message_identity_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L332-L398
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L333-L399
 visibility: private
 generated:
   by: okf-rs/0.3.0

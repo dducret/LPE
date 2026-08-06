@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: app
-resource: crates/lpe-admin-api/src/app.rs#L1-L1006
+resource: crates/lpe-admin-api/src/app.rs#L1-L1010
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -33,6 +33,7 @@ relationships:
 - [protocol_router](../../../../functions/crates/lpe-admin-api/src/app/protocol_router.md)
 - [init_observability](../../../../functions/crates/lpe-admin-api/src/app/init_observability.md)
 - [observe_outbound_worker_poll](../../../../functions/crates/lpe-admin-api/src/app/observe_outbound_worker_poll.md)
+- [observe_outbound_worker_poll_failure](../../../../functions/crates/lpe-admin-api/src/app/observe_outbound_worker_poll_failure.md)
 - [observe_outbound_worker_dispatch](../../../../functions/crates/lpe-admin-api/src/app/observe_outbound_worker_dispatch.md)
 - [app_router_serves_exchange_mapi_options_route](../../../../functions/crates/lpe-admin-api/src/app/app_router_serves_exchange_mapi_options_route.md)
 - [app_router_routes_mapi_post_to_exchange_handler](../../../../functions/crates/lpe-admin-api/src/app/app_router_routes_mapi_post_to_exchange_handler.md)

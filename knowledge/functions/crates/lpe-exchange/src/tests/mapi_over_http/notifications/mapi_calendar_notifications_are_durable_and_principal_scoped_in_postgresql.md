@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L606-L1027
+resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L743-L1164
 visibility: private
 generated:
   by: okf-rs/0.3.0

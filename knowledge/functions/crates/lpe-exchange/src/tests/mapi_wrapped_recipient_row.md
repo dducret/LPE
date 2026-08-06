@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_wrapped_recipient_row
-resource: crates/lpe-exchange/src/tests/mod.rs#L15579-L15591
+resource: crates/lpe-exchange/src/tests/mod.rs#L15647-L15659
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: query_mapi_content_table_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L10865-L10941
+resource: crates/lpe-exchange/src/tests/mod.rs#L10933-L11009
 visibility: private
 generated:
   by: okf-rs/0.3.0

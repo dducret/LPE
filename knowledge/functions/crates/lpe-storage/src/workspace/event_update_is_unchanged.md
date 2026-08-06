@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: event_update_is_unchanged
-resource: crates/lpe-storage/src/workspace.rs#L1209-L1245
+resource: crates/lpe-storage/src/workspace.rs#L1218-L1254
 visibility: private
 generated:
   by: okf-rs/0.3.0

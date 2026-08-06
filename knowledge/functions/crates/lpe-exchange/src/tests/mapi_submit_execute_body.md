@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_submit_execute_body
-resource: crates/lpe-exchange/src/tests/mod.rs#L12339-L12352
+resource: crates/lpe-exchange/src/tests/mod.rs#L12407-L12420
 visibility: private
 generated:
   by: okf-rs/0.3.0

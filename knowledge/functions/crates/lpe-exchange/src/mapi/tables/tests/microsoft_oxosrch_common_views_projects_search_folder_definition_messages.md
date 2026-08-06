@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxosrch_common_views_projects_search_folder_definition_messages
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4005-L4114
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4063-L4172
 visibility: private
 generated:
   by: okf-rs/0.3.0

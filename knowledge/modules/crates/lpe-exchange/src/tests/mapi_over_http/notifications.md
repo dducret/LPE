@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: notifications
-resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1-L1686
+resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1-L1823
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -21,6 +21,7 @@ relationships:
 - [assert_navigation_shortcut_notification](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/assert_navigation_shortcut_notification.md)
 - [navigation_shortcut_notification_cursor](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/navigation_shortcut_notification_cursor.md)
 - [assert_outsider_has_no_notifications](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/assert_outsider_has_no_notifications.md)
+- [mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql.md)
 - [mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql.md)
 - [mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql.md)
 - [mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql.md)

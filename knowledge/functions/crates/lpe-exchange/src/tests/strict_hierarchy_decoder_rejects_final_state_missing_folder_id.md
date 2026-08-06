@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_decoder_rejects_final_state_missing_folder_id
-resource: crates/lpe-exchange/src/tests/mod.rs#L14672-L14679
+resource: crates/lpe-exchange/src/tests/mod.rs#L14740-L14747
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_decode_change_number_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L13260-L13270
+resource: crates/lpe-exchange/src/tests/mod.rs#L13328-L13338
 visibility: private
 generated:
   by: okf-rs/0.3.0

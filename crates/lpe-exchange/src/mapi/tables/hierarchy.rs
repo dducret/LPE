@@ -74,16 +74,18 @@ pub(super) fn hierarchy_rows_excluding_deleted<'a>(
                 )
             })
             .map(HierarchyRow::Mailbox)
-            .chain(
-                snapshot
-                    .collaboration_folders()
-                    .iter()
-                    .filter(|folder| !collaboration_folder_shadows_outlook_special_folder(folder))
-                    .filter(|folder| restriction_matches_collaboration_folder(restriction, folder))
-                    .map(HierarchyRow::Collaboration),
-            )
             .collect::<Vec<_>>()
     };
+    if folder_id == IPM_SUBTREE_FOLDER_ID {
+        rows.extend(
+            snapshot
+                .collaboration_folders()
+                .iter()
+                .filter(|folder| !collaboration_folder_shadows_outlook_special_folder(folder))
+                .filter(|folder| restriction_matches_collaboration_folder(restriction, folder))
+                .map(HierarchyRow::Collaboration),
+        );
+    }
     let mut folder_ids = rows.iter().map(hierarchy_row_id).collect::<HashSet<_>>();
     if folder_id == ROOT_FOLDER_ID {
         for special_folder_id in ROOT_HIERARCHY_FOLDER_IDS {
@@ -140,7 +142,7 @@ pub(super) fn hierarchy_table_rows_excluding_deleted<'a>(
     deleted_advertised_special_folders: &HashSet<u64>,
     depth: bool,
 ) -> Vec<HierarchyRow<'a>> {
-    let mut rows = if depth {
+    if depth {
         // [MS-OXCFOLD] section 2.2.1.13.1: Depth lists every level below the
         // input folder, while the normal hierarchy table remains direct-only.
         let mut seen_folder_ids = HashSet::from([folder_id]);
@@ -176,11 +178,7 @@ pub(super) fn hierarchy_table_rows_excluding_deleted<'a>(
             mailbox_guid,
             deleted_advertised_special_folders,
         )
-    };
-    if folder_id != IPM_SUBTREE_FOLDER_ID {
-        rows.retain(|row| !matches!(row, HierarchyRow::Collaboration(_)));
     }
-    rows
 }
 
 /// The informative hierarchy-table form is safe only when the current table

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_response_contains_utf16
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8729-L8734
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8787-L8792
 visibility: private
 generated:
   by: okf-rs/0.3.0

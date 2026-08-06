@@ -11,6 +11,7 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/allocate_next_mapi_global_counter
   - functions/crates/lpe-storage/src/collaboration/deleted_events/allocate_global_counter_in_tx
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/allocate_next_contact_change_number_in_tx
   - functions/crates/lpe-storage/src/mapi_events/rotate_mapi_event_identities_in_tx
   - functions/crates/lpe-storage/src/mapi_events/imported_identity/allocate_mapi_event_identity_in_tx
@@ -32,6 +33,7 @@ relationships:
 
 - [allocate_next_mapi_global_counter](../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/allocate_next_mapi_global_counter.md)
 - [allocate_global_counter_in_tx](../../../../../functions/crates/lpe-storage/src/collaboration/deleted_events/allocate_global_counter_in_tx.md)
+- [rotate_active_mapi_contact_identities_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx.md)
 - [allocate_next_contact_change_number_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/allocate_next_contact_change_number_in_tx.md)
 - [rotate_mapi_event_identities_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_events/rotate_mapi_event_identities_in_tx.md)
 - [allocate_mapi_event_identity_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_events/imported_identity/allocate_mapi_event_identity_in_tx.md)

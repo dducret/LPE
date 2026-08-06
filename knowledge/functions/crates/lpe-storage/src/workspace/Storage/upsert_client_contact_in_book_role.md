@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_client_contact_in_book_role
-resource: crates/lpe-storage/src/workspace.rs#L379-L624
+resource: crates/lpe-storage/src/workspace.rs#L379-L626
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -19,6 +19,7 @@ relationships:
   - functions/crates/lpe-storage/src/workspace/client_address_book_id_for_role
   - functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
   - functions/crates/lpe-storage/src/change/Storage/emit_collaboration_change
   - functions/crates/lpe-storage/src/workspace/map_contact
@@ -47,6 +48,7 @@ relationships:
 - [client_address_book_id_for_role](../../../../../../functions/crates/lpe-storage/src/workspace/client_address_book_id_for_role.md)
 - [allocate_account_modseq_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [rotate_active_mapi_contact_identities_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx.md)
 - [insert_mail_change_log_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx.md)
 - [emit_collaboration_change](../../../../../../functions/crates/lpe-storage/src/change/Storage/emit_collaboration_change.md)
 - [map_contact](../../../../../../functions/crates/lpe-storage/src/workspace/map_contact.md)

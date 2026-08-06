@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bookmark_seek_preserves_global_position_for_windowed_content_tables
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1674-L1780
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1675-L1781
 visibility: private
 generated:
   by: okf-rs/0.3.0

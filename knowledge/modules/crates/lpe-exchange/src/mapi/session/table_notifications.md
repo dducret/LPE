@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: table_notifications
-resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L1-L306
+resource: crates/lpe-exchange/src/mapi/session/table_notifications.rs#L1-L325
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -20,6 +20,7 @@ relationships:
 - [forget_table_notification_handle](../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/forget_table_notification_handle.md)
 - [record_notification](../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/record_notification.md)
 - [pending_notification_count](../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/pending_notification_count.md)
+- [pending_collaboration_hierarchy_notification_requires_contents](../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/pending_collaboration_hierarchy_notification_requires_contents.md)
 - [has_notification_targets](../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/has_notification_targets.md)
 - [take_pending_notification_delivery_batch](../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/take_pending_notification_delivery_batch.md)
 - [matching_notifications](../../../../../../functions/crates/lpe-exchange/src/mapi/session/table_notifications/MapiSession/matching_notifications.md)

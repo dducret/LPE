@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mapi_contacts
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1-L1423
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1-L1490
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -35,6 +35,7 @@ relationships:
 - [fmt](../../../../functions/crates/lpe-storage/src/mapi_contacts/MapiContactImportObjectDeleted/std-fmt-display/fmt.md)
 - [AllocatedContactIdentity](../../../../classes/crates/lpe-storage/src/mapi_contacts/AllocatedContactIdentity.md)
 - [ExistingContactIdentityCommit](../../../../classes/crates/lpe-storage/src/mapi_contacts/ExistingContactIdentityCommit.md)
+- [rotate_active_mapi_contact_identities_in_tx](../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx.md)
 - [create_mapi_contact](../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md)
 - [NormalizedContact](../../../../classes/crates/lpe-storage/src/mapi_contacts/NormalizedContact.md)
 - [from_input](../../../../functions/crates/lpe-storage/src/mapi_contacts/NormalizedContact/from_input.md)

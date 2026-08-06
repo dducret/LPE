@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_identities_by_source_keys
-resource: crates/lpe-exchange/src/tests/mod.rs#L6758-L6777
+resource: crates/lpe-exchange/src/tests/mod.rs#L6826-L6845
 visibility: private
 generated:
   by: okf-rs/0.3.0

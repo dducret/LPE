@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: quick_step_settings_normal_contents_stays_empty_when_folder_row_has_count
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L919-L943
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L920-L944
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_mapi_custom_property_values
-resource: crates/lpe-exchange/src/tests/mod.rs#L6888-L6911
+resource: crates/lpe-exchange/src/tests/mod.rs#L6956-L6979
 visibility: private
 generated:
   by: okf-rs/0.3.0

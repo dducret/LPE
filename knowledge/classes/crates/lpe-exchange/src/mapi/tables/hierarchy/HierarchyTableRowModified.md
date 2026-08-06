@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: HierarchyTableRowModified
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L189-L193
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L187-L191
 generated:
   by: okf-rs/0.3.0
 ---

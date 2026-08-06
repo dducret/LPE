@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: accept
-resource: crates/lpe-cli/src/main.rs#L409-L443
+resource: crates/lpe-cli/src/main.rs#L467-L501
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,14 +1,15 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1-L10198
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1-L10256
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/super
-  - external/crate-mapi-wire-mapirestrictiontype
+  - external/crate-mapi-notifications-mapinotificationevent-mapinotificationkind
   - external/crate-mapi-wire-ropid
+  - external/crate-mapi-wire-mapinotificationeventmask-mapirestrictiontype
   - external/crate-mapi-store-mapijournalentry
   - external/base64-engine-general-purpose-standard-as-base64-standard-engine-as
   - external/lpe-storage-accessiblecontact-accessibleevent-clienttask-collaborationcollection-collaborationrights-jmapemailaddress-journalentry-mailboxrule-searchfolderdefinition
@@ -91,7 +92,7 @@ relationships:
 - [folder_type_rows_follow_microsoft_values](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/folder_type_rows_follow_microsoft_values.md)
 - [microsoft_oxosfld_special_folder_metadata_covers_bounded_list](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/microsoft_oxosfld_special_folder_metadata_covers_bounded_list.md)
 - [hierarchy_table_projects_user_saved_search_folder](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder.md)
-- [custom_collaboration_folders_are_only_ipm_subtree_children](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_only_ipm_subtree_children.md)
+- [custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants.md)
 - [ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders.md)
 - [deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy.md)
 - [real_quick_step_folder_projects_configuration_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/real_quick_step_folder_projects_configuration_class.md)
@@ -217,8 +218,9 @@ relationships:
 # Imports
 
 - `super::*`
-- `crate::mapi::wire::MapiRestrictionType`
+- `crate::mapi::notifications::{MapiNotificationEvent, MapiNotificationKind}`
 - `crate::mapi::wire::RopId`
+- `crate::mapi::wire::{MapiNotificationEventMask, MapiRestrictionType}`
 - `crate::mapi_store::MapiJournalEntry`
 - `base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _}`
 - `lpe_storage::{

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_same_execute_additional_ren_junk_alias_opens_junk
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5108-L5194
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5168-L5254
 visibility: private
 generated:
   by: okf-rs/0.3.0

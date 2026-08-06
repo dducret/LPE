@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_issues_query_rows_returns_no_children_until_backed
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1133-L1187
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1134-L1188
 visibility: private
 generated:
   by: okf-rs/0.3.0

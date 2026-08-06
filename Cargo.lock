@@ -1445,6 +1445,7 @@ dependencies = [
  "lpe-managesieve",
  "lpe-storage",
  "reqwest",
+ "sqlx",
  "tokio",
  "tracing",
  "tracing-subscriber",

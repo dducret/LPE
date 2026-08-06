@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pst_upload_validation_rejects_extension_and_type_mismatch
-resource: crates/lpe-admin-api/src/app.rs#L555-L582
+resource: crates/lpe-admin-api/src/app.rs#L559-L586
 visibility: private
 generated:
   by: okf-rs/0.3.0

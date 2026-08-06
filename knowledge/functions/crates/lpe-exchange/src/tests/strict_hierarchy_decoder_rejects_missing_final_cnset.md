@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_decoder_rejects_missing_final_cnset
-resource: crates/lpe-exchange/src/tests/mod.rs#L14610-L14624
+resource: crates/lpe-exchange/src/tests/mod.rs#L14678-L14692
 visibility: private
 generated:
   by: okf-rs/0.3.0

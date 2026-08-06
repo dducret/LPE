@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: dismiss_recipient_suggestion
-resource: crates/lpe-storage/src/workspace.rs#L1082-L1107
+resource: crates/lpe-storage/src/workspace.rs#L1091-L1116
 generated:
   by: okf-rs/0.3.0
 relationships:

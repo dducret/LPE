@@ -24,6 +24,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_local_replica_id_reservations_are_atomic_in_postgresql
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postgresql
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_store_identity_is_shared_and_allocations_do_not_overlap_across_accounts
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql
@@ -52,6 +53,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/postgres_mapi_calendar_fixture_drop_cleans_temporary_schema
   - functions/crates/lpe-exchange/src/tests/postgres_mapi_mailbox_content_commit_time_tracks_canonical_mail_mutations
   - functions/crates/lpe-exchange/src/tests/postgres_mapi_contacts_local_commit_time_tracks_canonical_update
+  - functions/crates/lpe-exchange/src/tests/postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync
   - functions/crates/lpe-exchange/src/tests/mapi_associated_config_storage_is_account_scoped
   - functions/crates/lpe-exchange/src/tests/mapi_associated_config_upsert_preserves_canonical_message_identity
   - functions/crates/lpe-exchange/src/tests/mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects
@@ -94,6 +96,7 @@ relationships:
 - [mapi_local_replica_id_reservations_are_atomic_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_local_replica_id_reservations_are_atomic_in_postgresql.md)
 - [mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postgresql.md)
 - [mapi_store_identity_is_shared_and_allocations_do_not_overlap_across_accounts](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/local_replica_ids/mapi_store_identity_is_shared_and_allocations_do_not_overlap_across_accounts.md)
+- [mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql.md)
 - [mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql.md)
 - [mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql.md)
 - [mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql.md)
@@ -122,6 +125,7 @@ relationships:
 - [postgres_mapi_calendar_fixture_drop_cleans_temporary_schema](../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_calendar_fixture_drop_cleans_temporary_schema.md)
 - [postgres_mapi_mailbox_content_commit_time_tracks_canonical_mail_mutations](../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_mailbox_content_commit_time_tracks_canonical_mail_mutations.md)
 - [postgres_mapi_contacts_local_commit_time_tracks_canonical_update](../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_contacts_local_commit_time_tracks_canonical_update.md)
+- [postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync](../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync.md)
 - [mapi_associated_config_storage_is_account_scoped](../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_storage_is_account_scoped.md)
 - [mapi_associated_config_upsert_preserves_canonical_message_identity](../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_upsert_preserves_canonical_message_identity.md)
 - [mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects](../../../../../functions/crates/lpe-exchange/src/tests/mapi_associated_config_upsert_keeps_named_views_with_distinct_subjects.md)

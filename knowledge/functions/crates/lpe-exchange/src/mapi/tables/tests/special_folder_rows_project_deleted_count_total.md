@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_folder_rows_project_deleted_count_total
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L879-L896
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L880-L897
 visibility: private
 generated:
   by: okf-rs/0.3.0

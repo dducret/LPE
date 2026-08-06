@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_contacts_contents_table_uses_contact_rows_and_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L674-L782
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L675-L783
 visibility: private
 generated:
   by: okf-rs/0.3.0

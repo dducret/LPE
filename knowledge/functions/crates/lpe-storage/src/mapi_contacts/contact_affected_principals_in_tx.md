@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_affected_principals_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1398-L1423
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1465-L1490
 visibility: private
 generated:
   by: okf-rs/0.3.0

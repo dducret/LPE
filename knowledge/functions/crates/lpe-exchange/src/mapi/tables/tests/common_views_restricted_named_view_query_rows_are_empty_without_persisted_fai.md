@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_restricted_named_view_query_rows_are_empty_without_persisted_fai
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4982-L5016
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5040-L5074
 visibility: private
 generated:
   by: okf-rs/0.3.0

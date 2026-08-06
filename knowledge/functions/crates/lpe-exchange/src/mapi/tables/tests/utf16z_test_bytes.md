@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: utf16z_test_bytes
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L10192-L10198
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L10250-L10256
 visibility: private
 generated:
   by: okf-rs/0.3.0

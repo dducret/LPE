@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_security_event
-resource: crates/lpe-admin-api/src/observability.rs#L218-L225
+resource: crates/lpe-admin-api/src/observability.rs#L225-L232
 generated:
   by: okf-rs/0.3.0
 relationships:

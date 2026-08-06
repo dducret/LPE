@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: import_jmap_email
-resource: crates/lpe-exchange/src/tests/mod.rs#L11244-L11292
+resource: crates/lpe-exchange/src/tests/mod.rs#L11312-L11360
 visibility: private
 generated:
   by: okf-rs/0.3.0

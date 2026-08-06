@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: connect
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1-L5919
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1-L5979
 generated:
   by: okf-rs/0.3.0
 relationships:

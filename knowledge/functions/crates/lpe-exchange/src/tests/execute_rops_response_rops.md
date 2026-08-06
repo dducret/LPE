@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rops_response_rops
-resource: crates/lpe-exchange/src/tests/mod.rs#L15545-L15569
+resource: crates/lpe-exchange/src/tests/mod.rs#L15613-L15637
 visibility: private
 generated:
   by: okf-rs/0.3.0

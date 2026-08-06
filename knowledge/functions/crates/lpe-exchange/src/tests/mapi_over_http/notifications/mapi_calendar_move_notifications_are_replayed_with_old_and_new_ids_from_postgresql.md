@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L494-L603
+resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L631-L740
 visibility: private
 generated:
   by: okf-rs/0.3.0

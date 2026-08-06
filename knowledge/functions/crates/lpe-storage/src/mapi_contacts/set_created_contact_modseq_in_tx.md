@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: set_created_contact_modseq_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1351-L1396
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1418-L1463
 visibility: private
 generated:
   by: okf-rs/0.3.0

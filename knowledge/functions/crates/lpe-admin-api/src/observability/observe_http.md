@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: observe_http
-resource: crates/lpe-admin-api/src/observability.rs#L88-L146
+resource: crates/lpe-admin-api/src/observability.rs#L89-L147
 generated:
   by: okf-rs/0.3.0
 relationships:

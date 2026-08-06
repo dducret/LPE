@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_exact_configuration_find_row_uses_sort_order
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6106-L6148
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6164-L6206
 visibility: private
 generated:
   by: okf-rs/0.3.0

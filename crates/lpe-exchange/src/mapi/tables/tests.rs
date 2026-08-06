@@ -1,6 +1,7 @@
 use super::*;
-use crate::mapi::wire::MapiRestrictionType;
+use crate::mapi::notifications::{MapiNotificationEvent, MapiNotificationKind};
 use crate::mapi::wire::RopId;
+use crate::mapi::wire::{MapiNotificationEventMask, MapiRestrictionType};
 use crate::mapi_store::MapiJournalEntry;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_storage::{
@@ -3413,7 +3414,7 @@ fn hierarchy_table_projects_user_saved_search_folder() {
 }
 
 #[test]
-fn custom_collaboration_folders_are_only_ipm_subtree_children() {
+fn custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants() {
     let folder_id = crate::mapi::identity::mapi_store_id(0x7FFF_1000_1130);
     let collection = CollaborationCollection {
         id: "project-calendar".to_string(),
@@ -3475,6 +3476,63 @@ fn custom_collaboration_folders_are_only_ipm_subtree_children() {
     assert!(!root_rows
         .iter()
         .any(|row| hierarchy_row_id(row) == folder_id));
+
+    let root_depth_folder_ids = hierarchy_depth_folder_ids_excluding_deleted(
+        ROOT_FOLDER_ID,
+        &mailboxes,
+        &snapshot,
+        &HashSet::new(),
+    );
+    assert!(root_depth_folder_ids.contains(&folder_id));
+
+    let table = MapiObject::HierarchyTable {
+        folder_id: ROOT_FOLDER_ID,
+        depth: true,
+        depth_folder_ids: root_depth_folder_ids,
+        columns: vec![PID_TAG_DISPLAY_NAME_W, PID_TAG_FOLDER_ID],
+        columns_set: true,
+        sort_orders: Vec::new(),
+        category_count: 0,
+        expanded_count: 0,
+        collapsed_categories: HashSet::new(),
+        deleted_advertised_special_folders: HashSet::new(),
+        restriction: None,
+        bookmarks: HashMap::new(),
+        next_bookmark: 1,
+        position: 0,
+    };
+    let event = MapiNotificationEvent::canonical(
+        MapiNotificationKind::Hierarchy,
+        MapiNotificationEventMask::TableModified.as_u16(),
+        IPM_SUBTREE_FOLDER_ID,
+        Some(folder_id),
+        None,
+        1,
+        1,
+        None,
+        None,
+        "created".to_string(),
+        Some("Project Calendar".to_string()),
+        None,
+        None,
+        None,
+    )
+    .with_parent_folder_id(Some(IPM_SUBTREE_FOLDER_ID));
+    let row = hierarchy_table_row_modified(&table, &event, &mailboxes, &snapshot, Uuid::nil())
+        .expect("custom Calendar row in root-depth hierarchy notification");
+    assert_eq!(row.folder_id, folder_id);
+    let mut row_data = Cursor::new(row.row_data.as_slice());
+    assert_eq!(row_data.read_u8().unwrap(), 0);
+    assert_eq!(
+        parse_mapi_property_value(&mut row_data, PID_TAG_DISPLAY_NAME_W).unwrap(),
+        MapiValue::String("Project Calendar".to_string())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut row_data, PID_TAG_FOLDER_ID).unwrap(),
+        MapiValue::I64(i64::from_le_bytes(
+            crate::mapi::identity::wire_id_bytes_from_object_id(folder_id).unwrap(),
+        ))
+    );
 }
 
 #[test]

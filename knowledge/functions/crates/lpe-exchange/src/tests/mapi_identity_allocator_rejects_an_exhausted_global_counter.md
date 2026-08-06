@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_identity_allocator_rejects_an_exhausted_global_counter
-resource: crates/lpe-exchange/src/tests/mod.rs#L2760-L2789
+resource: crates/lpe-exchange/src/tests/mod.rs#L2828-L2857
 visibility: private
 generated:
   by: okf-rs/0.3.0

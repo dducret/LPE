@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count
   - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner
   - functions/crates/lpe-exchange/src/mapi/tables/row_keys/table_row_keys
+  - functions/crates/lpe-exchange/src/tests/postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync
 ---
 
 # Signature
@@ -28,3 +29,4 @@ relationships:
 - [table_position_and_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count.md)
 - [rop_query_rows_response_inner](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner.md)
 - [table_row_keys](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_keys/table_row_keys.md)
+- [postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync](../../../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_nested_folder_delete_replay_uses_historical_parent_and_retained_identity_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1449-L1567
+resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L1586-L1704
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_notification_folder_id
   - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_notification_folder_identity_ids_from_row
   - functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/calendar_move_is_suppressed_without_a_distinct_old_message_id
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql
 ---
 
 # Signature
@@ -32,3 +33,4 @@ relationships:
 - [mapi_calendar_notification_folder_id](../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_notification_folder_id.md)
 - [mapi_calendar_notification_folder_identity_ids_from_row](../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/mapi_calendar_notification_folder_identity_ids_from_row.md)
 - [calendar_move_is_suppressed_without_a_distinct_old_message_id](../../../../../functions/crates/lpe-exchange/src/store/storage_impl/address_helpers/calendar_move_is_suppressed_without_a_distinct_old_message_id.md)
+- [mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql.md)

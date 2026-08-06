@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bootstrap_auto_request_requires_explicit_bootstrap_credentials
-resource: crates/lpe-admin-api/src/app.rs#L712-L731
+resource: crates/lpe-admin-api/src/app.rs#L716-L735
 visibility: private
 generated:
   by: okf-rs/0.3.0

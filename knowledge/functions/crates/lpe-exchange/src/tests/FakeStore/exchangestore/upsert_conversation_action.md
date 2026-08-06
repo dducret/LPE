@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_conversation_action
-resource: crates/lpe-exchange/src/tests/mod.rs#L10661-L10694
+resource: crates/lpe-exchange/src/tests/mod.rs#L10729-L10762
 visibility: private
 generated:
   by: okf-rs/0.3.0

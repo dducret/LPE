@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L182-L365
+resource: crates/lpe-exchange/src/tests/mapi_over_http/notifications.rs#L319-L502
 visibility: private
 generated:
   by: okf-rs/0.3.0

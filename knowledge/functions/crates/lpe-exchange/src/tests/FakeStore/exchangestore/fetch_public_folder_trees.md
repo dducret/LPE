@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_public_folder_trees
-resource: crates/lpe-exchange/src/tests/mod.rs#L6201-L6225
+resource: crates/lpe-exchange/src/tests/mod.rs#L6269-L6293
 visibility: private
 generated:
   by: okf-rs/0.3.0

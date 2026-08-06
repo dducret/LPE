@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: FakeStore
-resource: crates/lpe-exchange/src/tests/mod.rs#L3855-L3979
+resource: crates/lpe-exchange/src/tests/mod.rs#L3923-L4047
 visibility: private
 generated:
   by: okf-rs/0.3.0

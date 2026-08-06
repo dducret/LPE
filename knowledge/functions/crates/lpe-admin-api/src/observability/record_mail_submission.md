@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_mail_submission
-resource: crates/lpe-admin-api/src/observability.rs#L184-L191
+resource: crates/lpe-admin-api/src/observability.rs#L185-L192
 generated:
   by: okf-rs/0.3.0
 relationships:

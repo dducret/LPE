@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_associated_config_upsert_preserves_canonical_message_identity
-resource: crates/lpe-exchange/src/tests/mod.rs#L776-L837
+resource: crates/lpe-exchange/src/tests/mod.rs#L844-L905
 visibility: private
 generated:
   by: okf-rs/0.3.0

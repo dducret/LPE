@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: quick_step_settings_is_projected_as_leaf_configuration_folder
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L899-L916
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L900-L917
 visibility: private
 generated:
   by: okf-rs/0.3.0

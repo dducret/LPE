@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_folder_property_value_with_change_number
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L612-L694
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L610-L692
 generated:
   by: okf-rs/0.3.0
 relationships:

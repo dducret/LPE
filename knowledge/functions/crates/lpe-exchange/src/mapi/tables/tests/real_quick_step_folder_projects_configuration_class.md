@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: real_quick_step_folder_projects_configuration_class
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3850-L3913
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3908-L3971
 visibility: private
 generated:
   by: okf-rs/0.3.0

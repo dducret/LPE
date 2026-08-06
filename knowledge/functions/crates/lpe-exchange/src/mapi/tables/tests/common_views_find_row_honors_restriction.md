@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_find_row_honors_restriction
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4250-L4315
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4308-L4373
 visibility: private
 generated:
   by: okf-rs/0.3.0

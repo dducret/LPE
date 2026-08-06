@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: utf16_occurrences
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8744-L8751
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8802-L8809
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_find_row_returns_not_found_for_unstored_sharing_configuration
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5310-L5312
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5368-L5370
 visibility: private
 generated:
   by: okf-rs/0.3.0

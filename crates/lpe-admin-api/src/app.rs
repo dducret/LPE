@@ -399,6 +399,10 @@ pub fn observe_outbound_worker_poll(batch_size: usize) {
     observability::record_outbound_worker_poll(batch_size);
 }
 
+pub fn observe_outbound_worker_poll_failure() {
+    observability::record_outbound_worker_poll_failure();
+}
+
 pub fn observe_outbound_worker_dispatch(status: &str) {
     observability::record_outbound_dispatch(status);
 }

@@ -26,6 +26,7 @@ struct CoreMetrics {
     mail_submissions_total: BTreeMap<String, u64>,
     inbound_deliveries_total: BTreeMap<String, u64>,
     outbound_worker_dispatch_total: BTreeMap<String, u64>,
+    outbound_worker_poll_failures_total: u64,
     security_events_total: BTreeMap<String, u64>,
     outbound_worker_batch_size_last: i64,
     outbound_worker_last_poll_timestamp_seconds: u64,
@@ -215,6 +216,12 @@ pub fn record_outbound_worker_poll(batch_size: usize) {
     }
 }
 
+pub fn record_outbound_worker_poll_failure() {
+    if let Ok(mut guard) = metrics().lock() {
+        guard.outbound_worker_poll_failures_total += 1;
+    }
+}
+
 pub fn record_security_event(event: &str) {
     if let Ok(mut guard) = metrics().lock() {
         *guard
@@ -314,6 +321,15 @@ fn render_metrics() -> String {
             value
         ));
     }
+
+    output.push_str(
+        "# HELP lpe_outbound_worker_poll_failures_total Failed outbound worker database polls.\n",
+    );
+    output.push_str("# TYPE lpe_outbound_worker_poll_failures_total counter\n");
+    output.push_str(&format!(
+        "lpe_outbound_worker_poll_failures_total {}\n",
+        guard.outbound_worker_poll_failures_total
+    ));
 
     output
         .push_str("# HELP lpe_outbound_worker_batch_size_last Last outbound worker batch size.\n");
@@ -493,6 +509,7 @@ mod tests {
 
         assert!(rendered.contains("lpe_mapi_notification_wait_completions_total"));
         assert!(rendered.contains("lpe_mapi_notification_new_mail_deliveries_total"));
+        assert!(rendered.contains("lpe_outbound_worker_poll_failures_total"));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: restricted_associated_query_position_reports_filtered_row_count
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2217-L2288
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2218-L2289
 visibility: private
 generated:
   by: okf-rs/0.3.0

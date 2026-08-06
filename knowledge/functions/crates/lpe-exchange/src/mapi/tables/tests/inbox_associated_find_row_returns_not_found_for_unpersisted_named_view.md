@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_find_row_returns_not_found_for_unpersisted_named_view
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5303-L5307
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5361-L5365
 visibility: private
 generated:
   by: okf-rs/0.3.0

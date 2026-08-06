@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_ews_mail_app_manifests
-resource: crates/lpe-exchange/src/tests/mod.rs#L5529-L5556
+resource: crates/lpe-exchange/src/tests/mod.rs#L5597-L5624
 visibility: private
 generated:
   by: okf-rs/0.3.0

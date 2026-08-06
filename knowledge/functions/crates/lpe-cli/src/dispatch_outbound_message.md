@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: dispatch_outbound_message
-resource: crates/lpe-cli/src/main.rs#L284-L352
+resource: crates/lpe-cli/src/main.rs#L292-L360
 visibility: private
 generated:
   by: okf-rs/0.3.0

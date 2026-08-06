@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_contact_predecessor_change_list
-resource: crates/lpe-storage/src/mapi_contacts.rs#L749-L777
+resource: crates/lpe-storage/src/mapi_contacts.rs#L816-L844
 visibility: private
 generated:
   by: okf-rs/0.3.0

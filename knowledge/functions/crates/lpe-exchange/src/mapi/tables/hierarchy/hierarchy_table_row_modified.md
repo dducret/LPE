@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_table_row_modified
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L198-L270
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L196-L268
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/serialize_hierarchy_row
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants
 ---
 
 # Signature
@@ -32,3 +33,4 @@ relationships:
 # Called by
 
 - [execute_rops](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops.md)
+- [custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants.md)

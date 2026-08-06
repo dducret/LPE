@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: safe_header
-resource: crates/lpe-admin-api/src/observability.rs#L79-L86
+resource: crates/lpe-admin-api/src/observability.rs#L80-L87
 visibility: private
 generated:
   by: okf-rs/0.3.0

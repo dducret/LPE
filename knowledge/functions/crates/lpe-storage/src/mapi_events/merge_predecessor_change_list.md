@@ -9,6 +9,7 @@ relationships:
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   called_by:
   - functions/crates/lpe-storage/src/collaboration/deleted_events/rekey_active_event_identities_in_tx
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/validate_imported_identity
   - functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx
   - functions/crates/lpe-storage/src/mapi_events/rotate_mapi_event_identities_in_tx
@@ -32,6 +33,7 @@ relationships:
 # Called by
 
 - [rekey_active_event_identities_in_tx](../../../../../functions/crates/lpe-storage/src/collaboration/deleted_events/rekey_active_event_identities_in_tx.md)
+- [rotate_active_mapi_contact_identities_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx.md)
 - [validate_imported_identity](../../../../../functions/crates/lpe-storage/src/mapi_contacts/validate_imported_identity.md)
 - [allocate_contact_identity_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx.md)
 - [rotate_mapi_event_identities_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_events/rotate_mapi_event_identities_in_tx.md)

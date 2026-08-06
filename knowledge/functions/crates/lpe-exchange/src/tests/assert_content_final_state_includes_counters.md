@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_content_final_state_includes_counters
-resource: crates/lpe-exchange/src/tests/mod.rs#L12626-L12648
+resource: crates/lpe-exchange/src/tests/mod.rs#L12694-L12716
 visibility: private
 generated:
   by: okf-rs/0.3.0

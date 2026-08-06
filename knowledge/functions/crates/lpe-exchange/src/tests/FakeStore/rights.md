@@ -1,13 +1,14 @@
 ---
 type: Rust Method
 title: rights
-resource: crates/lpe-exchange/src/tests/mod.rs#L4210-L4217
+resource: crates/lpe-exchange/src/tests/mod.rs#L4278-L4285
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_ids
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows
   - functions/crates/lpe-exchange/src/tests/FakeStore/collection
   - functions/crates/lpe-exchange/src/tests/FakeStore/contact
   - functions/crates/lpe-exchange/src/tests/FakeStore/task
@@ -23,6 +24,7 @@ relationships:
 # Called by
 
 - [mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_ids](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_ids.md)
+- [mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows.md)
 - [collection](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/collection.md)
 - [contact](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/contact.md)
 - [task](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/task.md)

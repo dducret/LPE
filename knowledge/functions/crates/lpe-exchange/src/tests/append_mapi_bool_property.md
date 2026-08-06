@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_mapi_bool_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L14827-L14830
+resource: crates/lpe-exchange/src/tests/mod.rs#L14895-L14898
 visibility: private
 generated:
   by: okf-rs/0.3.0

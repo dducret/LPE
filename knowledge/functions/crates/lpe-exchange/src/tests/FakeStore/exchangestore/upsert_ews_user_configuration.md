@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_ews_user_configuration
-resource: crates/lpe-exchange/src/tests/mod.rs#L5028-L5062
+resource: crates/lpe-exchange/src/tests/mod.rs#L5096-L5130
 visibility: private
 generated:
   by: okf-rs/0.3.0

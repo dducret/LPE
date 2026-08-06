@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: metrics_endpoint
-resource: crates/lpe-admin-api/src/observability.rs#L172-L182
+resource: crates/lpe-admin-api/src/observability.rs#L173-L183
 generated:
   by: okf-rs/0.3.0
 relationships:

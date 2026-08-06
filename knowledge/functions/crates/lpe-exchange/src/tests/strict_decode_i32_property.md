@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_decode_i32_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L13220-L13230
+resource: crates/lpe-exchange/src/tests/mod.rs#L13288-L13298
 visibility: private
 generated:
   by: okf-rs/0.3.0

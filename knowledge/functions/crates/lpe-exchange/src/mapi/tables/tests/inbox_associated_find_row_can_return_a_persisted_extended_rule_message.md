@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_find_row_can_return_a_persisted_extended_rule_message
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6586-L6627
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6644-L6685
 visibility: private
 generated:
   by: okf-rs/0.3.0

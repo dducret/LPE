@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ipm_subtree_hierarchy_does_not_duplicate_sync_issues_children
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1091-L1107
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1092-L1108
 visibility: private
 generated:
   by: okf-rs/0.3.0

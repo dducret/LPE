@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_ews_app_marketplace_policy
-resource: crates/lpe-exchange/src/tests/mod.rs#L5558-L5564
+resource: crates/lpe-exchange/src/tests/mod.rs#L5626-L5632
 visibility: private
 generated:
   by: okf-rs/0.3.0

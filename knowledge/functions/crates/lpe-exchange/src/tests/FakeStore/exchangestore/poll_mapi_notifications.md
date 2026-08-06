@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: poll_mapi_notifications
-resource: crates/lpe-exchange/src/tests/mod.rs#L7380-L7400
+resource: crates/lpe-exchange/src/tests/mod.rs#L7448-L7468
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_event_pending
   - functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/durable_events_response
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/assert_outsider_has_no_notifications
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql
@@ -39,6 +40,7 @@ relationships:
 - [notification_wait_event_pending](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_event_pending.md)
 - [durable_events_response](../../../../../../../functions/crates/lpe-exchange/src/service/ews/notifications/ExchangeService/durable_events_response.md)
 - [assert_outsider_has_no_notifications](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/assert_outsider_has_no_notifications.md)
+- [mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql.md)
 - [mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql.md)
 - [mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql.md)
 - [mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql.md)

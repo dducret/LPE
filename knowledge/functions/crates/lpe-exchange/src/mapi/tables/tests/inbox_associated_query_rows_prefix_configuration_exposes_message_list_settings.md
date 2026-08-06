@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_query_rows_prefix_configuration_exposes_message_list_settings
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7152-L7201
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7210-L7259
 visibility: private
 generated:
   by: okf-rs/0.3.0

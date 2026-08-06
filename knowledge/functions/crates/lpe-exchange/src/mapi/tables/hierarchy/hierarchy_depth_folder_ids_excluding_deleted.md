@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_depth_folder_ids_excluding_deleted
-resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L272-L291
+resource: crates/lpe-exchange/src/mapi/tables/hierarchy.rs#L270-L289
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/hierarchy_row_id
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_open/append_open_table_response
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants
 ---
 
 # Signature
@@ -24,3 +25,4 @@ relationships:
 # Called by
 
 - [append_open_table_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_open/append_open_table_response.md)
+- [custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_accessible_task
-resource: crates/lpe-exchange/src/tests/mod.rs#L9384-L9414
+resource: crates/lpe-exchange/src/tests/mod.rs#L9452-L9482
 visibility: private
 generated:
   by: okf-rs/0.3.0
