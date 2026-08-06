@@ -92,7 +92,7 @@ fn event_property_value_with_optional_version(
         }
         PID_LID_LOCATION_W_TAG => Some(MapiValue::String(event.location.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Appointment".to_string())),
-        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(event_mapi_access(event))),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
@@ -153,6 +153,20 @@ fn event_property_value_with_optional_version(
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
     }
+}
+
+fn event_mapi_access(event: &AccessibleEvent) -> u32 {
+    let mut access = 0;
+    if event.rights.may_read {
+        access |= MAPI_ACCESS_READ;
+    }
+    if event.rights.may_write {
+        access |= MAPI_ACCESS_MODIFY;
+    }
+    if event.rights.may_delete {
+        access |= MAPI_ACCESS_DELETE;
+    }
+    access
 }
 
 fn calendar_organizer(event: &AccessibleEvent) -> CalendarOrganizerMetadata {
@@ -481,6 +495,37 @@ pub(in crate::mapi) fn default_event_for_mapping(
         ),
         notes: String::new(),
         body_html: String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calendar_item_access_follows_canonical_grant() {
+        let account_id = Uuid::nil();
+        let mut read_only = default_event_for_mapping(account_id, "shared-read-only");
+        read_only.rights.may_write = false;
+        read_only.rights.may_delete = false;
+        assert_eq!(
+            event_property_value(&read_only, 1, CALENDAR_FOLDER_ID, PID_TAG_ACCESS),
+            Some(MapiValue::U32(MAPI_ACCESS_READ))
+        );
+
+        let mut writable_delegate = read_only.clone();
+        writable_delegate.rights.may_write = true;
+        writable_delegate.rights.may_delete = true;
+        assert_eq!(
+            event_property_value(&writable_delegate, 1, CALENDAR_FOLDER_ID, PID_TAG_ACCESS),
+            Some(MapiValue::U32(MAPI_MESSAGE_ACCESS))
+        );
+
+        let owner = default_event_for_mapping(account_id, "owned");
+        assert_eq!(
+            event_property_value(&owner, 1, CALENDAR_FOLDER_ID, PID_TAG_ACCESS),
+            Some(MapiValue::U32(MAPI_MESSAGE_ACCESS))
+        );
     }
 }
 

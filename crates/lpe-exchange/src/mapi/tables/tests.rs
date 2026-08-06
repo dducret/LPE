@@ -9457,6 +9457,113 @@ fn access_rows_follow_microsoft_flags() {
 }
 
 #[test]
+fn collaboration_folder_tables_follow_effective_collection_grants() {
+    let read_only = CollaborationRights {
+        may_read: true,
+        may_write: false,
+        may_delete: false,
+        may_share: false,
+    };
+    let writable_delegate = CollaborationRights {
+        may_read: true,
+        may_write: true,
+        may_delete: true,
+        may_share: false,
+    };
+    let owner = CollaborationRights {
+        may_read: true,
+        may_write: true,
+        may_delete: true,
+        may_share: true,
+    };
+    let collection = |kind: &str,
+                      display_name: &str,
+                      is_owned: bool,
+                      rights: CollaborationRights| CollaborationCollection {
+        id: format!("mapi-access-{kind}-{display_name}"),
+        kind: kind.to_string(),
+        owner_account_id: Uuid::from_u128(0xA11CE),
+        owner_email: "owner@example.test".to_string(),
+        owner_display_name: "Owner".to_string(),
+        display_name: display_name.to_string(),
+        is_owned,
+        rights,
+    };
+    let snapshot = MapiMailStoreSnapshot::new(
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        vec![collection(
+            "contacts",
+            "Shared contacts",
+            false,
+            read_only.clone(),
+        )],
+        vec![
+            collection("calendar", "Shared calendar", false, read_only.clone()),
+            collection(
+                "calendar",
+                "Writable calendar",
+                false,
+                writable_delegate.clone(),
+            ),
+        ],
+        vec![
+            collection("tasks", "Shared tasks", false, read_only),
+            collection("tasks", "Owner tasks", true, owner),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    for folder in snapshot.collaboration_folders() {
+        let expected_access = if folder.collection.is_owned {
+            MAPI_FOLDER_ACCESS
+        } else if folder.collection.rights.may_write {
+            MAPI_ACCESS_READ
+                | MAPI_ACCESS_MODIFY
+                | MAPI_ACCESS_DELETE
+                | MAPI_ACCESS_CREATE_CONTENTS
+                | MAPI_ACCESS_CREATE_ASSOCIATED
+        } else {
+            MAPI_ACCESS_READ
+        };
+        let expected_rights = if folder.collection.is_owned {
+            crate::mapi::permissions::owner_rights()
+        } else {
+            crate::mapi::permissions::rights_from_grant(
+                folder.collection.rights.may_read,
+                folder.collection.rights.may_write,
+                folder.collection.rights.may_delete,
+                folder.collection.rights.may_share,
+            )
+        };
+        let columns = [PID_TAG_ACCESS, PID_TAG_RIGHTS];
+        let folder_row = serialize_collaboration_folder_row_with_context(folder, &columns, 0);
+        let hierarchy_row = serialize_hierarchy_row(
+            HierarchyRow::Collaboration(folder),
+            &[],
+            &snapshot,
+            &columns,
+            Uuid::nil(),
+        );
+
+        for row in [&folder_row, &hierarchy_row] {
+            assert_eq!(
+                u32::from_le_bytes(row[..4].try_into().unwrap()),
+                expected_access
+            );
+            assert_eq!(
+                u32::from_le_bytes(row[4..].try_into().unwrap()),
+                expected_rights
+            );
+        }
+    }
+}
+
+#[test]
 fn reminders_folder_projects_reminder_container_class() {
     let row = serialize_special_folder_row(
         REMINDERS_FOLDER_ID,

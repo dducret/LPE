@@ -883,7 +883,6 @@ pub(in crate::mapi) fn serialize_collaboration_folder_row_with_context(
             PID_TAG_ASSOCIATED_CONTENT_COUNT => write_u32(&mut row, associated_count),
             PID_TAG_SUBFOLDERS => row.push(0),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
-            PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTAINER_CLASS_W => {
                 write_utf16z(&mut row, collaboration_folder_message_class(folder.kind))
             }

@@ -20,6 +20,7 @@ mod submission;
 mod sync;
 mod sync_import_deletes;
 mod tables;
+mod tasks;
 mod transport;
 mod wlink_properties;
 

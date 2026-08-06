@@ -731,17 +731,8 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
         PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(FOLDER_GENERIC)),
-        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
-        PID_TAG_RIGHTS => Some(MapiValue::U32(if folder.collection.is_owned {
-            crate::mapi::permissions::owner_rights()
-        } else {
-            crate::mapi::permissions::rights_from_grant(
-                folder.collection.rights.may_read,
-                folder.collection.rights.may_write,
-                folder.collection.rights.may_delete,
-                folder.collection.rights.may_share,
-            )
-        })),
+        PID_TAG_ACCESS => Some(MapiValue::U32(collaboration_folder_access(folder))),
+        PID_TAG_RIGHTS => Some(MapiValue::U32(collaboration_folder_rights(folder))),
         PID_TAG_EXTENDED_FOLDER_FLAGS => Some(MapiValue::Binary(extended_folder_flags())),
         PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS => Some(MapiValue::U32(0)),
         PID_TAG_ARCHIVE_PERIOD => None,
@@ -808,6 +799,38 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
     }
+}
+
+fn collaboration_folder_rights(folder: &MapiCollaborationFolder) -> u32 {
+    if folder.collection.is_owned {
+        crate::mapi::permissions::owner_rights()
+    } else {
+        crate::mapi::permissions::rights_from_grant(
+            folder.collection.rights.may_read,
+            folder.collection.rights.may_write,
+            folder.collection.rights.may_delete,
+            folder.collection.rights.may_share,
+        )
+    }
+}
+
+fn collaboration_folder_access(folder: &MapiCollaborationFolder) -> u32 {
+    let mapi_rights = collaboration_folder_rights(folder);
+    let rights = crate::mapi::permissions::access_from_rights(mapi_rights);
+    let mut access = 0;
+    if rights.may_read {
+        access |= MAPI_ACCESS_READ;
+    }
+    if rights.may_write {
+        access |= MAPI_ACCESS_MODIFY | MAPI_ACCESS_CREATE_CONTENTS | MAPI_ACCESS_CREATE_ASSOCIATED;
+    }
+    if rights.may_delete {
+        access |= MAPI_ACCESS_DELETE;
+    }
+    if crate::mapi::permissions::may_share_from_rights(mapi_rights) {
+        access |= MAPI_ACCESS_CREATE_HIERARCHY;
+    }
+    access
 }
 
 pub(in crate::mapi) fn public_folder_property_value(

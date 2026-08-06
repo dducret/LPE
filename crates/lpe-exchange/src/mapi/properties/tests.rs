@@ -1665,6 +1665,55 @@ fn collaboration_item_properties_project_outlook_table_identity_columns() {
 }
 
 #[test]
+fn contact_and_task_access_follow_effective_canonical_rights() {
+    let account_id = Uuid::from_u128(0x77777777_7777_4777_8777_77777777777d);
+    let mut contact = default_contact_for_mapping(account_id, "shared");
+    let mut task = default_task_for_mapping(account_id, "shared");
+
+    contact.rights = lpe_storage::CollaborationRights {
+        may_read: true,
+        may_write: false,
+        may_delete: false,
+        may_share: false,
+    };
+    task.is_owned = false;
+    task.rights = contact.rights.clone();
+    assert_eq!(
+        contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_TAG_ACCESS),
+        Some(MapiValue::U32(MAPI_ACCESS_READ))
+    );
+    assert_eq!(
+        task_property_value(&task, 2, TASKS_FOLDER_ID, PID_TAG_ACCESS),
+        Some(MapiValue::U32(MAPI_ACCESS_READ))
+    );
+
+    // Writable delegates retain the owner-level Message access advertised by
+    // their effective canonical grant.
+    contact.rights = default_mapping_rights();
+    task.is_owned = false;
+    task.rights = default_mapping_rights();
+    assert_eq!(
+        contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_TAG_ACCESS),
+        Some(MapiValue::U32(MAPI_MESSAGE_ACCESS))
+    );
+    assert_eq!(
+        task_property_value(&task, 2, TASKS_FOLDER_ID, PID_TAG_ACCESS),
+        Some(MapiValue::U32(MAPI_MESSAGE_ACCESS))
+    );
+
+    task.is_owned = true;
+    task.rights = default_mapping_rights();
+    assert_eq!(
+        contact_property_value(&contact, 1, CONTACTS_FOLDER_ID, PID_TAG_ACCESS),
+        Some(MapiValue::U32(MAPI_MESSAGE_ACCESS))
+    );
+    assert_eq!(
+        task_property_value(&task, 2, TASKS_FOLDER_ID, PID_TAG_ACCESS),
+        Some(MapiValue::U32(MAPI_MESSAGE_ACCESS))
+    );
+}
+
+#[test]
 fn outlook_contact_search_source_columns_project_empty_values() {
     let account_id = Uuid::from_u128(0x77777777_7777_4777_8777_777777777778);
     let contact = default_contact_for_mapping(account_id, "default");

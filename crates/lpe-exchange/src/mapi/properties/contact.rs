@@ -150,7 +150,21 @@ pub(in crate::mapi) fn contact_property_value_with_identity(
         ))),
         PID_TAG_BODY_W => Some(MapiValue::String(contact.notes.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Contact".to_string())),
-        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(
+            if contact.rights.may_read {
+                MAPI_ACCESS_READ
+            } else {
+                0
+            } | if contact.rights.may_write {
+                MAPI_ACCESS_MODIFY
+            } else {
+                0
+            } | if contact.rights.may_delete {
+                MAPI_ACCESS_DELETE
+            } else {
+                0
+            },
+        )),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),

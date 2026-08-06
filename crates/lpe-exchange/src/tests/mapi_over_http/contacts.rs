@@ -977,6 +977,104 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_shared_contact_read_only_rights_reject_mutations() {
+    let account = FakeStore::account();
+    let owner_account_id = Uuid::parse_str("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb").unwrap();
+    let contact_id = Uuid::parse_str("cccccccc-cccc-4ccc-8ccc-cccccccccccc").unwrap();
+    let mut shared_contacts = FakeStore::collection(
+        "shared-readonly-contacts",
+        "contacts",
+        "Shared Readonly Contacts",
+    );
+    shared_contacts.owner_account_id = owner_account_id;
+    shared_contacts.owner_email = "owner@example.test".to_string();
+    shared_contacts.owner_display_name = "Owner".to_string();
+    shared_contacts.is_owned = false;
+    shared_contacts.rights.may_write = false;
+    shared_contacts.rights.may_delete = false;
+    shared_contacts.rights.may_share = false;
+    let mut shared_contact = FakeStore::contact(
+        "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "Shared readonly before",
+        "shared@example.test",
+    );
+    shared_contact.collection_id = shared_contacts.id.clone();
+    shared_contact.owner_account_id = owner_account_id;
+    shared_contact.owner_email = shared_contacts.owner_email.clone();
+    shared_contact.owner_display_name = shared_contacts.owner_display_name.clone();
+    shared_contact.rights = shared_contacts.rights.clone();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        contact_collections: Arc::new(Mutex::new(vec![shared_contacts.clone()])),
+        contacts: Arc::new(Mutex::new(vec![shared_contact])),
+        ..Default::default()
+    };
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 100)
+        .await
+        .unwrap();
+    let shared_folder_id = snapshot
+        .collaboration_folders()
+        .iter()
+        .find(|folder| folder.collection.id == shared_contacts.id)
+        .expect("shared contacts folder projected")
+        .id;
+    let contact_mapi_id = snapshot
+        .contacts_for_folder(shared_folder_id)
+        .into_iter()
+        .find(|contact| contact.canonical_id == contact_id)
+        .expect("shared contact projected")
+        .id;
+    let contacts = store.contacts.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut properties = Vec::new();
+    append_mapi_utf16_property(&mut properties, 0x3001_001F, "Forbidden update");
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, shared_folder_id);
+    append_rop_open_message(&mut rops, 1, 2, shared_folder_id, contact_mapi_id);
+    append_rop_get_properties_specific(&mut rops, 2, &[0x0FF4_0003]);
+    append_rop_set_properties(&mut rops, 2, 1, &properties);
+    append_rop_delete_messages(&mut rops, 1, &[contact_mapi_id]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &0x0000_0002u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x02, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x1E, 0x01, 0x05, 0x00, 0x07, 0x80]
+    ));
+    let contacts = contacts.lock().unwrap();
+    assert_eq!(contacts.len(), 1);
+    assert_eq!(contacts[0].name, "Shared readonly before");
+}
+
+#[tokio::test]
 async fn mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property() {
     let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
     let contacts = Arc::new(Mutex::new(vec![FakeStore::contact(
