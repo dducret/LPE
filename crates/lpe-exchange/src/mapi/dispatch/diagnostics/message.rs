@@ -314,3 +314,76 @@ pub(in crate::mapi::dispatch) fn format_normal_message_debug_value(
         _ => format_debug_mapi_value(value),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_email(mailbox_role: &str) -> JmapEmail {
+        JmapEmail {
+            id: Uuid::from_u128(0x7171_0003),
+            thread_id: Uuid::from_u128(0x8181_0003),
+            mailbox_id: Uuid::from_u128(0x9191_0003),
+            mailbox_role: mailbox_role.to_string(),
+            mailbox_name: mailbox_role.to_string(),
+            modseq: 1,
+            mailbox_ids: Vec::new(),
+            mailbox_states: Vec::new(),
+            received_at: "2026-08-06T12:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: None,
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: vec![JmapEmailAddress {
+                address: "hidden@example.test".to_string(),
+                display_name: Some("Hidden recipient".to_string()),
+            }],
+            subject: "Bcc diagnostics".to_string(),
+            preview: String::new(),
+            body_text: String::new(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            categories: Vec::new(),
+            has_attachments: false,
+            size_octets: 0,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        }
+    }
+
+    #[test]
+    fn normal_message_diagnostics_hide_bcc_outside_drafts_and_sent() {
+        for role in ["drafts", "sent"] {
+            assert_eq!(
+                normal_message_debug_property_value(&test_email(role), PID_TAG_DISPLAY_BCC_W),
+                Some(MapiValue::String("Hidden recipient".to_string()))
+            );
+        }
+
+        for role in ["inbox", "shared"] {
+            assert_eq!(
+                normal_message_debug_property_value(&test_email(role), PID_TAG_DISPLAY_BCC_W),
+                Some(MapiValue::String(String::new()))
+            );
+        }
+    }
+}

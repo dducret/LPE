@@ -3077,7 +3077,7 @@ fn rss_feed_messages_project_rss_message_class_and_named_properties() {
     );
     assert_eq!(
         email_property_value(&email, PID_TAG_DISPLAY_BCC_W),
-        Some(MapiValue::String("Hidden".to_string()))
+        Some(MapiValue::String(String::new()))
     );
 
     let headers = match email_property_value(&email, PID_TAG_TRANSPORT_MESSAGE_HEADERS_W) {

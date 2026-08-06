@@ -8857,6 +8857,61 @@ fn test_table_email(id: Uuid, mailbox_id: Uuid, subject: &str) -> JmapEmail {
     }
 }
 
+#[test]
+fn bcc_projections_only_expose_drafts_and_sent_items() {
+    let mut email = test_table_email(
+        Uuid::from_u128(0x7171_0002),
+        Uuid::from_u128(0x8181_0002),
+        "Bcc projection",
+    );
+    email.bcc = vec![JmapEmailAddress {
+        address: "hidden@example.test".to_string(),
+        display_name: Some("Hidden recipient".to_string()),
+    }];
+    let bcc = email.bcc.clone();
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(0x7171_0002),
+    );
+
+    for role in ["drafts", "sent"] {
+        email.mailbox_role = role.to_string();
+        assert!(message_can_expose_bcc(&email));
+        assert!(message_recipients(&email)
+            .iter()
+            .any(|recipient| recipient.recipient_type == 0x03));
+        assert_eq!(
+            email_property_value(&email, PID_TAG_DISPLAY_BCC_W),
+            Some(MapiValue::String("Hidden recipient".to_string()))
+        );
+        assert_response_contains_utf16(
+            &serialize_message_row(&email, &[PID_TAG_DISPLAY_BCC_W]),
+            "Hidden recipient",
+        );
+    }
+
+    for role in ["inbox", "shared"] {
+        email.mailbox_role = role.to_string();
+        assert!(!message_can_expose_bcc(&email));
+        assert!(!message_recipients(&email)
+            .iter()
+            .any(|recipient| recipient.recipient_type == 0x03));
+        assert_eq!(
+            email_property_value(&email, PID_TAG_DISPLAY_BCC_W),
+            Some(MapiValue::String(String::new()))
+        );
+        assert!(utf16_position(
+            &serialize_message_row(&email, &[PID_TAG_DISPLAY_BCC_W]),
+            "Hidden recipient",
+        )
+        .is_none());
+    }
+
+    assert_eq!(email.bcc.len(), bcc.len());
+    assert_eq!(email.bcc[0].address, bcc[0].address);
+    assert_eq!(email.bcc[0].display_name, bcc[0].display_name);
+}
+
 fn assert_response_contains_utf16(response: &[u8], value: &str) {
     assert!(
         utf16_position(response, value).is_some(),

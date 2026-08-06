@@ -98,9 +98,10 @@ pub(in crate::mapi) fn display_cc(email: &JmapEmail) -> String {
 }
 
 pub(in crate::mapi) fn display_bcc(email: &JmapEmail) -> String {
-    email
-        .bcc
-        .iter()
+    message_can_expose_bcc(email)
+        .then_some(email.bcc.iter())
+        .into_iter()
+        .flatten()
         .map(|address| {
             address
                 .display_name
