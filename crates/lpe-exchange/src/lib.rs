@@ -10,8 +10,9 @@ mod service;
 mod store;
 
 pub use crate::mapi::{
-    mapi_folder_purge_metrics, mapi_notification_metrics, mapi_outlook_view_metrics,
-    MapiFolderPurgeMetrics, MapiNotificationMetrics, MapiOutlookViewMetrics,
+    mapi_calendar_event_save_metrics, mapi_folder_purge_metrics, mapi_notification_metrics,
+    mapi_outlook_view_metrics, MapiCalendarEventSaveMetrics, MapiFolderPurgeMetrics,
+    MapiNotificationMetrics, MapiOutlookViewMetrics,
 };
 pub use crate::service::router;
 

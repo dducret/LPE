@@ -43,6 +43,7 @@ use crate::{
 };
 
 mod dispatch;
+mod event_metrics;
 pub(crate) mod identity;
 mod notification_metrics;
 pub(crate) mod notifications;
@@ -65,6 +66,10 @@ pub(crate) use crate::mapi::{
         mapi_error_response, mapi_response_payload_bytes, request_cookie_transport_debug,
         safe_header, MapiEndpoint,
     },
+};
+pub use event_metrics::{mapi_calendar_event_save_metrics, MapiCalendarEventSaveMetrics};
+pub(crate) use event_metrics::{
+    record_mapi_calendar_event_save, MapiCalendarEventSaveFlow, MapiCalendarEventSaveOutcome,
 };
 pub use notification_metrics::{mapi_notification_metrics, MapiNotificationMetrics};
 pub(crate) use notification_metrics::{

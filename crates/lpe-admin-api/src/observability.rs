@@ -361,6 +361,34 @@ fn render_metrics() -> String {
 
     #[cfg(feature = "exchange")]
     {
+        let calendar_event_saves = lpe_exchange::mapi_calendar_event_save_metrics();
+        output.push_str("# HELP lpe_mapi_calendar_existing_event_saves_total Existing Calendar Event save outcomes observed through MAPI.\n");
+        output.push_str("# TYPE lpe_mapi_calendar_existing_event_saves_total counter\n");
+        output.push_str(&format!(
+            "lpe_mapi_calendar_existing_event_saves_total{{flow=\"direct\",outcome=\"committed\"}} {}\n",
+            calendar_event_saves.direct_committed_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_calendar_existing_event_saves_total{{flow=\"ics\",outcome=\"applied\"}} {}\n",
+            calendar_event_saves.ics_applied_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_calendar_existing_event_saves_total{{flow=\"ics\",outcome=\"ignored_older_or_same\"}} {}\n",
+            calendar_event_saves.ics_ignored_older_or_same_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_calendar_existing_event_saves_total{{flow=\"ics\",outcome=\"kept_server_content\"}} {}\n",
+            calendar_event_saves.ics_kept_server_content_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_calendar_existing_event_saves_total{{flow=\"direct\",outcome=\"failed\"}} {}\n",
+            calendar_event_saves.direct_failed_total
+        ));
+        output.push_str(&format!(
+            "lpe_mapi_calendar_existing_event_saves_total{{flow=\"ics\",outcome=\"failed\"}} {}\n",
+            calendar_event_saves.ics_failed_total
+        ));
+
         let purge = lpe_exchange::mapi_folder_purge_metrics();
         output.push_str(
             "# HELP lpe_mapi_folder_purge_messages_total MAPI whole-folder purge message outcomes.\n",
@@ -504,9 +532,10 @@ mod tests {
 
     #[cfg(feature = "exchange")]
     #[test]
-    fn metrics_include_mapi_notification_delivery_counters() {
+    fn metrics_include_mapi_calendar_event_save_and_notification_counters() {
         let rendered = super::render_metrics();
 
+        assert!(rendered.contains("lpe_mapi_calendar_existing_event_saves_total"));
         assert!(rendered.contains("lpe_mapi_notification_wait_completions_total"));
         assert!(rendered.contains("lpe_mapi_notification_new_mail_deliveries_total"));
         assert!(rendered.contains("lpe_outbound_worker_poll_failures_total"));

@@ -156,12 +156,20 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
     event_id: u64,
     transaction: MapiEventTransaction,
 ) {
+    let metric_flow = if transaction.imported_identity.is_some()
+        || transaction.import_disposition != MapiEventImportDisposition::Apply
+    {
+        MapiCalendarEventSaveFlow::Ics
+    } else {
+        MapiCalendarEventSaveFlow::Direct
+    };
     let attachment_changes = session
         .pending_event_attachment_transactions
         .get(&handle)
         .cloned()
         .unwrap_or_default();
     let Some(event) = snapshot.event_for_id(folder_id, event_id).cloned() else {
+        record_mapi_calendar_event_save(metric_flow, MapiCalendarEventSaveOutcome::Failed);
         responses.extend_from_slice(&rop_error_response(
             0x0C,
             request.response_handle_index(),
@@ -179,6 +187,7 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
         None
     };
     if let Some(error) = save_error {
+        record_mapi_calendar_event_save(metric_flow, MapiCalendarEventSaveOutcome::Failed);
         responses.extend_from_slice(&rop_error_response(
             0x0C,
             request.response_handle_index(),
@@ -198,6 +207,7 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
     ) {
         Ok(commit_input) => commit_input,
         Err(_) => {
+            record_mapi_calendar_event_save(metric_flow, MapiCalendarEventSaveOutcome::Failed);
             responses.extend_from_slice(&rop_error_response(
                 0x0C,
                 request.response_handle_index(),
@@ -207,6 +217,10 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
         }
     };
     let Some(mut commit_input) = commit_input else {
+        record_mapi_calendar_event_save(
+            MapiCalendarEventSaveFlow::Ics,
+            MapiCalendarEventSaveOutcome::IcsIgnoredOlderOrSame,
+        );
         clear_event_attachment_transaction(session, handle);
         remember_saved_event_handle(
             session,
@@ -232,6 +246,17 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
     let event_input = commit_input.event.clone();
     match store.commit_mapi_event_update(commit_input).await {
         Ok(MapiEventCommitOutcome::Saved(saved)) => {
+            let metric_outcome = match transaction.import_disposition {
+                MapiEventImportDisposition::Apply if matches!(metric_flow, MapiCalendarEventSaveFlow::Ics) => {
+                    MapiCalendarEventSaveOutcome::IcsApplied
+                }
+                MapiEventImportDisposition::Apply => MapiCalendarEventSaveOutcome::Committed,
+                MapiEventImportDisposition::KeepServerContent => {
+                    MapiCalendarEventSaveOutcome::IcsKeptServerContent
+                }
+                MapiEventImportDisposition::IgnoreOlderOrSame => unreachable!(),
+            };
+            record_mapi_calendar_event_save(metric_flow, metric_outcome);
             let updated_event = event_after_commit(event.event.clone(), event_input.as_ref());
             let version = saved.version;
             snapshot.remember_updated_event(
@@ -271,22 +296,38 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
                 event_id,
             );
         }
-        Ok(MapiEventCommitOutcome::ObjectModified { .. }) => responses.extend_from_slice(
-            &rop_error_response(0x0C, request.response_handle_index(), 0x8004_0109),
-        ),
-        Ok(MapiEventCommitOutcome::NotFound) => responses.extend_from_slice(&rop_error_response(
-            0x0C,
-            request.response_handle_index(),
-            0x8004_010F,
-        )),
-        Ok(MapiEventCommitOutcome::AccessDenied) => responses.extend_from_slice(
-            &rop_error_response(0x0C, request.response_handle_index(), 0x8007_0005),
-        ),
-        Err(_) => responses.extend_from_slice(&rop_error_response(
-            0x0C,
-            request.response_handle_index(),
-            0x8000_4005,
-        )),
+        Ok(MapiEventCommitOutcome::ObjectModified { .. }) => {
+            record_mapi_calendar_event_save(metric_flow, MapiCalendarEventSaveOutcome::Failed);
+            responses.extend_from_slice(&rop_error_response(
+                0x0C,
+                request.response_handle_index(),
+                0x8004_0109,
+            ));
+        }
+        Ok(MapiEventCommitOutcome::NotFound) => {
+            record_mapi_calendar_event_save(metric_flow, MapiCalendarEventSaveOutcome::Failed);
+            responses.extend_from_slice(&rop_error_response(
+                0x0C,
+                request.response_handle_index(),
+                0x8004_010F,
+            ));
+        }
+        Ok(MapiEventCommitOutcome::AccessDenied) => {
+            record_mapi_calendar_event_save(metric_flow, MapiCalendarEventSaveOutcome::Failed);
+            responses.extend_from_slice(&rop_error_response(
+                0x0C,
+                request.response_handle_index(),
+                0x8007_0005,
+            ));
+        }
+        Err(_) => {
+            record_mapi_calendar_event_save(metric_flow, MapiCalendarEventSaveOutcome::Failed);
+            responses.extend_from_slice(&rop_error_response(
+                0x0C,
+                request.response_handle_index(),
+                0x8000_4005,
+            ));
+        }
     }
 }
 
