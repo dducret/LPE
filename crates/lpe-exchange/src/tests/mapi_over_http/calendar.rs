@@ -7762,7 +7762,7 @@ async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_c
                 recurrence_rule: String::new(),
                 recurrence_json: "{}".to_string(),
                 recurrence_exceptions_json: "[]".to_string(),
-                title: "Custom calendar before update".to_string(),
+                title: "Café".to_string(),
                 location: "Room 701".to_string(),
                 organizer_json: "{}".to_string(),
                 attendees: String::new(),
@@ -7797,11 +7797,7 @@ async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_c
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
     let mut property_values = Vec::new();
-    append_mapi_utf16_property(
-        &mut property_values,
-        0x0037_001F,
-        "Custom calendar after update",
-    );
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Café avec neuchatel");
     append_mapi_i64_property(
         &mut property_values,
         0x0060_0040,
@@ -7846,7 +7842,7 @@ async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_c
     assert_eq!(custom_events.len(), 1);
     assert_eq!(custom_events[0].id, event.id);
     assert_eq!(custom_events[0].collection_id, collection.id);
-    assert_eq!(custom_events[0].title, "Custom calendar after update");
+    assert_eq!(custom_events[0].title, "Café avec neuchatel");
     assert_eq!(custom_events[0].date, "2026-06-07");
     assert_eq!(custom_events[0].time, "10:15");
     assert_eq!(custom_events[0].duration_minutes, 45);
@@ -7856,6 +7852,34 @@ async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_c
         .fetch_accessible_events_in_collection(fixture.account_id, "default")
         .await?;
     assert!(default_events.is_empty());
+
+    let reopened_service = ExchangeService::new(storage.clone());
+    let reopened_connect = reopened_service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut reopened_headers = mapi_headers("Execute");
+    reopened_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&reopened_connect)).unwrap(),
+    );
+    let mut reopen_rops = Vec::new();
+    append_rop_open_folder(&mut reopen_rops, 0, 1, folder.id);
+    append_rop_open_message(&mut reopen_rops, 1, 2, folder.id, mapi_event.id);
+    append_rop_get_properties_specific(&mut reopen_rops, 2, &[0x0037_001F]);
+    let response = reopened_service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &reopened_headers,
+            &execute_body(&rop_buffer(&reopen_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let reopened_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &reopened_response,
+        &utf16z("Café avec neuchatel")
+    ));
 
     fixture.cleanup().await?;
     Ok(())

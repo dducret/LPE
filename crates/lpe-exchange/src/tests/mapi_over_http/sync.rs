@@ -13629,6 +13629,53 @@ async fn execute_existing_calendar_sync_import(
 }
 
 #[tokio::test]
+async fn mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subject() {
+    // [MS-OXCFXICS] section 3.1.5.6.1: a client PCL with a later local id
+    // from the same replica includes the server PCL and is therefore newer.
+    let event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000305").unwrap();
+    let message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8035);
+    let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
+    let server_change_key = vec![
+        0xA2, 0xD1, 0xCC, 0x5A, 0x17, 0xAB, 0x87, 0x4F, 0xB7, 0x18, 0xA2, 0xE4, 0xB8, 0xAB, 0x0A,
+        0xC2, 0x00, 0x00, 0x08, 0x22,
+    ];
+    let client_change_key = vec![
+        0xA2, 0xD1, 0xCC, 0x5A, 0x17, 0xAB, 0x87, 0x4F, 0xB7, 0x18, 0xA2, 0xE4, 0xB8, 0xAB, 0x0A,
+        0xC2, 0x00, 0x00, 0x08, 0x23,
+    ];
+    let server_pcl = calendar_sync_conflict_pcl(&[&server_change_key]);
+    let client_pcl = calendar_sync_conflict_pcl(&[&client_change_key]);
+    let store = calendar_sync_conflict_store(
+        event_id,
+        message_id,
+        server_change_key,
+        server_pcl,
+        "2026-07-17T10:00:00Z",
+    );
+    let events = store.events.clone();
+    let versions = store.mapi_event_identity_versions.clone();
+
+    let response = execute_existing_calendar_sync_import(
+        store,
+        &source_key,
+        test_filetime("2026-07-17", "11:00"),
+        &client_change_key,
+        &client_pcl,
+        0,
+        Some("Café avec neuchatel"),
+        false,
+    )
+    .await;
+
+    assert!(contains_bytes(&response, &[0x72, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response, &[0x0c, 0x02, 0, 0, 0, 0]));
+    assert_eq!(events.lock().unwrap()[0].title, "Café avec neuchatel");
+    let version = versions.lock().unwrap()[&event_id].clone();
+    assert_eq!(version.change_key, client_change_key);
+    assert_eq!(version.predecessor_change_list, client_pcl);
+}
+
+#[tokio::test]
 async fn mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_save() {
     // [MS-OXCFXICS] section 3.1.5.6.1: when the server PCL includes the
     // client PCL, the imported version is older and MUST be ignored.
