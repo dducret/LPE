@@ -765,8 +765,10 @@ pub struct UpsertClientTaskRequest {
     pub title: String,
     pub description: String,
     pub status: String,
+    pub starts_at: Option<String>,
     pub due_at: Option<String>,
     pub completed_at: Option<String>,
+    pub priority: Option<i32>,
     pub recurrence_rule: Option<String>,
     pub sort_order: Option<i32>,
 }

@@ -460,8 +460,10 @@ fn task_properties(properties: Option<Vec<String>>) -> HashSet<String> {
                 "title".to_string(),
                 "description".to_string(),
                 "status".to_string(),
+                "start".to_string(),
                 "due".to_string(),
                 "completed".to_string(),
+                "priority".to_string(),
                 "sortOrder".to_string(),
                 "updated".to_string(),
             ]
@@ -514,6 +516,7 @@ fn task_to_value(task: &ClientTask, properties: &HashSet<String>) -> Value {
         task.description.clone(),
     );
     insert_if(properties, &mut object, "status", task.status.clone());
+    insert_if(properties, &mut object, "start", task.starts_at.clone());
     insert_if(properties, &mut object, "due", task.due_at.clone());
     insert_if(
         properties,
@@ -521,6 +524,7 @@ fn task_to_value(task: &ClientTask, properties: &HashSet<String>) -> Value {
         "completed",
         task.completed_at.clone(),
     );
+    insert_if(properties, &mut object, "priority", task.priority);
     insert_if(
         properties,
         &mut object,
@@ -597,11 +601,26 @@ fn parse_task_input(
         description: parse_optional_string(object.get("description"))?.unwrap_or_default(),
         status: parse_optional_string(object.get("status"))?
             .unwrap_or_else(|| "needs-action".to_string()),
+        starts_at: parse_optional_string(object.get("start"))?,
         due_at: parse_optional_string(object.get("due"))?,
         completed_at: parse_optional_string(object.get("completed"))?,
+        priority: parse_task_priority(object.get("priority"))?,
         recurrence_rule: parse_optional_string(object.get("recurrenceRule"))?.unwrap_or_default(),
         sort_order: object.get("sortOrder").and_then(Value::as_i64).unwrap_or(0) as i32,
     })
+}
+
+fn parse_task_priority(value: Option<&Value>) -> Result<i32> {
+    let Some(value) = value else {
+        return Ok(0);
+    };
+    let priority = value
+        .as_i64()
+        .ok_or_else(|| anyhow!("priority must be an integer"))?;
+    if !(0..=9).contains(&priority) {
+        bail!("priority must be between 0 and 9");
+    }
+    Ok(priority as i32)
 }
 
 fn parse_task_list_create(account_id: Uuid, value: Value) -> Result<CreateTaskListInput> {
@@ -639,8 +658,8 @@ fn parse_task_list_update(
 fn reject_unknown_task_properties(object: &Map<String, Value>) -> Result<()> {
     for key in object.keys() {
         match key.as_str() {
-            "@type" | "uid" | "title" | "description" | "status" | "due" | "completed"
-            | "recurrenceRule" | "sortOrder" | "taskListId" => {}
+            "@type" | "uid" | "title" | "description" | "status" | "start" | "due"
+            | "completed" | "priority" | "recurrenceRule" | "sortOrder" | "taskListId" => {}
             _ => bail!("unsupported task property: {key}"),
         }
     }

@@ -248,8 +248,10 @@ impl FakeStore {
             title: title.to_string(),
             description: String::new(),
             status: "needs-action".to_string(),
+            starts_at: None,
             due_at: None,
             completed_at: None,
+            priority: 0,
             recurrence_rule: "FREQ=WEEKLY;COUNT=4;BYDAY=TH".to_string(),
             sort_order: 0,
             updated_at: "2026-04-20T09:00:00Z".to_string(),
@@ -656,11 +658,13 @@ impl DavStore for FakeStore {
                     } else {
                         input.status
                     },
+                    starts_at: input.starts_at,
                     due_at: input.due_at,
                     completed_at: match input.completed_at {
                         Some(value) if !value.trim().is_empty() => Some(value),
                         _ => None,
                     },
+                    priority: input.priority,
                     recurrence_rule: input.recurrence_rule,
                     sort_order: input.sort_order,
                     updated_at: "2026-04-20T09:00:00Z".to_string(),
@@ -1115,8 +1119,10 @@ async fn propfind_lists_task_collection_and_resources() {
             title: "Prepare launch".to_string(),
             description: "Review the last checklist".to_string(),
             status: "in-progress".to_string(),
+            starts_at: None,
             due_at: Some("2026-04-25T08:30:00Z".to_string()),
             completed_at: None,
+            priority: 0,
             recurrence_rule: String::new(),
             sort_order: 7,
             updated_at: "2026-04-20T09:00:00Z".to_string(),
@@ -1163,8 +1169,10 @@ async fn propfind_lists_shared_task_collection_with_canonical_name() {
             title: "Shared task".to_string(),
             description: String::new(),
             status: "needs-action".to_string(),
+            starts_at: None,
             due_at: None,
             completed_at: None,
+            priority: 0,
             recurrence_rule: String::new(),
             sort_order: 0,
             updated_at: "2026-04-20T09:00:00Z".to_string(),
@@ -1211,8 +1219,10 @@ async fn get_returns_vtodo_for_existing_task() {
             title: "File quarterly report".to_string(),
             description: "Publish before the board review".to_string(),
             status: "completed".to_string(),
+            starts_at: Some("2026-04-20T10:00:00Z".to_string()),
             due_at: Some("2026-04-30T10:00:00Z".to_string()),
             completed_at: Some("2026-04-28T16:45:00Z".to_string()),
+            priority: 8,
             recurrence_rule: "FREQ=WEEKLY;COUNT=4;BYDAY=TH".to_string(),
             sort_order: 3,
             updated_at: "2026-04-20T09:00:00Z".to_string(),
@@ -1236,6 +1246,8 @@ async fn get_returns_vtodo_for_existing_task() {
     assert!(body.contains("BEGIN:VTODO"));
     assert!(body.contains("SUMMARY:File quarterly report"));
     assert!(body.contains("STATUS:COMPLETED"));
+    assert!(body.contains("DTSTART:20260420T100000Z"));
+    assert!(body.contains("PRIORITY:8"));
     assert!(body.contains("RRULE:FREQ=WEEKLY;COUNT=4;BYDAY=TH"));
     assert!(body.contains("X-LPE-SORT-ORDER:3"));
 }
@@ -1255,7 +1267,7 @@ async fn put_upserts_task_from_vtodo() {
                 &Method::PUT,
                 &Uri::from_maybe_shared(task_resource_path(&collection_id, task_id)).unwrap(),
                 &bearer_headers(),
-                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:14141414-1414-1414-1414-141414141414\r\nSUMMARY:Prepare migration\r\nDESCRIPTION:Freeze tenant changes before the window\r\nSTATUS:IN-PROCESS\r\nDUE:20260501T083000Z\r\nRRULE:FREQ=WEEKLY;COUNT=4;BYDAY=FR\r\nX-LPE-SORT-ORDER:5\r\nEND:VTODO\r\nEND:VCALENDAR",
+                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:14141414-1414-1414-1414-141414141414\r\nSUMMARY:Prepare migration\r\nDESCRIPTION:Freeze tenant changes before the window\r\nSTATUS:IN-PROCESS\r\nDTSTART:20260501T080000Z\r\nDUE:20260501T083000Z\r\nPRIORITY:7\r\nRRULE:FREQ=WEEKLY;COUNT=4;BYDAY=FR\r\nX-LPE-SORT-ORDER:5\r\nEND:VTODO\r\nEND:VCALENDAR",
             )
             .await
             .unwrap();
@@ -1266,7 +1278,9 @@ async fn put_upserts_task_from_vtodo() {
     assert_eq!(tasks[0].id, task_id);
     assert_eq!(tasks[0].collection_id, collection_id);
     assert_eq!(tasks[0].status, "in-progress");
+    assert_eq!(tasks[0].starts_at.as_deref(), Some("2026-05-01T08:00:00Z"));
     assert_eq!(tasks[0].due_at.as_deref(), Some("2026-05-01T08:30:00Z"));
+    assert_eq!(tasks[0].priority, 7);
     assert_eq!(tasks[0].recurrence_rule, "FREQ=WEEKLY;COUNT=4;BYDAY=FR");
     assert_eq!(tasks[0].sort_order, 5);
 }
@@ -1474,8 +1488,10 @@ async fn delete_returns_forbidden_for_read_only_shared_task() {
             title: "Read only".to_string(),
             description: String::new(),
             status: "needs-action".to_string(),
+            starts_at: None,
             due_at: None,
             completed_at: None,
+            priority: 0,
             recurrence_rule: String::new(),
             sort_order: 0,
             updated_at: "2026-04-20T09:00:00Z".to_string(),

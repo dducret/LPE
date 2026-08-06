@@ -4744,8 +4744,10 @@ impl FakeStore {
             title: title.to_string(),
             description: "Task body".to_string(),
             status: "needs-action".to_string(),
+            starts_at: None,
             due_at: Some("2026-05-05T09:00:00Z".to_string()),
             completed_at: None,
+            priority: 0,
             recurrence_rule: String::new(),
             sort_order: 10,
             updated_at: "2026-05-04T08:00:00Z".to_string(),
@@ -9440,8 +9442,10 @@ impl ExchangeStore for FakeStore {
             title: input.title,
             description: input.description,
             status: input.status,
+            starts_at: input.starts_at,
             due_at: input.due_at,
             completed_at: input.completed_at,
+            priority: input.priority,
             recurrence_rule: input.recurrence_rule,
             sort_order: input.sort_order,
             updated_at: "2026-05-05T08:00:00Z".to_string(),
@@ -9463,6 +9467,7 @@ impl ExchangeStore for FakeStore {
         task.title = input.title;
         task.description = input.description;
         task.status = input.status;
+        task.starts_at = input.starts_at;
         task.due_at = input.due_at;
         task.completed_at = if task.status == "completed" {
             input
@@ -9471,6 +9476,7 @@ impl ExchangeStore for FakeStore {
         } else {
             None
         };
+        task.priority = input.priority;
         task.sort_order = input.sort_order;
         let mut versions = self.task_versions.lock().unwrap();
         let version = versions

@@ -3494,8 +3494,10 @@ fn reminder_named_properties_project_from_canonical_reminder_links() {
         title: "Follow up".to_string(),
         description: String::new(),
         status: "needs-action".to_string(),
+        starts_at: None,
         due_at: Some("2026-05-21T12:00:00Z".to_string()),
         completed_at: None,
+        priority: 0,
         recurrence_rule: String::new(),
         sort_order: 0,
         updated_at: "2026-05-20T09:00:00Z".to_string(),
@@ -3553,6 +3555,92 @@ fn reminder_named_properties_project_from_canonical_reminder_links() {
         ),
         Some(MapiValue::String(String::new()))
     );
+}
+
+#[test]
+fn task_properties_project_canonical_dates_status_priority_and_recurrence() {
+    let account_id = Uuid::from_u128(0x77777777_7777_4777_8777_77777777777e);
+    let mut task = default_task_for_mapping(account_id, "default");
+    task.status = "completed".to_string();
+    task.starts_at = Some("2026-05-20T09:00:00Z".to_string());
+    task.due_at = Some("2026-05-21T17:00:00Z".to_string());
+    task.completed_at = Some("2026-05-21T00:00:00Z".to_string());
+    task.priority = 1;
+    task.recurrence_rule = "FREQ=WEEKLY;COUNT=2".to_string();
+
+    assert_eq!(
+        task_property_value(&task, 1, TASKS_FOLDER_ID, PID_TAG_IMPORTANCE),
+        Some(MapiValue::U32(2))
+    );
+    assert_eq!(
+        task_property_value(&task, 1, TASKS_FOLDER_ID, PID_LID_TASK_STATUS_TAG),
+        Some(MapiValue::U32(2))
+    );
+    assert_eq!(
+        task_property_value(&task, 1, TASKS_FOLDER_ID, PID_LID_TASK_COMPLETE_TAG),
+        Some(MapiValue::Bool(true))
+    );
+    assert_eq!(
+        task_property_value(&task, 1, TASKS_FOLDER_ID, PID_LID_PERCENT_COMPLETE_TAG),
+        Some(MapiValue::F64(1.0f64.to_bits()))
+    );
+    assert_eq!(
+        task_property_value(&task, 1, TASKS_FOLDER_ID, PID_TAG_START_DATE),
+        Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-05-20T09:00:00Z"
+        )))
+    );
+    assert_eq!(
+        task_property_value(&task, 1, TASKS_FOLDER_ID, PID_LID_TASK_DUE_DATE_TAG),
+        Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-05-21T17:00:00Z"
+        )))
+    );
+    assert_eq!(
+        task_property_value(&task, 1, TASKS_FOLDER_ID, PID_LID_TASK_DATE_COMPLETED_TAG),
+        Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+            "2026-05-21T00:00:00Z"
+        )))
+    );
+    assert_eq!(
+        task_property_value(&task, 1, TASKS_FOLDER_ID, PID_LID_TASK_F_RECURRING_TAG),
+        Some(MapiValue::Bool(true))
+    );
+}
+
+#[test]
+fn task_property_updates_map_to_canonical_state_dates_and_priority() {
+    let account_id = Uuid::from_u128(0x77777777_7777_4777_8777_77777777777f);
+    let existing = default_task_for_mapping(account_id, "default");
+    let properties = HashMap::from([
+        (PID_LID_TASK_STATUS_TAG, MapiValue::U32(2)),
+        (
+            PID_LID_TASK_START_DATE_TAG,
+            MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-20T09:00:00Z",
+            )),
+        ),
+        (
+            PID_LID_TASK_DUE_DATE_TAG,
+            MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-21T17:00:00Z",
+            )),
+        ),
+        (
+            PID_LID_TASK_DATE_COMPLETED_TAG,
+            MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-21T00:00:00Z",
+            )),
+        ),
+        (PID_TAG_IMPORTANCE, MapiValue::U32(0)),
+    ]);
+
+    let input = task_input_from_mapi(account_id, None, &existing, Some("default"), &properties);
+    assert_eq!(input.status, "completed");
+    assert_eq!(input.starts_at.as_deref(), Some("2026-05-20T09:00:00Z"));
+    assert_eq!(input.due_at.as_deref(), Some("2026-05-21T17:00:00Z"));
+    assert_eq!(input.completed_at.as_deref(), Some("2026-05-21T00:00:00Z"));
+    assert_eq!(input.priority, 9);
 }
 
 #[test]

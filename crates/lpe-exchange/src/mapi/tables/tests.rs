@@ -43,8 +43,10 @@ fn test_client_task(title: &str, due_at: Option<&str>, updated_at: &str) -> Clie
         title: title.to_string(),
         description: String::new(),
         status: "needsAction".to_string(),
+        starts_at: None,
         due_at: due_at.map(str::to_string),
         completed_at: None,
+        priority: 0,
         recurrence_rule: String::new(),
         sort_order: 0,
         updated_at: updated_at.to_string(),
@@ -129,6 +131,38 @@ fn task_default_view_sort_orders_by_due_date() {
         &mut rows,
         &[MapiSortOrder {
             property_tag: PID_LID_TASK_DUE_DATE_TAG,
+            order: 0,
+        }],
+    );
+
+    assert_eq!(rows[0].task.title, "Earlier");
+    assert_eq!(rows[1].task.title, "Later");
+}
+
+#[test]
+fn task_default_view_sort_orders_by_start_date() {
+    let mut earlier = test_client_task("Earlier", None, "2026-05-20T09:00:00Z");
+    earlier.starts_at = Some("2026-05-21T09:00:00Z".to_string());
+    let mut later = test_client_task("Later", None, "2026-05-20T10:00:00Z");
+    later.starts_at = Some("2026-05-21T12:00:00Z".to_string());
+    let earlier = MapiTask {
+        id: 1,
+        folder_id: TASKS_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x11111111_1111_4111_8111_111111111112),
+        task: earlier,
+    };
+    let later = MapiTask {
+        id: 2,
+        folder_id: TASKS_FOLDER_ID,
+        canonical_id: Uuid::from_u128(0x22222222_2222_4222_8222_222222222223),
+        task: later,
+    };
+    let mut rows = vec![&later, &earlier];
+
+    sort_tasks(
+        &mut rows,
+        &[MapiSortOrder {
+            property_tag: PID_LID_TASK_START_DATE_TAG,
             order: 0,
         }],
     );

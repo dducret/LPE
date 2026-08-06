@@ -153,8 +153,10 @@ pub(crate) fn parse_vtodo(
     let mut title = String::new();
     let mut description = String::new();
     let mut status = String::new();
+    let mut starts_at = None;
     let mut due_at = None;
     let mut completed_at = None;
+    let mut priority = 0;
     let mut recurrence_rule = String::new();
     let mut sort_order = 0;
 
@@ -172,8 +174,14 @@ pub(crate) fn parse_vtodo(
             "SUMMARY" => title = value,
             "DESCRIPTION" => description = value,
             "STATUS" => status = task_status_from_vtodo_status(&value)?,
+            "DTSTART" => starts_at = Some(parse_ical_timestamp(&value)?),
             "DUE" => due_at = Some(parse_ical_timestamp(&value)?),
             "COMPLETED" => completed_at = Some(parse_ical_timestamp(&value)?),
+            "PRIORITY" => {
+                priority = value
+                    .parse::<i32>()
+                    .map_err(|_| anyhow!("invalid PRIORITY"))?;
+            }
             "RRULE" => recurrence_rule = value,
             "X-LPE-SORT-ORDER" => {
                 sort_order = value
@@ -196,8 +204,10 @@ pub(crate) fn parse_vtodo(
         title,
         description,
         status,
+        starts_at,
         due_at,
         completed_at,
+        priority,
         recurrence_rule,
         sort_order,
     })

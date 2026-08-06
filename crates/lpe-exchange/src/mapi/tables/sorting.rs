@@ -312,8 +312,16 @@ pub(in crate::mapi) fn sort_tasks(
                 PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
                     left.task.updated_at.cmp(&right.task.updated_at)
                 }
-                PID_LID_TASK_DUE_DATE_TAG => left.task.due_at.cmp(&right.task.due_at),
-                PID_LID_TASK_START_DATE_TAG => left.task.updated_at.cmp(&right.task.updated_at),
+                PID_TAG_IMPORTANCE => {
+                    task_importance(&left.task).cmp(&task_importance(&right.task))
+                }
+                PID_TAG_END_DATE | PID_LID_TASK_DUE_DATE_TAG => {
+                    left.task.due_at.cmp(&right.task.due_at)
+                }
+                PID_TAG_START_DATE | PID_LID_TASK_START_DATE_TAG => {
+                    left.task.starts_at.cmp(&right.task.starts_at)
+                }
+                PID_LID_TASK_STATUS_TAG => task_status(&left.task).cmp(&task_status(&right.task)),
                 PID_TAG_MID => left.id.cmp(&right.id),
                 _ => Ordering::Equal,
             };
@@ -324,6 +332,24 @@ pub(in crate::mapi) fn sort_tasks(
         }
         Ordering::Equal
     });
+}
+
+fn task_importance(task: &lpe_storage::ClientTask) -> u32 {
+    match task.priority {
+        1..=4 => 2,
+        5 => 1,
+        6..=9 => 0,
+        _ => 1,
+    }
+}
+
+fn task_status(task: &lpe_storage::ClientTask) -> u32 {
+    match task.status.as_str() {
+        "in-progress" => 1,
+        "completed" => 2,
+        "cancelled" => 4,
+        _ => 0,
+    }
 }
 
 pub(in crate::mapi) fn sort_notes(

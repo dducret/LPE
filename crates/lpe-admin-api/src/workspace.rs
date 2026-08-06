@@ -966,8 +966,10 @@ pub(crate) async fn upsert_client_task(
                 title: request.title,
                 description: request.description,
                 status: request.status,
+                starts_at: request.starts_at,
                 due_at: request.due_at,
                 completed_at: request.completed_at,
+                priority: request.priority.unwrap_or(0),
                 recurrence_rule: request.recurrence_rule.unwrap_or_default(),
                 sort_order: request.sort_order.unwrap_or(0),
             })

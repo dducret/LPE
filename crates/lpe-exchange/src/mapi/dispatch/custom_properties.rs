@@ -451,8 +451,12 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
         PID_LID_FLAG_REQUEST_W_TAG
             | PID_LID_COMMON_START_TAG
             | PID_LID_COMMON_END_TAG
+            | PID_LID_TASK_STATUS_TAG
             | PID_LID_TASK_START_DATE_TAG
             | PID_LID_TASK_DUE_DATE_TAG
+            | PID_LID_TASK_DATE_COMPLETED_TAG
+            | PID_LID_TASK_COMPLETE_TAG
+            | PID_LID_TASK_F_RECURRING_TAG
             | PID_LID_GLOBAL_OBJECT_ID_TAG
             | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG
             | PID_LID_BUSY_STATUS_TAG

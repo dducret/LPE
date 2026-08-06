@@ -39,9 +39,13 @@ pub(super) fn contains_outlook_view_descriptor_probe(properties: &[MapiNamedProp
                     || (*guid == PSETID_TASK_GUID
                         && matches!(
                             *lid,
-                            PID_LID_TASK_DUE_DATE
+                            PID_LID_TASK_STATUS
+                                | PID_LID_TASK_DUE_DATE
                                 | PID_LID_TASK_START_DATE
                                 | PID_LID_PERCENT_COMPLETE
+                                | PID_LID_TASK_DATE_COMPLETED
+                                | PID_LID_TASK_COMPLETE
+                                | PID_LID_TASK_F_RECURRING
                         ))
                     || (*guid == PSETID_NOTE_GUID && matches!(*lid, PID_LID_NOTE_COLOR))
                     || (*guid == PSETID_LOG_GUID

@@ -69,8 +69,14 @@ pub(crate) fn serialize_vtodo(task: &DavTask) -> String {
         "STATUS",
         vtodo_status_from_task_status(&task.status),
     );
+    if let Some(starts_at) = task.starts_at.as_deref() {
+        lines.push(format!("DTSTART:{}", format_ical_timestamp(starts_at)));
+    }
     if let Some(due_at) = task.due_at.as_deref() {
         lines.push(format!("DUE:{}", format_ical_timestamp(due_at)));
+    }
+    if task.priority != 0 {
+        lines.push(format!("PRIORITY:{}", task.priority));
     }
     if let Some(completed_at) = task.completed_at.as_deref() {
         lines.push(format!("COMPLETED:{}", format_ical_timestamp(completed_at)));

@@ -48,9 +48,32 @@ pub(in crate::mapi) fn task_property_value_with_reminder(
         )),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
+        PID_TAG_IMPORTANCE => Some(MapiValue::U32(task_importance(task))),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(task_flag_status(task))),
+        PID_TAG_FLAG_COMPLETE_TIME => task
+            .completed_at
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_TAG_START_DATE | PID_LID_TASK_START_DATE_TAG => task
+            .starts_at
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_TAG_END_DATE | PID_LID_TASK_DUE_DATE_TAG => task
+            .due_at
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        // MS-OXOTASK 2.2.2.2.2 requires the status, percent complete,
+        // completion date, and complete flag to stay consistent.
+        PID_LID_TASK_STATUS_TAG => Some(MapiValue::U32(task_status(task))),
         PID_LID_PERCENT_COMPLETE_TAG => Some(MapiValue::F64(task_percent_complete(task).to_bits())),
-        PID_LID_RECURRING_TAG => Some(MapiValue::Bool(!task.recurrence_rule.trim().is_empty())),
+        PID_LID_TASK_DATE_COMPLETED_TAG => task
+            .completed_at
+            .as_deref()
+            .map(|value| MapiValue::U64(task_completion_date_filetime(value))),
+        PID_LID_TASK_COMPLETE_TAG => Some(MapiValue::Bool(task.status == "completed")),
+        PID_LID_TASK_F_RECURRING_TAG => {
+            Some(MapiValue::Bool(!task.recurrence_rule.trim().is_empty()))
+        }
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(task_size(task))),
         PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(task_size(task))),
@@ -124,10 +147,28 @@ fn task_flag_status(task: &ClientTask) -> u32 {
 }
 
 fn task_percent_complete(task: &ClientTask) -> f64 {
-    if task.status == "completed" {
-        1.0
-    } else {
-        0.0
+    match task.status.as_str() {
+        "completed" => 1.0,
+        "in-progress" => 0.5,
+        _ => 0.0,
+    }
+}
+
+fn task_status(task: &ClientTask) -> u32 {
+    match task.status.as_str() {
+        "in-progress" => 1,
+        "completed" => 2,
+        "cancelled" => 4,
+        _ => 0,
+    }
+}
+
+fn task_importance(task: &ClientTask) -> u32 {
+    match task.priority {
+        1..=4 => 2,
+        5 => 1,
+        6..=9 => 0,
+        _ => 1,
     }
 }
 
@@ -147,8 +188,10 @@ pub(in crate::mapi) fn default_task_for_mapping(
         title: String::new(),
         description: String::new(),
         status: "needs-action".to_string(),
+        starts_at: None,
         due_at: None,
         completed_at: None,
+        priority: 0,
         recurrence_rule: String::new(),
         sort_order: if matches!(collection_id, "tasks" | "default") {
             0
@@ -175,24 +218,50 @@ pub(in crate::mapi) fn task_input_from_mapi(
         ],
     )
     .unwrap_or_else(|| existing.title.clone());
-    let status = properties
-        .get(&PID_TAG_FLAG_STATUS)
-        .and_then(MapiValue::as_i64)
-        .map(|value| {
-            if value == FOLLOWUP_COMPLETE as i64 {
-                "completed"
-            } else {
-                "needs-action"
-            }
-        })
-        .unwrap_or(&existing.status)
-        .to_string();
-    let due_at = properties
-        .get(&PID_TAG_END_DATE)
-        .and_then(MapiValue::as_i64)
-        .and_then(filetime_to_date_time)
-        .map(|(date, time)| format!("{date}T{time}:00Z"))
+    let status = task_status_from_mapi(properties).unwrap_or_else(|| existing.status.clone());
+    let status_was_updated = properties.keys().any(|tag| {
+        matches!(
+            canonical_property_storage_tag(*tag),
+            PID_TAG_FLAG_STATUS
+                | PID_LID_TASK_STATUS_TAG
+                | PID_LID_TASK_COMPLETE_TAG
+                | PID_LID_PERCENT_COMPLETE_TAG
+        )
+    });
+    let starts_at = task_time_from_mapi(
+        properties,
+        &[PID_TAG_START_DATE, PID_LID_TASK_START_DATE_TAG],
+    )
+    .or_else(|| existing.starts_at.clone());
+    let due_at = task_time_from_mapi(properties, &[PID_TAG_END_DATE, PID_LID_TASK_DUE_DATE_TAG])
         .or_else(|| existing.due_at.clone());
+    let completed_at = task_time_from_mapi(
+        properties,
+        &[PID_TAG_FLAG_COMPLETE_TIME, PID_LID_TASK_DATE_COMPLETED_TAG],
+    )
+    .or_else(|| {
+        (status == "completed").then(|| {
+            existing
+                .completed_at
+                .clone()
+                .unwrap_or_else(current_task_completion_time)
+        })
+    })
+    .or_else(|| {
+        (!status_was_updated)
+            .then(|| existing.completed_at.clone())
+            .flatten()
+    });
+    let priority = properties
+        .get(&PID_TAG_IMPORTANCE)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| match value {
+            0 => Some(9),
+            1 => Some(5),
+            2 => Some(1),
+            _ => None,
+        })
+        .unwrap_or(existing.priority);
     UpsertClientTaskInput {
         id,
         principal_account_id: account_id,
@@ -204,11 +273,86 @@ pub(in crate::mapi) fn task_input_from_mapi(
         description: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
             .unwrap_or_else(|| existing.description.clone()),
         status,
+        starts_at,
         due_at,
-        completed_at: existing.completed_at.clone(),
+        completed_at,
+        priority,
         recurrence_rule: existing.recurrence_rule.clone(),
         sort_order: existing.sort_order,
     }
+}
+
+fn task_status_from_mapi(properties: &HashMap<u32, MapiValue>) -> Option<String> {
+    if let Some(value) = properties
+        .get(&PID_LID_TASK_STATUS_TAG)
+        .and_then(MapiValue::as_i64)
+    {
+        return match value {
+            0 => Some("needs-action".to_string()),
+            1 => Some("in-progress".to_string()),
+            2 => Some("completed".to_string()),
+            4 => Some("cancelled".to_string()),
+            _ => None,
+        };
+    }
+    if let Some(value) = properties
+        .get(&PID_LID_TASK_COMPLETE_TAG)
+        .and_then(MapiValue::as_bool)
+    {
+        return Some(if value { "completed" } else { "needs-action" }.to_string());
+    }
+    if let Some(value) = properties
+        .get(&PID_TAG_FLAG_STATUS)
+        .and_then(MapiValue::as_i64)
+    {
+        return Some(
+            if value == FOLLOWUP_COMPLETE as i64 {
+                "completed"
+            } else {
+                "needs-action"
+            }
+            .to_string(),
+        );
+    }
+    properties
+        .get(&PID_LID_PERCENT_COMPLETE_TAG)
+        .and_then(|value| match value {
+            MapiValue::F64(bits) => Some(f64::from_bits(*bits)),
+            _ => None,
+        })
+        .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+        .map(|value| {
+            if value == 1.0 {
+                "completed"
+            } else if value > 0.0 {
+                "in-progress"
+            } else {
+                "needs-action"
+            }
+            .to_string()
+        })
+}
+
+fn task_time_from_mapi(properties: &HashMap<u32, MapiValue>, tags: &[u32]) -> Option<String> {
+    tags.iter().find_map(|tag| {
+        properties
+            .get(tag)
+            .and_then(MapiValue::as_i64)
+            .and_then(filetime_to_date_time)
+            .map(|(date, time)| format!("{date}T{time}:00Z"))
+    })
+}
+
+fn current_task_completion_time() -> String {
+    filetime_to_date_time(lpe_domain::current_windows_filetime() as i64)
+        .map(|(date, _)| format!("{date}T00:00:00Z"))
+        .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string())
+}
+
+fn task_completion_date_filetime(value: &str) -> u64 {
+    filetime_to_date_time(mapi_mailstore::filetime_from_rfc3339_utc(value) as i64)
+        .map(|(date, _)| mapi_mailstore::filetime_from_rfc3339_utc(&format!("{date}T00:00:00Z")))
+        .unwrap_or_else(|| mapi_mailstore::filetime_from_rfc3339_utc(value))
 }
 
 fn reject_unsupported_mapi_task_properties(properties: &HashMap<u32, MapiValue>) -> Result<()> {
@@ -219,8 +363,17 @@ fn reject_unsupported_mapi_task_properties(properties: &HashMap<u32, MapiValue>)
                 | PID_TAG_NORMALIZED_SUBJECT_W
                 | PID_TAG_DISPLAY_NAME_W
                 | PID_TAG_BODY_W
+                | PID_TAG_IMPORTANCE
                 | PID_TAG_FLAG_STATUS
+                | PID_TAG_FLAG_COMPLETE_TIME
+                | PID_TAG_START_DATE
                 | PID_TAG_END_DATE
+                | PID_LID_TASK_STATUS_TAG
+                | PID_LID_PERCENT_COMPLETE_TAG
+                | PID_LID_TASK_START_DATE_TAG
+                | PID_LID_TASK_DUE_DATE_TAG
+                | PID_LID_TASK_DATE_COMPLETED_TAG
+                | PID_LID_TASK_COMPLETE_TAG
         );
         if !supported {
             return Err(anyhow!(

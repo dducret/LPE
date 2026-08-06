@@ -14,16 +14,20 @@ pub(in crate::service) fn task_item_summary_xml_with_change_key(
             "<t:ItemId Id=\"task:{id}\" ChangeKey=\"{change_key}\"/>",
             "<t:Subject>{title}</t:Subject>",
             "<t:Status>{status}</t:Status>",
+            "{start_date}",
             "{due_date}",
             "{complete_date}",
+            "{priority}",
             "</t:Task>"
         ),
         id = task.id,
         change_key = escape_xml(change_key),
         title = escape_xml(&task.title),
         status = ews_task_status(&task.status),
+        start_date = optional_text_element("t:StartDate", task.starts_at.as_deref()),
         due_date = optional_text_element("t:DueDate", task.due_at.as_deref()),
         complete_date = optional_text_element("t:CompleteDate", task.completed_at.as_deref()),
+        priority = task_priority_xml(task.priority),
     )
 }
 
@@ -39,8 +43,10 @@ pub(in crate::service) fn task_item_xml_with_change_key(
             "<t:Subject>{title}</t:Subject>",
             "<t:Body BodyType=\"Text\">{description}</t:Body>",
             "<t:Status>{status}</t:Status>",
+            "{start_date}",
             "{due_date}",
             "{complete_date}",
+            "{priority}",
             "</t:Task>"
         ),
         id = task.id,
@@ -49,8 +55,10 @@ pub(in crate::service) fn task_item_xml_with_change_key(
         title = escape_xml(&task.title),
         description = escape_xml(&task.description),
         status = ews_task_status(&task.status),
+        start_date = optional_text_element("t:StartDate", task.starts_at.as_deref()),
         due_date = optional_text_element("t:DueDate", task.due_at.as_deref()),
         complete_date = optional_text_element("t:CompleteDate", task.completed_at.as_deref()),
+        priority = task_priority_xml(task.priority),
     )
 }
 
@@ -70,8 +78,10 @@ pub(in crate::service) fn create_task_success_response(
             "<t:ParentFolderId Id=\"{folder_id}\"/>",
             "<t:Subject>{title}</t:Subject>",
             "<t:Status>{status}</t:Status>",
+            "{start_date}",
             "{due_date}",
             "{complete_date}",
+            "{priority}",
             "</t:Task>",
             "</m:Items>",
             "</m:CreateItemResponseMessage>",
@@ -83,8 +93,10 @@ pub(in crate::service) fn create_task_success_response(
         folder_id = task.task_list_id,
         title = escape_xml(&task.title),
         status = ews_task_status(&task.status),
+        start_date = optional_text_element("t:StartDate", task.starts_at.as_deref()),
         due_date = optional_text_element("t:DueDate", task.due_at.as_deref()),
         complete_date = optional_text_element("t:CompleteDate", task.completed_at.as_deref()),
+        priority = task_priority_xml(task.priority),
     )
 }
 
@@ -116,8 +128,10 @@ pub(in crate::service) fn parse_create_task_input(
         title: element_text(task, "Subject").unwrap_or_else(|| "Untitled task".to_string()),
         description,
         status,
+        starts_at: element_text(task, "StartDate"),
         due_at: element_text(task, "DueDate"),
         completed_at: element_text(task, "CompleteDate"),
+        priority: parse_ews_task_priority(element_text(task, "Importance"))?,
         recurrence_rule: parse_ews_recurrence(task)?,
         sort_order: 0,
     })
@@ -157,6 +171,11 @@ pub(in crate::service) fn parse_update_task_input(
             .if_empty(existing.title.clone()),
         description,
         status,
+        starts_at: if field_deleted(request, "task:StartDate") {
+            None
+        } else {
+            element_text(task, "StartDate").or_else(|| existing.starts_at.clone())
+        },
         due_at: if field_deleted(request, "task:DueDate") {
             None
         } else {
@@ -166,6 +185,13 @@ pub(in crate::service) fn parse_update_task_input(
             None
         } else {
             element_text(task, "CompleteDate").or_else(|| existing.completed_at.clone())
+        },
+        priority: if field_deleted(request, "item:Importance") {
+            0
+        } else if let Some(priority) = element_text(task, "Importance") {
+            parse_ews_task_priority(Some(priority))?
+        } else {
+            existing.priority
         },
         recurrence_rule: if field_deleted(request, "task:Recurrence") {
             String::new()
@@ -195,6 +221,28 @@ fn ews_task_status(status: &str) -> &'static str {
         "completed" => "Completed",
         "cancelled" => "Deferred",
         _ => "NotStarted",
+    }
+}
+
+fn task_priority_xml(priority: i32) -> String {
+    let importance = match priority {
+        1..=3 => "High",
+        7..=9 => "Low",
+        _ => "Normal",
+    };
+    format!("<t:Importance>{importance}</t:Importance>")
+}
+
+fn parse_ews_task_priority(value: Option<String>) -> Result<i32> {
+    match value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None | Some("Normal") => Ok(5),
+        Some("Low") => Ok(9),
+        Some("High") => Ok(1),
+        Some(value) => bail!("unsupported task importance: {value}"),
     }
 }
 

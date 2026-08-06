@@ -616,8 +616,10 @@ impl FakeStore {
             title: "Prepare release".to_string(),
             description: "Confirm the release checklist".to_string(),
             status: "needs-action".to_string(),
+            starts_at: Some("2026-04-20T09:00:00Z".to_string()),
             due_at: Some("2026-04-21T09:00:00Z".to_string()),
             completed_at: None,
+            priority: 5,
             recurrence_rule: String::new(),
             sort_order: 10,
             updated_at: "2026-04-20T15:00:00Z".to_string(),
@@ -2069,6 +2071,7 @@ impl JmapStore for FakeStore {
             title: input.title.trim().to_string(),
             description: input.description.trim().to_string(),
             status: input.status.trim().to_ascii_lowercase(),
+            starts_at: input.starts_at,
             due_at: input.due_at,
             completed_at: if input.status.trim().eq_ignore_ascii_case("completed") {
                 input
@@ -2077,6 +2080,7 @@ impl JmapStore for FakeStore {
             } else {
                 None
             },
+            priority: input.priority,
             recurrence_rule: input.recurrence_rule,
             sort_order: input.sort_order,
             updated_at: if input.id.is_some() {
@@ -12079,8 +12083,10 @@ async fn shared_task_push_change_wakes_grantee_principal() {
         title: "Shared rollout".to_string(),
         description: "Visible through canonical sharing".to_string(),
         status: "in-progress".to_string(),
+        starts_at: None,
         due_at: None,
         completed_at: None,
+        priority: 0,
         recurrence_rule: String::new(),
         sort_order: 1,
         updated_at: "2026-04-20T16:20:00Z".to_string(),
@@ -13483,7 +13489,9 @@ async fn task_methods_use_canonical_task_store() {
                                     "title": "Follow up",
                                     "description": "Send customer recap",
                                     "status": "in-progress",
+                                    "start": "2026-04-21T08:00:00Z",
                                     "due": "2026-04-22T08:30:00Z",
+                                    "priority": 8,
                                     "sortOrder": 20,
                                     "taskListId": FakeStore::default_task_list().id.to_string()
                                 }
@@ -13505,10 +13513,56 @@ async fn task_methods_use_canonical_task_store() {
         response.method_responses[1].1["list"][0]["status"],
         Value::String("needs-action".to_string())
     );
+    assert_eq!(
+        response.method_responses[1].1["list"][0]["start"],
+        Value::String("2026-04-20T09:00:00Z".to_string())
+    );
+    assert_eq!(response.method_responses[1].1["list"][0]["priority"], 5);
     assert!(response.created_ids.contains_key("t1"));
     let tasks = store.tasks.lock().unwrap();
     assert_eq!(tasks.len(), 2);
-    assert!(tasks.iter().any(|task| task.title == "Follow up"));
+    let task = tasks.iter().find(|task| task.title == "Follow up").unwrap();
+    assert_eq!(task.starts_at.as_deref(), Some("2026-04-21T08:00:00Z"));
+    assert_eq!(task.priority, 8);
+}
+
+#[tokio::test]
+async fn task_set_rejects_out_of_range_priority() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        task_lists: Arc::new(Mutex::new(vec![FakeStore::default_task_list()])),
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Task/set".to_string(),
+                    json!({
+                        "create": {
+                            "t1": {
+                                "@type": "Task",
+                                "title": "Invalid priority",
+                                "priority": 10,
+                                "taskListId": FakeStore::default_task_list().id.to_string()
+                            }
+                        }
+                    }),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["notCreated"]["t1"]["description"],
+        "priority must be between 0 and 9"
+    );
 }
 
 #[tokio::test]
@@ -14825,9 +14879,11 @@ async fn task_query_includes_shared_accessible_tasks() {
         title: "Shared rollout".to_string(),
         description: "Visible through canonical sharing".to_string(),
         status: "in-progress".to_string(),
+        starts_at: None,
         due_at: None,
         recurrence_rule: String::new(),
         completed_at: None,
+        priority: 0,
         sort_order: 1,
         updated_at: "2026-04-20T16:20:00Z".to_string(),
     };

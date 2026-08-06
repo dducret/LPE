@@ -2292,7 +2292,9 @@ async fn create_update_task_round_trips_through_sync_folder_items() {
                       <t:Subject>Review JMAP parity</t:Subject>
                       <t:Body BodyType="Text">Check EWS task coverage</t:Body>
                       <t:Status>InProgress</t:Status>
+                      <t:StartDate>2026-05-06T08:00:00Z</t:StartDate>
                       <t:DueDate>2026-05-06T09:00:00Z</t:DueDate>
+                      <t:Importance>High</t:Importance>
                     </t:Task>
                   </m:Items>
                 </m:CreateItem>
@@ -2308,6 +2310,11 @@ async fn create_update_task_round_trips_through_sync_folder_items() {
     assert!(body.contains("task:eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"));
     assert_eq!(tasks.lock().unwrap()[0].task_list_id, task_list_id);
     assert_eq!(tasks.lock().unwrap()[0].status, "in-progress");
+    assert_eq!(
+        tasks.lock().unwrap()[0].starts_at.as_deref(),
+        Some("2026-05-06T08:00:00Z")
+    );
+    assert_eq!(tasks.lock().unwrap()[0].priority, 1);
 
     let response = service
         .handle(
@@ -2343,6 +2350,8 @@ async fn create_update_task_round_trips_through_sync_folder_items() {
                             <t:Subject>Complete JMAP parity review</t:Subject>
                             <t:Body BodyType="Text">Validated through EWS sync</t:Body>
                             <t:Status>Completed</t:Status>
+                            <t:StartDate>2026-05-06T08:15:00Z</t:StartDate>
+                            <t:Importance>Normal</t:Importance>
                             <t:CompleteDate>2026-05-06T10:00:00Z</t:CompleteDate>
                           </t:Task>
                         </t:SetItemField>
@@ -2361,6 +2370,11 @@ async fn create_update_task_round_trips_through_sync_folder_items() {
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:Subject>Complete JMAP parity review</t:Subject>"));
     assert!(body.contains("<t:Status>Completed</t:Status>"));
+    assert_eq!(
+        tasks.lock().unwrap()[0].starts_at.as_deref(),
+        Some("2026-05-06T08:15:00Z")
+    );
+    assert_eq!(tasks.lock().unwrap()[0].priority, 5);
 
     let request = format!(
         r#"<s:Envelope><s:Body><m:SyncFolderItems><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape><m:SyncFolderId><t:FolderId Id="aaaaaaaa-0000-0000-0000-000000000001"/></m:SyncFolderId><m:SyncState>{old_sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
@@ -2372,7 +2386,9 @@ async fn create_update_task_round_trips_through_sync_folder_items() {
     let body = response_text(response).await;
     assert!(body.contains("<t:Update><t:Task>"));
     assert!(body.contains("<t:Subject>Complete JMAP parity review</t:Subject>"));
+    assert!(body.contains("<t:StartDate>2026-05-06T08:15:00Z</t:StartDate>"));
     assert!(body.contains("<t:CompleteDate>2026-05-06T10:00:00Z</t:CompleteDate>"));
+    assert!(body.contains("<t:Importance>Normal</t:Importance>"));
 }
 
 #[tokio::test]

@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use sqlx::types::chrono::{DateTime, FixedOffset};
 use sqlx::Postgres;
 use uuid::Uuid;
 
@@ -25,6 +26,16 @@ impl Storage {
         }
 
         let status = normalize_task_status(&input.status)?;
+        if !(0..=9).contains(&input.priority) {
+            bail!("task priority must be between 0 and 9");
+        }
+        let starts_at = parse_task_timestamp(input.starts_at.as_deref(), "start")?;
+        let due_at = parse_task_timestamp(input.due_at.as_deref(), "due")?;
+        if let (Some(starts_at), Some(due_at)) = (starts_at, due_at) {
+            if due_at < starts_at {
+                bail!("task due time must not be earlier than its start time");
+            }
+        }
         let principal_account_id = input.principal_account_id;
         let task_id = input.id.unwrap_or_else(Uuid::new_v4);
         let existing_task = match input.id {
@@ -94,8 +105,10 @@ impl Storage {
                 title,
                 description,
                 status,
+                starts_at,
                 due_at,
                 completed_at,
+                priority,
                 recurrence_rule,
                 sort_order
             )
@@ -109,20 +122,24 @@ impl Storage {
                 $6,
                 $7,
                 NULLIF($8, '')::timestamptz,
+                NULLIF($9, '')::timestamptz,
                 CASE
-                    WHEN $7 = 'completed' THEN COALESCE(NULLIF($9, '')::timestamptz, NOW())
+                    WHEN $7 = 'completed' THEN COALESCE(NULLIF($10, '')::timestamptz, NOW())
                     ELSE NULL
                 END,
-                NULLIF($10, ''),
-                $11
+                $11,
+                NULLIF($12, ''),
+                $13
             )
             ON CONFLICT (id) DO UPDATE SET
                 task_list_id = EXCLUDED.task_list_id,
                 title = EXCLUDED.title,
                 description = EXCLUDED.description,
                 status = EXCLUDED.status,
+                starts_at = EXCLUDED.starts_at,
                 due_at = EXCLUDED.due_at,
                 completed_at = EXCLUDED.completed_at,
+                priority = EXCLUDED.priority,
                 recurrence_rule = EXCLUDED.recurrence_rule,
                 sort_order = EXCLUDED.sort_order,
                 updated_at = NOW()
@@ -131,13 +148,13 @@ impl Storage {
             RETURNING
                 tasks.id,
                 tasks.owner_account_id,
-                $12::text AS owner_email,
-                $13::text AS owner_display_name,
-                $14::boolean AS is_owned,
-                $15::boolean AS may_read,
-                $16::boolean AS may_write,
-                $17::boolean AS may_delete,
-                $18::boolean AS may_share,
+                $14::text AS owner_email,
+                $15::text AS owner_display_name,
+                $16::boolean AS is_owned,
+                $17::boolean AS may_read,
+                $18::boolean AS may_write,
+                $19::boolean AS may_delete,
+                $20::boolean AS may_share,
                 tasks.task_list_id,
                 (
                     SELECT sort_order
@@ -150,6 +167,10 @@ impl Storage {
                 tasks.description,
                 tasks.status,
                 CASE
+                    WHEN tasks.starts_at IS NULL THEN NULL
+                    ELSE to_char(tasks.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+                END AS starts_at,
+                CASE
                     WHEN tasks.due_at IS NULL THEN NULL
                     ELSE to_char(tasks.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS due_at,
@@ -157,6 +178,7 @@ impl Storage {
                     WHEN tasks.completed_at IS NULL THEN NULL
                     ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS completed_at,
+                tasks.priority,
                 COALESCE(tasks.recurrence_rule, '') AS recurrence_rule,
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
@@ -169,8 +191,10 @@ impl Storage {
         .bind(title)
         .bind(input.description.trim())
         .bind(status)
+        .bind(input.starts_at.as_deref().unwrap_or_default().trim())
         .bind(input.due_at.as_deref().unwrap_or_default().trim())
         .bind(input.completed_at.as_deref().unwrap_or_default().trim())
+        .bind(input.priority)
         .bind(input.recurrence_rule.trim())
         .bind(input.sort_order)
         .bind(target_task_list.owner_email.clone())
@@ -1079,6 +1103,10 @@ impl Storage {
                 tasks.description,
                 tasks.status,
                 CASE
+                    WHEN tasks.starts_at IS NULL THEN NULL
+                    ELSE to_char(tasks.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+                END AS starts_at,
+                CASE
                     WHEN tasks.due_at IS NULL THEN NULL
                     ELSE to_char(tasks.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS due_at,
@@ -1086,6 +1114,7 @@ impl Storage {
                     WHEN tasks.completed_at IS NULL THEN NULL
                     ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS completed_at,
+                tasks.priority,
                 COALESCE(tasks.recurrence_rule, '') AS recurrence_rule,
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
@@ -1161,6 +1190,10 @@ impl Storage {
                 tasks.description,
                 tasks.status,
                 CASE
+                    WHEN tasks.starts_at IS NULL THEN NULL
+                    ELSE to_char(tasks.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+                END AS starts_at,
+                CASE
                     WHEN tasks.due_at IS NULL THEN NULL
                     ELSE to_char(tasks.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS due_at,
@@ -1168,6 +1201,7 @@ impl Storage {
                     WHEN tasks.completed_at IS NULL THEN NULL
                     ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS completed_at,
+                tasks.priority,
                 COALESCE(tasks.recurrence_rule, '') AS recurrence_rule,
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
@@ -1230,8 +1264,10 @@ impl Storage {
             title: task.title,
             description: task.description,
             status: task.status,
+            starts_at: task.starts_at,
             due_at: task.due_at,
             completed_at: task.completed_at,
+            priority: task.priority,
             recurrence_rule: task.recurrence_rule,
             sort_order: task.sort_order,
             updated_at: task.updated_at,
@@ -1276,6 +1312,10 @@ impl Storage {
                 tasks.description,
                 tasks.status,
                 CASE
+                    WHEN tasks.starts_at IS NULL THEN NULL
+                    ELSE to_char(tasks.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+                END AS starts_at,
+                CASE
                     WHEN tasks.due_at IS NULL THEN NULL
                     ELSE to_char(tasks.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS due_at,
@@ -1283,6 +1323,7 @@ impl Storage {
                     WHEN tasks.completed_at IS NULL THEN NULL
                     ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS completed_at,
+                tasks.priority,
                 COALESCE(tasks.recurrence_rule, '') AS recurrence_rule,
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
@@ -1359,6 +1400,10 @@ impl Storage {
                 tasks.description,
                 tasks.status,
                 CASE
+                    WHEN tasks.starts_at IS NULL THEN NULL
+                    ELSE to_char(tasks.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
+                END AS starts_at,
+                CASE
                     WHEN tasks.due_at IS NULL THEN NULL
                     ELSE to_char(tasks.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS due_at,
@@ -1366,6 +1411,7 @@ impl Storage {
                     WHEN tasks.completed_at IS NULL THEN NULL
                     ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS completed_at,
+                tasks.priority,
                 COALESCE(tasks.recurrence_rule, '') AS recurrence_rule,
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
@@ -1477,4 +1523,15 @@ impl Storage {
         .await?
         .ok_or_else(|| anyhow!("task list not found"))
     }
+}
+
+fn parse_task_timestamp(value: Option<&str>, field: &str) -> Result<Option<DateTime<FixedOffset>>> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            DateTime::parse_from_rfc3339(value)
+                .map_err(|_| anyhow!("task {field} time must be an RFC3339 timestamp"))
+        })
+        .transpose()
 }
