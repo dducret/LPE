@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: user_saved_search_folder_projection_key
-resource: crates/lpe-exchange/src/mapi_store.rs#L376-L382
+resource: crates/lpe-exchange/src/mapi_store.rs#L377-L383
 visibility: private
 generated:
   by: okf-rs/0.3.0

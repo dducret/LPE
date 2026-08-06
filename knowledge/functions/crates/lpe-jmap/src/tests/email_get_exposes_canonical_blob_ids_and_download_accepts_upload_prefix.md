@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_get_exposes_canonical_blob_ids_and_download_accepts_upload_prefix
-resource: crates/lpe-jmap/src/tests.rs#L7206-L7277
+resource: crates/lpe-jmap/src/tests.rs#L7694-L7765
 visibility: private
 generated:
   by: okf-rs/0.3.0

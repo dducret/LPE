@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: shared_task_list_rights_push_change_wakes_grantee_principal
-resource: crates/lpe-jmap/src/tests.rs#L11649-L11706
+resource: crates/lpe-jmap/src/tests.rs#L12139-L12196
 visibility: private
 generated:
   by: okf-rs/0.3.0

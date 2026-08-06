@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: resolve_names_returns_tenant_directory_account_match
-resource: crates/lpe-exchange/src/tests/ews.rs#L1156-L1181
+resource: crates/lpe-exchange/src/tests/ews.rs#L1473-L1498
 visibility: private
 generated:
   by: okf-rs/0.3.0

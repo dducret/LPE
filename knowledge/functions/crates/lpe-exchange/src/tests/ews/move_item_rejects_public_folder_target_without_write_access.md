@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: move_item_rejects_public_folder_target_without_write_access
-resource: crates/lpe-exchange/src/tests/ews.rs#L8827-L8883
+resource: crates/lpe-exchange/src/tests/ews.rs#L9268-L9324
 visibility: private
 generated:
   by: okf-rs/0.3.0

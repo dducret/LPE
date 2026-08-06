@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: apply_canonical_contact_property_values
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L680-L706
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L814-L840
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_builtin_contacts_search_get_search_criteria_uses_fixed_folder_id
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1617-L1672
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1706-L1761
 visibility: private
 generated:
   by: okf-rs/0.3.0

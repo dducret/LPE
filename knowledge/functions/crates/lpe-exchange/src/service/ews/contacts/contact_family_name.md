@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_family_name
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L591-L597
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L739-L745
 visibility: private
 generated:
   by: okf-rs/0.3.0

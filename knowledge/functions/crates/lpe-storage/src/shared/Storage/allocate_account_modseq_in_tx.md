@@ -23,6 +23,7 @@ relationships:
   - functions/crates/lpe-storage/src/conversation_actions/Storage/upsert_conversation_action
   - functions/crates/lpe-storage/src/conversation_actions/Storage/delete_conversation_action
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update
   - functions/crates/lpe-storage/src/mapi_contacts/record_contact_change_in_tx
   - functions/crates/lpe-storage/src/mapi_events/Storage/move_calendar_events_to_collection_in_tx
   - functions/crates/lpe-storage/src/mapi_events/Storage/create_mapi_event
@@ -67,6 +68,7 @@ relationships:
 - [upsert_conversation_action](../../../../../../functions/crates/lpe-storage/src/conversation_actions/Storage/upsert_conversation_action.md)
 - [delete_conversation_action](../../../../../../functions/crates/lpe-storage/src/conversation_actions/Storage/delete_conversation_action.md)
 - [create_mapi_contact](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md)
+- [commit_mapi_contact_update](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update.md)
 - [record_contact_change_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/record_contact_change_in_tx.md)
 - [move_calendar_events_to_collection_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/move_calendar_events_to_collection_in_tx.md)
 - [create_mapi_event](../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/create_mapi_event.md)

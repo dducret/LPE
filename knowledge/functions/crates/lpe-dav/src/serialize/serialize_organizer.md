@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_organizer
-resource: crates/lpe-dav/src/serialize.rs#L127-L140
+resource: crates/lpe-dav/src/serialize.rs#L133-L146
 visibility: private
 generated:
   by: okf-rs/0.3.0

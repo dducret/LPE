@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_event_participants
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L581-L608
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L578-L605
 visibility: private
 generated:
   by: okf-rs/0.3.0

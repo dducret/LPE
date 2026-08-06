@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_meeting_classes_fail_explicitly
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4190-L4226
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4327-L4363
 visibility: private
 generated:
   by: okf-rs/0.3.0

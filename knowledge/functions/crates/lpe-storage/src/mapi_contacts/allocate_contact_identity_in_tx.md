@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: allocate_contact_identity_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L931-L1082
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1176-L1327
 visibility: private
 generated:
   by: okf-rs/0.3.0

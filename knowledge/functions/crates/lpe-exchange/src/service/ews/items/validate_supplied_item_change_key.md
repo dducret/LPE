@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_supplied_item_change_key
-resource: crates/lpe-exchange/src/service/ews/items.rs#L1434-L1447
+resource: crates/lpe-exchange/src/service/ews/items.rs#L1539-L1552
 visibility: private
 generated:
   by: okf-rs/0.3.0

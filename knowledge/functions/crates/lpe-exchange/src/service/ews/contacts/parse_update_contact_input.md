@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_update_contact_input
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L182-L314
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L188-L323
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -16,6 +16,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/contacts/deleted_or_updated_contact_entry
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_emails_json
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_phones_json
+  - functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_addresses_json
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_urls_json
   called_by:
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_narrow_update_omits_unowned_rich_fields
@@ -38,6 +39,7 @@ relationships:
 - [deleted_or_updated_contact_entry](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/deleted_or_updated_contact_entry.md)
 - [ews_updated_contact_emails_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_emails_json.md)
 - [ews_updated_contact_phones_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_phones_json.md)
+- [ews_updated_contact_addresses_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_addresses_json.md)
 - [ews_updated_contact_urls_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_urls_json.md)
 
 # Called by

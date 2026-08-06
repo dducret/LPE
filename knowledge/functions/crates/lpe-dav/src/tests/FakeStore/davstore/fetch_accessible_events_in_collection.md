@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_events_in_collection
-resource: crates/lpe-dav/src/tests.rs#L380-L394
+resource: crates/lpe-dav/src/tests.rs#L382-L396
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: root_child_folder_count
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L408-L439
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L433-L464
 generated:
   by: okf-rs/0.3.0
 relationships:

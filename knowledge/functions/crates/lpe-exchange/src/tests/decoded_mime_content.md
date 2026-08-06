@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: decoded_mime_content
-resource: crates/lpe-exchange/src/tests/mod.rs#L12551-L12558
+resource: crates/lpe-exchange/src/tests/mod.rs#L12676-L12683
 visibility: private
 generated:
   by: okf-rs/0.3.0

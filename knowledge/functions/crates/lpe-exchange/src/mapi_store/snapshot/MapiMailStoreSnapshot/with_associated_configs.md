@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_associated_configs
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L339-L360
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L354-L375
 generated:
   by: okf-rs/0.3.0
 relationships:

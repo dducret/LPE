@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_set_rejects_parent_cycles_and_unknown_parents
-resource: crates/lpe-jmap/src/tests.rs#L6812-L6879
+resource: crates/lpe-jmap/src/tests.rs#L7141-L7208
 visibility: private
 generated:
   by: okf-rs/0.3.0

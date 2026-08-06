@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: expect_anyhow_failure
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L654-L657
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L664-L667
 visibility: private
 generated:
   by: okf-rs/0.3.0

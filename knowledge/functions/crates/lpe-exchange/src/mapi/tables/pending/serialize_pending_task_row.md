@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_pending_task_row
-resource: crates/lpe-exchange/src/mapi/tables/pending.rs#L579-L610
+resource: crates/lpe-exchange/src/mapi/tables/pending.rs#L579-L612
 generated:
   by: okf-rs/0.3.0
 relationships:

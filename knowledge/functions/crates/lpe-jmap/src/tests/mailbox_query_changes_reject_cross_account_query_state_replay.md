@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_query_changes_reject_cross_account_query_state_replay
-resource: crates/lpe-jmap/src/tests.rs#L5378-L5434
+resource: crates/lpe-jmap/src/tests.rs#L5455-L5511
 visibility: private
 generated:
   by: okf-rs/0.3.0

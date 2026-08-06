@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_parameter
-resource: crates/lpe-dav/src/parse.rs#L262-L271
+resource: crates/lpe-dav/src/parse.rs#L272-L281
 visibility: private
 generated:
   by: okf-rs/0.3.0

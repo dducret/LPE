@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: add_calendar_event_attachment
-resource: crates/lpe-jmap/src/store.rs#L1044-L1053
+resource: crates/lpe-jmap/src/store.rs#L1070-L1079
 visibility: private
 generated:
   by: okf-rs/0.3.0

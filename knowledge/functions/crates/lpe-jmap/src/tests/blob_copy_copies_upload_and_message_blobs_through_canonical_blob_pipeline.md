@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: blob_copy_copies_upload_and_message_blobs_through_canonical_blob_pipeline
-resource: crates/lpe-jmap/src/tests.rs#L7408-L7465
+resource: crates/lpe-jmap/src/tests.rs#L7896-L7953
 visibility: private
 generated:
   by: okf-rs/0.3.0

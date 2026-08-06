@@ -51,6 +51,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/time/filetime_to_date_time_in_time_zone
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/special_message_delivery_sort_time
   - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_u32_property
+  - functions/crates/lpe-exchange/src/service/ews/calendar/ews_duration_minutes
   - functions/crates/lpe-exchange/src/store/storage_impl/fai_identity_import/commit_mapi_imported_fai_identity_in_tx
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/allocate_next_mapi_named_property_id
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/serialize_mapi_predecessor_change_list
@@ -71,6 +72,7 @@ relationships:
   - functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/insert_contact_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/update_contact_in_tx
+  - functions/crates/lpe-storage/src/mapi_contacts/fetch_principal_contact_identity_in_tx
   - functions/crates/lpe-storage/src/mapi_events/serialize_predecessor_change_list
   - functions/crates/lpe-storage/src/mapi_message_identity/rekey_active_mapi_message_identity_for_server_move_in_tx
   - functions/crates/lpe-storage/src/mapi_store_identity/allocate_mapi_store_global_counter_in_tx
@@ -131,6 +133,7 @@ relationships:
 - [filetime_to_date_time_in_time_zone](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/time/filetime_to_date_time_in_time_zone.md)
 - [special_message_delivery_sort_time](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/special_message_delivery_sort_time.md)
 - [special_message_u32_property](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_u32_property.md)
+- [ews_duration_minutes](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_duration_minutes.md)
 - [commit_mapi_imported_fai_identity_in_tx](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/fai_identity_import/commit_mapi_imported_fai_identity_in_tx.md)
 - [allocate_next_mapi_named_property_id](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/allocate_next_mapi_named_property_id.md)
 - [serialize_mapi_predecessor_change_list](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/serialize_mapi_predecessor_change_list.md)
@@ -151,6 +154,7 @@ relationships:
 - [allocate_contact_identity_in_tx](../../../../../../../functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx.md)
 - [insert_contact_in_tx](../../../../../../../functions/crates/lpe-storage/src/mapi_contacts/insert_contact_in_tx.md)
 - [update_contact_in_tx](../../../../../../../functions/crates/lpe-storage/src/mapi_contacts/update_contact_in_tx.md)
+- [fetch_principal_contact_identity_in_tx](../../../../../../../functions/crates/lpe-storage/src/mapi_contacts/fetch_principal_contact_identity_in_tx.md)
 - [serialize_predecessor_change_list](../../../../../../../functions/crates/lpe-storage/src/mapi_events/serialize_predecessor_change_list.md)
 - [rekey_active_mapi_message_identity_for_server_move_in_tx](../../../../../../../functions/crates/lpe-storage/src/mapi_message_identity/rekey_active_mapi_message_identity_for_server_move_in_tx.md)
 - [allocate_mapi_store_global_counter_in_tx](../../../../../../../functions/crates/lpe-storage/src/mapi_store_identity/allocate_mapi_store_global_counter_in_tx.md)

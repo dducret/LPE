@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_item
-resource: crates/lpe-exchange/src/service/ews/items.rs#L522-L702
+resource: crates/lpe-exchange/src/service/ews/items.rs#L552-L732
 generated:
   by: okf-rs/0.3.0
 relationships:

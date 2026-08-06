@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_change_log_cursor_constraints
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2003-L2212
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2013-L2222
 visibility: private
 generated:
   by: okf-rs/0.3.0

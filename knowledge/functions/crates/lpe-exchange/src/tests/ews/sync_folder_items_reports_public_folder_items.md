@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_folder_items_reports_public_folder_items
-resource: crates/lpe-exchange/src/tests/ews.rs#L7987-L8062
+resource: crates/lpe-exchange/src/tests/ews.rs#L8428-L8503
 visibility: private
 generated:
   by: okf-rs/0.3.0

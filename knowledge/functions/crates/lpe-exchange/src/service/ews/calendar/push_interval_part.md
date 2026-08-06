@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_interval_part
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L542-L549
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L539-L546
 visibility: private
 generated:
   by: okf-rs/0.3.0

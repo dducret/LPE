@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_reminders_folder_open_uses_canonical_search_projection
-resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L385-L433
+resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L386-L434
 visibility: private
 generated:
   by: okf-rs/0.3.0

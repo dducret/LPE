@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: message_for_canonical_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L763-L767
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L795-L799
 generated:
   by: okf-rs/0.3.0
 relationships:

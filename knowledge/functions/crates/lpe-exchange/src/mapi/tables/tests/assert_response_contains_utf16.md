@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_response_contains_utf16
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8860-L8865
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8949-L8954
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -24,6 +24,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_followup_uses_the_original_rowset
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_can_return_a_persisted_extended_rule_message
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_query_rows_returns_virtual_rule_organizer
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items
 ---
 
 # Signature
@@ -49,3 +50,4 @@ relationships:
 - [inbox_associated_find_row_followup_uses_the_original_rowset](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_followup_uses_the_original_rowset.md)
 - [inbox_associated_find_row_can_return_a_persisted_extended_rule_message](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_find_row_can_return_a_persisted_extended_rule_message.md)
 - [inbox_associated_query_rows_returns_virtual_rule_organizer](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_query_rows_returns_virtual_rule_organizer.md)
+- [bcc_projections_only_expose_drafts_and_sent_items](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items.md)

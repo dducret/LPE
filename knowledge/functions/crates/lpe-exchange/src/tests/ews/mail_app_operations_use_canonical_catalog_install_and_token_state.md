@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mail_app_operations_use_canonical_catalog_install_and_token_state
-resource: crates/lpe-exchange/src/tests/ews.rs#L5988-L6119
+resource: crates/lpe-exchange/src/tests/ews.rs#L6321-L6452
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_jmap_object_families_expose_full_method_matrix_without_mapi_session_objects
-resource: crates/lpe-jmap/src/tests.rs#L8011-L8161
+resource: crates/lpe-jmap/src/tests.rs#L8499-L8649
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -94,11 +94,12 @@ relationships:
   - functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription
   - functions/crates/lpe-storage/src/mailboxes/Storage/destroy_jmap_mailbox
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update
   - functions/crates/lpe-storage/src/mapi_events/Storage/create_mapi_event
   - functions/crates/lpe-storage/src/mapi_events/Storage/fetch_mapi_event_versions
   - functions/crates/lpe-storage/src/mapi_events/Storage/commit_mapi_event_update
   - functions/crates/lpe-storage/src/message_ops/Storage/delete_client_contact
-  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email
+  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts
   - functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership
   - functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_followup_flags
   - functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_content
@@ -277,11 +278,12 @@ relationships:
 - [set_mailbox_subscription](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription.md)
 - [destroy_jmap_mailbox](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/destroy_jmap_mailbox.md)
 - [create_mapi_contact](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md)
+- [commit_mapi_contact_update](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update.md)
 - [create_mapi_event](../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/create_mapi_event.md)
 - [fetch_mapi_event_versions](../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/fetch_mapi_event_versions.md)
 - [commit_mapi_event_update](../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/commit_mapi_event_update.md)
 - [delete_client_contact](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/delete_client_contact.md)
-- [copy_jmap_email](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email.md)
+- [copy_jmap_email_between_accounts](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts.md)
 - [move_jmap_email_membership](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership.md)
 - [update_jmap_email_followup_flags](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_followup_flags.md)
 - [update_jmap_email_content](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_content.md)

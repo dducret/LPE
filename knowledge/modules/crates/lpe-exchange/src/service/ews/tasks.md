@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tasks
-resource: crates/lpe-exchange/src/service/ews/tasks.rs#L1-L207
+resource: crates/lpe-exchange/src/service/ews/tasks.rs#L1-L255
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -22,6 +22,8 @@ relationships:
 - [requested_task_list_id](../../../../../../functions/crates/lpe-exchange/src/service/ews/tasks/requested_task_list_id.md)
 - [ews_task_status_to_canonical](../../../../../../functions/crates/lpe-exchange/src/service/ews/tasks/ews_task_status_to_canonical.md)
 - [ews_task_status](../../../../../../functions/crates/lpe-exchange/src/service/ews/tasks/ews_task_status.md)
+- [task_priority_xml](../../../../../../functions/crates/lpe-exchange/src/service/ews/tasks/task_priority_xml.md)
+- [parse_ews_task_priority](../../../../../../functions/crates/lpe-exchange/src/service/ews/tasks/parse_ews_task_priority.md)
 - [optional_text_element](../../../../../../functions/crates/lpe-exchange/src/service/ews/tasks/optional_text_element.md)
 
 # Imports

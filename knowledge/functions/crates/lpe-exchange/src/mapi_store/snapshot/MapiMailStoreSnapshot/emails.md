@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: emails
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L756-L761
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L788-L793
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_submit_from_pending_message
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L533-L574
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L533-L597
 generated:
   by: okf-rs/0.3.0
 relationships:

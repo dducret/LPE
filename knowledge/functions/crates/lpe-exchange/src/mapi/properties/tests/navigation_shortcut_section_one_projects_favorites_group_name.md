@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: navigation_shortcut_section_one_projects_favorites_group_name
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7126-L7148
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7263-L7285
 visibility: private
 generated:
   by: okf-rs/0.3.0

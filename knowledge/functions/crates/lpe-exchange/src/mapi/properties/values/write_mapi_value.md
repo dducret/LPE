@@ -27,6 +27,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/values/write_multi_binary
   - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_property_default
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/staged_contact_commit_input
   - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/upsert_custom_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/mapi_event_custom_property_values_from_map
   - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/mapi_contact_custom_property_values_from_map
@@ -44,6 +45,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/tests/push_property_restriction
   - functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property
   - functions/crates/lpe-exchange/src/mapi/rop/serialize_session_folder_row
+  - functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property
   - functions/crates/lpe-exchange/src/mapi/rop/event_properties/serialize_event_object_property
   - functions/crates/lpe-exchange/src/mapi/rop/receive_folders/rop_get_receive_folder_table_response
   - functions/crates/lpe-exchange/src/mapi/rop/request_reader/read_rop_request_with_logon_id
@@ -114,6 +116,7 @@ relationships:
 
 # Called by
 
+- [staged_contact_commit_input](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/staged_contact_commit_input.md)
 - [upsert_custom_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/upsert_custom_property_values.md)
 - [mapi_event_custom_property_values_from_map](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/mapi_event_custom_property_values_from_map.md)
 - [mapi_contact_custom_property_values_from_map](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/mapi_contact_custom_property_values_from_map.md)
@@ -131,6 +134,7 @@ relationships:
 - [push_property_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/push_property_restriction.md)
 - [serialize_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property.md)
 - [serialize_session_folder_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_session_folder_row.md)
+- [serialize_contact_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property.md)
 - [serialize_event_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/event_properties/serialize_event_object_property.md)
 - [rop_get_receive_folder_table_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/receive_folders/rop_get_receive_folder_table_response.md)
 - [read_rop_request_with_logon_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/request_reader/read_rop_request_with_logon_id.md)

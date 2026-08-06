@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_get_property_ids_from_names_response
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L94-L385
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L98-L389
 generated:
   by: okf-rs/0.3.0
 relationships:

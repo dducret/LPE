@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: move_jmap_email_from_mailbox_with_mapi_identity
-resource: crates/lpe-storage/src/message_ops.rs#L237-L259
+resource: crates/lpe-storage/src/message_ops.rs#L259-L281
 generated:
   by: okf-rs/0.3.0
 relationships:

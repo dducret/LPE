@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_view_named_view_property_value
-resource: crates/lpe-exchange/src/mapi/properties.rs#L887-L1012
+resource: crates/lpe-exchange/src/mapi/properties.rs#L910-L1035
 generated:
   by: okf-rs/0.3.0
 relationships:

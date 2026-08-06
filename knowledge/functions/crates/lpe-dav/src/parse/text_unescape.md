@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: text_unescape
-resource: crates/lpe-dav/src/parse.rs#L329-L336
+resource: crates/lpe-dav/src/parse.rs#L339-L346
 visibility: private
 generated:
   by: okf-rs/0.3.0

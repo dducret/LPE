@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: types
-resource: crates/lpe-exchange/src/mapi/session/types.rs#L1-L606
+resource: crates/lpe-exchange/src/mapi/session/types.rs#L1-L626
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -32,6 +32,8 @@ relationships:
 - [eq](../../../../../../functions/crates/lpe-exchange/src/mapi/session/types/MapiSavedSearchFolderDefinition/partialeq/eq.md)
 - [MapiEventImportDisposition](../../../../../../classes/crates/lpe-exchange/src/mapi/session/types/MapiEventImportDisposition.md)
 - [MapiEventTransaction](../../../../../../classes/crates/lpe-exchange/src/mapi/session/types/MapiEventTransaction.md)
+- [MapiContactTransaction](../../../../../../classes/crates/lpe-exchange/src/mapi/session/types/MapiContactTransaction.md)
+- [new](../../../../../../functions/crates/lpe-exchange/src/mapi/session/types/MapiContactTransaction/new.md)
 - [new](../../../../../../functions/crates/lpe-exchange/src/mapi/session/types/MapiEventTransaction/new.md)
 - [MapiObject](../../../../../../classes/crates/lpe-exchange/src/mapi/session/types/MapiObject.md)
 

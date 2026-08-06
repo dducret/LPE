@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: map_task_list
-resource: crates/lpe-storage/src/tasks/types.rs#L124-L142
+resource: crates/lpe-storage/src/tasks/types.rs#L130-L148
 generated:
   by: okf-rs/0.3.0
 relationships:

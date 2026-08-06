@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_task_list_grant
-resource: crates/lpe-storage/src/tasks.rs#L471-L537
+resource: crates/lpe-storage/src/tasks.rs#L495-L561
 generated:
   by: okf-rs/0.3.0
 relationships:

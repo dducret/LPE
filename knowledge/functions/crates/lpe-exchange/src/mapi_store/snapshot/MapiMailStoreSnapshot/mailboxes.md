@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: mailboxes
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L733-L738
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L765-L770
 generated:
   by: okf-rs/0.3.0
 relationships:

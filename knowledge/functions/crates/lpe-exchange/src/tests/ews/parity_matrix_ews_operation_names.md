@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parity_matrix_ews_operation_names
-resource: crates/lpe-exchange/src/tests/ews.rs#L9996-L10005
+resource: crates/lpe-exchange/src/tests/ews.rs#L10437-L10446
 visibility: private
 generated:
   by: okf-rs/0.3.0

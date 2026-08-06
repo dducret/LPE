@@ -17,6 +17,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder
   - functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders
   - functions/crates/lpe-exchange/src/mapi/tables/tests/dynamic_contacts_associated_find_row_does_not_invent_osc_contact_sync_config
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/collaboration_folder_tables_follow_effective_collection_grants
 ---
 
 # Signature
@@ -38,3 +39,4 @@ relationships:
 - [hierarchy_table_projects_user_saved_search_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/hierarchy_table_projects_user_saved_search_folder.md)
 - [ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders.md)
 - [dynamic_contacts_associated_find_row_does_not_invent_osc_contact_sync_config](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/dynamic_contacts_associated_find_row_does_not_invent_osc_contact_sync_config.md)
+- [collaboration_folder_tables_follow_effective_collection_grants](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/collaboration_folder_tables_follow_effective_collection_grants.md)

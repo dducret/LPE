@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_task_list_create
-resource: crates/lpe-jmap/src/tasks.rs#L607-L617
+resource: crates/lpe-jmap/src/tasks.rs#L626-L636
 visibility: private
 generated:
   by: okf-rs/0.3.0

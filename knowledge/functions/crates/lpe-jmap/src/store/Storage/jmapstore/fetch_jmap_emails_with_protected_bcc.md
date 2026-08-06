@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_emails_with_protected_bcc
-resource: crates/lpe-jmap/src/store.rs#L714-L721
+resource: crates/lpe-jmap/src/store.rs#L722-L729
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_contact_create_is_atomic_and_preserves_reserved_import_identity
-resource: crates/lpe-storage/tests/mapi_contact_create.rs#L292-L695
+resource: crates/lpe-storage/tests/mapi_contact_create.rs#L293-L696
 visibility: private
 generated:
   by: okf-rs/0.3.0

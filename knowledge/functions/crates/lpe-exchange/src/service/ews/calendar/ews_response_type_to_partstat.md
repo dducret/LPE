@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_response_type_to_partstat
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L621-L625
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L618-L622
 visibility: private
 generated:
   by: okf-rs/0.3.0

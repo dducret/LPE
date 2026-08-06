@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_folder_success_response
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L699-L710
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L753-L764
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_quota
-resource: crates/lpe-jmap/src/store.rs#L735-L737
+resource: crates/lpe-jmap/src/store.rs#L743-L745
 visibility: private
 generated:
   by: okf-rs/0.3.0

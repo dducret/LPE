@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reminder_delta_minutes
-resource: crates/lpe-exchange/src/mapi/properties/task.rs#L96-L102
+resource: crates/lpe-exchange/src/mapi/properties/task.rs#L133-L139
 generated:
   by: okf-rs/0.3.0
 relationships:

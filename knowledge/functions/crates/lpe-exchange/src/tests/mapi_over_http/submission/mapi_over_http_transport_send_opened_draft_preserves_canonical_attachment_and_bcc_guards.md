@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_transport_send_opened_draft_preserves_canonical_attachment_and_bcc_guards
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1485-L1644
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1604-L1763
 visibility: private
 generated:
   by: okf-rs/0.3.0

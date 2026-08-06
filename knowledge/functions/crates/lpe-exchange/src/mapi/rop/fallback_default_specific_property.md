@@ -1,13 +1,14 @@
 ---
 type: Rust Function
 title: fallback_default_specific_property
-resource: crates/lpe-exchange/src/mapi/rop.rs#L616-L730
+resource: crates/lpe-exchange/src/mapi/rop.rs#L631-L748
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/rop/event_properties/event_object_property_is_deleted
+  - functions/crates/lpe-exchange/src/mapi/rop/contact_properties/contact_object_property_is_deleted
   - functions/crates/lpe-exchange/src/mapi/properties/navigation_shortcut/navigation_shortcut_object_property_is_deleted
   - functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag
   - functions/crates/lpe-exchange/src/mapi/rop/get_properties_specific_value_tag
@@ -30,6 +31,7 @@ relationships:
 # Calls
 
 - [event_object_property_is_deleted](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/event_properties/event_object_property_is_deleted.md)
+- [contact_object_property_is_deleted](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/contact_properties/contact_object_property_is_deleted.md)
 - [navigation_shortcut_object_property_is_deleted](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/navigation_shortcut/navigation_shortcut_object_property_is_deleted.md)
 - [canonical_property_storage_tag](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag.md)
 - [get_properties_specific_value_tag](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/get_properties_specific_value_tag.md)

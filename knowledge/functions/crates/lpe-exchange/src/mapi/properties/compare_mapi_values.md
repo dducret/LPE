@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: compare_mapi_values
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1256-L1270
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1279-L1293
 generated:
   by: okf-rs/0.3.0
 relationships:

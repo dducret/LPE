@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ensure_mailbox_write
-resource: crates/lpe-jmap/src/mailboxes.rs#L553-L559
+resource: crates/lpe-jmap/src/mailboxes.rs#L561-L567
 generated:
   by: okf-rs/0.3.0
 relationships:

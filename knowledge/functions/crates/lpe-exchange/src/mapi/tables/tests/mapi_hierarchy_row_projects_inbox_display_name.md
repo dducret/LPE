@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_hierarchy_row_projects_inbox_display_name
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2976-L2995
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3010-L3029
 visibility: private
 generated:
   by: okf-rs/0.3.0

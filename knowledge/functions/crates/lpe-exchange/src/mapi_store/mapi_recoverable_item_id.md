@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_recoverable_item_id
-resource: crates/lpe-exchange/src/mapi_store.rs#L951-L953
+resource: crates/lpe-exchange/src/mapi_store.rs#L958-L960
 generated:
   by: okf-rs/0.3.0
 relationships:

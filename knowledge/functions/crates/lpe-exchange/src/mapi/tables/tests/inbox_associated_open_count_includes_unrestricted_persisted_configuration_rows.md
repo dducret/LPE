@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_open_count_includes_unrestricted_persisted_configuration_rows
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6802-L6816
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6836-L6850
 visibility: private
 generated:
   by: okf-rs/0.3.0

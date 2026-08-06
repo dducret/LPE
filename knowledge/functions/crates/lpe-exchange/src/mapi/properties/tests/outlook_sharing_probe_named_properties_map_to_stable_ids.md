@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_sharing_probe_named_properties_map_to_stable_ids
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6364-L6414
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6501-L6551
 visibility: private
 generated:
   by: okf-rs/0.3.0

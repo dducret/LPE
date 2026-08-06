@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_projection_keeps_a_named_exchange_recipient_as_a_meeting
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3809-L3840
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3946-L3977
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: types
-resource: crates/lpe-admin-api/src/types.rs#L1-L825
+resource: crates/lpe-admin-api/src/types.rs#L1-L827
 generated:
   by: okf-rs/0.3.0
 relationships:

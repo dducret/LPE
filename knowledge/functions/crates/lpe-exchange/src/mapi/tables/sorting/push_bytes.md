@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_bytes
-resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L425-L429
+resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L451-L455
 visibility: private
 generated:
   by: okf-rs/0.3.0

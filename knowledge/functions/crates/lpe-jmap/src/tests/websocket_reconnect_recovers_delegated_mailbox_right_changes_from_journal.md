@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: websocket_reconnect_recovers_delegated_mailbox_right_changes_from_journal
-resource: crates/lpe-jmap/src/tests.rs#L11141-L11201
+resource: crates/lpe-jmap/src/tests.rs#L11629-L11689
 visibility: private
 generated:
   by: okf-rs/0.3.0

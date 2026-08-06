@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: remember_navigation_shortcut
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L327-L337
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L342-L352
 generated:
   by: okf-rs/0.3.0
 relationships:

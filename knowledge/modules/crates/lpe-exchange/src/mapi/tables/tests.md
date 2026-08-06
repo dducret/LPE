@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1-L10326
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1-L10522
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -25,6 +25,7 @@ relationships:
 - [default_hierarchy_columns_cover_table_projection_contract](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/default_hierarchy_columns_cover_table_projection_contract.md)
 - [default_store_identity_columns_omit_offline_reminders_entry_id](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/default_store_identity_columns_omit_offline_reminders_entry_id.md)
 - [task_default_view_sort_orders_by_due_date](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/task_default_view_sort_orders_by_due_date.md)
+- [task_default_view_sort_orders_by_start_date](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/task_default_view_sort_orders_by_start_date.md)
 - [journal_default_view_sort_orders_by_log_start](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/journal_default_view_sort_orders_by_log_start.md)
 - [sent_default_view_sort_orders_by_client_submit_time](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/sent_default_view_sort_orders_by_client_submit_time.md)
 - [property_defaults_serialize_floating_types_with_wire_widths](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/property_defaults_serialize_floating_types_with_wire_widths.md)
@@ -186,6 +187,7 @@ relationships:
 - [common_views_sort_snapshot](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_sort_snapshot.md)
 - [message_table_row_flags_absent_deadline_expiry_and_recall_times](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/message_table_row_flags_absent_deadline_expiry_and_recall_times.md)
 - [test_table_email](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/test_table_email.md)
+- [bcc_projections_only_expose_drafts_and_sent_items](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items.md)
 - [assert_response_contains_utf16](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/assert_response_contains_utf16.md)
 - [utf16_position](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/utf16_position.md)
 - [utf16_occurrences](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/utf16_occurrences.md)
@@ -198,6 +200,7 @@ relationships:
 - [categorized_and_deleted_message_rows_keep_long_term_entry_ids](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/categorized_and_deleted_message_rows_keep_long_term_entry_ids.md)
 - [normal_message_row_projects_microsoft_view_descriptor_string8_columns](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/normal_message_row_projects_microsoft_view_descriptor_string8_columns.md)
 - [access_rows_follow_microsoft_flags](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/access_rows_follow_microsoft_flags.md)
+- [collaboration_folder_tables_follow_effective_collection_grants](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/collaboration_folder_tables_follow_effective_collection_grants.md)
 - [reminders_folder_projects_reminder_container_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/reminders_folder_projects_reminder_container_class.md)
 - [reminders_folder_projects_default_post_message_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/reminders_folder_projects_default_post_message_class.md)
 - [special_folder_property_projects_record_key](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/special_folder_property_projects_record_key.md)

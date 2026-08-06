@@ -5,8 +5,6 @@ resource: crates/lpe-domain/src/civil_time.rs#L38-L51
 generated:
   by: okf-rs/0.3.0
 relationships:
-  calls:
-  - functions/crates/lpe-domain/src/civil_time/civil_from_days
   called_by:
   - functions/crates/lpe-domain/src/civil_time/utc_parts_include_weekday_and_month_names
   - functions/crates/lpe-exchange/src/mapi/transport/mapi_http_date
@@ -16,10 +14,6 @@ relationships:
 # Signature
 
 `pub fn utc_from_unix_seconds(total_seconds: u64) -> UtcDateTime`
-
-# Calls
-
-- [civil_from_days](../../../../../functions/crates/lpe-domain/src/civil_time/civil_from_days.md)
 
 # Called by
 

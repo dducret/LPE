@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: create_item_saveonly_stores_message_as_canonical_draft
-resource: crates/lpe-exchange/src/tests/ews.rs#L2124-L2185
+resource: crates/lpe-exchange/src/tests/ews.rs#L2457-L2518
 visibility: private
 generated:
   by: okf-rs/0.3.0

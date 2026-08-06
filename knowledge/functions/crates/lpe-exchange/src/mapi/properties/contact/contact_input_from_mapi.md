@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_input_from_mapi
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L361-L488
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L376-L504
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/contact/contact_urls_json_from_mapi
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_pending_contact
+  - functions/crates/lpe-exchange/src/mapi/properties/contact/contact_input_from_mapi_with_deletions
   - functions/crates/lpe-exchange/src/mapi/properties/contact/apply_canonical_contact_property_values
   - functions/crates/lpe-exchange/src/mapi/properties/tests/mapi_contact_narrow_update_omits_unowned_rich_fields
   - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_contact_row
@@ -33,6 +34,7 @@ relationships:
 # Called by
 
 - [save_pending_contact](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_pending_contact.md)
+- [contact_input_from_mapi_with_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/contact_input_from_mapi_with_deletions.md)
 - [apply_canonical_contact_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/apply_canonical_contact_property_values.md)
 - [mapi_contact_narrow_update_omits_unowned_rich_fields](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/mapi_contact_narrow_update_omits_unowned_rich_fields.md)
 - [serialize_pending_contact_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_contact_row.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: resolve_full_email_query_ids
-resource: crates/lpe-jmap/src/mail.rs#L1257-L1280
+resource: crates/lpe-jmap/src/mail.rs#L1263-L1286
 generated:
   by: okf-rs/0.3.0
 relationships:

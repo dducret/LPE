@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_root_default_folder_get_properties_returns_canonical_entry_ids
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6496-L6588
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6498-L6590
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_category_leaf_row
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2939-L2973
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2973-L3007
 visibility: private
 generated:
   by: okf-rs/0.3.0

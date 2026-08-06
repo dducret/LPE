@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: search_folder
-resource: crates/lpe-jmap/src/tests.rs#L655-L668
+resource: crates/lpe-jmap/src/tests.rs#L658-L671
 visibility: private
 generated:
   by: okf-rs/0.3.0

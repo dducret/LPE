@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: imported_contact_version_wins_last_writer
-resource: crates/lpe-storage/src/mapi_contacts.rs#L792-L812
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1037-L1057
 visibility: private
 generated:
   by: okf-rs/0.3.0

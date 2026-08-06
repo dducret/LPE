@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_contact_content_sync_exports_deletes
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1144-L1200
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1233-L1289
 visibility: private
 generated:
   by: okf-rs/0.3.0

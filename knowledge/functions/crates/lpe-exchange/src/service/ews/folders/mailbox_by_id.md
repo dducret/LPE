@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_by_id
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L613-L621
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L656-L664
 generated:
   by: okf-rs/0.3.0
 relationships:

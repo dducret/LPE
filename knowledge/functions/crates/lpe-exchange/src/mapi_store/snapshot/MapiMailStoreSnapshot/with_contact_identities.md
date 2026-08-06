@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_contact_identities
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L301-L325
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L316-L340
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: postgres_mapi_calendar_fixture_drop_cleans_temporary_schema
-resource: crates/lpe-exchange/src/tests/mod.rs#L303-L329
+resource: crates/lpe-exchange/src/tests/mod.rs#L304-L330
 visibility: private
 generated:
   by: okf-rs/0.3.0

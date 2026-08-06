@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: shapes
-resource: crates/lpe-exchange/src/mapi/rop/debug/shapes.rs#L1-L327
+resource: crates/lpe-exchange/src/mapi/rop/debug/shapes.rs#L1-L328
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -162,6 +162,7 @@
 - [attachments](../modules/crates/lpe-exchange/src/mapi/dispatch/attachments.md) — Rust Module
 - [calendar_move_copy](../modules/crates/lpe-exchange/src/mapi/dispatch/calendar_move_copy.md) — Rust Module
 - [contact_save](../modules/crates/lpe-exchange/src/mapi/dispatch/contact_save.md) — Rust Module
+- [contact_transactions](../modules/crates/lpe-exchange/src/mapi/dispatch/contact_transactions.md) — Rust Module
 - [contacts](../modules/crates/lpe-exchange/src/mapi/dispatch/contacts.md) — Rust Module
 - [conversation_actions](../modules/crates/lpe-exchange/src/mapi/dispatch/conversation_actions.md) — Rust Module
 - [custom_properties](../modules/crates/lpe-exchange/src/mapi/dispatch/custom_properties.md) — Rust Module
@@ -275,6 +276,7 @@
 - [rop](../modules/crates/lpe-exchange/src/mapi/rop.md) — Rust Module
 - [attachments](../modules/crates/lpe-exchange/src/mapi/rop/attachments.md) — Rust Module
 - [buffer](../modules/crates/lpe-exchange/src/mapi/rop/buffer.md) — Rust Module
+- [contact_properties](../modules/crates/lpe-exchange/src/mapi/rop/contact_properties.md) — Rust Module
 - [debug](../modules/crates/lpe-exchange/src/mapi/rop/debug.md) — Rust Module
 - [folders](../modules/crates/lpe-exchange/src/mapi/rop/debug/folders.md) — Rust Module
 - [shapes](../modules/crates/lpe-exchange/src/mapi/rop/debug/shapes.md) — Rust Module
@@ -461,6 +463,7 @@
 - [sync](../modules/crates/lpe-exchange/src/tests/mapi_over_http/sync.md) — Rust Module
 - [sync_import_deletes](../modules/crates/lpe-exchange/src/tests/mapi_over_http/sync_import_deletes.md) — Rust Module
 - [tables](../modules/crates/lpe-exchange/src/tests/mapi_over_http/tables.md) — Rust Module
+- [tasks](../modules/crates/lpe-exchange/src/tests/mapi_over_http/tasks.md) — Rust Module
 - [transport](../modules/crates/lpe-exchange/src/tests/mapi_over_http/transport.md) — Rust Module
 - [wlink_properties](../modules/crates/lpe-exchange/src/tests/mapi_over_http/wlink_properties.md) — Rust Module
 - [rpc_proxy](../modules/crates/lpe-exchange/src/tests/rpc_proxy.md) — Rust Module

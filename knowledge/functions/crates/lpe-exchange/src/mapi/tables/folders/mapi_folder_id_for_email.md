@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_folder_id_for_email
-resource: crates/lpe-exchange/src/mapi/tables/folders.rs#L929-L933
+resource: crates/lpe-exchange/src/mapi/tables/folders.rs#L928-L932
 generated:
   by: okf-rs/0.3.0
 relationships:

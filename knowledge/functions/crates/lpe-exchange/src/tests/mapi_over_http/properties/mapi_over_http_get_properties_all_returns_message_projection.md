@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_properties_all_returns_message_projection
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1985-L2058
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1987-L2060
 visibility: private
 generated:
   by: okf-rs/0.3.0

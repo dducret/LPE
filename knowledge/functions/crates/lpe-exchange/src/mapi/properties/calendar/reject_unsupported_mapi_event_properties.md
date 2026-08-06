@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reject_unsupported_mapi_event_properties
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L912-L940
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L957-L985
 generated:
   by: okf-rs/0.3.0
 relationships:

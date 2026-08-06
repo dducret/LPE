@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rop_get_properties_all_response
-resource: crates/lpe-exchange/src/mapi/rop.rs#L1023-L1113
+resource: crates/lpe-exchange/src/mapi/rop.rs#L1041-L1131
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -13,7 +13,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
   called_by:
   - functions/crates/lpe-storage/src/inbound/Storage/store_inbound_message_in_tx
-  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email
+  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts
   - functions/crates/lpe-storage/src/message_ops/Storage/import_jmap_email
   - functions/crates/lpe-storage/src/pst/Storage/persist_pst_imported_message_in_tx
   - functions/crates/lpe-storage/src/recoverable_items/Storage/restore_recoverable_item
@@ -36,7 +36,7 @@ relationships:
 # Called by
 
 - [store_inbound_message_in_tx](../../../../../../functions/crates/lpe-storage/src/inbound/Storage/store_inbound_message_in_tx.md)
-- [copy_jmap_email](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email.md)
+- [copy_jmap_email_between_accounts](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts.md)
 - [import_jmap_email](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/import_jmap_email.md)
 - [persist_pst_imported_message_in_tx](../../../../../../functions/crates/lpe-storage/src/pst/Storage/persist_pst_imported_message_in_tx.md)
 - [restore_recoverable_item](../../../../../../functions/crates/lpe-storage/src/recoverable_items/Storage/restore_recoverable_item.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_events
-resource: crates/lpe-dav/src/tests.rs#L372-L378
+resource: crates/lpe-dav/src/tests.rs#L374-L380
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_attach_text_file_stream_saves_canonical_attachment
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L3093-L3219
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L3095-L3221
 visibility: private
 generated:
   by: okf-rs/0.3.0

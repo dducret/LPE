@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: tracked_mail_processing_message_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1063-L1070
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1095-L1102
 generated:
   by: okf-rs/0.3.0
 relationships:

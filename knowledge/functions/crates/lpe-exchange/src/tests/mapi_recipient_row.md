@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_recipient_row
-resource: crates/lpe-exchange/src/tests/mod.rs#L15680-L15686
+resource: crates/lpe-exchange/src/tests/mod.rs#L15805-L15811
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,6 +9,7 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_reload_cached_information_returns_pending_message_summary
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_remove_all_recipients_clears_pending_message_recipients
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until_save
@@ -28,6 +29,7 @@ relationships:
 
 - [mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end.md)
 - [mapi_over_http_reload_cached_information_returns_pending_message_summary](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_reload_cached_information_returns_pending_message_summary.md)
+- [submit_new_mapi_message_with_identities](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities.md)
 - [mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type.md)
 - [mapi_over_http_remove_all_recipients_clears_pending_message_recipients](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_remove_all_recipients_clears_pending_message_recipients.md)
 - [mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until_save.md)

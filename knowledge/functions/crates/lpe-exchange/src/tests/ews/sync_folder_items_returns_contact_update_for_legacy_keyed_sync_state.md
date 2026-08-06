@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_folder_items_returns_contact_update_for_legacy_keyed_sync_state
-resource: crates/lpe-exchange/src/tests/ews.rs#L6827-L6866
+resource: crates/lpe-exchange/src/tests/ews.rs#L7181-L7220
 visibility: private
 generated:
   by: okf-rs/0.3.0

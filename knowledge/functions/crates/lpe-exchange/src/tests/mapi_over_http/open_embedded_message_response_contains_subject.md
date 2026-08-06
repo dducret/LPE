@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: open_embedded_message_response_contains_subject
-resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L146-L160
+resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L147-L161
 visibility: private
 generated:
   by: okf-rs/0.3.0

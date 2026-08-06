@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/change_number_for_store_id
   - functions/crates/lpe-exchange/src/mapi/tables/time/event_start_filetime
   - functions/crates/lpe-exchange/src/mapi/tables/time/event_end_filetime
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_mapi_access
   - functions/crates/lpe-exchange/src/mapi/properties/message/mapi_message_size_value
   - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/event_size
   - functions/crates/lpe-exchange/src/mapi/properties/message/mapi_message_size_extended_value
@@ -48,6 +49,7 @@ relationships:
 - [change_number_for_store_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/change_number_for_store_id.md)
 - [event_start_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/time/event_start_filetime.md)
 - [event_end_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/time/event_end_filetime.md)
+- [event_mapi_access](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_mapi_access.md)
 - [mapi_message_size_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_message_size_value.md)
 - [event_size](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/event_size.md)
 - [mapi_message_size_extended_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_message_size_extended_value.md)

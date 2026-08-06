@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_links_write_and_project_canonical_attachments
-resource: crates/lpe-jmap/src/tests.rs#L12264-L12351
+resource: crates/lpe-jmap/src/tests.rs#L12754-L12841
 visibility: private
 generated:
   by: okf-rs/0.3.0

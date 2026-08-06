@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_parent_id_field
-resource: crates/lpe-jmap/src/mailboxes.rs#L622-L629
+resource: crates/lpe-jmap/src/mailboxes.rs#L630-L637
 visibility: private
 generated:
   by: okf-rs/0.3.0

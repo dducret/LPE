@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_id_for_mapi_folder_id
-resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L1015-L1023
+resource: crates/lpe-exchange/src/mapi/store_adapter/access_plan.rs#L1016-L1024
 generated:
   by: okf-rs/0.3.0
 relationships:

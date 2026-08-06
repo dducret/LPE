@@ -54,6 +54,8 @@ relationships:
   - functions/crates/lpe-jmap/src/tests/identity_thread_and_submission_reads_are_available
   - functions/crates/lpe-jmap/src/tests/identity_get_state_tracks_sender_identity_projection
   - functions/crates/lpe-jmap/src/tests/identity_changes_tracks_sender_identity_projection
+  - functions/crates/lpe-jmap/src/tests/identity_shared_account_reads_use_the_same_authorization_model
+  - functions/crates/lpe-jmap/src/tests/identity_shared_account_reads_reject_inaccessible_accounts
   - functions/crates/lpe-jmap/src/tests/email_submission_get_state_tracks_submission_rows
   - functions/crates/lpe-jmap/src/tests/email_submission_changes_tracks_submission_rows
   - functions/crates/lpe-jmap/src/tests/email_submission_changes_use_durable_log_ids_when_state_has_cursor
@@ -73,10 +75,13 @@ relationships:
   - functions/crates/lpe-jmap/src/tests/mailbox_get_exposes_backed_exchange_compatibility_mail_folders
   - functions/crates/lpe-jmap/src/tests/mailbox_get_advertises_child_creation_for_writable_owned_mailboxes
   - functions/crates/lpe-jmap/src/tests/mailbox_get_hides_child_creation_for_read_only_shared_mailboxes
+  - functions/crates/lpe-jmap/src/tests/mailbox_get_rename_and_delete_rights_match_mailbox_set
   - functions/crates/lpe-jmap/src/tests/mailbox_parent_id_and_subscription_round_trip_through_get_query_and_set
   - functions/crates/lpe-jmap/src/tests/mailbox_set_rejects_parent_cycles_and_unknown_parents
   - functions/crates/lpe-jmap/src/tests/mailbox_set_copy_import_and_quota_are_available
   - functions/crates/lpe-jmap/src/tests/mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations
+  - functions/crates/lpe-jmap/src/tests/email_copy_allows_shared_source_to_owned_target_without_exposing_bcc
+  - functions/crates/lpe-jmap/src/tests/email_copy_rejects_inaccessible_source_and_read_only_target
   - functions/crates/lpe-jmap/src/tests/email_copy_and_import_reject_shared_drafts_without_sender_delegation
   - functions/crates/lpe-jmap/src/tests/email_import_validates_and_preserves_multipart_attachments
   - functions/crates/lpe-jmap/src/tests/email_get_exposes_canonical_blob_ids_and_download_accepts_upload_prefix
@@ -125,6 +130,7 @@ relationships:
   - functions/crates/lpe-jmap/src/tests/collection_query_changes_ignore_backend_order_for_equal_sort_keys
   - functions/crates/lpe-jmap/src/tests/calendar_event_get_exposes_owner_and_participation_status
   - functions/crates/lpe-jmap/src/tests/task_methods_use_canonical_task_store
+  - functions/crates/lpe-jmap/src/tests/task_set_rejects_out_of_range_priority
   - functions/crates/lpe-jmap/src/tests/private_outlook_methods_use_canonical_note_journal_and_reminder_store
   - functions/crates/lpe-jmap/src/tests/private_outlook_profile_methods_read_canonical_profile_state
   - functions/crates/lpe-jmap/src/tests/reminder_writes_update_canonical_source_metadata
@@ -203,6 +209,8 @@ relationships:
 - [identity_thread_and_submission_reads_are_available](../../../../../../functions/crates/lpe-jmap/src/tests/identity_thread_and_submission_reads_are_available.md)
 - [identity_get_state_tracks_sender_identity_projection](../../../../../../functions/crates/lpe-jmap/src/tests/identity_get_state_tracks_sender_identity_projection.md)
 - [identity_changes_tracks_sender_identity_projection](../../../../../../functions/crates/lpe-jmap/src/tests/identity_changes_tracks_sender_identity_projection.md)
+- [identity_shared_account_reads_use_the_same_authorization_model](../../../../../../functions/crates/lpe-jmap/src/tests/identity_shared_account_reads_use_the_same_authorization_model.md)
+- [identity_shared_account_reads_reject_inaccessible_accounts](../../../../../../functions/crates/lpe-jmap/src/tests/identity_shared_account_reads_reject_inaccessible_accounts.md)
 - [email_submission_get_state_tracks_submission_rows](../../../../../../functions/crates/lpe-jmap/src/tests/email_submission_get_state_tracks_submission_rows.md)
 - [email_submission_changes_tracks_submission_rows](../../../../../../functions/crates/lpe-jmap/src/tests/email_submission_changes_tracks_submission_rows.md)
 - [email_submission_changes_use_durable_log_ids_when_state_has_cursor](../../../../../../functions/crates/lpe-jmap/src/tests/email_submission_changes_use_durable_log_ids_when_state_has_cursor.md)
@@ -222,10 +230,13 @@ relationships:
 - [mailbox_get_exposes_backed_exchange_compatibility_mail_folders](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_exposes_backed_exchange_compatibility_mail_folders.md)
 - [mailbox_get_advertises_child_creation_for_writable_owned_mailboxes](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_advertises_child_creation_for_writable_owned_mailboxes.md)
 - [mailbox_get_hides_child_creation_for_read_only_shared_mailboxes](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_hides_child_creation_for_read_only_shared_mailboxes.md)
+- [mailbox_get_rename_and_delete_rights_match_mailbox_set](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_rename_and_delete_rights_match_mailbox_set.md)
 - [mailbox_parent_id_and_subscription_round_trip_through_get_query_and_set](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_parent_id_and_subscription_round_trip_through_get_query_and_set.md)
 - [mailbox_set_rejects_parent_cycles_and_unknown_parents](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_set_rejects_parent_cycles_and_unknown_parents.md)
 - [mailbox_set_copy_import_and_quota_are_available](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_set_copy_import_and_quota_are_available.md)
 - [mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations.md)
+- [email_copy_allows_shared_source_to_owned_target_without_exposing_bcc](../../../../../../functions/crates/lpe-jmap/src/tests/email_copy_allows_shared_source_to_owned_target_without_exposing_bcc.md)
+- [email_copy_rejects_inaccessible_source_and_read_only_target](../../../../../../functions/crates/lpe-jmap/src/tests/email_copy_rejects_inaccessible_source_and_read_only_target.md)
 - [email_copy_and_import_reject_shared_drafts_without_sender_delegation](../../../../../../functions/crates/lpe-jmap/src/tests/email_copy_and_import_reject_shared_drafts_without_sender_delegation.md)
 - [email_import_validates_and_preserves_multipart_attachments](../../../../../../functions/crates/lpe-jmap/src/tests/email_import_validates_and_preserves_multipart_attachments.md)
 - [email_get_exposes_canonical_blob_ids_and_download_accepts_upload_prefix](../../../../../../functions/crates/lpe-jmap/src/tests/email_get_exposes_canonical_blob_ids_and_download_accepts_upload_prefix.md)
@@ -274,6 +285,7 @@ relationships:
 - [collection_query_changes_ignore_backend_order_for_equal_sort_keys](../../../../../../functions/crates/lpe-jmap/src/tests/collection_query_changes_ignore_backend_order_for_equal_sort_keys.md)
 - [calendar_event_get_exposes_owner_and_participation_status](../../../../../../functions/crates/lpe-jmap/src/tests/calendar_event_get_exposes_owner_and_participation_status.md)
 - [task_methods_use_canonical_task_store](../../../../../../functions/crates/lpe-jmap/src/tests/task_methods_use_canonical_task_store.md)
+- [task_set_rejects_out_of_range_priority](../../../../../../functions/crates/lpe-jmap/src/tests/task_set_rejects_out_of_range_priority.md)
 - [private_outlook_methods_use_canonical_note_journal_and_reminder_store](../../../../../../functions/crates/lpe-jmap/src/tests/private_outlook_methods_use_canonical_note_journal_and_reminder_store.md)
 - [private_outlook_profile_methods_read_canonical_profile_state](../../../../../../functions/crates/lpe-jmap/src/tests/private_outlook_profile_methods_read_canonical_profile_state.md)
 - [reminder_writes_update_canonical_source_metadata](../../../../../../functions/crates/lpe-jmap/src/tests/reminder_writes_update_canonical_source_metadata.md)

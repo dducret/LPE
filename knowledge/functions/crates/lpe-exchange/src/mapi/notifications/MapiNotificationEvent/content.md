@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/append_pending_associated_config_save_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/append_existing_associated_config_save_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_pending_contact
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_existing_contact
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/folders/append_empty_folder_response
@@ -32,6 +33,7 @@ relationships:
 - [append_pending_associated_config_save_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/append_pending_associated_config_save_response.md)
 - [append_existing_associated_config_save_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/append_existing_associated_config_save_response.md)
 - [save_pending_contact](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_pending_contact.md)
+- [save_existing_contact](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_existing_contact.md)
 - [save_pending_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event.md)
 - [save_existing_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event.md)
 - [append_empty_folder_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/folders/append_empty_folder_response.md)

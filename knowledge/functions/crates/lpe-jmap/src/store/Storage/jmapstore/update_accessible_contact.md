@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_accessible_contact
-resource: crates/lpe-jmap/src/store.rs#L923-L931
+resource: crates/lpe-jmap/src/store.rs#L949-L957
 visibility: private
 generated:
   by: okf-rs/0.3.0

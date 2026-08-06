@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: parse
-resource: crates/lpe-dav/src/parse.rs#L1-L336
+resource: crates/lpe-dav/src/parse.rs#L1-L346
 generated:
   by: okf-rs/0.3.0
 relationships:

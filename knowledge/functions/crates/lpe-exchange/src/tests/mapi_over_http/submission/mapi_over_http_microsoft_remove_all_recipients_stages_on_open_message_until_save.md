@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_remove_all_recipients_stages_on_open_message_until_save
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L614-L700
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L742-L828
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: seed_mailbox_fixture
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L775-L879
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L785-L889
 visibility: private
 generated:
   by: okf-rs/0.3.0

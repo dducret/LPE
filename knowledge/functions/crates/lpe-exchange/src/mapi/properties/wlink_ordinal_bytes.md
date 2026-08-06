@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wlink_ordinal_bytes
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1159-L1177
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1182-L1200
 generated:
   by: okf-rs/0.3.0
 relationships:

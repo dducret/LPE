@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: canonical_objects
-resource: crates/lpe-jmap/src/service/canonical.rs#L481-L565
+resource: crates/lpe-jmap/src/service/canonical.rs#L521-L605
 generated:
   by: okf-rs/0.3.0
 relationships:

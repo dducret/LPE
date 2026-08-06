@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_jmap_event_reminder
-resource: crates/lpe-jmap/src/store.rs#L1170-L1186
+resource: crates/lpe-jmap/src/store.rs#L1196-L1212
 visibility: private
 generated:
   by: okf-rs/0.3.0

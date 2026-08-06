@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: wait_for_change
-resource: crates/lpe-jmap/src/tests.rs#L238-L243
+resource: crates/lpe-jmap/src/tests.rs#L239-L244
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_task_list_id
-resource: crates/lpe-jmap/src/tasks.rs#L660-L668
+resource: crates/lpe-jmap/src/tasks.rs#L679-L687
 visibility: private
 generated:
   by: okf-rs/0.3.0

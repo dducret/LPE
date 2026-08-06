@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: insert_mapi_special_folder_alias
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2325-L2351
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2335-L2361
 visibility: private
 generated:
   by: okf-rs/0.3.0

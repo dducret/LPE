@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_folder_open_stream_reads_computed_binary_property
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5948-L6003
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5950-L6005
 visibility: private
 generated:
   by: okf-rs/0.3.0

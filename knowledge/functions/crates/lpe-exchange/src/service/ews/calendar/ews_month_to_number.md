@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_month_to_number
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L566-L568
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L563-L565
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,12 +1,13 @@
 ---
 type: Rust Module
 title: tasks
-resource: crates/lpe-storage/src/tasks.rs#L1-L1480
+resource: crates/lpe-storage/src/tasks.rs#L1-L1537
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/anyhow-anyhow-bail-result
+  - external/sqlx-types-chrono-datetime-fixedoffset
   - external/sqlx-postgres
   - external/uuid-uuid
   - external/crate-collaboration-validate-collaboration-rights-normalize-email-normalize-task-list-name-normalize-task-status-auditentryinput-canonicalchangecategory-clienttasklistrow-clienttaskrow-davtaskrow-storage-tasklistgrantrow-default-task-list-name-default-task-list-role
@@ -38,10 +39,12 @@ relationships:
 - [fetch_client_tasks_by_ids](../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks_by_ids.md)
 - [ensure_default_task_list](../../../../functions/crates/lpe-storage/src/tasks/Storage/ensure_default_task_list.md)
 - [load_task_list_in_tx](../../../../functions/crates/lpe-storage/src/tasks/Storage/load_task_list_in_tx.md)
+- [parse_task_timestamp](../../../../functions/crates/lpe-storage/src/tasks/parse_task_timestamp.md)
 
 # Imports
 
 - `anyhow::{anyhow, bail, Result}`
+- `sqlx::types::chrono::{DateTime, FixedOffset}`
 - `sqlx::Postgres`
 - `uuid::Uuid`
 - `crate::{

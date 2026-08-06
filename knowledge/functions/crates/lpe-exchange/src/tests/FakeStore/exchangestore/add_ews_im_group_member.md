@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: add_ews_im_group_member
-resource: crates/lpe-exchange/src/tests/mod.rs#L7662-L7710
+resource: crates/lpe-exchange/src/tests/mod.rs#L7666-L7714
 visibility: private
 generated:
   by: okf-rs/0.3.0

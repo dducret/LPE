@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: user_configuration_create_get_update_and_delete_use_canonical_storage
-resource: crates/lpe-exchange/src/tests/ews.rs#L3235-L3399
+resource: crates/lpe-exchange/src/tests/ews.rs#L3568-L3732
 visibility: private
 generated:
   by: okf-rs/0.3.0

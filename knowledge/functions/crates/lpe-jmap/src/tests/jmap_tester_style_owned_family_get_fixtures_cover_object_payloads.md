@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_tester_style_owned_family_get_fixtures_cover_object_payloads
-resource: crates/lpe-jmap/src/tests.rs#L9947-L10196
+resource: crates/lpe-jmap/src/tests.rs#L10435-L10684
 visibility: private
 generated:
   by: okf-rs/0.3.0

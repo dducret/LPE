@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: has_sender_right_in_tx
-resource: crates/lpe-storage/src/submission.rs#L1254-L1282
+resource: crates/lpe-storage/src/submission.rs#L1257-L1285
 visibility: private
 generated:
   by: okf-rs/0.3.0

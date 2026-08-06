@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: contacts
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L1-L669
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L1-L887
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -22,6 +22,9 @@ relationships:
 - [parse_update_contact_input](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input.md)
 - [ews_contact_email_entries_xml](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_email_entries_xml.md)
 - [ews_contact_phone_entries_xml](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_phone_entries_xml.md)
+- [ews_contact_physical_addresses_xml](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_physical_addresses_xml.md)
+- [contact_address_by_label](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_address_by_label.md)
+- [address_text](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/address_text.md)
 - [ews_contact_phone_by_label](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_phone_by_label.md)
 - [ews_contact_url_by_label](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_url_by_label.md)
 - [contact_labeled_string](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_labeled_string.md)
@@ -30,6 +33,11 @@ relationships:
 - [ews_contact_emails_json](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_emails_json.md)
 - [ews_contact_phones_json](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_phones_json.md)
 - [ews_contact_urls_json](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_urls_json.md)
+- [ews_contact_addresses_json](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_addresses_json.md)
+- [ews_updated_contact_addresses_json](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_addresses_json.md)
+- [ews_contact_address_entry](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_address_entry.md)
+- [contact_address_json](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_address_json.md)
+- [remove_contact_address](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/remove_contact_address.md)
 - [ews_updated_contact_emails_json](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_emails_json.md)
 - [ews_updated_contact_phones_json](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_phones_json.md)
 - [ews_updated_contact_urls_json](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_urls_json.md)
@@ -41,6 +49,9 @@ relationships:
 - [contact_job_title](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_job_title.md)
 - [first_name](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/first_name.md)
 - [last_name](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/last_name.md)
+- [principal](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/principal.md)
+- [create_contact_requires_name_and_primary_email](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/create_contact_requires_name_and_primary_email.md)
+- [physical_addresses_round_trip_and_targeted_update_preserves_other_rows](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/physical_addresses_round_trip_and_targeted_update_preserves_other_rows.md)
 - [ews_contact_narrow_update_omits_unowned_rich_fields](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_narrow_update_omits_unowned_rich_fields.md)
 
 # Imports

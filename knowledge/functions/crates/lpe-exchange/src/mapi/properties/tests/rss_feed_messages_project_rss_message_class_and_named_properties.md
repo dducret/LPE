@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rss_feed_messages_project_rss_message_class_and_named_properties
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2774-L3129
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2823-L3178
 visibility: private
 generated:
   by: okf-rs/0.3.0

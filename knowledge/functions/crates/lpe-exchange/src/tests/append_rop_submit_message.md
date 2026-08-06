@@ -1,13 +1,14 @@
 ---
 type: Rust Function
 title: append_rop_submit_message
-resource: crates/lpe-exchange/src/tests/mod.rs#L15609-L15611
+resource: crates/lpe-exchange/src/tests/mod.rs#L15734-L15736
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_replayed_execute_request_id_does_not_resubmit_message
   - functions/crates/lpe-exchange/src/tests/mapi_submit_execute_body
 ---
@@ -19,5 +20,6 @@ relationships:
 # Called by
 
 - [mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end.md)
+- [submit_new_mapi_message_with_identities](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities.md)
 - [mapi_over_http_replayed_execute_request_id_does_not_resubmit_message](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_replayed_execute_request_id_does_not_resubmit_message.md)
 - [mapi_submit_execute_body](../../../../../functions/crates/lpe-exchange/src/tests/mapi_submit_execute_body.md)

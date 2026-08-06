@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: flagged_property_error_code
-resource: crates/lpe-exchange/src/mapi/rop.rs#L756-L775
+resource: crates/lpe-exchange/src/mapi/rop.rs#L774-L793
 visibility: private
 generated:
   by: okf-rs/0.3.0

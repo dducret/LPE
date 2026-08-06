@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: utf16le_bytes
-resource: crates/lpe-exchange/src/mapi/rop.rs#L828-L834
+resource: crates/lpe-exchange/src/mapi/rop.rs#L846-L852
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_activesync_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L3008-L3055
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L3089-L3136
 visibility: private
 generated:
   by: okf-rs/0.3.0

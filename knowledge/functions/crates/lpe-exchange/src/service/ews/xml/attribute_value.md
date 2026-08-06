@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/contacts/parse_create_contact_input
   - functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input
   - functions/crates/lpe-exchange/src/service/ews/contacts/contact_entry_value
+  - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_address_entry
   - functions/crates/lpe-exchange/src/service/ews/ids/convert_id_sources_for_tag
   - functions/crates/lpe-exchange/src/service/ews/mail/parse_create_message_input
   - functions/crates/lpe-exchange/src/service/ews/notifications/pull_subscription_subscribes_to_all_folders
@@ -41,6 +42,7 @@ relationships:
 - [parse_create_contact_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/parse_create_contact_input.md)
 - [parse_update_contact_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input.md)
 - [contact_entry_value](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_entry_value.md)
+- [ews_contact_address_entry](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_address_entry.md)
 - [convert_id_sources_for_tag](../../../../../../../functions/crates/lpe-exchange/src/service/ews/ids/convert_id_sources_for_tag.md)
 - [parse_create_message_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail/parse_create_message_input.md)
 - [pull_subscription_subscribes_to_all_folders](../../../../../../../functions/crates/lpe-exchange/src/service/ews/notifications/pull_subscription_subscribes_to_all_folders.md)

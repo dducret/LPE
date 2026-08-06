@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: store
-resource: crates/lpe-jmap/src/store.rs#L1-L1381
+resource: crates/lpe-jmap/src/store.rs#L1-L1407
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -81,6 +81,7 @@ relationships:
 - [delete_draft_message](../../../../functions/crates/lpe-jmap/src/store/Storage/jmapstore/delete_draft_message.md)
 - [submit_draft_message](../../../../functions/crates/lpe-jmap/src/store/Storage/jmapstore/submit_draft_message.md)
 - [copy_jmap_email](../../../../functions/crates/lpe-jmap/src/store/Storage/jmapstore/copy_jmap_email.md)
+- [copy_jmap_email_between_accounts](../../../../functions/crates/lpe-jmap/src/store/Storage/jmapstore/copy_jmap_email_between_accounts.md)
 - [import_jmap_email](../../../../functions/crates/lpe-jmap/src/store/Storage/jmapstore/import_jmap_email.md)
 - [fetch_accessible_contact_collections](../../../../functions/crates/lpe-jmap/src/store/Storage/jmapstore/fetch_accessible_contact_collections.md)
 - [fetch_accessible_contacts](../../../../functions/crates/lpe-jmap/src/store/Storage/jmapstore/fetch_accessible_contacts.md)

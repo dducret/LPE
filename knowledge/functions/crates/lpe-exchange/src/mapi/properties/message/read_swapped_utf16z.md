@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_swapped_utf16z
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L991-L1001
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L1014-L1024
 visibility: private
 generated:
   by: okf-rs/0.3.0

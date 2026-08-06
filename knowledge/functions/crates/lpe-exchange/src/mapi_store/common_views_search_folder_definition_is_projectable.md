@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_search_folder_definition_is_projectable
-resource: crates/lpe-exchange/src/mapi_store.rs#L1156-L1165
+resource: crates/lpe-exchange/src/mapi_store.rs#L1163-L1172
 visibility: private
 generated:
   by: okf-rs/0.3.0

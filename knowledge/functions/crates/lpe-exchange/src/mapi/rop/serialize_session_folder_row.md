@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_session_folder_row
-resource: crates/lpe-exchange/src/mapi/rop.rs#L1478-L1610
+resource: crates/lpe-exchange/src/mapi/rop.rs#L1489-L1621
 visibility: private
 generated:
   by: okf-rs/0.3.0

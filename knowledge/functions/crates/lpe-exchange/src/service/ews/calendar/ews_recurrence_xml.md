@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_recurrence_xml
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L326-L331
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L323-L328
 visibility: private
 generated:
   by: okf-rs/0.3.0

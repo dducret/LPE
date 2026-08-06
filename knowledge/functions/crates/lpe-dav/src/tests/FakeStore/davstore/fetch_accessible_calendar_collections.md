@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_calendar_collections
-resource: crates/lpe-dav/src/tests.rs#L320-L332
+resource: crates/lpe-dav/src/tests.rs#L322-L334
 visibility: private
 generated:
   by: okf-rs/0.3.0

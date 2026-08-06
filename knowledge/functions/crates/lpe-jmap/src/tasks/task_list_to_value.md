@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_list_to_value
-resource: crates/lpe-jmap/src/tasks.rs#L473-L496
+resource: crates/lpe-jmap/src/tasks.rs#L475-L498
 visibility: private
 generated:
   by: okf-rs/0.3.0

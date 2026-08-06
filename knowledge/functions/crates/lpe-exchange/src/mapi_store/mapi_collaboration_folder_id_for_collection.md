@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_collaboration_folder_id_for_collection
-resource: crates/lpe-exchange/src/mapi_store.rs#L981-L1011
+resource: crates/lpe-exchange/src/mapi_store.rs#L988-L1018
 generated:
   by: okf-rs/0.3.0
 relationships:

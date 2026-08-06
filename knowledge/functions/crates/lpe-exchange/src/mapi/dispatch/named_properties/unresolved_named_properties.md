@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: unresolved_named_properties
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L606-L615
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L610-L619
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: owned_message_download_prefers_sanitized_stored_raw_mime_blob
-resource: crates/lpe-jmap/src/tests.rs#L7280-L7324
+resource: crates/lpe-jmap/src/tests.rs#L7768-L7812
 visibility: private
 generated:
   by: okf-rs/0.3.0

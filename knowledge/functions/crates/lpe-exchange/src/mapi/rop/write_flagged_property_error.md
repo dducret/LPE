@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_flagged_property_error
-resource: crates/lpe-exchange/src/mapi/rop.rs#L823-L826
+resource: crates/lpe-exchange/src/mapi/rop.rs#L841-L844
 visibility: private
 generated:
   by: okf-rs/0.3.0

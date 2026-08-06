@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_default_columns_are_navigation_shortcut_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4248-L4261
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4282-L4295
 visibility: private
 generated:
   by: okf-rs/0.3.0

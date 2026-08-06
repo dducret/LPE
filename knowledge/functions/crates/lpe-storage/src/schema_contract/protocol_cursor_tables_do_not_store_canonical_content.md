@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: protocol_cursor_tables_do_not_store_canonical_content
-resource: crates/lpe-storage/src/schema_contract.rs#L3103-L3127
+resource: crates/lpe-storage/src/schema_contract.rs#L3109-L3133
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_subscription
-resource: crates/lpe-jmap/src/tests.rs#L823-L833
+resource: crates/lpe-jmap/src/tests.rs#L836-L846
 visibility: private
 generated:
   by: okf-rs/0.3.0

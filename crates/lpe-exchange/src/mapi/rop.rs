@@ -7,6 +7,7 @@ use super::*;
 
 mod attachments;
 mod buffer;
+mod contact_properties;
 mod debug;
 mod errors;
 mod event_properties;
@@ -26,6 +27,7 @@ mod typed_requests;
 
 pub(in crate::mapi) use attachments::*;
 pub(in crate::mapi) use buffer::*;
+pub(in crate::mapi) use contact_properties::*;
 pub(in crate::mapi) use debug::*;
 pub(in crate::mapi) use errors::*;
 pub(in crate::mapi) use event_properties::*;
@@ -161,6 +163,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         Some(MapiObject::Contact {
             folder_id,
             contact_id,
+            ..
         }) => {
             let Some(_contact) = snapshot.contact_for_id(*folder_id, *contact_id) else {
                 return rop_error_response(
@@ -577,7 +580,19 @@ fn serialize_object_property_row_with_custom(
 ) -> Vec<u8> {
     let mut row = Vec::new();
     for tag in columns {
-        if let Some(value) = custom_values.get(tag) {
+        if matches!(object, Some(MapiObject::Contact { transaction, .. })
+            if transaction.deleted_properties.contains(&canonical_property_storage_tag(*tag))
+                || transaction.pending_properties.contains_key(&canonical_property_storage_tag(*tag)))
+        {
+            row.extend_from_slice(&serialize_object_property(
+                object,
+                principal,
+                mailboxes,
+                emails,
+                snapshot,
+                get_properties_specific_value_tag(object, *tag),
+            ));
+        } else if let Some(value) = custom_values.get(tag) {
             row.extend_from_slice(value);
         } else {
             row.extend_from_slice(&serialize_object_property(
@@ -622,6 +637,9 @@ fn fallback_default_specific_property(
     tag: u32,
 ) -> bool {
     if event_object_property_is_deleted(object, tag) {
+        return true;
+    }
+    if contact_object_property_is_deleted(object, tag) {
         return true;
     }
     if navigation_shortcut_object_property_is_deleted(object, tag) {
@@ -1214,19 +1232,12 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::PendingAssociatedMessage { properties, .. }) => {
             serialize_pending_associated_message_row(principal, properties, &[tag])
         }
-        Some(MapiObject::Contact {
-            folder_id,
-            contact_id,
-        }) => snapshot
-            .contact_for_id(*folder_id, *contact_id)
-            .map(|contact| {
-                serialize_mapi_contact_row(contact, contact.folder_id, principal.account_id, &[tag])
-            })
-            .unwrap_or_else(|| {
-                let mut value = Vec::new();
-                write_property_default(&mut value, tag);
-                value
-            }),
+        Some(MapiObject::Contact { .. }) => serialize_contact_object_property(
+            object.expect("Contact object is present"),
+            principal,
+            snapshot,
+            tag,
+        ),
         Some(MapiObject::PendingContact { properties, .. }) => {
             serialize_pending_contact_row(principal, properties, &[tag])
         }

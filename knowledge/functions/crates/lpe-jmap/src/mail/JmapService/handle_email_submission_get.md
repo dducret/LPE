@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_email_submission_get
-resource: crates/lpe-jmap/src/mail.rs#L723-L767
+resource: crates/lpe-jmap/src/mail.rs#L729-L773
 generated:
   by: okf-rs/0.3.0
 relationships:

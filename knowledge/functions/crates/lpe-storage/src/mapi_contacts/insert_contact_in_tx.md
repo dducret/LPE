@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: insert_contact_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1145-L1209
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1390-L1454
 visibility: private
 generated:
   by: okf-rs/0.3.0

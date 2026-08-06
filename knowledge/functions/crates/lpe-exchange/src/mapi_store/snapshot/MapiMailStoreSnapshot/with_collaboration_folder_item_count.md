@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_collaboration_folder_item_count
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L703-L716
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L735-L748
 generated:
   by: okf-rs/0.3.0
 relationships:

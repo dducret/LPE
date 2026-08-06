@@ -7,6 +7,7 @@ generated:
 relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/tables/recipients/message_recipients
+  - functions/crates/lpe-exchange/src/mapi/tables/recipients/display_bcc
 ---
 
 # Signature
@@ -16,3 +17,4 @@ relationships:
 # Called by
 
 - [message_recipients](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/recipients/message_recipients.md)
+- [display_bcc](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/recipients/display_bcc.md)

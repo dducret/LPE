@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_properties_sees_message_saved_in_same_execute
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L762-L837
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L764-L839
 visibility: private
 generated:
   by: okf-rs/0.3.0

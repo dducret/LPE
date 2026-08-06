@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_jmap_mail_reminder
-resource: crates/lpe-jmap/src/store.rs#L1188-L1210
+resource: crates/lpe-jmap/src/store.rs#L1214-L1236
 visibility: private
 generated:
   by: okf-rs/0.3.0

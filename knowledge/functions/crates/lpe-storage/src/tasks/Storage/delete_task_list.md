@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_task_list
-resource: crates/lpe-storage/src/tasks.rs#L901-L974
+resource: crates/lpe-storage/src/tasks.rs#L925-L998
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_thread_changes
-resource: crates/lpe-jmap/src/mail.rs#L1151-L1200
+resource: crates/lpe-jmap/src/mail.rs#L1157-L1206
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_decode_object_id_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L13318-L13332
+resource: crates/lpe-exchange/src/tests/mod.rs#L13443-L13457
 visibility: private
 generated:
   by: okf-rs/0.3.0

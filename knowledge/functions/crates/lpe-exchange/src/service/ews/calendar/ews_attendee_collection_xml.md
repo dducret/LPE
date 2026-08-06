@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_attendee_collection_xml
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L287-L297
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L284-L294
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_properties
-resource: crates/lpe-jmap/src/tasks.rs#L452-L471
+resource: crates/lpe-jmap/src/tasks.rs#L452-L473
 visibility: private
 generated:
   by: okf-rs/0.3.0

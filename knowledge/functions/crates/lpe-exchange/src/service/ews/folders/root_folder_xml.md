@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: root_folder_xml
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L712-L735
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L766-L789
 generated:
   by: okf-rs/0.3.0
 relationships:

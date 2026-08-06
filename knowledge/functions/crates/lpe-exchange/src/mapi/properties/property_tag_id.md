@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_tag_id
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1014-L1016
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1037-L1039
 visibility: private
 generated:
   by: okf-rs/0.3.0

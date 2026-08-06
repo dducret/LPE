@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_canonical_unsupported_write
-resource: crates/lpe-jmap/src/service/canonical.rs#L363-L417
+resource: crates/lpe-jmap/src/service/canonical.rs#L403-L457
 generated:
   by: okf-rs/0.3.0
 relationships:

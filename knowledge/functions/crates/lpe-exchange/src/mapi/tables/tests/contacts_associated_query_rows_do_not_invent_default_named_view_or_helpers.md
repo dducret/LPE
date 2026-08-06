@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_associated_query_rows_do_not_invent_default_named_view_or_helpers
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7044-L7076
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7078-L7110
 visibility: private
 generated:
   by: okf-rs/0.3.0

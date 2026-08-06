@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_category_header_row
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2900-L2937
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2934-L2971
 visibility: private
 generated:
   by: okf-rs/0.3.0

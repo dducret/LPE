@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: user_saved_search_folder_is_projectable
-resource: crates/lpe-exchange/src/mapi_store.rs#L384-L402
+resource: crates/lpe-exchange/src/mapi_store.rs#L385-L403
 visibility: private
 generated:
   by: okf-rs/0.3.0

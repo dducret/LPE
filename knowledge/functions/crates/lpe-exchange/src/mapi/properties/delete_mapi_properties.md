@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_mapi_properties
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1381-L1428
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1404-L1451
 generated:
   by: okf-rs/0.3.0
 relationships:

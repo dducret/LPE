@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_state_tracks_accessible_mailbox_projection
-resource: crates/lpe-jmap/src/tests.rs#L2440-L2514
+resource: crates/lpe-jmap/src/tests.rs#L2517-L2591
 visibility: private
 generated:
   by: okf-rs/0.3.0

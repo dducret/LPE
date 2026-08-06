@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: properties
-resource: crates/lpe-exchange/src/mapi/dispatch/properties.rs#L1-L1545
+resource: crates/lpe-exchange/src/mapi/dispatch/properties.rs#L1-L1546
 generated:
   by: okf-rs/0.3.0
 relationships:

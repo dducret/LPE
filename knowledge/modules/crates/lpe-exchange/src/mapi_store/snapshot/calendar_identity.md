@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: calendar_identity
-resource: crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity.rs#L1-L488
+resource: crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity.rs#L1-L489
 generated:
   by: okf-rs/0.3.0
 relationships:

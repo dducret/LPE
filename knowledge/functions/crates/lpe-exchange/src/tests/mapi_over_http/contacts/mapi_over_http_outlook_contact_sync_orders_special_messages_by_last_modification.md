@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_contact_sync_orders_special_messages_by_last_modification
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1203-L1282
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1292-L1371
 visibility: private
 generated:
   by: okf-rs/0.3.0

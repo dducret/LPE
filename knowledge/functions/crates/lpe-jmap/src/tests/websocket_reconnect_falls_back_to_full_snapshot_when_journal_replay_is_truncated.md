@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: websocket_reconnect_falls_back_to_full_snapshot_when_journal_replay_is_truncated
-resource: crates/lpe-jmap/src/tests.rs#L11204-L11250
+resource: crates/lpe-jmap/src/tests.rs#L11692-L11738
 visibility: private
 generated:
   by: okf-rs/0.3.0

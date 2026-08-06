@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: search_snippets_return_preview_for_requested_messages
-resource: crates/lpe-jmap/src/tests.rs#L6085-L6116
+resource: crates/lpe-jmap/src/tests.rs#L6297-L6328
 visibility: private
 generated:
   by: okf-rs/0.3.0

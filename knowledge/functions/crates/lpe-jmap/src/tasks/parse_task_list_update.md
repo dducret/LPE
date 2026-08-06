@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_task_list_update
-resource: crates/lpe-jmap/src/tasks.rs#L619-L637
+resource: crates/lpe-jmap/src/tasks.rs#L638-L656
 visibility: private
 generated:
   by: okf-rs/0.3.0

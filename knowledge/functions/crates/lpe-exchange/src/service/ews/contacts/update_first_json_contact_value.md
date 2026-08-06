@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_first_json_contact_value
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L564-L581
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L712-L729
 visibility: private
 generated:
   by: okf-rs/0.3.0

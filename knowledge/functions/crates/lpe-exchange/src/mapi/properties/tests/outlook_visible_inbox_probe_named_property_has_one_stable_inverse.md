@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_visible_inbox_probe_named_property_has_one_stable_inverse
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6734-L6770
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6871-L6907
 visibility: private
 generated:
   by: okf-rs/0.3.0

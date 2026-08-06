@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: imported_identity
-resource: crates/lpe-storage/tests/mapi_contact_create.rs#L207-L220
+resource: crates/lpe-storage/tests/mapi_contact_create.rs#L208-L221
 visibility: private
 generated:
   by: okf-rs/0.3.0

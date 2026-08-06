@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_ical_timestamp
-resource: crates/lpe-dav/src/serialize.rs#L101-L107
+resource: crates/lpe-dav/src/serialize.rs#L107-L113
 generated:
   by: okf-rs/0.3.0
 relationships:

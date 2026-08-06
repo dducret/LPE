@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: property_mutations
-resource: crates/lpe-exchange/src/mapi/dispatch/property_mutations.rs#L1-L778
+resource: crates/lpe-exchange/src/mapi/dispatch/property_mutations.rs#L1-L782
 generated:
   by: okf-rs/0.3.0
 relationships:

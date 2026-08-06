@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_mapi_contact
-resource: crates/lpe-storage/src/mapi_contacts.rs#L188-L433
+resource: crates/lpe-storage/src/mapi_contacts.rs#L215-L470
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -17,6 +17,7 @@ relationships:
   - functions/crates/lpe-storage/src/mapi_contacts/update_contact_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/upsert_custom_properties_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/record_contact_change_in_tx
+  - functions/crates/lpe-storage/src/mapi_contacts/fetch_contact_modseq_in_tx
   - functions/crates/lpe-core/src/sieve/Parser/next
   - functions/crates/lpe-storage/src/mapi_contacts/normalize_filetime
   - functions/crates/lpe-storage/src/mapi_contacts/current_filetime_in_tx
@@ -47,6 +48,7 @@ relationships:
 - [update_contact_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/update_contact_in_tx.md)
 - [upsert_custom_properties_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/upsert_custom_properties_in_tx.md)
 - [record_contact_change_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/record_contact_change_in_tx.md)
+- [fetch_contact_modseq_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/fetch_contact_modseq_in_tx.md)
 - [next](../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
 - [normalize_filetime](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/normalize_filetime.md)
 - [current_filetime_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/current_filetime_in_tx.md)

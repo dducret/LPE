@@ -25,6 +25,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input
   - functions/crates/lpe-exchange/src/service/ews/contacts/contact_entry_value
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_urls_json
+  - functions/crates/lpe-exchange/src/service/ews/contacts/contact_address_json
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_urls_json
   - functions/crates/lpe-exchange/src/service/ews/conversations/get_conversation_items_response
   - functions/crates/lpe-exchange/src/service/ews/conversations/parse_conversation_actions
@@ -112,6 +113,7 @@ relationships:
 - [parse_update_contact_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input.md)
 - [contact_entry_value](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_entry_value.md)
 - [ews_contact_urls_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_urls_json.md)
+- [contact_address_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_address_json.md)
 - [ews_updated_contact_urls_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_urls_json.md)
 - [get_conversation_items_response](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/get_conversation_items_response.md)
 - [parse_conversation_actions](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/parse_conversation_actions.md)

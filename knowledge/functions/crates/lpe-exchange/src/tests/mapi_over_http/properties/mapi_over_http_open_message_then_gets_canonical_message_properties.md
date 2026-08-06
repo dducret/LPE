@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_message_then_gets_canonical_message_properties
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1791-L1891
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1793-L1893
 visibility: private
 generated:
   by: okf-rs/0.3.0

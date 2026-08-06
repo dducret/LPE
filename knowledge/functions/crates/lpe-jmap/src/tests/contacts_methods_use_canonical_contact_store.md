@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_methods_use_canonical_contact_store
-resource: crates/lpe-jmap/src/tests.rs#L11759-L11829
+resource: crates/lpe-jmap/src/tests.rs#L12249-L12319
 visibility: private
 generated:
   by: okf-rs/0.3.0

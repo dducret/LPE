@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: MapiNote
-resource: crates/lpe-exchange/src/mapi_store.rs#L153-L158
+resource: crates/lpe-exchange/src/mapi_store.rs#L154-L159
 generated:
   by: okf-rs/0.3.0
 ---

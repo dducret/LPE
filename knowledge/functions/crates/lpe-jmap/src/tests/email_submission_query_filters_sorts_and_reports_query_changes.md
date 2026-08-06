@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_submission_query_filters_sorts_and_reports_query_changes
-resource: crates/lpe-jmap/src/tests.rs#L5846-L5929
+resource: crates/lpe-jmap/src/tests.rs#L6058-L6141
 visibility: private
 generated:
   by: okf-rs/0.3.0

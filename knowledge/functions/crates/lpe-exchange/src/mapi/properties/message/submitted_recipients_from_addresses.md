@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: submitted_recipients_from_addresses
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L623-L633
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L646-L656
 generated:
   by: okf-rs/0.3.0
 relationships:

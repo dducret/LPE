@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: MapiAssociatedConfigIdentity
-resource: crates/lpe-exchange/src/mapi_store.rs#L223-L225
+resource: crates/lpe-exchange/src/mapi_store.rs#L224-L226
 generated:
   by: okf-rs/0.3.0
 ---

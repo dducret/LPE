@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_full_snapshot_loads_messages_without_search_index_query
-resource: crates/lpe-exchange/src/tests/mod.rs#L2444-L2468
+resource: crates/lpe-exchange/src/tests/mod.rs#L2445-L2469
 visibility: private
 generated:
   by: okf-rs/0.3.0

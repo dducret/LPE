@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_query_subject_rows
-resource: crates/lpe-exchange/src/tests/mod.rs#L15617-L15626
+resource: crates/lpe-exchange/src/tests/mod.rs#L15742-L15751
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_imported_identity
-resource: crates/lpe-storage/src/mapi_contacts.rs#L536-L558
+resource: crates/lpe-storage/src/mapi_contacts.rs#L781-L803
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_organization_name
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L239-L245
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L254-L260
 generated:
   by: okf-rs/0.3.0
 ---

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_ical_datetime
-resource: crates/lpe-dav/src/parse.rs#L206-L223
+resource: crates/lpe-dav/src/parse.rs#L216-L233
 visibility: private
 generated:
   by: okf-rs/0.3.0

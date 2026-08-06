@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_item_rejects_public_folder_item_without_read_access
-resource: crates/lpe-exchange/src/tests/ews.rs#L8199-L8240
+resource: crates/lpe-exchange/src/tests/ews.rs#L8640-L8681
 visibility: private
 generated:
   by: okf-rs/0.3.0

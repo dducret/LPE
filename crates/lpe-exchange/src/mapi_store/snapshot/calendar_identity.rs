@@ -459,6 +459,7 @@ impl MapiMailStoreSnapshot {
                 .unwrap_or_default(),
             mailbox_content_commit_times: HashMap::new(),
             contact_commit_times: HashMap::new(),
+            contact_modseqs: HashMap::new(),
             public_folders: Vec::new(),
             public_folder_items: Vec::new(),
             public_folder_replicas: Vec::new(),

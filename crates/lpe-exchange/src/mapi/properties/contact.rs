@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::{bail, Result};
 
 pub(in crate::mapi) fn contact_property_value(
     contact: &AccessibleContact,
@@ -490,6 +491,7 @@ pub(in crate::mapi) fn contact_input_from_mapi(
             business_phone.as_deref().or(primary_phone.as_deref()),
             home_phone.as_deref(),
         )),
+        addresses_json: Some(existing.addresses_json.clone()),
         urls_json: Some(contact_urls_json_from_mapi(
             &existing.urls_json,
             personal_url.as_deref(),
@@ -644,7 +646,9 @@ fn upsert_labeled_value(
     }
 }
 
-fn reject_unsupported_mapi_contact_properties(properties: &HashMap<u32, MapiValue>) -> Result<()> {
+pub(in crate::mapi) fn reject_unsupported_mapi_contact_properties(
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<()> {
     for tag in properties.keys() {
         let supported = matches!(
             canonical_property_storage_tag(*tag),
@@ -689,6 +693,122 @@ fn reject_unsupported_mapi_contact_properties(properties: &HashMap<u32, MapiValu
         }
     }
     Ok(())
+}
+
+pub(in crate::mapi) fn contact_input_from_mapi_with_deletions(
+    account_id: Uuid,
+    id: Option<Uuid>,
+    existing: &AccessibleContact,
+    properties: &HashMap<u32, MapiValue>,
+    deleted_properties: &HashSet<u32>,
+) -> Result<UpsertClientContactInput> {
+    let mut input = contact_input_from_mapi(account_id, id, existing, properties);
+    for property_tag in deleted_properties {
+        match canonical_property_storage_tag(*property_tag) {
+            PID_TAG_DISPLAY_NAME_PREFIX_W => input.structured_name.prefix.clear(),
+            PID_TAG_GIVEN_NAME_W => input.structured_name.given.clear(),
+            PID_TAG_MIDDLE_NAME_W => input.structured_name.middle.clear(),
+            PID_TAG_SURNAME_W => input.structured_name.family.clear(),
+            PID_TAG_GENERATION_W => input.structured_name.suffix.clear(),
+            PID_TAG_NICKNAME_W => input.structured_name.nickname.clear(),
+            PID_TAG_MOBILE_TELEPHONE_NUMBER_W => {
+                input.phones_json = Some(remove_labeled_contact_values(
+                    input.phones_json.unwrap_or_default(),
+                    "phone",
+                    &["mobile", "cell"],
+                ));
+            }
+            PID_TAG_BUSINESS_TELEPHONE_NUMBER_W => {
+                input.phones_json = Some(remove_labeled_contact_values(
+                    input.phones_json.unwrap_or_default(),
+                    "phone",
+                    &["work", "business"],
+                ));
+            }
+            PID_TAG_HOME_TELEPHONE_NUMBER_W => {
+                input.phones_json = Some(remove_labeled_contact_values(
+                    input.phones_json.unwrap_or_default(),
+                    "phone",
+                    &["home"],
+                ));
+            }
+            PID_TAG_PRIMARY_TELEPHONE_NUMBER_W => input.phone.clear(),
+            PID_TAG_COMPANY_NAME_W => input.organization_name.clear(),
+            PID_TAG_DEPARTMENT_NAME_W => input.team.clear(),
+            PID_TAG_TITLE_W => {
+                input.job_title.clear();
+                input.role.clear();
+            }
+            PID_TAG_PERSONAL_HOME_PAGE_W => {
+                input.urls_json = Some(remove_labeled_contact_values(
+                    input.urls_json.unwrap_or_default(),
+                    "url",
+                    &["home", "personal"],
+                ));
+            }
+            PID_TAG_BUSINESS_HOME_PAGE_W => {
+                input.urls_json = Some(remove_labeled_contact_values(
+                    input.urls_json.unwrap_or_default(),
+                    "url",
+                    &["work", "business"],
+                ));
+            }
+            PID_TAG_BODY_W => input.notes.clear(),
+            PID_LID_EMAIL2_DISPLAY_NAME_W_TAG
+            | PID_LID_EMAIL2_EMAIL_ADDRESS_W_TAG
+            | PID_LID_EMAIL2_ORIGINAL_DISPLAY_NAME_W_TAG => {
+                input.emails_json = Some(remove_contact_email_index(
+                    input.emails_json.unwrap_or_default(),
+                    1,
+                ));
+            }
+            PID_LID_EMAIL3_DISPLAY_NAME_W_TAG
+            | PID_LID_EMAIL3_EMAIL_ADDRESS_W_TAG
+            | PID_LID_EMAIL3_ORIGINAL_DISPLAY_NAME_W_TAG => {
+                input.emails_json = Some(remove_contact_email_index(
+                    input.emails_json.unwrap_or_default(),
+                    2,
+                ));
+            }
+            _ => bail!("MAPI Contact property {property_tag:#010X} cannot be cleared"),
+        }
+    }
+    Ok(input)
+}
+
+fn remove_labeled_contact_values(
+    value: serde_json::Value,
+    key: &str,
+    labels: &[&str],
+) -> serde_json::Value {
+    let rows = value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|row| {
+            let label = row.get("label").and_then(serde_json::Value::as_str);
+            let matches_label = label.is_some_and(|label| {
+                labels
+                    .iter()
+                    .any(|expected| label.eq_ignore_ascii_case(expected))
+            });
+            !matches_label || row.get(key).is_none()
+        })
+        .cloned()
+        .collect();
+    serde_json::Value::Array(rows)
+}
+
+fn remove_contact_email_index(value: serde_json::Value, index: usize) -> serde_json::Value {
+    let mut rows = value.as_array().cloned().unwrap_or_default();
+    let mut email_positions = rows
+        .iter()
+        .enumerate()
+        .filter_map(|(position, row)| row.get("email").is_some().then_some(position));
+    if let Some(position) = email_positions.nth(index) {
+        rows.remove(position);
+    }
+    serde_json::Value::Array(rows)
 }
 
 pub(in crate::mapi) async fn apply_canonical_contact_property_values<S>(

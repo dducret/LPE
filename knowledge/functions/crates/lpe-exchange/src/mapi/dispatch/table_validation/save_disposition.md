@@ -6,6 +6,7 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_existing_contact
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_validation/save_flags_are_supported
@@ -17,6 +18,7 @@ relationships:
 
 # Called by
 
+- [save_existing_contact](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_existing_contact.md)
 - [save_pending_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event.md)
 - [save_existing_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event.md)
 - [save_flags_are_supported](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_validation/save_flags_are_supported.md)

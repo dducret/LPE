@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: from_input
-resource: crates/lpe-storage/src/mapi_contacts.rs#L457-L511
+resource: crates/lpe-storage/src/mapi_contacts.rs#L676-L730
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -15,6 +15,8 @@ relationships:
   - functions/crates/lpe-storage/src/workspace/contact_source_payload_json
   called_by:
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update
+  - functions/crates/lpe-storage/src/mapi_contacts/validate_mapi_contact_commit_input
 ---
 
 # Signature
@@ -33,3 +35,5 @@ relationships:
 # Called by
 
 - [create_mapi_contact](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md)
+- [commit_mapi_contact_update](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update.md)
+- [validate_mapi_contact_commit_input](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/validate_mapi_contact_commit_input.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_admin_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L678-L773
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L688-L783
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: storage_jmap_fixture
-resource: crates/lpe-jmap/src/tests.rs#L8209-L8399
+resource: crates/lpe-jmap/src/tests.rs#L8697-L8887
 visibility: private
 generated:
   by: okf-rs/0.3.0

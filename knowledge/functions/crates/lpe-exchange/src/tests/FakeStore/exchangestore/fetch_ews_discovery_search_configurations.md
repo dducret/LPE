@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_ews_discovery_search_configurations
-resource: crates/lpe-exchange/src/tests/mod.rs#L5266-L5272
+resource: crates/lpe-exchange/src/tests/mod.rs#L5270-L5276
 visibility: private
 generated:
   by: okf-rs/0.3.0

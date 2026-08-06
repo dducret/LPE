@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: cleanup
-resource: crates/lpe-storage/tests/mapi_contact_create.rs#L108-L119
+resource: crates/lpe-storage/tests/mapi_contact_create.rs#L109-L120
 visibility: private
 generated:
   by: okf-rs/0.3.0

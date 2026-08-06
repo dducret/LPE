@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_email_import
-resource: crates/lpe-jmap/src/mail.rs#L466-L528
+resource: crates/lpe-jmap/src/mail.rs#L472-L534
 generated:
   by: okf-rs/0.3.0
 relationships:

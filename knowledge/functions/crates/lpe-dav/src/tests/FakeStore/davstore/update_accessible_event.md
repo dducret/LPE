@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_accessible_event
-resource: crates/lpe-dav/src/tests.rs#L562-L616
+resource: crates/lpe-dav/src/tests.rs#L564-L618
 visibility: private
 generated:
   by: okf-rs/0.3.0

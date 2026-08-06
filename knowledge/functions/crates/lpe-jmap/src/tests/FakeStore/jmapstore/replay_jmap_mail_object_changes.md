@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: replay_jmap_mail_object_changes
-resource: crates/lpe-jmap/src/tests.rs#L884-L892
+resource: crates/lpe-jmap/src/tests.rs#L897-L905
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_delete_properties_no_replicate_is_best_effort_for_persisted_message
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1687-L1745
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1689-L1747
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_set_rejects_read_only_shared_mailbox_mutations
-resource: crates/lpe-jmap/src/tests.rs#L3215-L3275
+resource: crates/lpe-jmap/src/tests.rs#L3292-L3352
 visibility: private
 generated:
   by: okf-rs/0.3.0

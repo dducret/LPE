@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_account_may_draft
-resource: crates/lpe-jmap/src/mailboxes.rs#L549-L551
+resource: crates/lpe-jmap/src/mailboxes.rs#L552-L554
 generated:
   by: okf-rs/0.3.0
 relationships:

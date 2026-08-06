@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: propfind_lists_task_collection_and_resources
-resource: crates/lpe-dav/src/tests.rs#L1100-L1145
+resource: crates/lpe-dav/src/tests.rs#L1104-L1151
 visibility: private
 generated:
   by: okf-rs/0.3.0

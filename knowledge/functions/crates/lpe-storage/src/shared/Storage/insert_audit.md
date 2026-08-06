@@ -43,7 +43,7 @@ relationships:
   - functions/crates/lpe-storage/src/mailboxes/Storage/rename_imap_mailbox
   - functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription
   - functions/crates/lpe-storage/src/mailboxes/Storage/destroy_jmap_mailbox
-  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email
+  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts
   - functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership
   - functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_followup_flags
   - functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_content
@@ -122,7 +122,7 @@ relationships:
 - [rename_imap_mailbox](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/rename_imap_mailbox.md)
 - [set_mailbox_subscription](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription.md)
 - [destroy_jmap_mailbox](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/destroy_jmap_mailbox.md)
-- [copy_jmap_email](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email.md)
+- [copy_jmap_email_between_accounts](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts.md)
 - [move_jmap_email_membership](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership.md)
 - [update_jmap_email_followup_flags](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_followup_flags.md)
 - [update_jmap_email_content](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_content.md)

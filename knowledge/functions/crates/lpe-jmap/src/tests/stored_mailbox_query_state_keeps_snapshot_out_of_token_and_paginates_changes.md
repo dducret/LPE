@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stored_mailbox_query_state_keeps_snapshot_out_of_token_and_paginates_changes
-resource: crates/lpe-jmap/src/tests.rs#L4554-L4666
+resource: crates/lpe-jmap/src/tests.rs#L4631-L4743
 visibility: private
 generated:
   by: okf-rs/0.3.0

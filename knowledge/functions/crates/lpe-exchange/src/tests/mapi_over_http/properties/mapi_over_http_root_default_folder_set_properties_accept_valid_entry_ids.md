@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_root_default_folder_set_properties_accept_valid_entry_ids
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6376-L6433
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6378-L6435
 visibility: private
 generated:
   by: okf-rs/0.3.0

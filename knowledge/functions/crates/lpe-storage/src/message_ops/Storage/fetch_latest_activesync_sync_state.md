@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_latest_activesync_sync_state
-resource: crates/lpe-storage/src/message_ops.rs#L1297-L1331
+resource: crates/lpe-storage/src/message_ops.rs#L1320-L1354
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_removes_task
-resource: crates/lpe-dav/src/tests.rs#L1275-L1300
+resource: crates/lpe-dav/src/tests.rs#L1289-L1314
 visibility: private
 generated:
   by: okf-rs/0.3.0

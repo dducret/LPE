@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_notes_journal_reminder_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1327-L1567
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1337-L1577
 visibility: private
 generated:
   by: okf-rs/0.3.0

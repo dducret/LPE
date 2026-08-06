@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: report_filters_shared_contact_collection_by_shared_href
-resource: crates/lpe-dav/src/tests.rs#L1357-L1393
+resource: crates/lpe-dav/src/tests.rs#L1371-L1407
 visibility: private
 generated:
   by: okf-rs/0.3.0

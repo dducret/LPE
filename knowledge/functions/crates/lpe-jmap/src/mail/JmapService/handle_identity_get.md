@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_identity_get
-resource: crates/lpe-jmap/src/mail.rs#L897-L945
+resource: crates/lpe-jmap/src/mail.rs#L903-L951
 generated:
   by: okf-rs/0.3.0
 relationships:

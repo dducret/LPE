@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_removes_event
-resource: crates/lpe-dav/src/tests.rs#L860-L886
+resource: crates/lpe-dav/src/tests.rs#L864-L890
 visibility: private
 generated:
   by: okf-rs/0.3.0

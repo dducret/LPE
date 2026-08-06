@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1191-L1282
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1225-L1316
 visibility: private
 generated:
   by: okf-rs/0.3.0

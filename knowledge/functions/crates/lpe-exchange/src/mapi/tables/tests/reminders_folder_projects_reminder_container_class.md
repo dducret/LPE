@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reminders_folder_projects_reminder_container_class
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9460-L9471
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9656-L9667
 visibility: private
 generated:
   by: okf-rs/0.3.0

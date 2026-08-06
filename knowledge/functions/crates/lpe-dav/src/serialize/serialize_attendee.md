@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_attendee
-resource: crates/lpe-dav/src/serialize.rs#L142-L167
+resource: crates/lpe-dav/src/serialize.rs#L148-L173
 visibility: private
 generated:
   by: okf-rs/0.3.0

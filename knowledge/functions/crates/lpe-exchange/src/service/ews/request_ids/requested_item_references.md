@@ -9,8 +9,9 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/xml/attribute_value_after
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   called_by:
-  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/update_item
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/delete_item
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/validate_mutating_item_change_keys
+  - functions/crates/lpe-exchange/src/service/ews/items/requested_update_item_changes
   - functions/crates/lpe-exchange/src/service/ews/request_ids/requested_item_ids
   - functions/crates/lpe-exchange/src/service/ews/request_ids/item_references_keep_supplied_change_keys_with_their_item_ids
 ---
@@ -26,7 +27,8 @@ relationships:
 
 # Called by
 
-- [update_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/update_item.md)
+- [delete_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/delete_item.md)
 - [validate_mutating_item_change_keys](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/validate_mutating_item_change_keys.md)
+- [requested_update_item_changes](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/requested_update_item_changes.md)
 - [requested_item_ids](../../../../../../../functions/crates/lpe-exchange/src/service/ews/request_ids/requested_item_ids.md)
 - [item_references_keep_supplied_change_keys_with_their_item_ids](../../../../../../../functions/crates/lpe-exchange/src/service/ews/request_ids/item_references_keep_supplied_change_keys_with_their_item_ids.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: properties
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1-L1431
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1-L1454
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -75,6 +75,8 @@ relationships:
 - [mailbox_has_subfolders](../../../../../functions/crates/lpe-exchange/src/mapi/properties/mailbox_has_subfolders.md)
 - [mailbox_parent_folder_id](../../../../../functions/crates/lpe-exchange/src/mapi/properties/mailbox_parent_folder_id.md)
 - [collaboration_folder_property_value](../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_property_value.md)
+- [collaboration_folder_rights](../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_rights.md)
+- [collaboration_folder_access](../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_access.md)
 - [public_folder_property_value](../../../../../functions/crates/lpe-exchange/src/mapi/properties/public_folder_property_value.md)
 - [common_view_named_view_property_value](../../../../../functions/crates/lpe-exchange/src/mapi/properties/common_view_named_view_property_value.md)
 - [property_tag_id](../../../../../functions/crates/lpe-exchange/src/mapi/properties/property_tag_id.md)

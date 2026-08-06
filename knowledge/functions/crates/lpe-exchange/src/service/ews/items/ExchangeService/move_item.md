@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: move_item
-resource: crates/lpe-exchange/src/service/ews/items.rs#L1007-L1147
+resource: crates/lpe-exchange/src/service/ews/items.rs#L1037-L1177
 generated:
   by: okf-rs/0.3.0
 relationships:

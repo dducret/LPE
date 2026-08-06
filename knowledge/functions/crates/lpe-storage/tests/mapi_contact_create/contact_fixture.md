@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_fixture
-resource: crates/lpe-storage/tests/mapi_contact_create.rs#L122-L205
+resource: crates/lpe-storage/tests/mapi_contact_create.rs#L123-L206
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-activesync/src/tests/query
   called_by:
   - functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_create_is_atomic_and_preserves_reserved_import_identity
+  - functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_commit_is_atomic_and_rejects_a_stale_modseq
 ---
 
 # Signature
@@ -27,3 +28,4 @@ relationships:
 # Called by
 
 - [mapi_contact_create_is_atomic_and_preserves_reserved_import_identity](../../../../../functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_create_is_atomic_and_preserves_reserved_import_identity.md)
+- [mapi_contact_commit_is_atomic_and_rejects_a_stale_modseq](../../../../../functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_commit_is_atomic_and_rejects_a_stale_modseq.md)

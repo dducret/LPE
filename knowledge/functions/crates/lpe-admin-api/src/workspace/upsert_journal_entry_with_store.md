@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upsert_journal_entry_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1224-L1248
+resource: crates/lpe-admin-api/src/workspace.rs#L1226-L1250
 visibility: private
 generated:
   by: okf-rs/0.3.0

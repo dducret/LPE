@@ -8,6 +8,8 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/session/input_handle
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_values
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions
   - functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/stage_virtual_conversation_action_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/stage_virtual_conversation_action_property_delete
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_values
@@ -46,6 +48,8 @@ relationships:
 
 # Called by
 
+- [stage_contact_property_values](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_values.md)
+- [stage_contact_property_deletions](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions.md)
 - [stage_virtual_conversation_action_property_values](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/stage_virtual_conversation_action_property_values.md)
 - [stage_virtual_conversation_action_property_delete](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/stage_virtual_conversation_action_property_delete.md)
 - [stage_event_property_values](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_values.md)

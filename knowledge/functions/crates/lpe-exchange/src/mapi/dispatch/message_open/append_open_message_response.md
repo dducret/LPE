@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_open_message_response
-resource: crates/lpe-exchange/src/mapi/dispatch/message_open.rs#L3-L532
+resource: crates/lpe-exchange/src/mapi/dispatch/message_open.rs#L3-L536
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -20,9 +20,10 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/messages/canonical_message_folder_id
   - functions/crates/lpe-exchange/src/mapi/dispatch/messages/fallback_open_message_folder_id
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contact_for_id
+  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contact_modseq
   - functions/crates/lpe-exchange/src/mapi/rop/responses/rop_open_message_response
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/task_for_id
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/note_for_id
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/journal_entry_for_id
@@ -74,9 +75,10 @@ relationships:
 - [canonical_message_folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/messages/canonical_message_folder_id.md)
 - [fallback_open_message_folder_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/messages/fallback_open_message_folder_id.md)
 - [contact_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contact_for_id.md)
+- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
+- [contact_modseq](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contact_modseq.md)
 - [rop_open_message_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/responses/rop_open_message_response.md)
 - [event_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
 - [task_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/task_for_id.md)
 - [note_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/note_for_id.md)
 - [journal_entry_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/journal_entry_for_id.md)

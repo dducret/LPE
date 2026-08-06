@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: imported_source_counter
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1084-L1103
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1329-L1348
 visibility: private
 generated:
   by: okf-rs/0.3.0

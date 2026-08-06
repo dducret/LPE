@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_managed_retention_folder_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1883-L2001
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1893-L2011
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_phones_json_from_mapi
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L568-L584
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L584-L600
 visibility: private
 generated:
   by: okf-rs/0.3.0

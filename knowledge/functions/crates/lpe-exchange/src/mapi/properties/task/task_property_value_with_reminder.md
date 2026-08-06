@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_property_value_with_reminder
-resource: crates/lpe-exchange/src/mapi/properties/task.rs#L12-L64
+resource: crates/lpe-exchange/src/mapi/properties/task.rs#L12-L101
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -10,11 +10,12 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/change_number_for_store_id
   - functions/crates/lpe-exchange/src/mapi/properties/task/task_flag_status
+  - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_rfc3339_utc
   - functions/crates/lpe-exchange/src/mapi/properties/task/task_percent_complete
+  - functions/crates/lpe-exchange/src/mapi/properties/task/task_completion_date_filetime
   - functions/crates/lpe-exchange/src/mapi/properties/message/mapi_message_size_value
   - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/task_size
   - functions/crates/lpe-exchange/src/mapi/properties/message/mapi_message_size_extended_value
-  - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_rfc3339_utc
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/source_key_for_uuid
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/source_key_for_store_id
   called_by:
@@ -33,11 +34,12 @@ relationships:
 - [canonical_property_storage_tag](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag.md)
 - [change_number_for_store_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/change_number_for_store_id.md)
 - [task_flag_status](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/task_flag_status.md)
+- [filetime_from_rfc3339_utc](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_rfc3339_utc.md)
 - [task_percent_complete](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/task_percent_complete.md)
+- [task_completion_date_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/task_completion_date_filetime.md)
 - [mapi_message_size_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_message_size_value.md)
 - [task_size](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/task_size.md)
 - [mapi_message_size_extended_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_message_size_extended_value.md)
-- [filetime_from_rfc3339_utc](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_rfc3339_utc.md)
 - [source_key_for_uuid](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/source_key_for_uuid.md)
 - [source_key_for_store_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/source_key_for_store_id.md)
 

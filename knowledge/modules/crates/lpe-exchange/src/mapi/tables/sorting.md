@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: sorting
-resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L1-L530
+resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L1-L556
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -26,6 +26,8 @@ relationships:
 - [sort_contacts](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_contacts.md)
 - [sort_events](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_events.md)
 - [sort_tasks](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_tasks.md)
+- [task_importance](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/task_importance.md)
+- [task_status](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/task_status.md)
 - [sort_notes](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_notes.md)
 - [sort_journal_entries](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_journal_entries.md)
 - [compare_optional_mapi_values](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/compare_optional_mapi_values.md)

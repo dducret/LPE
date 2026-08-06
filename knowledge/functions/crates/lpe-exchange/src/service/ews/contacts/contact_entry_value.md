@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_entry_value
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L406-L434
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L466-L494
 visibility: private
 generated:
   by: okf-rs/0.3.0

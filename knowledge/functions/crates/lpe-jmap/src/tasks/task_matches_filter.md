@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_matches_filter
-resource: crates/lpe-jmap/src/tasks.rs#L535-L556
+resource: crates/lpe-jmap/src/tasks.rs#L539-L560
 visibility: private
 generated:
   by: okf-rs/0.3.0

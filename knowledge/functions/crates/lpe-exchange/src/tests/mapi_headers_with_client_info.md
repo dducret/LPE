@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_headers_with_client_info
-resource: crates/lpe-exchange/src/tests/mod.rs#L12372-L12376
+resource: crates/lpe-exchange/src/tests/mod.rs#L12497-L12501
 visibility: private
 generated:
   by: okf-rs/0.3.0

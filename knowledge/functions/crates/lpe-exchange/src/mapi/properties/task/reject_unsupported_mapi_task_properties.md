@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reject_unsupported_mapi_task_properties
-resource: crates/lpe-exchange/src/mapi/properties/task.rs#L200-L218
+resource: crates/lpe-exchange/src/mapi/properties/task.rs#L358-L385
 visibility: private
 generated:
   by: okf-rs/0.3.0

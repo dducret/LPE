@@ -37,6 +37,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     folder_versions: MapiFolderVersions,
     mailbox_content_commit_times: HashMap<Uuid, u64>,
     contact_commit_times: HashMap<Uuid, u64>,
+    contact_modseqs: HashMap<Uuid, i64>,
     public_folders: Vec<MapiPublicFolder>,
     public_folder_items: Vec<MapiPublicFolderItem>,
     public_folder_replicas: Vec<MapiPublicFolderReplica>,
@@ -447,6 +448,7 @@ impl<T: ExchangeStore> MapiStore for T {
             let task_collections = self.fetch_accessible_task_collections(account_id).await?;
             let mut contacts = Vec::new();
             let mut contact_commit_times = Vec::new();
+            let mut contact_versions = Vec::new();
             for collection in &contact_collections {
                 contacts.extend(
                     self.fetch_accessible_contacts_in_collection(account_id, &collection.id)
@@ -454,6 +456,10 @@ impl<T: ExchangeStore> MapiStore for T {
                 );
                 contact_commit_times.extend(
                     self.fetch_contact_commit_times(account_id, &collection.id)
+                        .await?,
+                );
+                contact_versions.extend(
+                    self.fetch_contact_sync_versions(account_id, &collection.id)
                         .await?,
                 );
             }
@@ -679,6 +685,7 @@ impl<T: ExchangeStore> MapiStore for T {
             )
             .and_then(|snapshot| snapshot.with_contact_identities(&identity_records))
             .map(|snapshot| snapshot.with_contact_commit_times(contact_commit_times))
+            .map(|snapshot| snapshot.with_contact_modseqs(contact_versions))
             .map(|snapshot| snapshot.with_calendar_attachments(calendar_attachments))
             .and_then(|snapshot| snapshot.with_event_versions(event_versions))
             .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))

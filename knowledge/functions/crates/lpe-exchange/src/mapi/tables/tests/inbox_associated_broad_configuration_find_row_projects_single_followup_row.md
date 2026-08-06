@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_broad_configuration_find_row_projects_single_followup_row
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6282-L6366
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6316-L6400
 visibility: private
 generated:
   by: okf-rs/0.3.0

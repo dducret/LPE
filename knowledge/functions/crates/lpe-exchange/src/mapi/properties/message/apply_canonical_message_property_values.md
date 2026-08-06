@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: apply_canonical_message_property_values
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L670-L740
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L693-L763
 generated:
   by: okf-rs/0.3.0
 relationships:

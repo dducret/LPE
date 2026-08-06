@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: staged_custom_property_values
-resource: crates/lpe-exchange/src/mapi/dispatch/custom_properties.rs#L413-L439
+resource: crates/lpe-exchange/src/mapi/dispatch/custom_properties.rs#L414-L440
 visibility: private
 generated:
   by: okf-rs/0.3.0

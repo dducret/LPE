@@ -232,6 +232,12 @@ macro_rules! store_impl_collaboration {
         })
     }
 
+    fn commit_mapi_contact_update<'a>(
+        &'a self,
+        input: MapiContactCommitInput,
+    ) -> StoreFuture<'a, MapiContactCommitOutcome> {
+        Box::pin(async move { self.commit_mapi_contact_update(input).await })
+    }
     fn commit_mapi_event_update<'a>(
         &'a self,
         input: MapiEventCommitInput,

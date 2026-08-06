@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_property_value
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L3-L17
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L4-L18
 generated:
   by: okf-rs/0.3.0
 relationships:

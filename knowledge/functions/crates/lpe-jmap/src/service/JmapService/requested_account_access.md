@@ -39,6 +39,8 @@ relationships:
   - functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_set
   - functions/crates/lpe-jmap/src/service/blobs/JmapService/handle_upload
   - functions/crates/lpe-jmap/src/service/blobs/JmapService/handle_download
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query
+  - functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query_changes
   - functions/crates/lpe-jmap/src/service/canonical/JmapService/canonical_object_state
 ---
 
@@ -83,4 +85,6 @@ relationships:
 - [handle_mailbox_set](../../../../../../functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_set.md)
 - [handle_upload](../../../../../../functions/crates/lpe-jmap/src/service/blobs/JmapService/handle_upload.md)
 - [handle_download](../../../../../../functions/crates/lpe-jmap/src/service/blobs/JmapService/handle_download.md)
+- [handle_canonical_query](../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query.md)
+- [handle_canonical_query_changes](../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/handle_canonical_query_changes.md)
 - [canonical_object_state](../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/canonical_object_state.md)

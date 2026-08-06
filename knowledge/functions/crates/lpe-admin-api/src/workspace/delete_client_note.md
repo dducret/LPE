@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_client_note
-resource: crates/lpe-admin-api/src/workspace.rs#L1025-L1036
+resource: crates/lpe-admin-api/src/workspace.rs#L1027-L1038
 generated:
   by: okf-rs/0.3.0
 relationships:

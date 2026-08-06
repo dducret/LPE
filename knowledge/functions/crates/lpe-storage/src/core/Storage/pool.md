@@ -100,6 +100,7 @@ relationships:
   - functions/crates/lpe-storage/src/blob_store/tests/attachment_content_fetch_reads_through_blob_store_boundary
   - functions/crates/lpe-storage/src/core/connect_pins_search_path_to_canonical_public_schema
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update
   - functions/crates/lpe-storage/src/pst/insert_account_mailbox
   - functions/crates/lpe-storage/src/pst/insert_message_with_attachment
   - functions/crates/lpe-storage/src/pst/insert_secondary_storage_pool
@@ -115,6 +116,7 @@ relationships:
   - functions/crates/lpe-storage/src/storage_visibility/tests/s3_compatible_pool_health_checks_active_object_placement
   - functions/crates/lpe-storage/tests/mapi_contact_create/ContactFixture/cleanup
   - functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_create_is_atomic_and_preserves_reserved_import_identity
+  - functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_commit_is_atomic_and_rejects_a_stale_modseq
   - functions/crates/lpe-storage/tests/mapi_event_commit/EventFixture/cleanup
   - functions/crates/lpe-storage/tests/mapi_event_commit/reserve_imported_event_range
   - functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_persists_one_atomic_version
@@ -235,6 +237,7 @@ relationships:
 - [attachment_content_fetch_reads_through_blob_store_boundary](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/attachment_content_fetch_reads_through_blob_store_boundary.md)
 - [connect_pins_search_path_to_canonical_public_schema](../../../../../../functions/crates/lpe-storage/src/core/connect_pins_search_path_to_canonical_public_schema.md)
 - [create_mapi_contact](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md)
+- [commit_mapi_contact_update](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update.md)
 - [insert_account_mailbox](../../../../../../functions/crates/lpe-storage/src/pst/insert_account_mailbox.md)
 - [insert_message_with_attachment](../../../../../../functions/crates/lpe-storage/src/pst/insert_message_with_attachment.md)
 - [insert_secondary_storage_pool](../../../../../../functions/crates/lpe-storage/src/pst/insert_secondary_storage_pool.md)
@@ -250,6 +253,7 @@ relationships:
 - [s3_compatible_pool_health_checks_active_object_placement](../../../../../../functions/crates/lpe-storage/src/storage_visibility/tests/s3_compatible_pool_health_checks_active_object_placement.md)
 - [cleanup](../../../../../../functions/crates/lpe-storage/tests/mapi_contact_create/ContactFixture/cleanup.md)
 - [mapi_contact_create_is_atomic_and_preserves_reserved_import_identity](../../../../../../functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_create_is_atomic_and_preserves_reserved_import_identity.md)
+- [mapi_contact_commit_is_atomic_and_rejects_a_stale_modseq](../../../../../../functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_commit_is_atomic_and_rejects_a_stale_modseq.md)
 - [cleanup](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/EventFixture/cleanup.md)
 - [reserve_imported_event_range](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/reserve_imported_event_range.md)
 - [mapi_event_commit_persists_one_atomic_version](../../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/mapi_event_commit_persists_one_atomic_version.md)

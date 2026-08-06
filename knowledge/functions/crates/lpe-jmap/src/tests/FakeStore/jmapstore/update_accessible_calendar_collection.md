@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_accessible_calendar_collection
-resource: crates/lpe-jmap/src/tests.rs#L1697-L1710
+resource: crates/lpe-jmap/src/tests.rs#L1772-L1785
 visibility: private
 generated:
   by: okf-rs/0.3.0

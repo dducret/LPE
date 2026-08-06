@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_mail_query_snippet_and_blob_projections_do_not_expose_bcc
-resource: crates/lpe-jmap/src/tests.rs#L3784-L3850
+resource: crates/lpe-jmap/src/tests.rs#L3861-L3927
 visibility: private
 generated:
   by: okf-rs/0.3.0

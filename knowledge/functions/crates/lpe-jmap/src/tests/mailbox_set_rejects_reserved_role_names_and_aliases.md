@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_set_rejects_reserved_role_names_and_aliases
-resource: crates/lpe-jmap/src/tests.rs#L6172-L6210
+resource: crates/lpe-jmap/src/tests.rs#L6384-L6422
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_canonical_named_property_tag
-resource: crates/lpe-exchange/src/mapi/dispatch/custom_properties.rs#L448-L501
+resource: crates/lpe-exchange/src/mapi/dispatch/custom_properties.rs#L449-L506
 visibility: private
 generated:
   by: okf-rs/0.3.0

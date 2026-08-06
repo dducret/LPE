@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_set_rejects_shared_mailbox_draft_without_sender_delegation
-resource: crates/lpe-jmap/src/tests.rs#L3123-L3168
+resource: crates/lpe-jmap/src/tests.rs#L3200-L3245
 visibility: private
 generated:
   by: okf-rs/0.3.0

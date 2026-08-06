@@ -7,7 +7,6 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
-  - functions/crates/lpe-exchange/src/mapi/session/tests/principal
   - functions/crates/lpe-exchange/src/mapi/transport/connect_response
 ---
 
@@ -17,5 +16,4 @@ relationships:
 
 # Calls
 
-- [principal](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/principal.md)
 - [connect_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/transport/connect_response.md)

@@ -8,7 +8,6 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-core/src/sieve/Parser/next
-  - functions/crates/lpe-domain/src/civil_time/days_from_civil
   called_by:
   - functions/crates/lpe-activesync/src/service/application_data/duration_from_datetimes
 ---
@@ -20,7 +19,6 @@ relationships:
 # Calls
 
 - [next](../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
-- [days_from_civil](../../../../../../functions/crates/lpe-domain/src/civil_time/days_from_civil.md)
 
 # Called by
 

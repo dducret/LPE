@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: runtime_calendar_event_input
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2979-L3006
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L3060-L3087
 visibility: private
 generated:
   by: okf-rs/0.3.0

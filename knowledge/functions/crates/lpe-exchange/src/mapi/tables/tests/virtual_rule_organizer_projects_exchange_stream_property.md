@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: virtual_rule_organizer_projects_exchange_stream_property
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7592-L7609
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7626-L7643
 visibility: private
 generated:
   by: okf-rs/0.3.0

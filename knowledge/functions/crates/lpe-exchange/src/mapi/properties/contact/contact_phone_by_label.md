@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_phone_by_label
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L255-L260
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L270-L275
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: save_draft_message
-resource: crates/lpe-storage/src/submission.rs#L187-L579
+resource: crates/lpe-storage/src/submission.rs#L188-L581
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Trait
 title: JmapStore
-resource: crates/lpe-jmap/src/store.rs#L49-L506
+resource: crates/lpe-jmap/src/store.rs#L49-L514
 generated:
   by: okf-rs/0.3.0
 ---

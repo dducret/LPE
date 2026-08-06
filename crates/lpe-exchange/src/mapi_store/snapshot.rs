@@ -123,6 +123,21 @@ impl MapiMailStoreSnapshot {
         self
     }
 
+    pub(crate) fn with_contact_modseqs(mut self, versions: Vec<(Uuid, String)>) -> Self {
+        self.contact_modseqs
+            .extend(versions.into_iter().filter_map(|(contact_id, version)| {
+                version
+                    .parse::<i64>()
+                    .ok()
+                    .map(|version| (contact_id, version))
+            }));
+        self
+    }
+
+    pub(crate) fn contact_modseq(&self, contact_id: Uuid) -> i64 {
+        self.contact_modseqs.get(&contact_id).copied().unwrap_or(1)
+    }
+
     pub(crate) fn with_search_folder_definitions(
         mut self,
         search_folder_definitions: Vec<SearchFolderDefinition>,
@@ -575,6 +590,23 @@ impl MapiMailStoreSnapshot {
         {
             folder.item_count = folder.item_count.saturating_add(1);
         }
+    }
+
+    pub(crate) fn remember_updated_contact(
+        &mut self,
+        folder_id: u64,
+        contact_id: u64,
+        contact: AccessibleContact,
+        identity: MapiIdentityRecord,
+        canonical_modseq: i64,
+    ) {
+        self.remember_created_contact(folder_id, contact, identity);
+        self.contact_modseqs.insert(
+            self.contact_for_id(folder_id, contact_id)
+                .map(|contact| contact.canonical_id)
+                .unwrap_or_default(),
+            canonical_modseq,
+        );
     }
 
     pub(crate) fn remember_updated_event(

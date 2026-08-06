@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: ensure_same_tenant_account_in_tx
-resource: crates/lpe-storage/src/submission.rs#L1243-L1252
+resource: crates/lpe-storage/src/submission.rs#L1246-L1255
 visibility: private
 generated:
   by: okf-rs/0.3.0

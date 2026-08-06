@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: canonical_common_views_fai_messages
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1258-L1282
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1290-L1314
 visibility: private
 generated:
   by: okf-rs/0.3.0

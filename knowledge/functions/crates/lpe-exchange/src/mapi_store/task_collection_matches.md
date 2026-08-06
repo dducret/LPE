@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_collection_matches
-resource: crates/lpe-exchange/src/mapi_store.rs#L1057-L1059
+resource: crates/lpe-exchange/src/mapi_store.rs#L1064-L1066
 visibility: private
 generated:
   by: okf-rs/0.3.0

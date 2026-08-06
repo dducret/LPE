@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wlink_group_name
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1040-L1054
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1063-L1077
 visibility: private
 generated:
   by: okf-rs/0.3.0

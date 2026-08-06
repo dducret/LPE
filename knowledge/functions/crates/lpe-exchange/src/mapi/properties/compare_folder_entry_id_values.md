@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: compare_folder_entry_id_values
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1272-L1279
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1295-L1302
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: compare_i64
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1281-L1283
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1304-L1306
 generated:
   by: okf-rs/0.3.0
 relationships:

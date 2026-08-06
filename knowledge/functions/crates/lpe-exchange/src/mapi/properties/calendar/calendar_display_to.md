@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_display_to
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L181-L189
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L195-L203
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: postgres_mapi_special_folder_alias_round_trip_and_identity_collision_guards
-resource: crates/lpe-exchange/src/tests/mod.rs#L2629-L2731
+resource: crates/lpe-exchange/src/tests/mod.rs#L2630-L2732
 visibility: private
 generated:
   by: okf-rs/0.3.0

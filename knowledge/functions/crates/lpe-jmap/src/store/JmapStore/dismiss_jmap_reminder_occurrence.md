@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: dismiss_jmap_reminder_occurrence
-resource: crates/lpe-jmap/src/store.rs#L473-L489
+resource: crates/lpe-jmap/src/store.rs#L481-L497
 visibility: private
 generated:
   by: okf-rs/0.3.0

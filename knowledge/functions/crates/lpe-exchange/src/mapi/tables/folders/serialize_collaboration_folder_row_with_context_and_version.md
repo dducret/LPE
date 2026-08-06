@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_collaboration_folder_row_with_context_and_version
-resource: crates/lpe-exchange/src/mapi/tables/folders.rs#L902-L923
+resource: crates/lpe-exchange/src/mapi/tables/folders.rs#L901-L922
 generated:
   by: okf-rs/0.3.0
 relationships:

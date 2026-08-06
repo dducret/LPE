@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: response_rops_from_execute_response
-resource: crates/lpe-exchange/src/tests/mod.rs#L15628-L15632
+resource: crates/lpe-exchange/src/tests/mod.rs#L15753-L15757
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -142,6 +142,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_replays_outlook_contact_sync_import_then_save
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_sync_import_save_reports_deleted_source_key
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_shared_contact_read_only_rights_reject_mutations
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_created_contact_link_config_accepts_outlook_marker_property
@@ -329,6 +330,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_hierarchy_sync_does_not_publish_recoverable_items
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_empty_folder_notifies_when_partial_purge_changes_contents
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/rule_organizer/mapi_over_http_exchange_rule_organizer_query_rows_opens_returned_message
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_subrestriction_matches_message_recipients
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_string8_rows_save_canonically
@@ -495,6 +497,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_table_control_rops_require_table_handles
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_set_search_criteria_reuses_previous_scope_and_restriction
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_set_search_criteria_rejects_unsupported_restriction
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tasks/mapi_over_http_shared_task_read_only_rights_reject_mutations
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_microsoft_oxcmsg_name_to_id_mapping_works_on_message_object
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_open_attachment_rejects_invalid_microsoft_flags_without_batch_drift
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_microsoft_set_search_criteria_rejects_invalid_search_flags
@@ -647,6 +650,7 @@ relationships:
 - [mapi_over_http_replays_outlook_contact_sync_import_then_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_replays_outlook_contact_sync_import_then_save.md)
 - [mapi_over_http_contact_sync_import_save_reports_deleted_source_key](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_sync_import_save_reports_deleted_source_key.md)
 - [mapi_over_http_contact_crud_uses_canonical_contacts](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts.md)
+- [mapi_over_http_shared_contact_read_only_rights_reject_mutations](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_shared_contact_read_only_rights_reject_mutations.md)
 - [mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property.md)
 - [mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags.md)
 - [mapi_over_http_created_contact_link_config_accepts_outlook_marker_property](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_created_contact_link_config_accepts_outlook_marker_property.md)
@@ -834,6 +838,7 @@ relationships:
 - [mapi_over_http_hierarchy_sync_does_not_publish_recoverable_items](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_hierarchy_sync_does_not_publish_recoverable_items.md)
 - [mapi_over_http_empty_folder_notifies_when_partial_purge_changes_contents](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_empty_folder_notifies_when_partial_purge_changes_contents.md)
 - [mapi_over_http_exchange_rule_organizer_query_rows_opens_returned_message](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/rule_organizer/mapi_over_http_exchange_rule_organizer_query_rows_opens_returned_message.md)
+- [submit_new_mapi_message_with_identities](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities.md)
 - [mapi_over_http_microsoft_subrestriction_matches_message_recipients](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_subrestriction_matches_message_recipients.md)
 - [mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type.md)
 - [mapi_over_http_modify_recipients_string8_rows_save_canonically](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_string8_rows_save_canonically.md)
@@ -1000,6 +1005,7 @@ relationships:
 - [mapi_over_http_microsoft_table_control_rops_require_table_handles](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_table_control_rops_require_table_handles.md)
 - [mapi_over_http_microsoft_set_search_criteria_reuses_previous_scope_and_restriction](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_microsoft_set_search_criteria_reuses_previous_scope_and_restriction.md)
 - [mapi_over_http_set_search_criteria_rejects_unsupported_restriction](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_set_search_criteria_rejects_unsupported_restriction.md)
+- [mapi_over_http_shared_task_read_only_rights_reject_mutations](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tasks/mapi_over_http_shared_task_read_only_rights_reject_mutations.md)
 - [mapi_over_http_microsoft_oxcmsg_name_to_id_mapping_works_on_message_object](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_microsoft_oxcmsg_name_to_id_mapping_works_on_message_object.md)
 - [mapi_over_http_open_attachment_rejects_invalid_microsoft_flags_without_batch_drift](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_open_attachment_rejects_invalid_microsoft_flags_without_batch_drift.md)
 - [mapi_over_http_microsoft_set_search_criteria_rejects_invalid_search_flags](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/transport/mapi_over_http_microsoft_set_search_criteria_rejects_invalid_search_flags.md)

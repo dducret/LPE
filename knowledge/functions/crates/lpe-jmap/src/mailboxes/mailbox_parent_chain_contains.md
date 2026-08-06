@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_parent_chain_contains
-resource: crates/lpe-jmap/src/mailboxes.rs#L767-L780
+resource: crates/lpe-jmap/src/mailboxes.rs#L775-L788
 visibility: private
 generated:
   by: okf-rs/0.3.0

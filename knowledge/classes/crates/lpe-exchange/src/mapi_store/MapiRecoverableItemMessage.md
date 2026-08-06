@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: MapiRecoverableItemMessage
-resource: crates/lpe-exchange/src/mapi_store.rs#L281-L286
+resource: crates/lpe-exchange/src/mapi_store.rs#L282-L287
 generated:
   by: okf-rs/0.3.0
 ---

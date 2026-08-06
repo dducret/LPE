@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_json_values
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L328-L338
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L343-L353
 visibility: private
 generated:
   by: okf-rs/0.3.0

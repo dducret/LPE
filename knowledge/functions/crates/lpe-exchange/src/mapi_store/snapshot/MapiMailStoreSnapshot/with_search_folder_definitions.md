@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_search_folder_definitions
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L126-L149
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L141-L164
 generated:
   by: okf-rs/0.3.0
 relationships:

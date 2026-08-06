@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: ensure_default_task_list
-resource: crates/lpe-storage/src/tasks.rs#L1405-L1442
+resource: crates/lpe-storage/src/tasks.rs#L1451-L1488
 generated:
   by: okf-rs/0.3.0
 relationships:

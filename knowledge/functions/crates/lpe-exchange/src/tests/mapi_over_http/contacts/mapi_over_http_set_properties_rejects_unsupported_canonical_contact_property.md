@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L980-L1041
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1069-L1130
 visibility: private
 generated:
   by: okf-rs/0.3.0

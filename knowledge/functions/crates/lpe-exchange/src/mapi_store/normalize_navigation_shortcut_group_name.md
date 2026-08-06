@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normalize_navigation_shortcut_group_name
-resource: crates/lpe-exchange/src/mapi_store.rs#L1115-L1130
+resource: crates/lpe-exchange/src/mapi_store.rs#L1122-L1137
 visibility: private
 generated:
   by: okf-rs/0.3.0

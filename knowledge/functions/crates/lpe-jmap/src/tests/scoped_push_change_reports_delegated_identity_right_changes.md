@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: scoped_push_change_reports_delegated_identity_right_changes
-resource: crates/lpe-jmap/src/tests.rs#L11363-L11415
+resource: crates/lpe-jmap/src/tests.rs#L11851-L11903
 visibility: private
 generated:
   by: okf-rs/0.3.0

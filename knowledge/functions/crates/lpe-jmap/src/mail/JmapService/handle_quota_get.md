@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_quota_get
-resource: crates/lpe-jmap/src/mail.rs#L1202-L1230
+resource: crates/lpe-jmap/src/mail.rs#L1208-L1236
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_datetime_parts
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L632-L640
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L629-L637
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -10,7 +10,7 @@ relationships:
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   called_by:
   - functions/crates/lpe-exchange/src/service/ews/calendar/parse_create_event_input
-  - functions/crates/lpe-exchange/src/service/ews/calendar/ews_duration_minutes
+  - functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_minutes
 ---
 
 # Signature
@@ -24,4 +24,4 @@ relationships:
 # Called by
 
 - [parse_create_event_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/parse_create_event_input.md)
-- [ews_duration_minutes](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_duration_minutes.md)
+- [ews_datetime_minutes](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_minutes.md)

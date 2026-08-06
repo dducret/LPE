@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_jmap_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2521-L2611
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2531-L2621
 visibility: private
 generated:
   by: okf-rs/0.3.0

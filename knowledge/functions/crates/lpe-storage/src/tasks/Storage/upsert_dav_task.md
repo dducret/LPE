@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_dav_task
-resource: crates/lpe-storage/src/tasks.rs#L1207-L1239
+resource: crates/lpe-storage/src/tasks.rs#L1241-L1275
 generated:
   by: okf-rs/0.3.0
 relationships:

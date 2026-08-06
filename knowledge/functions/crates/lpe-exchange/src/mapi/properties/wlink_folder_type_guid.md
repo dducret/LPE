@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wlink_folder_type_guid
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1116-L1156
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1139-L1179
 generated:
   by: okf-rs/0.3.0
 relationships:

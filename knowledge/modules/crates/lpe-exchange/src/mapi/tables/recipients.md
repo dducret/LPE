@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: recipients
-resource: crates/lpe-exchange/src/mapi/tables/recipients.rs#L1-L113
+resource: crates/lpe-exchange/src/mapi/tables/recipients.rs#L1-L114
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: apply_supported_object_property_values
-resource: crates/lpe-exchange/src/mapi/dispatch/properties.rs#L1351-L1545
+resource: crates/lpe-exchange/src/mapi/dispatch/properties.rs#L1351-L1546
 generated:
   by: okf-rs/0.3.0
 relationships:

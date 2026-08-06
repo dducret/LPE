@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_object_debug_fields
-resource: crates/lpe-exchange/src/mapi/rop/debug/shapes.rs#L74-L319
+resource: crates/lpe-exchange/src/mapi/rop/debug/shapes.rs#L74-L320
 generated:
   by: okf-rs/0.3.0
 relationships:

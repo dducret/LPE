@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_task_list
-resource: crates/lpe-storage/src/tasks.rs#L756-L816
+resource: crates/lpe-storage/src/tasks.rs#L780-L840
 generated:
   by: okf-rs/0.3.0
 relationships:

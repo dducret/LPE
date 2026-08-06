@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: private_outlook_methods_use_canonical_note_journal_and_reminder_store
-resource: crates/lpe-jmap/src/tests.rs#L13031-L13171
+resource: crates/lpe-jmap/src/tests.rs#L13569-L13709
 visibility: private
 generated:
   by: okf-rs/0.3.0

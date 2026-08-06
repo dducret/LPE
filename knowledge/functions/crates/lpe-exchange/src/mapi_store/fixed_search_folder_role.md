@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fixed_search_folder_role
-resource: crates/lpe-exchange/src/mapi_store.rs#L310-L318
+resource: crates/lpe-exchange/src/mapi_store.rs#L311-L319
 visibility: private
 generated:
   by: okf-rs/0.3.0

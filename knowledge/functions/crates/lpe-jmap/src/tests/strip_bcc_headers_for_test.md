@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strip_bcc_headers_for_test
-resource: crates/lpe-jmap/src/tests.rs#L180-L204
+resource: crates/lpe-jmap/src/tests.rs#L181-L205
 visibility: private
 generated:
   by: okf-rs/0.3.0

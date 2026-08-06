@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wlink_save_stamp
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1056-L1071
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1079-L1094
 visibility: private
 generated:
   by: okf-rs/0.3.0

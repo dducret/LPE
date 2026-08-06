@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_or_allocate_mapi_named_property_ids
-resource: crates/lpe-exchange/src/tests/mod.rs#L6848-L6906
+resource: crates/lpe-exchange/src/tests/mod.rs#L6852-L6910
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: detect
-resource: crates/lpe-jmap/src/tests.rs#L137-L143
+resource: crates/lpe-jmap/src/tests.rs#L138-L144
 visibility: private
 generated:
   by: okf-rs/0.3.0

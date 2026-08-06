@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_contact_email_entries_xml
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L316-L346
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L325-L355
 visibility: private
 generated:
   by: okf-rs/0.3.0

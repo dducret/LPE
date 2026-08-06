@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_property_value_with_identity
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L19-L198
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L20-L213
 generated:
   by: okf-rs/0.3.0
 relationships:

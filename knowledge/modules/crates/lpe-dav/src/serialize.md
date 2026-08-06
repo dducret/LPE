@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: serialize
-resource: crates/lpe-dav/src/serialize.rs#L1-L201
+resource: crates/lpe-dav/src/serialize.rs#L1-L207
 generated:
   by: okf-rs/0.3.0
 relationships:

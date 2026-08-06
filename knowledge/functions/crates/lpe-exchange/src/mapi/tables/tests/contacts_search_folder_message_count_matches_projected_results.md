@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_search_folder_message_count_matches_projected_results
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L606-L672
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L640-L706
 visibility: private
 generated:
   by: okf-rs/0.3.0

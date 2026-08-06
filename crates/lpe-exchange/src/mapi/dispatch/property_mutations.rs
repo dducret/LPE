@@ -210,6 +210,9 @@ where
                 values,
             )
             .map(|problems| event_property_problems = problems),
+            Some(MapiObject::Contact { .. }) => {
+                stage_contact_property_values(session, handle_slots, request, snapshot, values)
+            }
             Some(MapiObject::NavigationShortcut { .. }) => {
                 stage_existing_navigation_shortcut_property_values(
                     principal,
@@ -249,8 +252,7 @@ where
                 stage_delegate_freebusy_property_values(session, handle_slots, request, values)
             }
             Some(
-                object @ (MapiObject::Contact { .. }
-                | MapiObject::Task { .. }
+                object @ (MapiObject::Task { .. }
                 | MapiObject::Note { .. }
                 | MapiObject::JournalEntry { .. }
                 | MapiObject::ConversationAction { .. }
@@ -497,6 +499,8 @@ pub(super) async fn append_delete_properties_response<S>(
     } else if matches!(object, Some(MapiObject::Event { .. })) {
         stage_event_property_deletions(session, handle_slots, request, snapshot, &property_tags)
             .map(|problems| event_property_problems = problems)
+    } else if matches!(object, Some(MapiObject::Contact { .. })) {
+        stage_contact_property_deletions(session, handle_slots, request, snapshot, &property_tags)
     } else if matches!(object, Some(MapiObject::NavigationShortcut { .. })) {
         stage_existing_navigation_shortcut_property_deletions(
             principal,

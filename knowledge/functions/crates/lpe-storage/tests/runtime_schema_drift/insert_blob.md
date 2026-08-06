@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: insert_blob
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L619-L644
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L629-L654
 visibility: private
 generated:
   by: okf-rs/0.3.0

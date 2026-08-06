@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: contacts_search_results
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L959-L967
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L991-L999
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: png
-resource: crates/lpe-exchange/src/tests/mod.rs#L4222-L4233
+resource: crates/lpe-exchange/src/tests/mod.rs#L4224-L4235
 visibility: private
 generated:
   by: okf-rs/0.3.0

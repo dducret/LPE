@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_restriction
-resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L431-L519
+resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L457-L545
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_search_folder_role
-resource: crates/lpe-exchange/src/mapi_store.rs#L404-L411
+resource: crates/lpe-exchange/src/mapi_store.rs#L405-L412
 visibility: private
 generated:
   by: okf-rs/0.3.0

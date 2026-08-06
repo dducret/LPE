@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_accessible_calendar_collection
-resource: crates/lpe-jmap/src/tests.rs#L1682-L1695
+resource: crates/lpe-jmap/src/tests.rs#L1757-L1770
 visibility: private
 generated:
   by: okf-rs/0.3.0

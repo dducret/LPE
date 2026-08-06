@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: save_jmap_query_state
-resource: crates/lpe-jmap/src/store.rs#L583-L602
+resource: crates/lpe-jmap/src/store.rs#L591-L610
 visibility: private
 generated:
   by: okf-rs/0.3.0

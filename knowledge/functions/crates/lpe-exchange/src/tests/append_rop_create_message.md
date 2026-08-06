@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_create_message
-resource: crates/lpe-exchange/src/tests/mod.rs#L15159-L15164
+resource: crates/lpe-exchange/src/tests/mod.rs#L15284-L15289
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -35,6 +35,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_pending_message_display_recipients_follow_modify_recipients
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_set_properties_accepts_ptyp_server_id_on_pending_message
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_string8_body_stream_writes_canonical_message_body
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_x500_rows_save_canonically
@@ -85,6 +86,7 @@ relationships:
 - [mapi_over_http_pending_message_display_recipients_follow_modify_recipients](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_pending_message_display_recipients_follow_modify_recipients.md)
 - [mapi_over_http_set_properties_accepts_ptyp_server_id_on_pending_message](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_set_properties_accepts_ptyp_server_id_on_pending_message.md)
 - [mapi_over_http_string8_body_stream_writes_canonical_message_body](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_string8_body_stream_writes_canonical_message_body.md)
+- [submit_new_mapi_message_with_identities](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities.md)
 - [mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type.md)
 - [mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically.md)
 - [mapi_over_http_modify_recipients_x500_rows_save_canonically](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_x500_rows_save_canonically.md)

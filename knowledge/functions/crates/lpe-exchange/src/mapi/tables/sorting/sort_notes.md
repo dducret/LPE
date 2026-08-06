@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sort_notes
-resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L329-L355
+resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L355-L381
 generated:
   by: okf-rs/0.3.0
 relationships:

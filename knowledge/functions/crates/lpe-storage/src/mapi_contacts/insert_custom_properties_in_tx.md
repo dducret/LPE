@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: insert_custom_properties_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1293-L1320
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1540-L1567
 visibility: private
 generated:
   by: okf-rs/0.3.0

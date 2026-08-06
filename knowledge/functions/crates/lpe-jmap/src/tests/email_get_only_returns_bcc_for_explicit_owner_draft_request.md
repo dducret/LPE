@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_get_only_returns_bcc_for_explicit_owner_draft_request
-resource: crates/lpe-jmap/src/tests.rs#L3546-L3585
+resource: crates/lpe-jmap/src/tests.rs#L3623-L3662
 visibility: private
 generated:
   by: okf-rs/0.3.0

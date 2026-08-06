@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: unsupported_specific_property_tags
-resource: crates/lpe-exchange/src/mapi/rop.rs#L596-L614
+resource: crates/lpe-exchange/src/mapi/rop.rs#L611-L629
 visibility: private
 generated:
   by: okf-rs/0.3.0

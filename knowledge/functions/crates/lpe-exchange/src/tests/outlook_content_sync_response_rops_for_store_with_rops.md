@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_content_sync_response_rops_for_store_with_rops
-resource: crates/lpe-exchange/src/tests/mod.rs#L15476-L15502
+resource: crates/lpe-exchange/src/tests/mod.rs#L15601-L15627
 visibility: private
 generated:
   by: okf-rs/0.3.0

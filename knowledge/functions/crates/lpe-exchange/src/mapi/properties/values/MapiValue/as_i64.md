@@ -18,6 +18,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/values/json_i64_values
   - functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value
   - functions/crates/lpe-exchange/src/mapi/sync/search_folder_definition_sync_object
+  - functions/crates/lpe-jmap/src/tasks/parse_task_priority
 ---
 
 # Signature
@@ -40,3 +41,4 @@ relationships:
 - [json_i64_values](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/json_i64_values.md)
 - [write_mapi_value](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value.md)
 - [search_folder_definition_sync_object](../../../../../../../../functions/crates/lpe-exchange/src/mapi/sync/search_folder_definition_sync_object.md)
+- [parse_task_priority](../../../../../../../../functions/crates/lpe-jmap/src/tasks/parse_task_priority.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: armed
-resource: crates/lpe-storage/tests/mapi_contact_create.rs#L43-L48
+resource: crates/lpe-storage/tests/mapi_contact_create.rs#L44-L49
 visibility: private
 generated:
   by: okf-rs/0.3.0

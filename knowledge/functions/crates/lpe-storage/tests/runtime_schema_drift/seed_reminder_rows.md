@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: seed_reminder_rows
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1569-L1664
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1579-L1674
 visibility: private
 generated:
   by: okf-rs/0.3.0

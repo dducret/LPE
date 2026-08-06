@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: PublicFolderPermissionRow
-resource: crates/lpe-storage/src/models.rs#L736-L748
+resource: crates/lpe-storage/src/models.rs#L738-L750
 generated:
   by: okf-rs/0.3.0
 ---

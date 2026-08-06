@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_associated_query_rows_prefix_configuration_returns_calendar_config
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7211-L7280
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7245-L7314
 visibility: private
 generated:
   by: okf-rs/0.3.0

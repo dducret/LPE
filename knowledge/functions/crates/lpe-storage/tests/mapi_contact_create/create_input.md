@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: create_input
-resource: crates/lpe-storage/tests/mapi_contact_create.rs#L271-L289
+resource: crates/lpe-storage/tests/mapi_contact_create.rs#L272-L290
 visibility: private
 generated:
   by: okf-rs/0.3.0

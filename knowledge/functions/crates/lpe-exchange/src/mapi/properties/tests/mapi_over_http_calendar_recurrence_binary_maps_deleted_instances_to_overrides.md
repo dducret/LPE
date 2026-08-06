@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_recurrence_binary_maps_deleted_instances_to_overrides
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4415-L4440
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4552-L4577
 visibility: private
 generated:
   by: okf-rs/0.3.0

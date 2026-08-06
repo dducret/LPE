@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query_client_reminders_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1262-L1277
+resource: crates/lpe-admin-api/src/workspace.rs#L1264-L1279
 visibility: private
 generated:
   by: okf-rs/0.3.0

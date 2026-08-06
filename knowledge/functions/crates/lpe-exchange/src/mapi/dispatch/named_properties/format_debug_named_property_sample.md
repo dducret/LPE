@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_debug_named_property_sample
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L657-L671
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L661-L675
 generated:
   by: okf-rs/0.3.0
 relationships:

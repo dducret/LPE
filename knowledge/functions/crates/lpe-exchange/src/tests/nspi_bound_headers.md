@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_bound_headers
-resource: crates/lpe-exchange/src/tests/mod.rs#L12600-L12611
+resource: crates/lpe-exchange/src/tests/mod.rs#L12725-L12736
 visibility: private
 generated:
   by: okf-rs/0.3.0

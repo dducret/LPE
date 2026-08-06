@@ -359,6 +359,7 @@ pub(super) fn custom_property_object_identity(
         MapiObject::Contact {
             folder_id,
             contact_id,
+            ..
         } => snapshot
             .contact_for_id(*folder_id, *contact_id)
             .map(|contact| (MapiCustomPropertyObjectKind::Contact, contact.canonical_id)),

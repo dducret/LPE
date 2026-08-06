@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: properties
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1-L7093
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1-L7095
 generated:
   by: okf-rs/0.3.0
 relationships:

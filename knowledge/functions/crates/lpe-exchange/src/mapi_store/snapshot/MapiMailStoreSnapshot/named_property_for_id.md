@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: named_property_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L443-L448
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L458-L463
 generated:
   by: okf-rs/0.3.0
 relationships:

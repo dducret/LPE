@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_stream_region_rops_succeed_on_stream_handles
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2283-L2437
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2285-L2439
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_mapi_journal_entry
-resource: crates/lpe-exchange/src/tests/mod.rs#L9594-L9618
+resource: crates/lpe-exchange/src/tests/mod.rs#L9718-L9742
 visibility: private
 generated:
   by: okf-rs/0.3.0

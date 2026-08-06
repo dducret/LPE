@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_followup_update_is_empty
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L856-L874
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L879-L897
 generated:
   by: okf-rs/0.3.0
 relationships:

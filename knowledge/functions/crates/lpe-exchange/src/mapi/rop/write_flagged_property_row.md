@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_flagged_property_row
-resource: crates/lpe-exchange/src/mapi/rop.rs#L777-L821
+resource: crates/lpe-exchange/src/mapi/rop.rs#L795-L839
 visibility: private
 generated:
   by: okf-rs/0.3.0

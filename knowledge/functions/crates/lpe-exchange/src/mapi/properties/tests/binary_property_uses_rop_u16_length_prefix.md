@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: binary_property_uses_rop_u16_length_prefix
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2259-L2272
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2308-L2321
 visibility: private
 generated:
   by: okf-rs/0.3.0

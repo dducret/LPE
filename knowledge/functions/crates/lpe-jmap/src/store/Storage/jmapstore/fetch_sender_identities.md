@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_sender_identities
-resource: crates/lpe-jmap/src/store.rs#L639-L646
+resource: crates/lpe-jmap/src/store.rs#L647-L654
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -21,6 +21,9 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/delete_associated_config_properties
   - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/clear_event_attachment_transaction
   - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/abandon_event_attachment_transaction
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/remember_saved_contact_handle
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/apply_contact_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/delete_conversation_action_properties
   - functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/stage_virtual_conversation_action_property_delete
   - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/fetch_custom_property_values_for_request
@@ -40,6 +43,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/identity/MapiRequestIdentityScope/forget
   - functions/crates/lpe-exchange/src/mapi/identity/forget_mapi_identity
   - functions/crates/lpe-exchange/src/mapi/properties/delete_mapi_properties
+  - functions/crates/lpe-exchange/src/mapi/properties/contact/remove_contact_email_index
   - functions/crates/lpe-exchange/src/mapi/properties/navigation_shortcut/navigation_shortcut_properties_with_pending
   - functions/crates/lpe-exchange/src/mapi/properties/streams/sync_stream_target
   - functions/crates/lpe-exchange/src/mapi/session/MapiSession/record_recent_probe_action
@@ -124,6 +128,9 @@ relationships:
 - [delete_associated_config_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/delete_associated_config_properties.md)
 - [clear_event_attachment_transaction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/clear_event_attachment_transaction.md)
 - [abandon_event_attachment_transaction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/abandon_event_attachment_transaction.md)
+- [remember_saved_contact_handle](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/remember_saved_contact_handle.md)
+- [stage_contact_property_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions.md)
+- [apply_contact_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/apply_contact_property_values.md)
 - [delete_conversation_action_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/delete_conversation_action_properties.md)
 - [stage_virtual_conversation_action_property_delete](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/stage_virtual_conversation_action_property_delete.md)
 - [fetch_custom_property_values_for_request](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/fetch_custom_property_values_for_request.md)
@@ -143,6 +150,7 @@ relationships:
 - [forget](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiRequestIdentityScope/forget.md)
 - [forget_mapi_identity](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/forget_mapi_identity.md)
 - [delete_mapi_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/delete_mapi_properties.md)
+- [remove_contact_email_index](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/remove_contact_email_index.md)
 - [navigation_shortcut_properties_with_pending](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/navigation_shortcut/navigation_shortcut_properties_with_pending.md)
 - [sync_stream_target](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/sync_stream_target.md)
 - [record_recent_probe_action](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/MapiSession/record_recent_probe_action.md)

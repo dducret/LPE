@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_event_id_matches
-resource: crates/lpe-exchange/src/mapi_store.rs#L942-L944
+resource: crates/lpe-exchange/src/mapi_store.rs#L949-L951
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -23,7 +23,9 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/task/task_property_value_with_reminder
   - functions/crates/lpe-exchange/src/mapi/properties/task/task_reminder_property_value
   - functions/crates/lpe-exchange/src/mapi/properties/task/reminder_delta_minutes
+  - functions/crates/lpe-exchange/src/mapi/properties/task/task_completion_date_filetime
   - functions/crates/lpe-exchange/src/mapi/properties/tests/reminder_signal_time_wins_independently_of_property_order
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/task_property_updates_map_to_canonical_state_dates_and_priority
   - functions/crates/lpe-exchange/src/mapi/sync/special_sync_objects_for
   - functions/crates/lpe-exchange/src/mapi/sync/public_folder_item_sync_object
   - functions/crates/lpe-exchange/src/mapi/sync/task_sync_object
@@ -102,7 +104,9 @@ relationships:
 - [task_property_value_with_reminder](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/task_property_value_with_reminder.md)
 - [task_reminder_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/task_reminder_property_value.md)
 - [reminder_delta_minutes](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/reminder_delta_minutes.md)
+- [task_completion_date_filetime](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/task_completion_date_filetime.md)
 - [reminder_signal_time_wins_independently_of_property_order](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/reminder_signal_time_wins_independently_of_property_order.md)
+- [task_property_updates_map_to_canonical_state_dates_and_priority](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/task_property_updates_map_to_canonical_state_dates_and_priority.md)
 - [special_sync_objects_for](../../../../../../functions/crates/lpe-exchange/src/mapi/sync/special_sync_objects_for.md)
 - [public_folder_item_sync_object](../../../../../../functions/crates/lpe-exchange/src/mapi/sync/public_folder_item_sync_object.md)
 - [task_sync_object](../../../../../../functions/crates/lpe-exchange/src/mapi/sync/task_sync_object.md)

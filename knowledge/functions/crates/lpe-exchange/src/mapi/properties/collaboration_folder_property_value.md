@@ -1,15 +1,15 @@
 ---
 type: Rust Function
 title: collaboration_folder_property_value
-resource: crates/lpe-exchange/src/mapi/properties.rs#L722-L811
+resource: crates/lpe-exchange/src/mapi/properties.rs#L722-L802
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/change_number_for_store_id
-  - functions/crates/lpe-exchange/src/mapi/permissions/owner_rights
-  - functions/crates/lpe-exchange/src/mapi/permissions/rights_from_grant
+  - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_access
+  - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_rights
   - functions/crates/lpe-exchange/src/mapi/properties/extended_folder_flags
   - functions/crates/lpe-exchange/src/mapi/tables/folders/collaboration_folder_message_class
   - functions/crates/lpe-exchange/src/mapi/properties/default_post_message_class_for_container_class
@@ -34,8 +34,8 @@ relationships:
 
 - [canonical_property_storage_tag](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag.md)
 - [change_number_for_store_id](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/change_number_for_store_id.md)
-- [owner_rights](../../../../../../functions/crates/lpe-exchange/src/mapi/permissions/owner_rights.md)
-- [rights_from_grant](../../../../../../functions/crates/lpe-exchange/src/mapi/permissions/rights_from_grant.md)
+- [collaboration_folder_access](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_access.md)
+- [collaboration_folder_rights](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_rights.md)
 - [extended_folder_flags](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/extended_folder_flags.md)
 - [collaboration_folder_message_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/collaboration_folder_message_class.md)
 - [default_post_message_class_for_container_class](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/default_post_message_class_for_container_class.md)

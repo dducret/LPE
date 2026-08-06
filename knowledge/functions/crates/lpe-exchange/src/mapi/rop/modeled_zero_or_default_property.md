@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: modeled_zero_or_default_property
-resource: crates/lpe-exchange/src/mapi/rop.rs#L924-L1004
+resource: crates/lpe-exchange/src/mapi/rop.rs#L942-L1022
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mailboxes
-resource: crates/lpe-jmap/src/mailboxes.rs#L1-L789
+resource: crates/lpe-jmap/src/mailboxes.rs#L1-L797
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -29,6 +29,7 @@ relationships:
 - [mailbox_account_may_submit](../../../../functions/crates/lpe-jmap/src/mailboxes/mailbox_account_may_submit.md)
 - [mailbox_account_may_write](../../../../functions/crates/lpe-jmap/src/mailboxes/mailbox_account_may_write.md)
 - [mailbox_account_may_draft](../../../../functions/crates/lpe-jmap/src/mailboxes/mailbox_account_may_draft.md)
+- [mailbox_is_user_managed](../../../../functions/crates/lpe-jmap/src/mailboxes/mailbox_is_user_managed.md)
 - [ensure_mailbox_write](../../../../functions/crates/lpe-jmap/src/mailboxes/ensure_mailbox_write.md)
 - [ensure_mailbox_draft_write](../../../../functions/crates/lpe-jmap/src/mailboxes/ensure_mailbox_draft_write.md)
 - [parse_mailbox_create](../../../../functions/crates/lpe-jmap/src/mailboxes/parse_mailbox_create.md)

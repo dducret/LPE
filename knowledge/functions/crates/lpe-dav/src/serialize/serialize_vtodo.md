@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_vtodo
-resource: crates/lpe-dav/src/serialize.rs#L56-L83
+resource: crates/lpe-dav/src/serialize.rs#L56-L89
 generated:
   by: okf-rs/0.3.0
 relationships:

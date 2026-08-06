@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_defaults_serialize_floating_types_with_wire_widths
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L208-L220
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L242-L254
 visibility: private
 generated:
   by: okf-rs/0.3.0

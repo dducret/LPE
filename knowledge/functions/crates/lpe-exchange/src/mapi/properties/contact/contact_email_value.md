@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_email_value
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L266-L281
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L281-L296
 visibility: private
 generated:
   by: okf-rs/0.3.0

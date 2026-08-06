@@ -7,8 +7,9 @@ generated:
 relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/permissions/owner_rights
-  - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_property_value
+  - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_rights
   - functions/crates/lpe-exchange/src/mapi/properties/public_folder_property_value
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/collaboration_folder_tables_follow_effective_collection_grants
   - functions/crates/lpe-exchange/src/mapi_store/mapi_public_folder_permission
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/folder_access_for_principal
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_grant
@@ -32,8 +33,9 @@ relationships:
 # Called by
 
 - [owner_rights](../../../../../../functions/crates/lpe-exchange/src/mapi/permissions/owner_rights.md)
-- [collaboration_folder_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_property_value.md)
+- [collaboration_folder_rights](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_rights.md)
 - [public_folder_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/public_folder_property_value.md)
+- [collaboration_folder_tables_follow_effective_collection_grants](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/collaboration_folder_tables_follow_effective_collection_grants.md)
 - [mapi_public_folder_permission](../../../../../../functions/crates/lpe-exchange/src/mapi_store/mapi_public_folder_permission.md)
 - [folder_access_for_principal](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/folder_access_for_principal.md)
 - [mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_grant](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_grant.md)

@@ -7,7 +7,6 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
-  - functions/crates/lpe-exchange/src/mapi/session/tests/principal
   - functions/crates/lpe-exchange/src/mapi/session/lifecycle/create_session
   - functions/crates/lpe-exchange/src/mapi/session/lifecycle/remove_session
   - functions/crates/lpe-exchange/src/mapi/session/MapiSession/record_inbox_associated_contents_table
@@ -22,7 +21,6 @@ relationships:
 
 # Calls
 
-- [principal](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/principal.md)
 - [create_session](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/create_session.md)
 - [remove_session](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/remove_session.md)
 - [record_inbox_associated_contents_table](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/MapiSession/record_inbox_associated_contents_table.md)

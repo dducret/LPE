@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_canonical_changes
-resource: crates/lpe-jmap/src/service/canonical.rs#L219-L256
+resource: crates/lpe-jmap/src/service/canonical.rs#L259-L296
 generated:
   by: okf-rs/0.3.0
 relationships:

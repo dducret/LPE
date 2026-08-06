@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_set_properties_response
-resource: crates/lpe-exchange/src/mapi/dispatch/property_mutations.rs#L59-L406
+resource: crates/lpe-exchange/src/mapi/dispatch/property_mutations.rs#L59-L408
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -26,6 +26,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/messages/stage_message_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_pending_event_property_values
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/navigation_shortcut_save/stage_existing_navigation_shortcut_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/set_associated_config_properties
   - functions/crates/lpe-exchange/src/mapi/session/input_object_mut
@@ -73,6 +74,7 @@ relationships:
 - [stage_message_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/messages/stage_message_property_values.md)
 - [stage_event_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_values.md)
 - [stage_pending_event_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_pending_event_property_values.md)
+- [stage_contact_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_values.md)
 - [stage_existing_navigation_shortcut_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/navigation_shortcut_save/stage_existing_navigation_shortcut_property_values.md)
 - [set_associated_config_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/set_associated_config_properties.md)
 - [input_object_mut](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/input_object_mut.md)

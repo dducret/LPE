@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_calendar_attachments
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L718-L731
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L750-L763
 generated:
   by: okf-rs/0.3.0
 relationships:

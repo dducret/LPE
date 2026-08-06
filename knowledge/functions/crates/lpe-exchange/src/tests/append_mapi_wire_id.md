@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_mapi_wire_id
-resource: crates/lpe-exchange/src/tests/mod.rs#L14984-L14988
+resource: crates/lpe-exchange/src/tests/mod.rs#L15109-L15113
 visibility: private
 generated:
   by: okf-rs/0.3.0

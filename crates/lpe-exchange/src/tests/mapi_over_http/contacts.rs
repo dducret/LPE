@@ -845,18 +845,7 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = HeaderValue::from_str(
-        connect
-            .headers()
-            .get("set-cookie")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap(),
-    )
-    .unwrap();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut property_values = Vec::new();
     append_mapi_utf16_property(&mut property_values, 0x3001_001F, "RCA Contact");
@@ -871,7 +860,7 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
     append_rop_save_changes_message(&mut rops, 1, 1);
     append_rop_get_properties_specific(&mut rops, 1, &[0x3001_001F, 0x39FE_001F, 0x3A1C_001F]);
     let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", cookie.clone());
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -900,14 +889,16 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
     append_mapi_utf16_property(&mut update_values, 0x39FE_001F, "updated@example.test");
     let mut update_rops = Vec::new();
     append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(15));
-    append_rop_open_message(
+    append_rop_open_message_with_flags(
         &mut update_rops,
         1,
         2,
         test_mapi_folder_id(15),
         contact_mapi_id,
+        0x01,
     );
     append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    append_rop_save_changes_message(&mut update_rops, 1, 2);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(

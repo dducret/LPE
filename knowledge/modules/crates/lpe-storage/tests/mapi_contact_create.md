@@ -1,14 +1,14 @@
 ---
 type: Rust Module
 title: mapi_contact_create
-resource: crates/lpe-storage/tests/mapi_contact_create.rs#L1-L713
+resource: crates/lpe-storage/tests/mapi_contact_create.rs#L1-L812
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/std-env-str-fromstr-sync-oncelock-time-duration
   - external/anyhow-context-result
-  - external/lpe-storage-canonicalchangecategory-contactnamefields-contactsourcefields-mapicontactcreateinput-mapicontactcustompropertyvalue-mapicontactimportdisposition-mapicontactimportobjectdeleted-mapicontactimportedidentity-storage-upsertclientcontactinput
+  - external/lpe-storage-canonicalchangecategory-contactnamefields-contactsourcefields-mapicontactcommitinput-mapicontactcommitoutcome-mapicontactcreateinput-mapicontactcustompropertyvalue-mapicontactimportdisposition-mapicontactimportobjectdeleted-mapicontactimportedidentity-storage-upsertclientcontactinput
   - external/serde-json-json
   - external/sqlx-postgres-pgconnectoptions-pgpooloptions-pgpool-row
   - external/uuid-uuid
@@ -30,6 +30,7 @@ relationships:
 - [contact_input](../../../../functions/crates/lpe-storage/tests/mapi_contact_create/contact_input.md)
 - [create_input](../../../../functions/crates/lpe-storage/tests/mapi_contact_create/create_input.md)
 - [mapi_contact_create_is_atomic_and_preserves_reserved_import_identity](../../../../functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_create_is_atomic_and_preserves_reserved_import_identity.md)
+- [mapi_contact_commit_is_atomic_and_rejects_a_stale_modseq](../../../../functions/crates/lpe-storage/tests/mapi_contact_create/mapi_contact_commit_is_atomic_and_rejects_a_stale_modseq.md)
 - [mapi_store_id](../../../../functions/crates/lpe-storage/tests/mapi_contact_create/mapi_store_id.md)
 - [source_key](../../../../functions/crates/lpe-storage/tests/mapi_contact_create/source_key.md)
 - [predecessor_change_list](../../../../functions/crates/lpe-storage/tests/mapi_contact_create/predecessor_change_list.md)
@@ -39,9 +40,10 @@ relationships:
 - `std::{env, str::FromStr, sync::OnceLock, time::Duration}`
 - `anyhow::{Context, Result}`
 - `lpe_storage::{
-    CanonicalChangeCategory, ContactNameFields, ContactSourceFields, MapiContactCreateInput,
-    MapiContactCustomPropertyValue, MapiContactImportDisposition, MapiContactImportObjectDeleted,
-    MapiContactImportedIdentity, Storage, UpsertClientContactInput,
+    CanonicalChangeCategory, ContactNameFields, ContactSourceFields, MapiContactCommitInput,
+    MapiContactCommitOutcome, MapiContactCreateInput, MapiContactCustomPropertyValue,
+    MapiContactImportDisposition, MapiContactImportObjectDeleted, MapiContactImportedIdentity,
+    Storage, UpsertClientContactInput,
 }`
 - `serde_json::json`
 - `sqlx::{

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_store_id
-resource: crates/lpe-storage/tests/mapi_contact_create.rs#L697-L699
+resource: crates/lpe-storage/tests/mapi_contact_create.rs#L796-L798
 visibility: private
 generated:
   by: okf-rs/0.3.0

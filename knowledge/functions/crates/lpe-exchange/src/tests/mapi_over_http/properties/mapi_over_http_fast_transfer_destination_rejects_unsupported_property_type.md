@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_fast_transfer_destination_rejects_unsupported_property_type
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4496-L4523
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4498-L4525
 visibility: private
 generated:
   by: okf-rs/0.3.0

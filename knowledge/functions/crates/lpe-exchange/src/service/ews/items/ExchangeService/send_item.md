@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: send_item
-resource: crates/lpe-exchange/src/service/ews/items.rs#L704-L741
+resource: crates/lpe-exchange/src/service/ews/items.rs#L734-L771
 generated:
   by: okf-rs/0.3.0
 relationships:

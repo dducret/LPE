@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_ical_duration
-resource: crates/lpe-dav/src/parse.rs#L239-L260
+resource: crates/lpe-dav/src/parse.rs#L249-L270
 visibility: private
 generated:
   by: okf-rs/0.3.0

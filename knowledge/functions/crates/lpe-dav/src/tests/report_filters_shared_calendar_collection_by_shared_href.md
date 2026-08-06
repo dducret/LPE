@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: report_filters_shared_calendar_collection_by_shared_href
-resource: crates/lpe-dav/src/tests.rs#L1396-L1432
+resource: crates/lpe-dav/src/tests.rs#L1410-L1446
 visibility: private
 generated:
   by: okf-rs/0.3.0

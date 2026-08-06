@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_canonical_change_cursor
-resource: crates/lpe-jmap/src/store.rs#L529-L535
+resource: crates/lpe-jmap/src/store.rs#L537-L543
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: mailbox_state
-resource: crates/lpe-jmap/src/tests.rs#L380-L408
+resource: crates/lpe-jmap/src/tests.rs#L381-L409
 visibility: private
 generated:
   by: okf-rs/0.3.0

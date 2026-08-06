@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_read_recipients_returns_canonical_message_recipients
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2067-L2161
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2177-L2271
 visibility: private
 generated:
   by: okf-rs/0.3.0

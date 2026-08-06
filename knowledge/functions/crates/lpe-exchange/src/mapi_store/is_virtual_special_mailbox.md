@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_virtual_special_mailbox
-resource: crates/lpe-exchange/src/mapi_store.rs#L907-L914
+resource: crates/lpe-exchange/src/mapi_store.rs#L914-L921
 generated:
   by: okf-rs/0.3.0
 relationships:

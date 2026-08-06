@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_email_copy
-resource: crates/lpe-jmap/src/mail.rs#L381-L464
+resource: crates/lpe-jmap/src/mail.rs#L381-L470
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_submission_set_uses_authenticated_submitter_for_delegated_draft
-resource: crates/lpe-jmap/src/tests.rs#L3394-L3441
+resource: crates/lpe-jmap/src/tests.rs#L3471-L3518
 visibility: private
 generated:
   by: okf-rs/0.3.0

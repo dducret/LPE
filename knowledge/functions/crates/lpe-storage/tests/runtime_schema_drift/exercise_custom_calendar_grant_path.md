@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_custom_calendar_grant_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2778-L2977
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2859-L3058
 visibility: private
 generated:
   by: okf-rs/0.3.0

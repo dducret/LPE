@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_associated_configs
-resource: crates/lpe-exchange/src/tests/mod.rs#L10335-L10348
+resource: crates/lpe-exchange/src/tests/mod.rs#L10459-L10472
 visibility: private
 generated:
   by: okf-rs/0.3.0

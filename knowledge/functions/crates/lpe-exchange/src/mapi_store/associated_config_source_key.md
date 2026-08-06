@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_source_key
-resource: crates/lpe-exchange/src/mapi_store.rs#L320-L327
+resource: crates/lpe-exchange/src/mapi_store.rs#L321-L328
 visibility: private
 generated:
   by: okf-rs/0.3.0

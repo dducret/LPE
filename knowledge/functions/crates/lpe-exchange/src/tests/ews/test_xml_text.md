@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_xml_text
-resource: crates/lpe-exchange/src/tests/ews.rs#L4880-L4887
+resource: crates/lpe-exchange/src/tests/ews.rs#L5213-L5220
 visibility: private
 generated:
   by: okf-rs/0.3.0

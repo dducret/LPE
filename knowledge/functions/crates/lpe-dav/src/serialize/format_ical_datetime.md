@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_ical_datetime
-resource: crates/lpe-dav/src/serialize.rs#L97-L99
+resource: crates/lpe-dav/src/serialize.rs#L103-L105
 generated:
   by: okf-rs/0.3.0
 relationships:

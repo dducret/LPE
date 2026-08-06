@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_plan_uses_index
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2770-L2776
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2851-L2857
 visibility: private
 generated:
   by: okf-rs/0.3.0

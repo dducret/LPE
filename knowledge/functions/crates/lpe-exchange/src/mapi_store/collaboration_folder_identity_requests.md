@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_folder_identity_requests
-resource: crates/lpe-exchange/src/mapi_store.rs#L873-L905
+resource: crates/lpe-exchange/src/mapi_store.rs#L880-L912
 generated:
   by: okf-rs/0.3.0
 relationships:

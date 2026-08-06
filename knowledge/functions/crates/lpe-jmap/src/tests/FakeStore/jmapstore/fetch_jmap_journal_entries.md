@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_journal_entries
-resource: crates/lpe-jmap/src/tests.rs#L2084-L2086
+resource: crates/lpe-jmap/src/tests.rs#L2161-L2163
 visibility: private
 generated:
   by: okf-rs/0.3.0

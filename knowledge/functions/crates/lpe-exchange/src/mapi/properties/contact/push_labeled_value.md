@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_labeled_value
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L597-L606
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L613-L622
 visibility: private
 generated:
   by: okf-rs/0.3.0

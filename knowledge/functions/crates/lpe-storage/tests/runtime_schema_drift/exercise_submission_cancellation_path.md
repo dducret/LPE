@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_submission_cancellation_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2406-L2519
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2416-L2529
 visibility: private
 generated:
   by: okf-rs/0.3.0

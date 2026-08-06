@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_folder_rejects_non_owner_public_folder_structural_change
-resource: crates/lpe-exchange/src/tests/ews.rs#L890-L943
+resource: crates/lpe-exchange/src/tests/ews.rs#L1207-L1260
 visibility: private
 generated:
   by: okf-rs/0.3.0

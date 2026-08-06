@@ -1,12 +1,13 @@
 ---
 type: Rust Method
 title: upsert_client_task
-resource: crates/lpe-storage/src/tasks.rs#L21-L247
+resource: crates/lpe-storage/src/tasks.rs#L22-L271
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-storage/src/util/normalize_task_status
+  - functions/crates/lpe-storage/src/tasks/parse_task_timestamp
   - functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks_by_ids
   - functions/crates/lpe-core/src/sieve/Parser/next
   - functions/crates/lpe-storage/src/tasks/Storage/fetch_task_lists_by_ids
@@ -28,6 +29,7 @@ relationships:
 # Calls
 
 - [normalize_task_status](../../../../../../functions/crates/lpe-storage/src/util/normalize_task_status.md)
+- [parse_task_timestamp](../../../../../../functions/crates/lpe-storage/src/tasks/parse_task_timestamp.md)
 - [fetch_client_tasks_by_ids](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks_by_ids.md)
 - [next](../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
 - [fetch_task_lists_by_ids](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_task_lists_by_ids.md)

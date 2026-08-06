@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_copy_to_stream_saves_canonical_message_body
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2614-L2742
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2616-L2744
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: remove_ews_delegate
-resource: crates/lpe-exchange/src/tests/mod.rs#L5971-L5985
+resource: crates/lpe-exchange/src/tests/mod.rs#L5975-L5989
 visibility: private
 generated:
   by: okf-rs/0.3.0

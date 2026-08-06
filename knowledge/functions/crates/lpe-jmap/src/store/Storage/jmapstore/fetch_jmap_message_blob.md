@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_message_blob
-resource: crates/lpe-jmap/src/store.rs#L817-L823
+resource: crates/lpe-jmap/src/store.rs#L825-L831
 visibility: private
 generated:
   by: okf-rs/0.3.0

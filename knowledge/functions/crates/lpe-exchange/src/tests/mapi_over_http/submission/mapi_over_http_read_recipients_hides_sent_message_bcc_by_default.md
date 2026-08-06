@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_read_recipients_hides_sent_message_bcc_by_default
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2222-L2295
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2332-L2405
 visibility: private
 generated:
   by: okf-rs/0.3.0

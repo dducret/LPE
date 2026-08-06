@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_query_rows_uses_sort_order
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6761-L6799
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6795-L6833
 visibility: private
 generated:
   by: okf-rs/0.3.0

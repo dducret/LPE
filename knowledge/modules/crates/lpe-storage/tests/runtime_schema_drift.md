@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: runtime_schema_drift
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1-L6132
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1-L6213
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -47,6 +47,7 @@ relationships:
 - [exercise_submission_path](../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_path.md)
 - [exercise_submission_cancellation_path](../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_cancellation_path.md)
 - [exercise_jmap_path](../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_jmap_path.md)
+- [exercise_cross_account_jmap_copy_bcc_projection](../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_cross_account_jmap_copy_bcc_projection.md)
 - [exercise_index_plan_paths](../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_index_plan_paths.md)
 - [explain_rows](../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/explain_rows.md)
 - [assert_plan_uses_index](../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/assert_plan_uses_index.md)

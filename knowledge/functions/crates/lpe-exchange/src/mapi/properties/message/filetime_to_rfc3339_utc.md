@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: filetime_to_rfc3339_utc
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L891-L893
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L914-L916
 generated:
   by: okf-rs/0.3.0
 relationships:

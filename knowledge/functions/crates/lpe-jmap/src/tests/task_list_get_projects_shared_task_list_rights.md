@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_list_get_projects_shared_task_list_rights
-resource: crates/lpe-jmap/src/tests.rs#L14176-L14230
+resource: crates/lpe-jmap/src/tests.rs#L14714-L14768
 visibility: private
 generated:
   by: okf-rs/0.3.0

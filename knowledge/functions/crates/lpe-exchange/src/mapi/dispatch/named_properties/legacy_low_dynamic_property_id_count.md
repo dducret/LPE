@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: legacy_low_dynamic_property_id_count
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L617-L626
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L621-L630
 visibility: private
 generated:
   by: okf-rs/0.3.0

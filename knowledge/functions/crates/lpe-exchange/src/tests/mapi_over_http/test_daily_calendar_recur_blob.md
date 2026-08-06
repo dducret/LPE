@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_daily_calendar_recur_blob
-resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L92-L117
+resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L93-L118
 visibility: private
 generated:
   by: okf-rs/0.3.0

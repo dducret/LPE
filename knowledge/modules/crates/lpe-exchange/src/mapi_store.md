@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mapi_store
-resource: crates/lpe-exchange/src/mapi_store.rs#L1-L1241
+resource: crates/lpe-exchange/src/mapi_store.rs#L1-L1248
 generated:
   by: okf-rs/0.3.0
 relationships:

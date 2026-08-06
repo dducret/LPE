@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_draft
-resource: crates/lpe-storage/src/protocols.rs#L1196-L1204
+resource: crates/lpe-storage/src/protocols.rs#L1197-L1205
 generated:
   by: okf-rs/0.3.0
 ---

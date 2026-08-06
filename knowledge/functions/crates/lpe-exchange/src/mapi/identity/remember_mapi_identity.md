@@ -124,6 +124,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_extended_rule_snapshot
   - functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_sort_snapshot
   - functions/crates/lpe-exchange/src/mapi/tables/tests/message_table_row_flags_absent_deadline_expiry_and_recall_times
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items
   - functions/crates/lpe-exchange/src/mapi/tables/tests/message_row_projects_containing_folder_ids
   - functions/crates/lpe-exchange/src/mapi/tables/tests/draft_message_row_projects_mf_unsent_from_canonical_mailbox_state
   - functions/crates/lpe-exchange/src/mapi/tables/tests/message_row_client_submit_time_falls_back_to_received_time
@@ -366,6 +367,7 @@ relationships:
 - [inbox_associated_extended_rule_snapshot](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_extended_rule_snapshot.md)
 - [common_views_sort_snapshot](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_sort_snapshot.md)
 - [message_table_row_flags_absent_deadline_expiry_and_recall_times](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/message_table_row_flags_absent_deadline_expiry_and_recall_times.md)
+- [bcc_projections_only_expose_drafts_and_sent_items](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items.md)
 - [message_row_projects_containing_folder_ids](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/message_row_projects_containing_folder_ids.md)
 - [draft_message_row_projects_mf_unsent_from_canonical_mailbox_state](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/draft_message_row_projects_mf_unsent_from_canonical_mailbox_state.md)
 - [message_row_client_submit_time_falls_back_to_received_time](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/message_row_client_submit_time_falls_back_to_received_time.md)

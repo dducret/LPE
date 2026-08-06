@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: associated_config_message_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1377-L1393
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1409-L1425
 generated:
   by: okf-rs/0.3.0
 relationships:

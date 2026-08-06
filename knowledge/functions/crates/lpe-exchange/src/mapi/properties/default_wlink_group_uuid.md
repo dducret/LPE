@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_wlink_group_uuid
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1036-L1038
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1059-L1061
 generated:
   by: okf-rs/0.3.0
 relationships:

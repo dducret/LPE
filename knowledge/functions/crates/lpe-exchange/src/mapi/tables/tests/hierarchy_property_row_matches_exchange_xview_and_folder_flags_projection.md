@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_property_row_matches_exchange_xview_and_folder_flags_projection
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3423-L3487
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3457-L3521
 visibility: private
 generated:
   by: okf-rs/0.3.0

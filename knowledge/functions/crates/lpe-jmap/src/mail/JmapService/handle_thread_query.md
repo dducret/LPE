@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_thread_query
-resource: crates/lpe-jmap/src/mail.rs#L972-L1049
+resource: crates/lpe-jmap/src/mail.rs#L978-L1055
 generated:
   by: okf-rs/0.3.0
 relationships:

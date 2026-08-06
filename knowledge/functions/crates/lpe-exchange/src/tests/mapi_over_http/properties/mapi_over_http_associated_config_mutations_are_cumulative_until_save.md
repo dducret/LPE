@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_associated_config_mutations_are_cumulative_until_save
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5590-L5675
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5592-L5677
 visibility: private
 generated:
   by: okf-rs/0.3.0

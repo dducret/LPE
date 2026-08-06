@@ -7,7 +7,6 @@ generated:
 relationships:
   calls:
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-domain/src/civil_time/days_from_civil
   called_by:
   - functions/crates/lpe-exchange/src/mapi/properties/recurrence/calendar_recurrence_blob
   - functions/crates/lpe-exchange/src/mapi/properties/recurrence/recurrence_pattern_from_canonical
@@ -29,7 +28,6 @@ relationships:
 # Calls
 
 - [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [days_from_civil](../../../../../../../functions/crates/lpe-domain/src/civil_time/days_from_civil.md)
 
 # Called by
 

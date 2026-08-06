@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: persisted_object_property_delete_is_idempotent
-resource: crates/lpe-exchange/src/mapi/dispatch/property_mutations.rs#L661-L688
+resource: crates/lpe-exchange/src/mapi/dispatch/property_mutations.rs#L665-L692
 visibility: private
 generated:
   by: okf-rs/0.3.0

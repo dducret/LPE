@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_attendee
-resource: crates/lpe-dav/src/parse.rs#L282-L298
+resource: crates/lpe-dav/src/parse.rs#L292-L308
 visibility: private
 generated:
   by: okf-rs/0.3.0

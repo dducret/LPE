@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_mapi_local_replica_range_constraints
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L881-L1063
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L891-L1073
 visibility: private
 generated:
   by: okf-rs/0.3.0

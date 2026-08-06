@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_accepts_outlook_octet_stream_bind_probe
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L436-L490
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L438-L492
 visibility: private
 generated:
   by: okf-rs/0.3.0

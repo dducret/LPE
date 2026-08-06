@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pull_and_streaming_notifications_replay_canonical_sql_change_cursor
-resource: crates/lpe-exchange/src/tests/ews.rs#L4758-L4878
+resource: crates/lpe-exchange/src/tests/ews.rs#L5091-L5211
 visibility: private
 generated:
   by: okf-rs/0.3.0

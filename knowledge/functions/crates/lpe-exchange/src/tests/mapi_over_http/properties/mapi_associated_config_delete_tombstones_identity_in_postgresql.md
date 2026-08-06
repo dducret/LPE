@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_associated_config_delete_tombstones_identity_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5497-L5587
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5499-L5589
 visibility: private
 generated:
   by: okf-rs/0.3.0

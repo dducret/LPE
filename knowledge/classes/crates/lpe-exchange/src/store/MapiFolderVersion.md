@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: MapiFolderVersion
-resource: crates/lpe-exchange/src/store.rs#L28-L34
+resource: crates/lpe-exchange/src/store.rs#L29-L35
 generated:
   by: okf-rs/0.3.0
 ---

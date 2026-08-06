@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contains_outlook_view_descriptor_probe
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L28-L54
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L28-L58
 generated:
   by: okf-rs/0.3.0
 relationships:

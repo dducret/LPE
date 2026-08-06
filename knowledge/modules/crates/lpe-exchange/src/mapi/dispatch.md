@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: dispatch
-resource: crates/lpe-exchange/src/mapi/dispatch.rs#L1-L1686
+resource: crates/lpe-exchange/src/mapi/dispatch.rs#L1-L1688
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -30,6 +30,7 @@ relationships:
   - external/attachments
   - external/calendar-move-copy
   - external/contact-save
+  - external/contact-transactions
   - external/contacts
   - external/conversation-actions
   - external/custom-properties
@@ -141,6 +142,7 @@ relationships:
 - `attachments::*`
 - `calendar_move_copy::*`
 - `contact_save::*`
+- `contact_transactions::*`
 - `contacts::*`
 - `conversation_actions::*`
 - `custom_properties::*`

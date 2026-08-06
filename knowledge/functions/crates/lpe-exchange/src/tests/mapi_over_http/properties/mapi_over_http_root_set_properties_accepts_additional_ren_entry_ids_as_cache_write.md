@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_root_set_properties_accepts_additional_ren_entry_ids_as_cache_write
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6064-L6126
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6066-L6128
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_returns_forbidden_for_read_only_shared_task
-resource: crates/lpe-dav/src/tests.rs#L1459-L1498
+resource: crates/lpe-dav/src/tests.rs#L1473-L1514
 visibility: private
 generated:
   by: okf-rs/0.3.0

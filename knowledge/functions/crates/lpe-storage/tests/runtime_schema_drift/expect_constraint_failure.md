@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: expect_constraint_failure
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L646-L652
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L656-L662
 visibility: private
 generated:
   by: okf-rs/0.3.0

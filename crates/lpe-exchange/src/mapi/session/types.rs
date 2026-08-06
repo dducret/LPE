@@ -343,6 +343,25 @@ pub(in crate::mapi) struct MapiEventTransaction {
     pub(in crate::mapi) deleted_properties: HashSet<u32>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct MapiContactTransaction {
+    pub(in crate::mapi) open_mode_flags: u8,
+    pub(in crate::mapi) base_modseq: i64,
+    pub(in crate::mapi) pending_properties: HashMap<u32, MapiValue>,
+    pub(in crate::mapi) deleted_properties: HashSet<u32>,
+}
+
+impl MapiContactTransaction {
+    pub(in crate::mapi) fn new(open_mode_flags: u8, base_modseq: i64) -> Self {
+        Self {
+            open_mode_flags,
+            base_modseq,
+            pending_properties: HashMap::new(),
+            deleted_properties: HashSet::new(),
+        }
+    }
+}
+
 impl MapiEventTransaction {
     pub(in crate::mapi) fn new(open_mode_flags: u8, base_modseq: i64) -> Self {
         Self {
@@ -373,6 +392,7 @@ pub(in crate::mapi) enum MapiObject {
     Contact {
         folder_id: u64,
         contact_id: u64,
+        transaction: MapiContactTransaction,
     },
     Event {
         folder_id: u64,

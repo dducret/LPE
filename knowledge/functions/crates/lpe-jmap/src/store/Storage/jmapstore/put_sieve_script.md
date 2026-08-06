@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: put_sieve_script
-resource: crates/lpe-jmap/src/store.rs#L778-L788
+resource: crates/lpe-jmap/src/store.rs#L786-L796
 visibility: private
 generated:
   by: okf-rs/0.3.0

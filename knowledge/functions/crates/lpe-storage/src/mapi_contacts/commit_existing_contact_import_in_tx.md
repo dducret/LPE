@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: commit_existing_contact_import_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L631-L790
+resource: crates/lpe-storage/src/mapi_contacts.rs#L876-L1035
 visibility: private
 generated:
   by: okf-rs/0.3.0

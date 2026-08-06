@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: imported_message_move_destination_global_counter
-resource: crates/lpe-storage/src/message_ops.rs#L1470-L1491
+resource: crates/lpe-storage/src/message_ops.rs#L1493-L1514
 visibility: private
 generated:
   by: okf-rs/0.3.0

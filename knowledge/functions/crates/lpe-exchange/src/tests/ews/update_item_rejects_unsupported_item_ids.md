@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_item_rejects_unsupported_item_ids
-resource: crates/lpe-exchange/src/tests/ews.rs#L1551-L1571
+resource: crates/lpe-exchange/src/tests/ews.rs#L1868-L1888
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_duration
-resource: crates/lpe-dav/src/serialize.rs#L109-L117
+resource: crates/lpe-dav/src/serialize.rs#L115-L123
 generated:
   by: okf-rs/0.3.0
 ---

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: save_pending_contact
-resource: crates/lpe-exchange/src/mapi/dispatch/contact_save.rs#L6-L127
+resource: crates/lpe-exchange/src/mapi/dispatch/contact_save.rs#L6-L131
 generated:
   by: okf-rs/0.3.0
 relationships:

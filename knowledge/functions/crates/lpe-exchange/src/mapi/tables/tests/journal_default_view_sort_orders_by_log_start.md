@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: journal_default_view_sort_orders_by_log_start
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L141-L174
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L175-L208
 visibility: private
 generated:
   by: okf-rs/0.3.0

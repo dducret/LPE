@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_jmap_task
-resource: crates/lpe-jmap/src/tests.rs#L1959-L2019
+resource: crates/lpe-jmap/src/tests.rs#L2034-L2096
 visibility: private
 generated:
   by: okf-rs/0.3.0

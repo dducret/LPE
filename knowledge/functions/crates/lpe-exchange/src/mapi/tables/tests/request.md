@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: request
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1286-L1293
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1320-L1327
 visibility: private
 generated:
   by: okf-rs/0.3.0

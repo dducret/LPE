@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_get_properties_specific
-resource: crates/lpe-exchange/src/tests/mod.rs#L15750-L15758
+resource: crates/lpe-exchange/src/tests/mod.rs#L15875-L15883
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -46,6 +46,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_does_not_open_unbacked_quick_step_config
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_same_execute_additional_ren_junk_alias_opens_junk
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_shared_contact_read_only_rights_reject_mutations
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_sequence
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_direct_tombstone_set_is_staged_until_save
@@ -90,6 +91,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_hierarchy_change_accepts_existing_deleted_items
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cnset_and_deleted_when_canonical_is_emitted
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tasks/mapi_over_http_shared_task_read_only_rights_reject_mutations
 ---
 
 # Signature
@@ -137,6 +139,7 @@ relationships:
 - [mapi_over_http_does_not_open_unbacked_quick_step_config](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_does_not_open_unbacked_quick_step_config.md)
 - [mapi_over_http_same_execute_additional_ren_junk_alias_opens_junk](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_same_execute_additional_ren_junk_alias_opens_junk.md)
 - [mapi_over_http_contact_crud_uses_canonical_contacts](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts.md)
+- [mapi_over_http_shared_contact_read_only_rights_reject_mutations](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_shared_contact_read_only_rights_reject_mutations.md)
 - [mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags.md)
 - [mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_sequence](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_sequence.md)
 - [mapi_over_http_local_freebusy_direct_tombstone_set_is_staged_until_save](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_direct_tombstone_set_is_staged_until_save.md)
@@ -181,3 +184,4 @@ relationships:
 - [mapi_over_http_sync_import_hierarchy_change_accepts_existing_deleted_items](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_import_hierarchy_change_accepts_existing_deleted_items.md)
 - [mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cnset_and_deleted_when_canonical_is_emitted](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cnset_and_deleted_when_canonical_is_emitted.md)
 - [mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect.md)
+- [mapi_over_http_shared_task_read_only_rights_reject_mutations](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tasks/mapi_over_http_shared_task_read_only_rights_reject_mutations.md)

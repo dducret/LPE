@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_table_email
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8791-L8858
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8825-L8892
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/query_position_counts_categorized_content_rows
   - functions/crates/lpe-exchange/src/mapi/tables/tests/categorized_keywords_project_multivalue_instances_and_table_row_metadata
   - functions/crates/lpe-exchange/src/mapi/tables/tests/message_table_row_flags_absent_deadline_expiry_and_recall_times
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items
   - functions/crates/lpe-exchange/src/mapi/tables/tests/message_row_projects_containing_folder_ids
   - functions/crates/lpe-exchange/src/mapi/tables/tests/normal_contents_property_row_uses_durable_message_identity
   - functions/crates/lpe-exchange/src/mapi/tables/tests/draft_message_row_projects_mf_unsent_from_canonical_mailbox_state
@@ -36,6 +37,7 @@ relationships:
 - [query_position_counts_categorized_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/query_position_counts_categorized_content_rows.md)
 - [categorized_keywords_project_multivalue_instances_and_table_row_metadata](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/categorized_keywords_project_multivalue_instances_and_table_row_metadata.md)
 - [message_table_row_flags_absent_deadline_expiry_and_recall_times](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/message_table_row_flags_absent_deadline_expiry_and_recall_times.md)
+- [bcc_projections_only_expose_drafts_and_sent_items](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items.md)
 - [message_row_projects_containing_folder_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/message_row_projects_containing_folder_ids.md)
 - [normal_contents_property_row_uses_durable_message_identity](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/normal_contents_property_row_uses_durable_message_identity.md)
 - [draft_message_row_projects_mf_unsent_from_canonical_mailbox_state](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/draft_message_row_projects_mf_unsent_from_canonical_mailbox_state.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_mailbox_move_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L3099-L3554
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L3180-L3635
 visibility: private
 generated:
   by: okf-rs/0.3.0

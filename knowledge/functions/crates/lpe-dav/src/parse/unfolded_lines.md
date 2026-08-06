@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: unfolded_lines
-resource: crates/lpe-dav/src/parse.rs#L314-L327
+resource: crates/lpe-dav/src/parse.rs#L324-L337
 visibility: private
 generated:
   by: okf-rs/0.3.0

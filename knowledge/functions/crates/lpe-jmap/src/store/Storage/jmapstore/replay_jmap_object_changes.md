@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: replay_jmap_object_changes
-resource: crates/lpe-jmap/src/store.rs#L561-L570
+resource: crates/lpe-jmap/src/store.rs#L569-L578
 visibility: private
 generated:
   by: okf-rs/0.3.0

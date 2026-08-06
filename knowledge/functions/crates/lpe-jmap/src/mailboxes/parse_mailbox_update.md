@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_mailbox_update
-resource: crates/lpe-jmap/src/mailboxes.rs#L594-L620
+resource: crates/lpe-jmap/src/mailboxes.rs#L602-L628
 visibility: private
 generated:
   by: okf-rs/0.3.0

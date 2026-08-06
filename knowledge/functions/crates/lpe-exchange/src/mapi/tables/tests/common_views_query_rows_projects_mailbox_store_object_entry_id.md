@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_query_rows_projects_mailbox_store_object_entry_id
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5356-L5426
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5390-L5460
 visibility: private
 generated:
   by: okf-rs/0.3.0

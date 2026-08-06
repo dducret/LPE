@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_mailbox_name_policy_storage_guards
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1666-L1881
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1676-L1891
 visibility: private
 generated:
   by: okf-rs/0.3.0

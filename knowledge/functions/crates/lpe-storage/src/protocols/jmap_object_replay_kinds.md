@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_object_replay_kinds
-resource: crates/lpe-storage/src/protocols.rs#L1367-L1390
+resource: crates/lpe-storage/src/protocols.rs#L1368-L1391
 visibility: private
 generated:
   by: okf-rs/0.3.0

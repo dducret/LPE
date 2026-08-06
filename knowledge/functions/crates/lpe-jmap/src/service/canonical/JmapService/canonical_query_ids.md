@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: canonical_query_ids
-resource: crates/lpe-jmap/src/service/canonical.rs#L567-L597
+resource: crates/lpe-jmap/src/service/canonical.rs#L607-L637
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_client_tasks_by_ids
-resource: crates/lpe-storage/src/tasks.rs#L1320-L1403
+resource: crates/lpe-storage/src/tasks.rs#L1361-L1449
 generated:
   by: okf-rs/0.3.0
 relationships:

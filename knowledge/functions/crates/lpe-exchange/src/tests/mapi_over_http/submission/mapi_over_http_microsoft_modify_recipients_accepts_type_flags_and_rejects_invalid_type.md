@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L124-L214
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L252-L342
 visibility: private
 generated:
   by: okf-rs/0.3.0

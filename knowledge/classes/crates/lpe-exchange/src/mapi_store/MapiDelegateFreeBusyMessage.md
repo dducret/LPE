@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: MapiDelegateFreeBusyMessage
-resource: crates/lpe-exchange/src/mapi_store.rs#L272-L277
+resource: crates/lpe-exchange/src/mapi_store.rs#L273-L278
 generated:
   by: okf-rs/0.3.0
 ---

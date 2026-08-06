@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_special_folder_aliases
-resource: crates/lpe-exchange/src/tests/mod.rs#L6159-L6172
+resource: crates/lpe-exchange/src/tests/mod.rs#L6163-L6176
 visibility: private
 generated:
   by: okf-rs/0.3.0

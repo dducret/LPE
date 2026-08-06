@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_display_name_from_structured
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L524-L537
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L540-L553
 visibility: private
 generated:
   by: okf-rs/0.3.0

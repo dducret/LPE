@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_item_id
-resource: crates/lpe-exchange/src/mapi/tables/folders.rs#L935-L937
+resource: crates/lpe-exchange/src/mapi/tables/folders.rs#L934-L936
 generated:
   by: okf-rs/0.3.0
 relationships:

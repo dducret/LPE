@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_get_exposes_owner_and_participation_status
-resource: crates/lpe-jmap/src/tests.rs#L12926-L12967
+resource: crates/lpe-jmap/src/tests.rs#L13416-L13457
 visibility: private
 generated:
   by: okf-rs/0.3.0

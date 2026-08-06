@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_tasks_by_ids
-resource: crates/lpe-jmap/src/store.rs#L1083-L1089
+resource: crates/lpe-jmap/src/store.rs#L1109-L1115
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_ews_recurrence
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L481-L540
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L478-L537
 generated:
   by: okf-rs/0.3.0
 relationships:

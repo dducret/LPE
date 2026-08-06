@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query_position_clamps_stale_cursor_to_current_row_count
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2177-L2215
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2211-L2249
 visibility: private
 generated:
   by: okf-rs/0.3.0

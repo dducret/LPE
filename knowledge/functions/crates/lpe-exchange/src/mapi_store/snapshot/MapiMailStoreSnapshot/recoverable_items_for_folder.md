@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: recoverable_items_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1486-L1494
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1518-L1526
 generated:
   by: okf-rs/0.3.0
 relationships:

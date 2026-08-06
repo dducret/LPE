@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: ews
-resource: crates/lpe-exchange/src/tests/ews.rs#L1-L10019
+resource: crates/lpe-exchange/src/tests/ews.rs#L1-L10460
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -14,10 +14,13 @@ relationships:
 # Contains
 
 - [find_folder_lists_contact_and_calendar_folders](../../../../../functions/crates/lpe-exchange/src/tests/ews/find_folder_lists_contact_and_calendar_folders.md)
+- [find_folder_projects_collaboration_effective_rights](../../../../../functions/crates/lpe-exchange/src/tests/ews/find_folder_projects_collaboration_effective_rights.md)
+- [effective_rights_for_folder](../../../../../functions/crates/lpe-exchange/src/tests/ews/effective_rights_for_folder.md)
 - [sync_folder_hierarchy_lists_contact_and_calendar_folders](../../../../../functions/crates/lpe-exchange/src/tests/ews/sync_folder_hierarchy_lists_contact_and_calendar_folders.md)
 - [sync_folder_hierarchy_replays_canonical_mailbox_changes](../../../../../functions/crates/lpe-exchange/src/tests/ews/sync_folder_hierarchy_replays_canonical_mailbox_changes.md)
 - [create_folder_path_creates_nested_mailboxes_and_sync_reports_changes](../../../../../functions/crates/lpe-exchange/src/tests/ews/create_folder_path_creates_nested_mailboxes_and_sync_reports_changes.md)
 - [copy_move_and_update_folder_use_canonical_mailbox_changes](../../../../../functions/crates/lpe-exchange/src/tests/ews/copy_move_and_update_folder_use_canonical_mailbox_changes.md)
+- [folder_change_keys_follow_canonical_revisions_and_reject_stale_updates](../../../../../functions/crates/lpe-exchange/src/tests/ews/folder_change_keys_follow_canonical_revisions_and_reject_stale_updates.md)
 - [empty_folder_deletes_messages_and_subfolders_through_canonical_paths](../../../../../functions/crates/lpe-exchange/src/tests/ews/empty_folder_deletes_messages_and_subfolders_through_canonical_paths.md)
 - [folder_operations_preserve_system_and_public_folder_boundaries](../../../../../functions/crates/lpe-exchange/src/tests/ews/folder_operations_preserve_system_and_public_folder_boundaries.md)
 - [get_folder_returns_msgfolderroot](../../../../../functions/crates/lpe-exchange/src/tests/ews/get_folder_returns_msgfolderroot.md)

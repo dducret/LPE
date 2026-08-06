@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_properties_accepts_ptyp_server_id_on_pending_message
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1748-L1788
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1750-L1790
 visibility: private
 generated:
   by: okf-rs/0.3.0

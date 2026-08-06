@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_to_value
-resource: crates/lpe-jmap/src/mailboxes.rs#L491-L539
+resource: crates/lpe-jmap/src/mailboxes.rs#L491-L542
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,6 +9,8 @@ relationships:
   calls:
   - functions/crates/lpe-jmap/src/mailboxes/mailbox_account_may_draft
   - functions/crates/lpe-jmap/src/convert/insert_if
+  - functions/crates/lpe-jmap/src/mailboxes/mailbox_account_may_write
+  - functions/crates/lpe-jmap/src/mailboxes/mailbox_is_user_managed
   called_by:
   - functions/crates/lpe-jmap/src/mailboxes/JmapService/handle_mailbox_get
 ---
@@ -21,6 +23,8 @@ relationships:
 
 - [mailbox_account_may_draft](../../../../../functions/crates/lpe-jmap/src/mailboxes/mailbox_account_may_draft.md)
 - [insert_if](../../../../../functions/crates/lpe-jmap/src/convert/insert_if.md)
+- [mailbox_account_may_write](../../../../../functions/crates/lpe-jmap/src/mailboxes/mailbox_account_may_write.md)
+- [mailbox_is_user_managed](../../../../../functions/crates/lpe-jmap/src/mailboxes/mailbox_is_user_managed.md)
 
 # Called by
 

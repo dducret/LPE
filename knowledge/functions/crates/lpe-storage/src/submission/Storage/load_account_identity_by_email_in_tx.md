@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: load_account_identity_by_email_in_tx
-resource: crates/lpe-storage/src/submission.rs#L1216-L1241
+resource: crates/lpe-storage/src/submission.rs#L1219-L1244
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -8,6 +8,7 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_create_attachment_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_create_message_response
+  - functions/crates/lpe-exchange/src/mapi/properties/task/current_task_completion_time
 ---
 
 # Signature
@@ -18,3 +19,4 @@ relationships:
 
 - [append_create_attachment_response](../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_create_attachment_response.md)
 - [append_create_message_response](../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_create_message_response.md)
+- [current_task_completion_time](../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/current_task_completion_time.md)

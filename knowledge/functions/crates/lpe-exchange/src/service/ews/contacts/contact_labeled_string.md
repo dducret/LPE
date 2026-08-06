@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_labeled_string
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L386-L404
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L446-L464
 visibility: private
 generated:
   by: okf-rs/0.3.0

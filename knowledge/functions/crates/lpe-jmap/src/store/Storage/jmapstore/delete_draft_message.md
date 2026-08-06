@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_draft_message
-resource: crates/lpe-jmap/src/store.rs#L842-L850
+resource: crates/lpe-jmap/src/store.rs#L850-L858
 visibility: private
 generated:
   by: okf-rs/0.3.0

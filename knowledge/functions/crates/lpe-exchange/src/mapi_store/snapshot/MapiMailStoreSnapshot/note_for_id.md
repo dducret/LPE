@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: note_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1175-L1179
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1207-L1211
 generated:
   by: okf-rs/0.3.0
 relationships:

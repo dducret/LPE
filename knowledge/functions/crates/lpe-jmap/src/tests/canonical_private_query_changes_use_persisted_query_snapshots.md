@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_private_query_changes_use_persisted_query_snapshots
-resource: crates/lpe-jmap/src/tests.rs#L13641-L13714
+resource: crates/lpe-jmap/src/tests.rs#L14179-L14252
 visibility: private
 generated:
   by: okf-rs/0.3.0

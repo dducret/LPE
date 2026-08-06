@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_set_rejects_canonical_equivalent_sibling_duplicates
-resource: crates/lpe-jmap/src/tests.rs#L6259-L6303
+resource: crates/lpe-jmap/src/tests.rs#L6471-L6515
 visibility: private
 generated:
   by: okf-rs/0.3.0

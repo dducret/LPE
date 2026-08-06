@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_folder_rejects_public_folder_with_active_children
-resource: crates/lpe-exchange/src/tests/ews.rs#L946-L997
+resource: crates/lpe-exchange/src/tests/ews.rs#L1263-L1314
 visibility: private
 generated:
   by: okf-rs/0.3.0

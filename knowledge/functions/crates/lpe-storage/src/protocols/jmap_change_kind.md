@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_change_kind
-resource: crates/lpe-storage/src/protocols.rs#L1319-L1328
+resource: crates/lpe-storage/src/protocols.rs#L1320-L1329
 visibility: private
 generated:
   by: okf-rs/0.3.0

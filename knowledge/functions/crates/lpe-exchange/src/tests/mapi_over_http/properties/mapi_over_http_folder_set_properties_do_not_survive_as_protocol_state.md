@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_folder_set_properties_do_not_survive_as_protocol_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6129-L6218
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6131-L6220
 visibility: private
 generated:
   by: okf-rs/0.3.0

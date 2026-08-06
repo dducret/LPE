@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: accept_sharing_invitation_creates_same_tenant_calendar_grant
-resource: crates/lpe-exchange/src/tests/ews.rs#L2415-L2482
+resource: crates/lpe-exchange/src/tests/ews.rs#L2748-L2815
 visibility: private
 generated:
   by: okf-rs/0.3.0

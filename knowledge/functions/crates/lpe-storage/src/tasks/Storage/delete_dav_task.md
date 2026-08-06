@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_dav_task
-resource: crates/lpe-storage/src/tasks.rs#L1241-L1243
+resource: crates/lpe-storage/src/tasks.rs#L1277-L1279
 generated:
   by: okf-rs/0.3.0
 ---

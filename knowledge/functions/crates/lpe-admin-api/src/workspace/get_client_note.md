@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_client_note
-resource: crates/lpe-admin-api/src/workspace.rs#L1005-L1013
+resource: crates/lpe-admin-api/src/workspace.rs#L1007-L1015
 generated:
   by: okf-rs/0.3.0
 relationships:

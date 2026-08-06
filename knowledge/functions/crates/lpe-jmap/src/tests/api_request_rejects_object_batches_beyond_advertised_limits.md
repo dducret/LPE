@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: api_request_rejects_object_batches_beyond_advertised_limits
-resource: crates/lpe-jmap/src/tests.rs#L7901-L7949
+resource: crates/lpe-jmap/src/tests.rs#L8389-L8437
 visibility: private
 generated:
   by: okf-rs/0.3.0

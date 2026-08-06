@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_thread_get
-resource: crates/lpe-jmap/src/mail.rs#L1101-L1149
+resource: crates/lpe-jmap/src/mail.rs#L1107-L1155
 generated:
   by: okf-rs/0.3.0
 relationships:

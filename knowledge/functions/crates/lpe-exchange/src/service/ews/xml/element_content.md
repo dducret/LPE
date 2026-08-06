@@ -21,6 +21,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/contacts/parse_create_contact_input
   - functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input
   - functions/crates/lpe-exchange/src/service/ews/contacts/contact_entry_value
+  - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_address_entry
   - functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/conversation_source_emails
   - functions/crates/lpe-exchange/src/service/ews/conversations/filter_ignored_conversation_folders
   - functions/crates/lpe-exchange/src/service/ews/delegation/validate_delegate_mailbox_owner
@@ -74,6 +75,7 @@ relationships:
 - [parse_create_contact_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/parse_create_contact_input.md)
 - [parse_update_contact_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input.md)
 - [contact_entry_value](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_entry_value.md)
+- [ews_contact_address_entry](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_address_entry.md)
 - [conversation_source_emails](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/conversation_source_emails.md)
 - [filter_ignored_conversation_folders](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/filter_ignored_conversation_folders.md)
 - [validate_delegate_mailbox_owner](../../../../../../../functions/crates/lpe-exchange/src/service/ews/delegation/validate_delegate_mailbox_owner.md)

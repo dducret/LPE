@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_submit_from_email
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L594-L621
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L617-L644
 generated:
   by: okf-rs/0.3.0
 relationships:

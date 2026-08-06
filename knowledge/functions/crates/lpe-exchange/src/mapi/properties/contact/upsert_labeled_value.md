@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upsert_labeled_value
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L608-L631
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L624-L647
 visibility: private
 generated:
   by: okf-rs/0.3.0

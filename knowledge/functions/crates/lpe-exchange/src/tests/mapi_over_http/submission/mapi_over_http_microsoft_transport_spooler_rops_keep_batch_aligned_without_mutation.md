@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_transport_spooler_rops_keep_batch_aligned_without_mutation
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2360-L2430
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2470-L2540
 visibility: private
 generated:
   by: okf-rs/0.3.0

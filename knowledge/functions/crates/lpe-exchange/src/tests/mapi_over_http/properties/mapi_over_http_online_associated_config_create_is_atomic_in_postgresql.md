@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_online_associated_config_create_is_atomic_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4781-L4972
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4783-L4974
 visibility: private
 generated:
   by: okf-rs/0.3.0

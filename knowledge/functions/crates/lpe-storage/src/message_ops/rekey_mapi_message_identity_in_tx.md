@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rekey_mapi_message_identity_in_tx
-resource: crates/lpe-storage/src/message_ops.rs#L1334-L1468
+resource: crates/lpe-storage/src/message_ops.rs#L1357-L1491
 visibility: private
 generated:
   by: okf-rs/0.3.0

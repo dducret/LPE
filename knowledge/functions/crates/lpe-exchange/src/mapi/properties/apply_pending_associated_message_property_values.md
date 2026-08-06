@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: apply_pending_associated_message_property_values
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1363-L1379
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1386-L1402
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_transport_send_target_entry_id_uses_outbox_mirror_and_import_move
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1070-L1482
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1189-L1601
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_contact_narrow_update_omits_unowned_rich_fields
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L634-L668
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L859-L886
 visibility: private
 generated:
   by: okf-rs/0.3.0

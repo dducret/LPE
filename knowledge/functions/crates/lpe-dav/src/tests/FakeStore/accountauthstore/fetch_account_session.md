@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_account_session
-resource: crates/lpe-dav/src/tests.rs#L261-L271
+resource: crates/lpe-dav/src/tests.rs#L263-L273
 visibility: private
 generated:
   by: okf-rs/0.3.0

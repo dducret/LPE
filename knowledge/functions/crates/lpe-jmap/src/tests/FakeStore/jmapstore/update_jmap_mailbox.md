@@ -1,12 +1,13 @@
 ---
 type: Rust Method
 title: update_jmap_mailbox
-resource: crates/lpe-jmap/src/tests.rs#L1099-L1117
+resource: crates/lpe-jmap/src/tests.rs#L1112-L1133
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
+  - functions/crates/lpe-jmap/src/tests/FakeStore/mailbox_is_system
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
 ---
 
@@ -16,4 +17,5 @@ relationships:
 
 # Calls
 
+- [mailbox_is_system](../../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/mailbox_is_system.md)
 - [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)

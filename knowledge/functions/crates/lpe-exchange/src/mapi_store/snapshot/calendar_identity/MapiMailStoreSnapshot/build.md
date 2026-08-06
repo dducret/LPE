@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: build
-resource: crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity.rs#L246-L487
+resource: crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity.rs#L246-L488
 visibility: private
 generated:
   by: okf-rs/0.3.0

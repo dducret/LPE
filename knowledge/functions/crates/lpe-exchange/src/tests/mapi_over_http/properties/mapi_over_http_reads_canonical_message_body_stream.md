@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_reads_canonical_message_body_stream
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2440-L2540
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2442-L2542
 visibility: private
 generated:
   by: okf-rs/0.3.0

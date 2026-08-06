@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: compare_ordering
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1285-L1295
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1308-L1318
 generated:
   by: okf-rs/0.3.0
 relationships:

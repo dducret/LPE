@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_collapse_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L78-L90
+resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L79-L91
 visibility: private
 generated:
   by: okf-rs/0.3.0

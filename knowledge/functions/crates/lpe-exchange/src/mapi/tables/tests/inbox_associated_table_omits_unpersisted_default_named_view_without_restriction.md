@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_table_omits_unpersisted_default_named_view_without_restriction
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5886-L5904
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5920-L5938
 visibility: private
 generated:
   by: okf-rs/0.3.0

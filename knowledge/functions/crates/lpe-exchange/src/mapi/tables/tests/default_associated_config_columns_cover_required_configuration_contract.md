@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_associated_config_columns_cover_required_configuration_contract
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L593-L603
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L627-L637
 visibility: private
 generated:
   by: okf-rs/0.3.0

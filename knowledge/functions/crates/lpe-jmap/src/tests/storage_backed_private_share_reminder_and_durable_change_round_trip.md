@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: storage_backed_private_share_reminder_and_durable_change_round_trip
-resource: crates/lpe-jmap/src/tests.rs#L9290-L9539
+resource: crates/lpe-jmap/src/tests.rs#L9778-L10027
 visibility: private
 generated:
   by: okf-rs/0.3.0

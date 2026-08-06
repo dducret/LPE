@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_active_sieve_script
-resource: crates/lpe-jmap/src/store.rs#L771-L776
+resource: crates/lpe-jmap/src/store.rs#L779-L784
 visibility: private
 generated:
   by: okf-rs/0.3.0

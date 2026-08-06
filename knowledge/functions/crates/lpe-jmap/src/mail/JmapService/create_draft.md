@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_draft
-resource: crates/lpe-jmap/src/mail.rs#L1307-L1349
+resource: crates/lpe-jmap/src/mail.rs#L1313-L1355
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_object_property
-resource: crates/lpe-exchange/src/mapi/rop.rs#L1146-L1476
+resource: crates/lpe-exchange/src/mapi/rop.rs#L1164-L1487
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -16,8 +16,8 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/contents/serialize_message_row
   - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_message_row
   - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_associated_message_row
-  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contact_for_id
-  - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_mapi_contact_row
+  - functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property
+  - functions/crates/lpe-core/src/sieve/Parser/expect
   - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_contact_row
   - functions/crates/lpe-exchange/src/mapi/rop/event_properties/serialize_event_object_property
   - functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_event_row
@@ -89,8 +89,8 @@ relationships:
 - [serialize_message_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/contents/serialize_message_row.md)
 - [serialize_pending_message_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_message_row.md)
 - [serialize_pending_associated_message_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_associated_message_row.md)
-- [contact_for_id](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contact_for_id.md)
-- [serialize_mapi_contact_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_mapi_contact_row.md)
+- [serialize_contact_object_property](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property.md)
+- [expect](../../../../../../functions/crates/lpe-core/src/sieve/Parser/expect.md)
 - [serialize_pending_contact_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_contact_row.md)
 - [serialize_event_object_property](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/event_properties/serialize_event_object_property.md)
 - [serialize_pending_event_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/pending/serialize_pending_event_row.md)

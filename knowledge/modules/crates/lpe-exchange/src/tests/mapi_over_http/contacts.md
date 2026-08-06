@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: contacts
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1-L1672
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1-L1761
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -19,6 +19,7 @@ relationships:
 - [mapi_over_http_replays_outlook_contact_sync_import_then_save](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_replays_outlook_contact_sync_import_then_save.md)
 - [mapi_over_http_contact_sync_import_save_reports_deleted_source_key](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_sync_import_save_reports_deleted_source_key.md)
 - [mapi_over_http_contact_crud_uses_canonical_contacts](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts.md)
+- [mapi_over_http_shared_contact_read_only_rights_reject_mutations](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_shared_contact_read_only_rights_reject_mutations.md)
 - [mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property.md)
 - [mapi_over_http_delete_contact_virtual_folder_is_noop_acknowledged](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_delete_contact_virtual_folder_is_noop_acknowledged.md)
 - [mapi_over_http_contacts_sync_exports_associated_config_deletes](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contacts_sync_exports_associated_config_deletes.md)

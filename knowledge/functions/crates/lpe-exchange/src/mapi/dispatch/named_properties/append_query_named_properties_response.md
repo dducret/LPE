@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_query_named_properties_response
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L726-L744
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L730-L748
 generated:
   by: okf-rs/0.3.0
 relationships:

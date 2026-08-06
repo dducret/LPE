@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_collaboration_folder_row_with_context
-resource: crates/lpe-exchange/src/mapi/tables/folders.rs#L870-L900
+resource: crates/lpe-exchange/src/mapi/tables/folders.rs#L870-L899
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_property_default
   called_by:
   - functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_collaboration_folder_row_with_context_and_version
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/collaboration_folder_tables_follow_effective_collection_grants
 ---
 
 # Signature
@@ -32,3 +33,4 @@ relationships:
 # Called by
 
 - [serialize_collaboration_folder_row_with_context_and_version](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/folders/serialize_collaboration_folder_row_with_context_and_version.md)
+- [collaboration_folder_tables_follow_effective_collection_grants](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/collaboration_folder_tables_follow_effective_collection_grants.md)

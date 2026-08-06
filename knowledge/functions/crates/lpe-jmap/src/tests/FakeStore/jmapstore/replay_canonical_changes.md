@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: replay_canonical_changes
-resource: crates/lpe-jmap/src/tests.rs#L962-L970
+resource: crates/lpe-jmap/src/tests.rs#L975-L983
 visibility: private
 generated:
   by: okf-rs/0.3.0

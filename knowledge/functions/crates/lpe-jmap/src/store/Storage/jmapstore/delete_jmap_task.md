@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_jmap_task
-resource: crates/lpe-jmap/src/store.rs#L1095-L1097
+resource: crates/lpe-jmap/src/store.rs#L1121-L1123
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: snapshot
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1-L1585
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1-L1617
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -22,6 +22,8 @@ relationships:
 - [durable_identity_records](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/durable_identity_records.md)
 - [with_mailbox_content_commit_times](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_mailbox_content_commit_times.md)
 - [with_contact_commit_times](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_commit_times.md)
+- [with_contact_modseqs](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_contact_modseqs.md)
+- [contact_modseq](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contact_modseq.md)
 - [with_search_folder_definitions](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_search_folder_definitions.md)
 - [with_rules](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_rules.md)
 - [with_conversation_actions](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_conversation_actions.md)
@@ -42,6 +44,7 @@ relationships:
 - [remember_event_reminder_state](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_event_reminder_state.md)
 - [remember_created_event](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_created_event.md)
 - [remember_created_contact](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_created_contact.md)
+- [remember_updated_contact](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_updated_contact.md)
 - [remember_updated_event](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_updated_event.md)
 - [with_public_folders](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_public_folders.md)
 - [with_public_folder_replicas](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/with_public_folder_replicas.md)

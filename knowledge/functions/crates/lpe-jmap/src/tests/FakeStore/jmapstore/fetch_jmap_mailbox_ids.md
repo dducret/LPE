@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_mailbox_ids
-resource: crates/lpe-jmap/src/tests.rs#L1003-L1005
+resource: crates/lpe-jmap/src/tests.rs#L1016-L1018
 visibility: private
 generated:
   by: okf-rs/0.3.0

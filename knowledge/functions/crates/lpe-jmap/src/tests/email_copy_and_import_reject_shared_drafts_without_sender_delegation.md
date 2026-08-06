@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_copy_and_import_reject_shared_drafts_without_sender_delegation
-resource: crates/lpe-jmap/src/tests.rs#L7047-L7111
+resource: crates/lpe-jmap/src/tests.rs#L7535-L7599
 visibility: private
 generated:
   by: okf-rs/0.3.0

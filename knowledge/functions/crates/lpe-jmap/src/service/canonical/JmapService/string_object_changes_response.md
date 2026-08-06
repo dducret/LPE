@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: string_object_changes_response
-resource: crates/lpe-jmap/src/service/canonical.rs#L258-L305
+resource: crates/lpe-jmap/src/service/canonical.rs#L298-L345
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_create_attachment_saves_canonical_attachment_from_properties
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2847-L2965
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2849-L2967
 visibility: private
 generated:
   by: okf-rs/0.3.0

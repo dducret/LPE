@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kinds
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L101-L352
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L101-L354
 visibility: private
 generated:
   by: okf-rs/0.3.0

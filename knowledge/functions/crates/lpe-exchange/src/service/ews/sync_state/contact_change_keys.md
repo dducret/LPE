@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/find_item
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/update_item
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/create_item
+  - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/delete_item
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/validate_mutating_item_change_keys
   - functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items
 ---
@@ -34,5 +35,6 @@ relationships:
 - [find_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/find_item.md)
 - [update_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/update_item.md)
 - [create_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/create_item.md)
+- [delete_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/delete_item.md)
 - [validate_mutating_item_change_keys](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/validate_mutating_item_change_keys.md)
 - [sync_folder_items](../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/ExchangeService/sync_folder_items.md)

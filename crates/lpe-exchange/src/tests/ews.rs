@@ -6984,11 +6984,32 @@ async fn create_delete_contact_round_trips_through_sync_folder_items() {
     assert!(
         body.contains("<m:SyncState>contacts:default:v2:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb=ck-")
     );
+    let change_key = test_item_change_key(&body, "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete"><m:ItemIds><t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+            br#"
+            <s:Envelope><s:Body><m:UpdateItem><m:ItemChanges><t:ItemChange>
+              <t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/>
+              <t:Updates><t:SetItemField><t:FieldURI FieldURI="contacts:DisplayName"/>
+                <t:Contact><t:DisplayName>Must Not Persist</t:DisplayName></t:Contact>
+              </t:SetItemField></t:Updates>
+            </t:ItemChange></m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorIrresolvableConflict</m:ResponseCode>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete"><m:ItemIds><t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" ChangeKey="{change_key}"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+            )
+            .as_bytes(),
         )
         .await
         .unwrap();
@@ -7425,17 +7446,19 @@ async fn update_contact_round_trips_through_sync_folder_items() {
         .and_then(|rest| rest.split("</m:SyncState>").next())
         .unwrap()
         .to_string();
+    let change_key = test_item_change_key(&body, "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
     let response = service
         .handle(
             &bearer_headers(),
-            br#"
+            format!(
+                r#"
             <s:Envelope>
               <s:Body>
                 <m:UpdateItem ConflictResolution="AlwaysOverwrite">
                   <m:ItemChanges>
                     <t:ItemChange>
-                      <t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/>
+                      <t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" ChangeKey="{change_key}"/>
                       <t:Updates>
                         <t:SetItemField>
                           <t:FieldURI FieldURI="contacts:DisplayName"/>
@@ -7452,6 +7475,8 @@ async fn update_contact_round_trips_through_sync_folder_items() {
               </s:Body>
             </s:Envelope>
             "#,
+            )
+            .as_bytes(),
         )
         .await
         .unwrap();
@@ -7459,6 +7484,24 @@ async fn update_contact_round_trips_through_sync_folder_items() {
     assert!(body.contains("<m:UpdateItemResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:DisplayName>Updated RCA Contact</t:DisplayName>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateItem><m:ItemChanges><t:ItemChange>
+                  <t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" ChangeKey="{change_key}"/>
+                  <t:Updates><t:SetItemField><t:FieldURI FieldURI="contacts:DisplayName"/>
+                    <t:Contact><t:DisplayName>Stale Contact</t:DisplayName></t:Contact>
+                  </t:SetItemField></t:Updates>
+                </t:ItemChange></m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>"#,
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorIrresolvableConflict</m:ResponseCode>"));
 
     let request = format!(
         r#"<s:Envelope><s:Body><m:SyncFolderItems><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape><m:SyncFolderId><t:FolderId Id="default" ChangeKey="ck-default"/></m:SyncFolderId><m:SyncState>{old_sync_state}</m:SyncState><m:MaxChangesReturned>10</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#
@@ -7514,17 +7557,19 @@ async fn update_contact_unmapped_field_still_advances_sync_folder_items() {
         .and_then(|rest| rest.split("</m:SyncState>").next())
         .unwrap()
         .to_string();
+    let change_key = test_item_change_key(&body, "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
     let response = service
         .handle(
             &bearer_headers(),
-            br#"
+            format!(
+                r#"
             <s:Envelope>
               <s:Body>
                 <m:UpdateItem ConflictResolution="AlwaysOverwrite">
                   <m:ItemChanges>
                     <t:ItemChange>
-                      <t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/>
+                      <t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" ChangeKey="{change_key}"/>
                       <t:Updates>
                         <t:SetItemField>
                           <t:FieldURI FieldURI="contacts:AssistantName"/>
@@ -7539,6 +7584,8 @@ async fn update_contact_unmapped_field_still_advances_sync_folder_items() {
               </s:Body>
             </s:Envelope>
             "#,
+            )
+            .as_bytes(),
         )
         .await
         .unwrap();
@@ -7664,11 +7711,71 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     assert!(
         body.contains("<m:SyncState>calendar:default:v2:cccccccc-cccc-cccc-cccc-cccccccccccc=ck-")
     );
+    let change_key = test_item_change_key(&body, "event:cccccccc-cccc-cccc-cccc-cccccccccccc");
 
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete"><m:ItemIds><t:ItemId Id="event:cccccccc-cccc-cccc-cccc-cccccccccccc"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:UpdateItem><m:ItemChanges><t:ItemChange>
+              <t:ItemId Id="event:cccccccc-cccc-cccc-cccc-cccccccccccc"/>
+              <t:Updates><t:SetItemField><t:FieldURI FieldURI="calendar:Subject"/>
+                <t:CalendarItem><t:Subject>Must Not Persist</t:Subject></t:CalendarItem>
+              </t:SetItemField></t:Updates>
+            </t:ItemChange></m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorIrresolvableConflict</m:ResponseCode>"));
+    assert_eq!(events.lock().unwrap()[0].title, "RCA Calendar");
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateItem><m:ItemChanges><t:ItemChange>
+                  <t:ItemId Id="event:cccccccc-cccc-cccc-cccc-cccccccccccc" ChangeKey="{change_key}"/>
+                  <t:Updates><t:SetItemField><t:FieldURI FieldURI="calendar:Subject"/>
+                    <t:CalendarItem><t:Subject>Updated RCA Calendar</t:Subject></t:CalendarItem>
+                  </t:SetItemField></t:Updates>
+                </t:ItemChange></m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>"#,
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:Subject>Updated RCA Calendar</t:Subject>"));
+    assert_eq!(events.lock().unwrap()[0].title, "Updated RCA Calendar");
+    let updated_change_key = test_item_change_key(&body, "event:cccccccc-cccc-cccc-cccc-cccccccccccc");
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateItem><m:ItemChanges><t:ItemChange>
+                  <t:ItemId Id="event:cccccccc-cccc-cccc-cccc-cccccccccccc" ChangeKey="{change_key}"/>
+                  <t:Updates><t:SetItemField><t:FieldURI FieldURI="calendar:Subject"/>
+                    <t:CalendarItem><t:Subject>Stale Calendar</t:Subject></t:CalendarItem>
+                  </t:SetItemField></t:Updates>
+                </t:ItemChange></m:ItemChanges></m:UpdateItem></s:Body></s:Envelope>"#,
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorIrresolvableConflict</m:ResponseCode>"));
+    assert_eq!(events.lock().unwrap()[0].title, "Updated RCA Calendar");
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete"><m:ItemIds><t:ItemId Id="event:cccccccc-cccc-cccc-cccc-cccccccccccc" ChangeKey="{updated_change_key}"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+            )
+            .as_bytes(),
         )
         .await
         .unwrap();

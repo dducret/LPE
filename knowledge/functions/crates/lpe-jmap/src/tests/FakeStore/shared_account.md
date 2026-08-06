@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: shared_account
-resource: crates/lpe-jmap/src/tests.rs#L745-L753
+resource: crates/lpe-jmap/src/tests.rs#L748-L756
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -16,8 +16,13 @@ relationships:
   - functions/crates/lpe-jmap/src/tests/changes_reject_malformed_and_cross_account_state_tokens
   - functions/crates/lpe-jmap/src/tests/mailbox_query_states_are_bound_to_the_requested_account
   - functions/crates/lpe-jmap/src/tests/mailbox_query_changes_reject_cross_account_query_state_replay
+  - functions/crates/lpe-jmap/src/tests/identity_shared_account_reads_use_the_same_authorization_model
+  - functions/crates/lpe-jmap/src/tests/identity_shared_account_reads_reject_inaccessible_accounts
   - functions/crates/lpe-jmap/src/tests/mailbox_get_hides_child_creation_for_read_only_shared_mailboxes
+  - functions/crates/lpe-jmap/src/tests/mailbox_get_rename_and_delete_rights_match_mailbox_set
   - functions/crates/lpe-jmap/src/tests/mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations
+  - functions/crates/lpe-jmap/src/tests/email_copy_allows_shared_source_to_owned_target_without_exposing_bcc
+  - functions/crates/lpe-jmap/src/tests/email_copy_rejects_inaccessible_source_and_read_only_target
   - functions/crates/lpe-jmap/src/tests/message_blob_download_hides_bcc_for_delegated_shared_mailbox
   - functions/crates/lpe-jmap/src/tests/blob_copy_to_shared_account_does_not_widen_owner_bcc
   - functions/crates/lpe-jmap/src/tests/blob_create_paths_reject_read_only_shared_accounts
@@ -52,8 +57,13 @@ relationships:
 - [changes_reject_malformed_and_cross_account_state_tokens](../../../../../../functions/crates/lpe-jmap/src/tests/changes_reject_malformed_and_cross_account_state_tokens.md)
 - [mailbox_query_states_are_bound_to_the_requested_account](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_query_states_are_bound_to_the_requested_account.md)
 - [mailbox_query_changes_reject_cross_account_query_state_replay](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_query_changes_reject_cross_account_query_state_replay.md)
+- [identity_shared_account_reads_use_the_same_authorization_model](../../../../../../functions/crates/lpe-jmap/src/tests/identity_shared_account_reads_use_the_same_authorization_model.md)
+- [identity_shared_account_reads_reject_inaccessible_accounts](../../../../../../functions/crates/lpe-jmap/src/tests/identity_shared_account_reads_reject_inaccessible_accounts.md)
 - [mailbox_get_hides_child_creation_for_read_only_shared_mailboxes](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_hides_child_creation_for_read_only_shared_mailboxes.md)
+- [mailbox_get_rename_and_delete_rights_match_mailbox_set](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_get_rename_and_delete_rights_match_mailbox_set.md)
 - [mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations](../../../../../../functions/crates/lpe-jmap/src/tests/mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations.md)
+- [email_copy_allows_shared_source_to_owned_target_without_exposing_bcc](../../../../../../functions/crates/lpe-jmap/src/tests/email_copy_allows_shared_source_to_owned_target_without_exposing_bcc.md)
+- [email_copy_rejects_inaccessible_source_and_read_only_target](../../../../../../functions/crates/lpe-jmap/src/tests/email_copy_rejects_inaccessible_source_and_read_only_target.md)
 - [message_blob_download_hides_bcc_for_delegated_shared_mailbox](../../../../../../functions/crates/lpe-jmap/src/tests/message_blob_download_hides_bcc_for_delegated_shared_mailbox.md)
 - [blob_copy_to_shared_account_does_not_widen_owner_bcc](../../../../../../functions/crates/lpe-jmap/src/tests/blob_copy_to_shared_account_does_not_widen_owner_bcc.md)
 - [blob_create_paths_reject_read_only_shared_accounts](../../../../../../functions/crates/lpe-jmap/src/tests/blob_create_paths_reject_read_only_shared_accounts.md)

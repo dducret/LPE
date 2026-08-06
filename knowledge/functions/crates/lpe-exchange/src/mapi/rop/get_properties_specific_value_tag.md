@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_properties_specific_value_tag
-resource: crates/lpe-exchange/src/mapi/rop.rs#L858-L862
+resource: crates/lpe-exchange/src/mapi/rop.rs#L876-L880
 visibility: private
 generated:
   by: okf-rs/0.3.0

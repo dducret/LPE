@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: list_mailbox_rules
-resource: crates/lpe-jmap/src/store.rs#L739-L741
+resource: crates/lpe-jmap/src/store.rs#L747-L749
 visibility: private
 generated:
   by: okf-rs/0.3.0

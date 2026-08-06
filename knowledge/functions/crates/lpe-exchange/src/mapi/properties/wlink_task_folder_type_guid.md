@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wlink_task_folder_type_guid
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1088-L1093
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1111-L1116
 visibility: private
 generated:
   by: okf-rs/0.3.0

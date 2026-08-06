@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_collection_replay_maps_grant_rows_to_collection_ids
-resource: crates/lpe-storage/src/protocols.rs#L1489-L1510
+resource: crates/lpe-storage/src/protocols.rs#L1490-L1511
 visibility: private
 generated:
   by: okf-rs/0.3.0

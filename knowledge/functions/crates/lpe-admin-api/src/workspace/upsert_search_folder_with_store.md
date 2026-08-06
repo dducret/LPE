@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upsert_search_folder_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1305-L1323
+resource: crates/lpe-admin-api/src/workspace.rs#L1307-L1325
 visibility: private
 generated:
   by: okf-rs/0.3.0

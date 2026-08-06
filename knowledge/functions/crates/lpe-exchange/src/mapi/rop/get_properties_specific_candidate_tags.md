@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_properties_specific_candidate_tags
-resource: crates/lpe-exchange/src/mapi/rop.rs#L888-L922
+resource: crates/lpe-exchange/src/mapi/rop.rs#L906-L940
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rrule_to_ews_recurrence
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L333-L431
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L330-L428
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_jmap_note
-resource: crates/lpe-jmap/src/store.rs#L1115-L1117
+resource: crates/lpe-jmap/src/store.rs#L1141-L1143
 visibility: private
 generated:
   by: okf-rs/0.3.0

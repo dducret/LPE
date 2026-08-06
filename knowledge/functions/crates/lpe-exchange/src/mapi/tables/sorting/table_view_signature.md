@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_view_signature
-resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L418-L530
+resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L444-L556
 generated:
   by: okf-rs/0.3.0
 relationships:

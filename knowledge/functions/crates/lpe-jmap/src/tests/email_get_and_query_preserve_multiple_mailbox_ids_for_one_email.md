@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_get_and_query_preserve_multiple_mailbox_ids_for_one_email
-resource: crates/lpe-jmap/src/tests.rs#L3588-L3672
+resource: crates/lpe-jmap/src/tests.rs#L3665-L3749
 visibility: private
 generated:
   by: okf-rs/0.3.0

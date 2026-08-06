@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: apply_associated_config_identities
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L371-L430
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L386-L445
 visibility: private
 generated:
   by: okf-rs/0.3.0

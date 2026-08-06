@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bookmark_seek_does_not_mark_sparse_window_unknown_row_deleted
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1784-L1883
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1818-L1917
 visibility: private
 generated:
   by: okf-rs/0.3.0

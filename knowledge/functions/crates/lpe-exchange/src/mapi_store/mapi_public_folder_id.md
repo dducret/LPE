@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_public_folder_id
-resource: crates/lpe-exchange/src/mapi_store.rs#L946-L949
+resource: crates/lpe-exchange/src/mapi_store.rs#L953-L956
 visibility: private
 generated:
   by: okf-rs/0.3.0

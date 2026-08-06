@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_pst_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L3057-L3089
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L3138-L3170
 visibility: private
 generated:
   by: okf-rs/0.3.0

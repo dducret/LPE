@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_navigation_shortcut_debug_summary
-resource: crates/lpe-exchange/src/mapi_store.rs#L1132-L1139
+resource: crates/lpe-exchange/src/mapi_store.rs#L1139-L1146
 visibility: private
 generated:
   by: okf-rs/0.3.0

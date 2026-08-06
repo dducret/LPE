@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_named_property_id_sources
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L577-L587
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L581-L591
 visibility: private
 generated:
   by: okf-rs/0.3.0

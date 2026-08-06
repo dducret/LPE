@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fake_sort_hash
-resource: crates/lpe-jmap/src/tests.rs#L94-L97
+resource: crates/lpe-jmap/src/tests.rs#L95-L98
 visibility: private
 generated:
   by: okf-rs/0.3.0

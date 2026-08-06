@@ -28,6 +28,7 @@ pub(in crate::service) fn contact_item_xml_with_change_key(
 ) -> String {
     let email_entries = ews_contact_email_entries_xml(contact);
     let phone_entries = ews_contact_phone_entries_xml(contact);
+    let physical_addresses = ews_contact_physical_addresses_xml(contact);
     let business_home_page = ews_contact_url_by_label(contact, &["work", "business"])
         .map(|value| {
             format!(
@@ -63,6 +64,7 @@ pub(in crate::service) fn contact_item_xml_with_change_key(
             "<t:CompanyName>{company}</t:CompanyName>",
             "<t:EmailAddresses>{email_entries}</t:EmailAddresses>",
             "<t:PhoneNumbers>{phone_entries}</t:PhoneNumbers>",
+            "{physical_addresses}",
             "{business_home_page}",
             "{personal_home_page}",
             "<t:Body BodyType=\"Text\">{notes}</t:Body>",
@@ -83,6 +85,7 @@ pub(in crate::service) fn contact_item_xml_with_change_key(
         company = escape_xml(&contact_organization_name(contact)),
         email_entries = email_entries,
         phone_entries = phone_entries,
+        physical_addresses = physical_addresses,
         business_home_page = business_home_page,
         personal_home_page = personal_home_page,
         notes = escape_xml(&contact.notes),
@@ -126,7 +129,8 @@ pub(in crate::service) fn parse_create_contact_input(
         .ok_or_else(|| anyhow!("CreateItem is missing Contact"))?;
     let email = contact_entry_value(contact, "EmailAddresses", "EmailAddress1")
         .or_else(|| element_text(contact, "EmailAddress"))
-        .unwrap_or_else(|| principal.email.clone());
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("CreateItem Contact is missing EmailAddress1"))?;
     let given_name = element_text(contact, "GivenName").unwrap_or_default();
     let middle_name = element_text(contact, "MiddleName").unwrap_or_default();
     let surname = element_text(contact, "Surname").unwrap_or_default();
@@ -138,7 +142,8 @@ pub(in crate::service) fn parse_create_contact_input(
     let name = element_text(contact, "DisplayName")
         .or_else(|| element_text(contact, "FileAs"))
         .or_else(|| (!fallback_name.trim().is_empty()).then_some(fallback_name))
-        .unwrap_or_else(|| email.clone());
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("CreateItem Contact is missing a name"))?;
     let body_tag = open_tag_text(contact, "Body").unwrap_or_default();
     let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
     let body_value = element_text(contact, "Body").unwrap_or_default();
@@ -172,6 +177,7 @@ pub(in crate::service) fn parse_create_contact_input(
         },
         emails_json: Some(ews_contact_emails_json(contact, &email)),
         phones_json: Some(ews_contact_phones_json(contact)),
+        addresses_json: Some(ews_contact_addresses_json(contact)),
         urls_json: Some(ews_contact_urls_json(contact)),
         organization_name: element_text(contact, "CompanyName").unwrap_or_default(),
         job_title: element_text(contact, "JobTitle").unwrap_or_default(),
@@ -294,6 +300,9 @@ pub(in crate::service) fn parse_update_contact_input(
             request, contact, existing, &email,
         )),
         phones_json: Some(ews_updated_contact_phones_json(request, contact, existing)),
+        addresses_json: Some(ews_updated_contact_addresses_json(
+            request, contact, existing,
+        )),
         urls_json: Some(ews_updated_contact_urls_json(request, contact, existing)),
         organization_name: deleted_or_updated_text(
             request,
@@ -372,6 +381,57 @@ fn ews_contact_phone_entries_xml(contact: &AccessibleContact) -> String {
         ));
     }
     entries.join("")
+}
+
+fn ews_contact_physical_addresses_xml(contact: &AccessibleContact) -> String {
+    let entries = [("Business", "work"), ("Home", "home"), ("Other", "other")]
+        .into_iter()
+        .filter_map(|(ews_key, label)| {
+            contact_address_by_label(contact, label).map(|address| {
+                format!(
+                    concat!(
+                        "<t:Entry Key=\"{ews_key}\">",
+                        "<t:Street>{street}</t:Street>",
+                        "<t:City>{city}</t:City>",
+                        "<t:State>{state}</t:State>",
+                        "<t:CountryOrRegion>{country}</t:CountryOrRegion>",
+                        "<t:PostalCode>{postal_code}</t:PostalCode>",
+                        "</t:Entry>"
+                    ),
+                    ews_key = ews_key,
+                    street = escape_xml(address_text(address, "street")),
+                    city = escape_xml(address_text(address, "city")),
+                    state = escape_xml(address_text(address, "state")),
+                    country = escape_xml(address_text(address, "country")),
+                    postal_code = escape_xml(address_text(address, "postalCode")),
+                )
+            })
+        })
+        .collect::<String>();
+    if entries.is_empty() {
+        String::new()
+    } else {
+        format!("<t:PhysicalAddresses>{entries}</t:PhysicalAddresses>")
+    }
+}
+
+fn contact_address_by_label<'a>(
+    contact: &'a AccessibleContact,
+    label: &str,
+) -> Option<&'a serde_json::Value> {
+    contact.addresses_json.as_array()?.iter().find(|address| {
+        address
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|current| current.eq_ignore_ascii_case(label))
+    })
+}
+
+fn address_text<'a>(address: &'a serde_json::Value, key: &str) -> &'a str {
+    address
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
 }
 
 fn ews_contact_phone_by_label(contact: &AccessibleContact, labels: &[&str]) -> Option<String> {
@@ -506,6 +566,94 @@ fn ews_contact_urls_json(contact: &str) -> serde_json::Value {
     serde_json::Value::Array(rows)
 }
 
+fn ews_contact_addresses_json(contact: &str) -> serde_json::Value {
+    let rows = [("Business", "work"), ("Home", "home"), ("Other", "other")]
+        .into_iter()
+        .filter_map(|(ews_key, label)| {
+            ews_contact_address_entry(contact, ews_key).map(|entry| (label, entry))
+        })
+        .filter_map(|(label, entry)| contact_address_json(label, entry))
+        .collect();
+    serde_json::Value::Array(rows)
+}
+
+fn ews_updated_contact_addresses_json(
+    request: &str,
+    contact: &str,
+    existing: &AccessibleContact,
+) -> serde_json::Value {
+    let mut rows = existing
+        .addresses_json
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    for (ews_key, label) in [("Business", "work"), ("Home", "home"), ("Other", "other")] {
+        let field_uri = format!("contacts:PhysicalAddress:{ews_key}");
+        if field_deleted(request, &field_uri) {
+            remove_contact_address(&mut rows, label);
+        } else if let Some(entry) = ews_contact_address_entry(contact, ews_key) {
+            remove_contact_address(&mut rows, label);
+            if let Some(address) = contact_address_json(label, entry) {
+                rows.push(address);
+            }
+        }
+    }
+    serde_json::Value::Array(rows)
+}
+
+fn ews_contact_address_entry<'a>(contact: &'a str, key: &str) -> Option<&'a str> {
+    let addresses = element_content(contact, "PhysicalAddresses")?;
+    let mut rest = addresses;
+    while let Some(index) = rest.find('<') {
+        rest = &rest[index..];
+        let tag = &rest[1..];
+        let tag_end = tag.find('>')?;
+        let open_tag = &tag[..tag_end];
+        let name = open_tag
+            .split(|value: char| value.is_whitespace() || value == '/')
+            .next()?;
+        let content_start = tag_end + 1;
+        if name.rsplit(':').next() == Some("Entry") && attribute_value(open_tag, "Key") == Some(key)
+        {
+            let close_tag = format!("</{name}>");
+            let content = &rest[content_start..];
+            let content_end = content.find(&close_tag)?;
+            return Some(&content[..content_end]);
+        }
+        rest = &rest[content_start..];
+    }
+    None
+}
+
+fn contact_address_json(label: &str, entry: &str) -> Option<serde_json::Value> {
+    let mut address = serde_json::Map::new();
+    address.insert(
+        "label".to_string(),
+        serde_json::Value::String(label.to_string()),
+    );
+    for (element, key) in [
+        ("Street", "street"),
+        ("City", "city"),
+        ("State", "state"),
+        ("CountryOrRegion", "country"),
+        ("PostalCode", "postalCode"),
+    ] {
+        if let Some(value) = element_text(entry, element).filter(|value| !value.trim().is_empty()) {
+            address.insert(key.to_string(), serde_json::Value::String(value));
+        }
+    }
+    (address.len() > 1).then_some(serde_json::Value::Object(address))
+}
+
+fn remove_contact_address(rows: &mut Vec<serde_json::Value>, label: &str) {
+    rows.retain(|address| {
+        !address
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|current| current.eq_ignore_ascii_case(label))
+    });
+}
+
 fn ews_updated_contact_emails_json(
     request: &str,
     contact: &str,
@@ -630,16 +778,86 @@ fn last_name(name: &str) -> String {
 mod contact_update_tests {
     use super::*;
 
-    #[test]
-    fn ews_contact_narrow_update_omits_unowned_rich_fields() {
-        let principal = AccountPrincipal {
+    fn principal() -> AccountPrincipal {
+        AccountPrincipal {
             tenant_id: Uuid::from_u128(1),
             account_id: Uuid::from_u128(2),
             email: "ada@example.test".to_string(),
             display_name: "Ada".to_string(),
             quota_mb: None,
             quota_used_octets: None,
+        }
+    }
+
+    #[test]
+    fn create_contact_requires_name_and_primary_email() {
+        let missing_email = parse_create_contact_input(
+            &principal(),
+            "<m:CreateItem><t:Contact><t:DisplayName>Ada</t:DisplayName></t:Contact></m:CreateItem>",
+        )
+        .unwrap_err();
+        assert!(missing_email.to_string().contains("EmailAddress1"));
+
+        let missing_name = parse_create_contact_input(
+            &principal(),
+            "<m:CreateItem><t:Contact><t:EmailAddress>ada@example.test</t:EmailAddress></t:Contact></m:CreateItem>",
+        )
+        .unwrap_err();
+        assert!(missing_name.to_string().contains("missing a name"));
+    }
+
+    #[test]
+    fn physical_addresses_round_trip_and_targeted_update_preserves_other_rows() {
+        let input = parse_create_contact_input(
+            &principal(),
+            concat!(
+                "<m:CreateItem><t:Contact><t:DisplayName>Ada</t:DisplayName>",
+                "<t:EmailAddress>ada@example.test</t:EmailAddress>",
+                "<t:PhysicalAddresses><t:Entry Key=\"Business\">",
+                "<t:Street>1 Example Way</t:Street><t:City>Paris</t:City>",
+                "<t:PostalCode>75001</t:PostalCode></t:Entry></t:PhysicalAddresses>",
+                "</t:Contact></m:CreateItem>"
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            input.addresses_json,
+            Some(serde_json::json!([{
+                "label": "work",
+                "street": "1 Example Way",
+                "city": "Paris",
+                "postalCode": "75001"
+            }]))
+        );
+
+        let existing = AccessibleContact {
+            addresses_json: serde_json::json!([
+                {"label": "work", "street": "1 Example Way"},
+                {"label": "home", "city": "Lyon"},
+                {"label": "custom", "full": "preserve"}
+            ]),
+            ..AccessibleContact::default()
         };
+        let request = concat!(
+            "<m:UpdateItem><t:SetItemField><t:FieldURI FieldURI=\"contacts:PhysicalAddress:Business\"/>",
+            "<t:Contact><t:PhysicalAddresses><t:Entry Key=\"Business\">",
+            "<t:Street>2 Updated Way</t:Street></t:Entry></t:PhysicalAddresses></t:Contact>",
+            "</t:SetItemField></m:UpdateItem>"
+        );
+        let updated = ews_updated_contact_addresses_json(request, request, &existing);
+        assert_eq!(
+            updated,
+            serde_json::json!([
+                {"label": "home", "city": "Lyon"},
+                {"label": "custom", "full": "preserve"},
+                {"label": "work", "street": "2 Updated Way"}
+            ])
+        );
+    }
+
+    #[test]
+    fn ews_contact_narrow_update_omits_unowned_rich_fields() {
+        let principal = principal();
         let existing = AccessibleContact {
             id: Uuid::from_u128(3),
             name: "Ada Example".to_string(),

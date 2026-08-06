@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: recheck_contact_write_access_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L585-L629
+resource: crates/lpe-storage/src/mapi_contacts.rs#L830-L874
 visibility: private
 generated:
   by: okf-rs/0.3.0

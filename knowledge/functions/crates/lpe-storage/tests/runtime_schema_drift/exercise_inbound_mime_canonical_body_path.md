@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_inbound_mime_canonical_body_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1266-L1325
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1276-L1335
 visibility: private
 generated:
   by: okf-rs/0.3.0

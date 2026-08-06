@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync
-resource: crates/lpe-exchange/src/tests/mod.rs#L565-L630
+resource: crates/lpe-exchange/src/tests/mod.rs#L566-L631
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_item_returns_public_folder_item_body
-resource: crates/lpe-exchange/src/tests/ews.rs#L8161-L8196
+resource: crates/lpe-exchange/src/tests/ews.rs#L8602-L8637
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: resolve_client_sender_fields
-resource: crates/lpe-admin-api/src/workspace.rs#L1449-L1472
+resource: crates/lpe-admin-api/src/workspace.rs#L1451-L1474
 visibility: private
 generated:
   by: okf-rs/0.3.0

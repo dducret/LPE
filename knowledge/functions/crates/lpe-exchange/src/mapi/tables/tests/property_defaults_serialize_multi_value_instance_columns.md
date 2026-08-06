@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_defaults_serialize_multi_value_instance_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L230-L234
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L264-L268
 visibility: private
 generated:
   by: okf-rs/0.3.0

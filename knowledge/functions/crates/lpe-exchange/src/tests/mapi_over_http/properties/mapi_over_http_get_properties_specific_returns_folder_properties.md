@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_properties_specific_returns_folder_properties
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5678-L5748
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5680-L5750
 visibility: private
 generated:
   by: okf-rs/0.3.0

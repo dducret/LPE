@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reserved_folder_counter_for_role
-resource: crates/lpe-exchange/src/mapi_store.rs#L1061-L1109
+resource: crates/lpe-exchange/src/mapi_store.rs#L1068-L1116
 generated:
   by: okf-rs/0.3.0
 relationships:

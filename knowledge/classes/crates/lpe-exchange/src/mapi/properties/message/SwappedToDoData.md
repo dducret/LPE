@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: SwappedToDoData
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L896-L904
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L919-L927
 generated:
   by: okf-rs/0.3.0
 ---

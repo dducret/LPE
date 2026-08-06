@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: empty_mailbox_folder
-resource: crates/lpe-exchange/src/service.rs#L821-L884
+resource: crates/lpe-exchange/src/service.rs#L843-L906
 visibility: private
 generated:
   by: okf-rs/0.3.0

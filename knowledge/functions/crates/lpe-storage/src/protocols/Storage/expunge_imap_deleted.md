@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: expunge_imap_deleted
-resource: crates/lpe-storage/src/protocols.rs#L1154-L1163
+resource: crates/lpe-storage/src/protocols.rs#L1155-L1164
 generated:
   by: okf-rs/0.3.0
 ---

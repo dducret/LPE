@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: move_item_rejects_non_message_ids
-resource: crates/lpe-exchange/src/tests/ews.rs#L8886-L8910
+resource: crates/lpe-exchange/src/tests/ews.rs#L9327-L9351
 visibility: private
 generated:
   by: okf-rs/0.3.0

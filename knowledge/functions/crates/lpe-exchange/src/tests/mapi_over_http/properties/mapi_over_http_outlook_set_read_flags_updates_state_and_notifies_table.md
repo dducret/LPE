@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_set_read_flags_updates_state_and_notifies_table
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L3400-L3475
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L3402-L3477
 visibility: private
 generated:
   by: okf-rs/0.3.0

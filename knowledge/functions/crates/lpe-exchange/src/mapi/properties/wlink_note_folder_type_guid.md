@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wlink_note_folder_type_guid
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1095-L1100
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1118-L1123
 visibility: private
 generated:
   by: okf-rs/0.3.0

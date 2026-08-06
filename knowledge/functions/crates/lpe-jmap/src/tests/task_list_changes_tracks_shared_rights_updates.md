@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_list_changes_tracks_shared_rights_updates
-resource: crates/lpe-jmap/src/tests.rs#L14233-L14310
+resource: crates/lpe-jmap/src/tests.rs#L14771-L14848
 visibility: private
 generated:
   by: okf-rs/0.3.0

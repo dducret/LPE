@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: propfind_lists_shared_task_collection_with_canonical_name
-resource: crates/lpe-dav/src/tests.rs#L1148-L1193
+resource: crates/lpe-dav/src/tests.rs#L1154-L1201
 visibility: private
 generated:
   by: okf-rs/0.3.0

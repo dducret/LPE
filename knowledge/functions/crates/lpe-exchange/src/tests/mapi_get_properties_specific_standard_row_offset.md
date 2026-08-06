@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_get_properties_specific_standard_row_offset
-resource: crates/lpe-exchange/src/tests/mod.rs#L14817-L14834
+resource: crates/lpe-exchange/src/tests/mod.rs#L14942-L14959
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_delete_properties_response
-resource: crates/lpe-exchange/src/mapi/dispatch/property_mutations.rs#L446-L648
+resource: crates/lpe-exchange/src/mapi/dispatch/property_mutations.rs#L448-L652
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag
   - functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/stage_virtual_conversation_action_property_delete
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_deletions
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions
   - functions/crates/lpe-exchange/src/mapi/dispatch/navigation_shortcut_save/stage_existing_navigation_shortcut_property_deletions
   - functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/delete_conversation_action_properties
   - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/delete_associated_config_properties
@@ -45,6 +46,7 @@ relationships:
 - [canonical_property_storage_tag](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tags/canonical_property_storage_tag.md)
 - [stage_virtual_conversation_action_property_delete](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/stage_virtual_conversation_action_property_delete.md)
 - [stage_event_property_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_deletions.md)
+- [stage_contact_property_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions.md)
 - [stage_existing_navigation_shortcut_property_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/navigation_shortcut_save/stage_existing_navigation_shortcut_property_deletions.md)
 - [delete_conversation_action_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/delete_conversation_action_properties.md)
 - [delete_associated_config_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/delete_associated_config_properties.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_folder_returns_ews_error_for_unsupported_folder_ids
-resource: crates/lpe-exchange/src/tests/ews.rs#L1054-L1074
+resource: crates/lpe-exchange/src/tests/ews.rs#L1371-L1391
 visibility: private
 generated:
   by: okf-rs/0.3.0

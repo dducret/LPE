@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_open_embedded_message_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_save_changes_attachment_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_pending_contact
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_existing_contact
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_request_rop_buffer
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event
@@ -142,6 +143,7 @@ relationships:
 - [append_open_embedded_message_response](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_open_embedded_message_response.md)
 - [append_save_changes_attachment_response](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_save_changes_attachment_response.md)
 - [save_pending_contact](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_pending_contact.md)
+- [save_existing_contact](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_existing_contact.md)
 - [summarize_request_rop_buffer](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_request_rop_buffer.md)
 - [save_pending_event](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event.md)
 - [save_existing_event](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event.md)

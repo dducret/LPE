@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_hierarchy_columns_cover_table_projection_contract
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L72-L96
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L74-L98
 visibility: private
 generated:
   by: okf-rs/0.3.0

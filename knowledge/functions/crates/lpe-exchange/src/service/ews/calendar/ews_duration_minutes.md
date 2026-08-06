@@ -1,14 +1,14 @@
 ---
 type: Rust Function
 title: ews_duration_minutes
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L642-L648
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L639-L645
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
-  - functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_parts
-  - functions/crates/lpe-exchange/src/service/ews/calendar/time_minutes
+  - functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_minutes
+  - functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from
   called_by:
   - functions/crates/lpe-exchange/src/service/ews/calendar/parse_create_event_input
   - functions/crates/lpe-exchange/src/service/ews/calendar/parse_update_event_input
@@ -20,8 +20,8 @@ relationships:
 
 # Calls
 
-- [ews_datetime_parts](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_parts.md)
-- [time_minutes](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/time_minutes.md)
+- [ews_datetime_minutes](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_minutes.md)
+- [try_from](../../../../../../../functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from.md)
 
 # Called by
 

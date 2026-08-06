@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_legacy_dn
-resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L50-L62
+resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L51-L63
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_status_from_vtodo_status
-resource: crates/lpe-dav/src/parse.rs#L300-L312
+resource: crates/lpe-dav/src/parse.rs#L310-L322
 visibility: private
 generated:
   by: okf-rs/0.3.0

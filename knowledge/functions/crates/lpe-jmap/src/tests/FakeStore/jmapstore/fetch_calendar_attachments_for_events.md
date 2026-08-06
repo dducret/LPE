@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_calendar_attachments_for_events
-resource: crates/lpe-jmap/src/tests.rs#L1819-L1834
+resource: crates/lpe-jmap/src/tests.rs#L1894-L1909
 visibility: private
 generated:
   by: okf-rs/0.3.0

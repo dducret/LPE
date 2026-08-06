@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_or_updated_contact_entry
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L436-L453
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L496-L513
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -69,6 +69,7 @@ relationships:
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_path
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_cancellation_path
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_jmap_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_cross_account_jmap_copy_bcc_projection
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_index_plan_paths
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_custom_calendar_grant_path
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_activesync_path
@@ -160,6 +161,7 @@ relationships:
 - [exercise_submission_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_path.md)
 - [exercise_submission_cancellation_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_cancellation_path.md)
 - [exercise_jmap_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_jmap_path.md)
+- [exercise_cross_account_jmap_copy_bcc_projection](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_cross_account_jmap_copy_bcc_projection.md)
 - [exercise_index_plan_paths](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_index_plan_paths.md)
 - [exercise_custom_calendar_grant_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_custom_calendar_grant_path.md)
 - [exercise_activesync_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_activesync_path.md)

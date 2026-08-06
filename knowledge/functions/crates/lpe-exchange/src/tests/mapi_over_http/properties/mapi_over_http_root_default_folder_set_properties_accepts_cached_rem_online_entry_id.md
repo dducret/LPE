@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_root_default_folder_set_properties_accepts_cached_rem_online_entry_id
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6436-L6493
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6438-L6495
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rrule_date
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L570-L579
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L567-L576
 visibility: private
 generated:
   by: okf-rs/0.3.0

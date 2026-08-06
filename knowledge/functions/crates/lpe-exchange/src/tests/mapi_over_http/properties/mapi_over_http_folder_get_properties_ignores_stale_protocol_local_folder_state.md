@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_folder_get_properties_ignores_stale_protocol_local_folder_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6652-L6717
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6654-L6719
 visibility: private
 generated:
   by: okf-rs/0.3.0

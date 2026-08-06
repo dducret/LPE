@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normalize_filetime
-resource: crates/lpe-storage/src/mapi_contacts.rs#L560-L565
+resource: crates/lpe-storage/src/mapi_contacts.rs#L805-L810
 visibility: private
 generated:
   by: okf-rs/0.3.0

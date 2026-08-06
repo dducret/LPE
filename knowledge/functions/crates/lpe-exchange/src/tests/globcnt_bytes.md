@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: globcnt_bytes
-resource: crates/lpe-exchange/src/tests/mod.rs#L15738-L15740
+resource: crates/lpe-exchange/src/tests/mod.rs#L15863-L15865
 visibility: private
 generated:
   by: okf-rs/0.3.0

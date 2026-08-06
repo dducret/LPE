@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: draft_email
-resource: crates/lpe-jmap/src/tests.rs#L410-L463
+resource: crates/lpe-jmap/src/tests.rs#L411-L464
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,7 +9,7 @@ relationships:
   called_by:
   - functions/crates/lpe-jmap/src/tests/FakeStore/email_submission
   - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/submit_draft_message
-  - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/copy_jmap_email
+  - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/copy_jmap_email_between_accounts
   - functions/crates/lpe-jmap/src/tests/jmap_mail_query_snippet_and_blob_projections_do_not_expose_bcc
   - functions/crates/lpe-jmap/src/tests/delegated_email_and_thread_states_ignore_bcc_only_changes
   - functions/crates/lpe-jmap/src/tests/email_changes_report_updates_for_existing_messages
@@ -30,7 +30,7 @@ relationships:
 
 - [email_submission](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/email_submission.md)
 - [submit_draft_message](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/submit_draft_message.md)
-- [copy_jmap_email](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/copy_jmap_email.md)
+- [copy_jmap_email_between_accounts](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/copy_jmap_email_between_accounts.md)
 - [jmap_mail_query_snippet_and_blob_projections_do_not_expose_bcc](../../../../../../functions/crates/lpe-jmap/src/tests/jmap_mail_query_snippet_and_blob_projections_do_not_expose_bcc.md)
 - [delegated_email_and_thread_states_ignore_bcc_only_changes](../../../../../../functions/crates/lpe-jmap/src/tests/delegated_email_and_thread_states_ignore_bcc_only_changes.md)
 - [email_changes_report_updates_for_existing_messages](../../../../../../functions/crates/lpe-jmap/src/tests/email_changes_report_updates_for_existing_messages.md)

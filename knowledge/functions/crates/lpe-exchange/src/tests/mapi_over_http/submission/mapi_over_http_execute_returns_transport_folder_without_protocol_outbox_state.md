@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_execute_returns_transport_folder_without_protocol_outbox_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2298-L2357
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2408-L2467
 visibility: private
 generated:
   by: okf-rs/0.3.0

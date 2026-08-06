@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: find_row_beginning_origin_falls_back_when_complete_rows_are_loaded
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2078-L2174
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2112-L2208
 visibility: private
 generated:
   by: okf-rs/0.3.0

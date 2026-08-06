@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_subrestriction_matches_message_recipients
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L4-L121
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L132-L249
 visibility: private
 generated:
   by: okf-rs/0.3.0

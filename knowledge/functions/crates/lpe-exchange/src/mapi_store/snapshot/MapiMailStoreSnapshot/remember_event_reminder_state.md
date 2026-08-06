@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: remember_event_reminder_state
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L486-L512
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L501-L527
 generated:
   by: okf-rs/0.3.0
 relationships:

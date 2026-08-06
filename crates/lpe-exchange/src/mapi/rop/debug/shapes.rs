@@ -94,6 +94,7 @@ pub(in crate::mapi) fn mapi_object_debug_fields(
         Some(MapiObject::Contact {
             folder_id,
             contact_id,
+            ..
         }) => (
             "contact",
             format!("{folder_id:#018x}"),

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_draft
-resource: crates/lpe-jmap/src/mail.rs#L1351-L1426
+resource: crates/lpe-jmap/src/mail.rs#L1357-L1432
 generated:
   by: okf-rs/0.3.0
 relationships:

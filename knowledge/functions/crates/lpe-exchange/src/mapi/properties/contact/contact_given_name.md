@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_given_name
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L214-L224
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L229-L239
 generated:
   by: okf-rs/0.3.0
 relationships:

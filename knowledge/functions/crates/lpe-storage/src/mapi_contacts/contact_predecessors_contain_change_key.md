@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_predecessors_contain_change_key
-resource: crates/lpe-storage/src/mapi_contacts.rs#L874-L886
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1119-L1131
 visibility: private
 generated:
   by: okf-rs/0.3.0

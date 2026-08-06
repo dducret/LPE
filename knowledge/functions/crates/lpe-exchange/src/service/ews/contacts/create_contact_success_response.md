@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: create_contact_success_response
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L92-L119
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L95-L122
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_modeled_empty_special_folder_class_property
-resource: crates/lpe-exchange/src/mapi/rop.rs#L1006-L1021
+resource: crates/lpe-exchange/src/mapi/rop.rs#L1024-L1039
 visibility: private
 generated:
   by: okf-rs/0.3.0

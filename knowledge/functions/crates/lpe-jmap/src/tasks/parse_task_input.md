@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_task_input
-resource: crates/lpe-jmap/src/tasks.rs#L567-L605
+resource: crates/lpe-jmap/src/tasks.rs#L571-L611
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -12,6 +12,7 @@ relationships:
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   - functions/crates/lpe-jmap/src/parse/parse_required_string
   - functions/crates/lpe-jmap/src/parse/parse_optional_string
+  - functions/crates/lpe-jmap/src/tasks/parse_task_priority
   called_by:
   - functions/crates/lpe-jmap/src/tasks/JmapService/handle_task_set
 ---
@@ -27,6 +28,7 @@ relationships:
 - [get](../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
 - [parse_required_string](../../../../../functions/crates/lpe-jmap/src/parse/parse_required_string.md)
 - [parse_optional_string](../../../../../functions/crates/lpe-jmap/src/parse/parse_optional_string.md)
+- [parse_task_priority](../../../../../functions/crates/lpe-jmap/src/tasks/parse_task_priority.md)
 
 # Called by
 

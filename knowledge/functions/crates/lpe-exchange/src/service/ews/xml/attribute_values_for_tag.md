@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/xml/attribute_value
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   called_by:
+  - functions/crates/lpe-exchange/src/service/ExchangeService/update_folder
   - functions/crates/lpe-exchange/src/service/ews/conversations/requested_conversation_ids
   - functions/crates/lpe-exchange/src/service/ews/conversations/parse_conversation_actions
   - functions/crates/lpe-exchange/src/service/ews/conversations/filter_ignored_conversation_folders
@@ -39,6 +40,7 @@ relationships:
 
 # Called by
 
+- [update_folder](../../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/update_folder.md)
 - [requested_conversation_ids](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/requested_conversation_ids.md)
 - [parse_conversation_actions](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/parse_conversation_actions.md)
 - [filter_ignored_conversation_folders](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/filter_ignored_conversation_folders.md)

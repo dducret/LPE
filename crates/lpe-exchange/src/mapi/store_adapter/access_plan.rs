@@ -888,6 +888,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         MapiObject::Contact {
             folder_id,
             contact_id,
+            ..
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *contact_id);

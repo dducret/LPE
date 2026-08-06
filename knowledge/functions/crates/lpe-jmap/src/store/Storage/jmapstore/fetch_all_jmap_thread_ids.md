@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_all_jmap_thread_ids
-resource: crates/lpe-jmap/src/store.rs#L694-L696
+resource: crates/lpe-jmap/src/store.rs#L702-L704
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: blob_upload_get_and_copy_resolve_created_blob_references
-resource: crates/lpe-jmap/src/tests.rs#L7517-L7626
+resource: crates/lpe-jmap/src/tests.rs#L8005-L8114
 visibility: private
 generated:
   by: okf-rs/0.3.0

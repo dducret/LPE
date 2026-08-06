@@ -16,6 +16,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/delegation/parse_delegate_user_id_emails
   - functions/crates/lpe-exchange/src/service/ews/fields/field_deleted
   - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/create_managed_folder
+  - functions/crates/lpe-exchange/src/service/ews/items/requested_update_item_changes
   - functions/crates/lpe-exchange/src/service/ews/mail_apps/requested_mail_app_token_scopes
   - functions/crates/lpe-exchange/src/service/ews/mail_tips/requested_mail_tips_recipients
   - functions/crates/lpe-exchange/src/service/ews/mail_tips/requested_service_configurations
@@ -48,6 +49,7 @@ relationships:
 - [parse_delegate_user_id_emails](../../../../../../../functions/crates/lpe-exchange/src/service/ews/delegation/parse_delegate_user_id_emails.md)
 - [field_deleted](../../../../../../../functions/crates/lpe-exchange/src/service/ews/fields/field_deleted.md)
 - [create_managed_folder](../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/create_managed_folder.md)
+- [requested_update_item_changes](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/requested_update_item_changes.md)
 - [requested_mail_app_token_scopes](../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_apps/requested_mail_app_token_scopes.md)
 - [requested_mail_tips_recipients](../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_tips/requested_mail_tips_recipients.md)
 - [requested_service_configurations](../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail_tips/requested_service_configurations.md)

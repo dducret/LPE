@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_custom_named_property_set_before_save_persists_on_created_item
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L355-L433
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L357-L435
 visibility: private
 generated:
   by: okf-rs/0.3.0

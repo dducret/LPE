@@ -69,6 +69,10 @@ pub(super) async fn save_pending_contact<S: ExchangeStore>(
                 MapiObject::Contact {
                     folder_id,
                     contact_id,
+                    transaction: MapiContactTransaction::new(
+                        0x01,
+                        created.version.canonical_modseq,
+                    ),
                 },
             );
             if changes_server_replica {
@@ -124,4 +128,149 @@ pub(super) async fn save_pending_contact<S: ExchangeStore>(
             ));
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn save_existing_contact<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &mut Vec<u32>,
+    request: &RopRequest,
+    snapshot: &mut MapiMailStoreSnapshot,
+    responses: &mut Vec<u8>,
+    handle: u32,
+    folder_id: u64,
+    contact_id: u64,
+    transaction: MapiContactTransaction,
+) {
+    let Some(contact) = snapshot.contact_for_id(folder_id, contact_id).cloned() else {
+        responses.extend_from_slice(&rop_error_response(
+            0x0C,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    };
+    if !contact.contact.rights.may_write {
+        responses.extend_from_slice(&rop_error_response(
+            0x0C,
+            request.response_handle_index(),
+            0x8007_0005,
+        ));
+        return;
+    }
+    if !event_handle_is_writable(transaction.open_mode_flags, true) {
+        responses.extend_from_slice(&rop_error_response(
+            0x0C,
+            request.response_handle_index(),
+            0x8000_4005,
+        ));
+        return;
+    }
+    let disposition =
+        save_disposition(request).expect("SaveFlags were validated before Contact save");
+    let commit_input = match staged_contact_commit_input(
+        principal,
+        &contact,
+        &transaction,
+        disposition == SaveDisposition::ForceSave,
+    ) {
+        Ok(commit_input) => commit_input,
+        Err(_) => {
+            responses.extend_from_slice(&rop_error_response(
+                0x0C,
+                request.response_handle_index(),
+                0x8004_0102,
+            ));
+            return;
+        }
+    };
+    match store.commit_mapi_contact_update(commit_input).await {
+        Ok(lpe_storage::MapiContactCommitOutcome::Saved(saved)) => {
+            let identity = MapiIdentityRecord {
+                object_kind: MapiIdentityObjectKind::Contact,
+                canonical_id: saved.contact.id,
+                object_id: contact_id,
+                change_number: saved.version.change_number,
+                source_key: contact
+                    .durable_identity
+                    .as_ref()
+                    .map(|identity| identity.source_key.clone())
+                    .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(contact_id)),
+                change_key: saved.version.change_key.clone(),
+                predecessor_change_list: saved.version.predecessor_change_list.clone(),
+                last_modification_time: saved.version.last_modification_time,
+            };
+            snapshot.remember_updated_contact(
+                folder_id,
+                contact_id,
+                saved.contact,
+                identity,
+                saved.version.canonical_modseq,
+            );
+            remember_saved_contact_handle(
+                session,
+                handle,
+                folder_id,
+                contact_id,
+                disposition,
+                saved.version.canonical_modseq,
+            );
+            session
+                .record_notification(MapiNotificationEvent::content(folder_id, Some(contact_id)));
+            record_sync_upload_content_change(
+                session,
+                folder_id,
+                contact_id,
+                saved.version.change_number,
+                false,
+                false,
+            );
+            append_save_changes_message_response(
+                session,
+                responses,
+                handle_slots,
+                request,
+                handle,
+                contact_id,
+            );
+        }
+        Ok(lpe_storage::MapiContactCommitOutcome::ObjectModified) => responses.extend_from_slice(
+            &rop_error_response(0x0C, request.response_handle_index(), 0x8004_0109),
+        ),
+        Ok(lpe_storage::MapiContactCommitOutcome::NotFound) => responses.extend_from_slice(
+            &rop_error_response(0x0C, request.response_handle_index(), 0x8004_010F),
+        ),
+        Ok(lpe_storage::MapiContactCommitOutcome::AccessDenied) => responses.extend_from_slice(
+            &rop_error_response(0x0C, request.response_handle_index(), 0x8007_0005),
+        ),
+        Err(_) => responses.extend_from_slice(&rop_error_response(
+            0x0C,
+            request.response_handle_index(),
+            0x8000_4005,
+        )),
+    }
+}
+
+fn remember_saved_contact_handle(
+    session: &mut MapiSession,
+    handle: u32,
+    folder_id: u64,
+    contact_id: u64,
+    disposition: SaveDisposition,
+    canonical_modseq: i64,
+) {
+    let Some(open_mode_flags) = event_open_mode_after_save(disposition) else {
+        session.handles.remove(&handle);
+        return;
+    };
+    session.handles.insert(
+        handle,
+        MapiObject::Contact {
+            folder_id,
+            contact_id,
+            transaction: MapiContactTransaction::new(open_mode_flags, canonical_modseq),
+        },
+    );
 }

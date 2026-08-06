@@ -81,7 +81,9 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/availability/availability_suggestions_response
   - functions/crates/lpe-exchange/src/service/ews/calendar/rrule_until_to_ews_date
   - functions/crates/lpe-exchange/src/service/ews/calendar/rrule_date
+  - functions/crates/lpe-exchange/src/service/ews/calendar/ews_date_parts
   - functions/crates/lpe-exchange/src/service/ews/contacts/contact_entry_value
+  - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_address_entry
   - functions/crates/lpe-exchange/src/service/ews/contacts/first_name
   - functions/crates/lpe-exchange/src/service/ews/conversations/parse_conversation_actions
   - functions/crates/lpe-exchange/src/service/ews/diagnostics/ews_payload_debug_detail
@@ -153,7 +155,6 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_stale_message_handle_requires_force_save
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_local_replica_ids_returns_replica_guid
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_execute_opens_compat_shortcuts_folder
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_query_columns_all_folder_columns_omit_note_geometry
@@ -229,9 +230,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_x500_rows_save_canonically
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_remove_all_recipients_clears_pending_message_recipients
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_pending_message_uses_canonical_submission
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_replayed_execute_request_id_does_not_resubmit_message
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_opened_draft_uses_source_draft_id
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_open_message_returns_visible_recipient_rows
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_read_recipients_returns_canonical_message_recipients
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_read_recipients_hides_sent_message_bcc_by_default
@@ -330,7 +329,8 @@ relationships:
   - functions/crates/lpe-storage/src/mail/parse_message_attachments
   - functions/crates/lpe-storage/src/mail_items/update_message_flags
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
-  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update
+  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts
   - functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership
   - functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_followup_flags
   - functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_content
@@ -440,7 +440,9 @@ relationships:
 - [availability_suggestions_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/availability/availability_suggestions_response.md)
 - [rrule_until_to_ews_date](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/rrule_until_to_ews_date.md)
 - [rrule_date](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/rrule_date.md)
+- [ews_date_parts](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_date_parts.md)
 - [contact_entry_value](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_entry_value.md)
+- [ews_contact_address_entry](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_address_entry.md)
 - [first_name](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/first_name.md)
 - [parse_conversation_actions](../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/parse_conversation_actions.md)
 - [ews_payload_debug_detail](../../../../../../functions/crates/lpe-exchange/src/service/ews/diagnostics/ews_payload_debug_detail.md)
@@ -512,7 +514,6 @@ relationships:
 - [mapi_over_http_microsoft_stale_message_handle_requires_force_save](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_stale_message_handle_requires_force_save.md)
 - [mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests.md)
 - [mapi_over_http_get_local_replica_ids_returns_replica_guid](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_local_replica_ids_returns_replica_guid.md)
-- [mapi_over_http_contact_crud_uses_canonical_contacts](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts.md)
 - [mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property.md)
 - [mapi_over_http_execute_opens_compat_shortcuts_folder](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_execute_opens_compat_shortcuts_folder.md)
 - [mapi_over_http_query_columns_all_folder_columns_omit_note_geometry](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_query_columns_all_folder_columns_omit_note_geometry.md)
@@ -588,9 +589,7 @@ relationships:
 - [mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically.md)
 - [mapi_over_http_modify_recipients_x500_rows_save_canonically](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_x500_rows_save_canonically.md)
 - [mapi_over_http_remove_all_recipients_clears_pending_message_recipients](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_remove_all_recipients_clears_pending_message_recipients.md)
-- [mapi_over_http_submit_pending_message_uses_canonical_submission](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_pending_message_uses_canonical_submission.md)
 - [mapi_over_http_replayed_execute_request_id_does_not_resubmit_message](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_replayed_execute_request_id_does_not_resubmit_message.md)
-- [mapi_over_http_submit_opened_draft_uses_source_draft_id](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_opened_draft_uses_source_draft_id.md)
 - [mapi_over_http_open_message_returns_visible_recipient_rows](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_open_message_returns_visible_recipient_rows.md)
 - [mapi_over_http_read_recipients_returns_canonical_message_recipients](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_read_recipients_returns_canonical_message_recipients.md)
 - [mapi_over_http_read_recipients_hides_sent_message_bcc_by_default](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_read_recipients_hides_sent_message_bcc_by_default.md)
@@ -689,7 +688,8 @@ relationships:
 - [parse_message_attachments](../../../../../../functions/crates/lpe-storage/src/mail/parse_message_attachments.md)
 - [update_message_flags](../../../../../../functions/crates/lpe-storage/src/mail_items/update_message_flags.md)
 - [create_mapi_contact](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md)
-- [copy_jmap_email](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email.md)
+- [commit_mapi_contact_update](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update.md)
+- [copy_jmap_email_between_accounts](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts.md)
 - [move_jmap_email_membership](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership.md)
 - [update_jmap_email_followup_flags](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_followup_flags.md)
 - [update_jmap_email_content](../../../../../../functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_content.md)

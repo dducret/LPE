@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: types
-resource: crates/lpe-storage/src/tasks/types.rs#L1-L216
+resource: crates/lpe-storage/src/tasks/types.rs#L1-L226
 generated:
   by: okf-rs/0.3.0
 relationships:

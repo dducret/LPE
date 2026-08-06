@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_defaults_serialize_server_ids_as_empty_counted_binary
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L223-L227
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L257-L261
 visibility: private
 generated:
   by: okf-rs/0.3.0

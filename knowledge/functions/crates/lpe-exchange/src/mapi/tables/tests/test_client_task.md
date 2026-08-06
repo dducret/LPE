@@ -1,13 +1,14 @@
 ---
 type: Rust Function
 title: test_client_task
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L28-L52
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L28-L54
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/task_default_view_sort_orders_by_due_date
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/task_default_view_sort_orders_by_start_date
 ---
 
 # Signature
@@ -17,3 +18,4 @@ relationships:
 # Called by
 
 - [task_default_view_sort_orders_by_due_date](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/task_default_view_sort_orders_by_due_date.md)
+- [task_default_view_sort_orders_by_start_date](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/task_default_view_sort_orders_by_start_date.md)

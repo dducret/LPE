@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: thread_changes_use_durable_log_ids_when_state_has_cursor
-resource: crates/lpe-jmap/src/tests.rs#L4254-L4299
+resource: crates/lpe-jmap/src/tests.rs#L4331-L4376
 visibility: private
 generated:
   by: okf-rs/0.3.0

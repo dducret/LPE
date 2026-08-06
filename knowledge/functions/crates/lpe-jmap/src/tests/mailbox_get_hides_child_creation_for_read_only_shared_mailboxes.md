@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_get_hides_child_creation_for_read_only_shared_mailboxes
-resource: crates/lpe-jmap/src/tests.rs#L6669-L6724
+resource: crates/lpe-jmap/src/tests.rs#L6881-L6936
 visibility: private
 generated:
   by: okf-rs/0.3.0

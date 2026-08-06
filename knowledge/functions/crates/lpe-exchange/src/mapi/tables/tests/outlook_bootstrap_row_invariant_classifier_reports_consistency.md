@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_bootstrap_row_invariant_classifier_reports_consistency
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L254-L294
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L288-L328
 visibility: private
 generated:
   by: okf-rs/0.3.0

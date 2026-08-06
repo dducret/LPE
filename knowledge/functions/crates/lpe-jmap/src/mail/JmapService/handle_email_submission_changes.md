@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_email_submission_changes
-resource: crates/lpe-jmap/src/mail.rs#L871-L895
+resource: crates/lpe-jmap/src/mail.rs#L877-L901
 generated:
   by: okf-rs/0.3.0
 relationships:

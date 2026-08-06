@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_changes_use_durable_log_ids_when_state_has_cursor
-resource: crates/lpe-jmap/src/tests.rs#L4302-L4353
+resource: crates/lpe-jmap/src/tests.rs#L4379-L4430
 visibility: private
 generated:
   by: okf-rs/0.3.0

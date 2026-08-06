@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_recurrence_binary_maps_subject_location_exceptions
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4467-L4491
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4604-L4628
 visibility: private
 generated:
   by: okf-rs/0.3.0

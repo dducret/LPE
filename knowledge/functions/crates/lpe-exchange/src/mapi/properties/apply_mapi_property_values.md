@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: apply_mapi_property_values
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1306-L1361
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1329-L1384
 generated:
   by: okf-rs/0.3.0
 relationships:

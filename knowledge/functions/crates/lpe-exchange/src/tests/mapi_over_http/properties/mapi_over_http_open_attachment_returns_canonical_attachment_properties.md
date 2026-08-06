@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_attachment_returns_canonical_attachment_properties
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2061-L2164
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2063-L2166
 visibility: private
 generated:
   by: okf-rs/0.3.0

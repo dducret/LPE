@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: quick_step_associated_find_row_does_not_return_synthetic_custom_action
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5656-L5707
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5690-L5741
 visibility: private
 generated:
   by: okf-rs/0.3.0

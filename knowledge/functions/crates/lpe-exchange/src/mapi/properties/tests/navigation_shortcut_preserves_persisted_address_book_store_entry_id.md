@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: navigation_shortcut_preserves_persisted_address_book_store_entry_id
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6923-L6954
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7060-L7091
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_blob_download_hides_bcc_for_delegated_shared_mailbox
-resource: crates/lpe-jmap/src/tests.rs#L7327-L7353
+resource: crates/lpe-jmap/src/tests.rs#L7815-L7841
 visibility: private
 generated:
   by: okf-rs/0.3.0

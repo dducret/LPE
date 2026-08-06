@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stale_supplied_change_key_is_rejected_before_item_mutation
-resource: crates/lpe-exchange/src/service/ews/items.rs#L1455-L1467
+resource: crates/lpe-exchange/src/service/ews/items.rs#L1615-L1627
 visibility: private
 generated:
   by: okf-rs/0.3.0

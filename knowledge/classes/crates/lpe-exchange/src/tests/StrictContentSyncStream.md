@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: StrictContentSyncStream
-resource: crates/lpe-exchange/src/tests/mod.rs#L13812-L13821
+resource: crates/lpe-exchange/src/tests/mod.rs#L13937-L13946
 visibility: private
 generated:
   by: okf-rs/0.3.0

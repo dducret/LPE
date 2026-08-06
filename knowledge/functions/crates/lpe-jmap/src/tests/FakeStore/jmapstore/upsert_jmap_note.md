@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_jmap_note
-resource: crates/lpe-jmap/src/tests.rs#L2058-L2072
+resource: crates/lpe-jmap/src/tests.rs#L2135-L2149
 visibility: private
 generated:
   by: okf-rs/0.3.0

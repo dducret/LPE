@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: postgres_mapi_calendar_fixture
-resource: crates/lpe-exchange/src/tests/mod.rs#L201-L300
+resource: crates/lpe-exchange/src/tests/mod.rs#L202-L301
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_projects_computed_delegate_freebusy_messages
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L3502-L3534
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L3506-L3538
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -758,8 +758,28 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             .await;
             return;
         }
-        Some(MapiObject::Contact { contact_id, .. })
-        | Some(MapiObject::Task {
+        Some(MapiObject::Contact {
+            folder_id,
+            contact_id,
+            transaction,
+        }) => {
+            save_existing_contact(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+                handle,
+                folder_id,
+                contact_id,
+                transaction,
+            )
+            .await;
+            return;
+        }
+        Some(MapiObject::Task {
             task_id: contact_id,
             ..
         })

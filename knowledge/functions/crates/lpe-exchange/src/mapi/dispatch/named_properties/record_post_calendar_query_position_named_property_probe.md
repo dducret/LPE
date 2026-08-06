@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_post_calendar_query_position_named_property_probe
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L460-L575
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L464-L579
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_associated_config_snapshot_repair_preserves_calendar_virtual_parent
-resource: crates/lpe-exchange/src/tests/mod.rs#L1090-L1144
+resource: crates/lpe-exchange/src/tests/mod.rs#L1091-L1145
 visibility: private
 generated:
   by: okf-rs/0.3.0

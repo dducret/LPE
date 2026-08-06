@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_folder_property_tags_with_identity
-resource: crates/lpe-exchange/src/mapi/rop.rs#L1140-L1144
+resource: crates/lpe-exchange/src/mapi/rop.rs#L1158-L1162
 visibility: private
 generated:
   by: okf-rs/0.3.0

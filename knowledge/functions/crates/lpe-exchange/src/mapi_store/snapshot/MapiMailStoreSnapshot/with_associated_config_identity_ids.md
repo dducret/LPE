@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: with_associated_config_identity_ids
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L362-L369
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L377-L384
 generated:
   by: okf-rs/0.3.0
 relationships:

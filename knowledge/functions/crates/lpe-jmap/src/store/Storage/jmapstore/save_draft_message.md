@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: save_draft_message
-resource: crates/lpe-jmap/src/store.rs#L834-L840
+resource: crates/lpe-jmap/src/store.rs#L842-L848
 visibility: private
 generated:
   by: okf-rs/0.3.0

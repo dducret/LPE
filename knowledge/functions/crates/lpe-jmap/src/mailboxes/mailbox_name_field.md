@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_name_field
-resource: crates/lpe-jmap/src/mailboxes.rs#L782-L789
+resource: crates/lpe-jmap/src/mailboxes.rs#L790-L797
 visibility: private
 generated:
   by: okf-rs/0.3.0

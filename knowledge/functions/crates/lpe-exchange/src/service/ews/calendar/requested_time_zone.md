@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: requested_time_zone
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L627-L630
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L624-L627
 visibility: private
 generated:
   by: okf-rs/0.3.0

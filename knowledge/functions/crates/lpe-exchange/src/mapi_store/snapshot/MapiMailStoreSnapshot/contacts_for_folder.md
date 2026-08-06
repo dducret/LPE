@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: contacts_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L952-L957
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L984-L989
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count
   - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner
   - functions/crates/lpe-exchange/src/mapi/tables/row_keys/table_row_keys
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_shared_contact_read_only_rights_reject_mutations
   - functions/crates/lpe-exchange/src/tests/postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync
 ---
 
@@ -29,4 +30,5 @@ relationships:
 - [table_position_and_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count.md)
 - [rop_query_rows_response_inner](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner.md)
 - [table_row_keys](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_keys/table_row_keys.md)
+- [mapi_over_http_shared_contact_read_only_rights_reject_mutations](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_shared_contact_read_only_rights_reject_mutations.md)
 - [postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync](../../../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_contact_update_rotates_durable_identity_for_incremental_sync.md)

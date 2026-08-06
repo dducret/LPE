@@ -1,12 +1,13 @@
 ---
 type: Rust Module
 title: contact
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L1-L706
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L1-L840
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/super
+  - external/anyhow-bail-result
   member_of:
   - packages/crates/lpe-exchange
 ---
@@ -37,11 +38,15 @@ relationships:
 - [push_labeled_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/push_labeled_value.md)
 - [upsert_labeled_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/upsert_labeled_value.md)
 - [reject_unsupported_mapi_contact_properties](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/reject_unsupported_mapi_contact_properties.md)
+- [contact_input_from_mapi_with_deletions](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/contact_input_from_mapi_with_deletions.md)
+- [remove_labeled_contact_values](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/remove_labeled_contact_values.md)
+- [remove_contact_email_index](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/remove_contact_email_index.md)
 - [apply_canonical_contact_property_values](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/apply_canonical_contact_property_values.md)
 
 # Imports
 
 - `super::*`
+- `anyhow::{bail, Result}`
 
 # Member of
 

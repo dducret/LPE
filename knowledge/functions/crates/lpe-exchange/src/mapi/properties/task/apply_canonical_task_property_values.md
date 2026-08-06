@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: apply_canonical_task_property_values
-resource: crates/lpe-exchange/src/mapi/properties/task.rs#L220-L262
+resource: crates/lpe-exchange/src/mapi/properties/task.rs#L387-L429
 generated:
   by: okf-rs/0.3.0
 relationships:

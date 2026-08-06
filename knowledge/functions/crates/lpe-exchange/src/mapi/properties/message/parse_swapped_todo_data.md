@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_swapped_todo_data
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L922-L972
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L945-L995
 generated:
   by: okf-rs/0.3.0
 relationships:

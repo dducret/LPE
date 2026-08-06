@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: vacation_response_set_update_preserves_omitted_fields
-resource: crates/lpe-jmap/src/tests.rs#L10865-L10904
+resource: crates/lpe-jmap/src/tests.rs#L11353-L11392
 visibility: private
 generated:
   by: okf-rs/0.3.0

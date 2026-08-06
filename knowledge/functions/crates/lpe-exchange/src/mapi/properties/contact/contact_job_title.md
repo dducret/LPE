@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_job_title
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L247-L253
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L262-L268
 generated:
   by: okf-rs/0.3.0
 ---

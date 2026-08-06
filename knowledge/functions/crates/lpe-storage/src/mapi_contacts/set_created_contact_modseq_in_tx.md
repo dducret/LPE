@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: set_created_contact_modseq_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1418-L1463
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1768-L1813
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-activesync/src/tests/query
   called_by:
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update
   - functions/crates/lpe-storage/src/mapi_contacts/record_contact_change_in_tx
 ---
 
@@ -24,4 +25,5 @@ relationships:
 # Called by
 
 - [create_mapi_contact](../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md)
+- [commit_mapi_contact_update](../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update.md)
 - [record_contact_change_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/record_contact_change_in_tx.md)

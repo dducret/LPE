@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deterministic_collaboration_folder_uuid
-resource: crates/lpe-exchange/src/mapi_store.rs#L1035-L1055
+resource: crates/lpe-exchange/src/mapi_store.rs#L1042-L1062
 visibility: private
 generated:
   by: okf-rs/0.3.0

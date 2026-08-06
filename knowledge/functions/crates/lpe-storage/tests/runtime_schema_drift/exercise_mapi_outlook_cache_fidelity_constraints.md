@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_mapi_outlook_cache_fidelity_constraints
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1065-L1236
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1075-L1246
 visibility: private
 generated:
   by: okf-rs/0.3.0

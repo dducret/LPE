@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_update_event_input
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L168-L266
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L165-L263
 generated:
   by: okf-rs/0.3.0
 relationships:

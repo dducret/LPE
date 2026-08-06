@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delegated_email_and_thread_states_ignore_bcc_only_changes
-resource: crates/lpe-jmap/src/tests.rs#L3853-L3900
+resource: crates/lpe-jmap/src/tests.rs#L3930-L3977
 visibility: private
 generated:
   by: okf-rs/0.3.0

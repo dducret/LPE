@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_events
-resource: crates/lpe-jmap/src/store.rs#L990-L995
+resource: crates/lpe-jmap/src/store.rs#L1016-L1021
 visibility: private
 generated:
   by: okf-rs/0.3.0

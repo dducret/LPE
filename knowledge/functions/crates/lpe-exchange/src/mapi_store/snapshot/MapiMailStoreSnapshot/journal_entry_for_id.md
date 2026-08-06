@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: journal_entry_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1188-L1196
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1220-L1228
 generated:
   by: okf-rs/0.3.0
 relationships:

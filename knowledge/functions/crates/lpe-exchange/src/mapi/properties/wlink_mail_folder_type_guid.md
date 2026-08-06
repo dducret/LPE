@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wlink_mail_folder_type_guid
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1073-L1079
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1096-L1102
 generated:
   by: okf-rs/0.3.0
 relationships:

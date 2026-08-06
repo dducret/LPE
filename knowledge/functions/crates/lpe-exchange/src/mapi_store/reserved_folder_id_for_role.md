@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reserved_folder_id_for_role
-resource: crates/lpe-exchange/src/mapi_store.rs#L1111-L1113
+resource: crates/lpe-exchange/src/mapi_store.rs#L1118-L1120
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_sieve_script
-resource: crates/lpe-exchange/src/tests/mod.rs#L9394-L9405
+resource: crates/lpe-exchange/src/tests/mod.rs#L9514-L9525
 visibility: private
 generated:
   by: okf-rs/0.3.0

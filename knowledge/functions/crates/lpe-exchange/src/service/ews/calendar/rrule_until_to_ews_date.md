@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rrule_until_to_ews_date
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L472-L479
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L469-L476
 visibility: private
 generated:
   by: okf-rs/0.3.0

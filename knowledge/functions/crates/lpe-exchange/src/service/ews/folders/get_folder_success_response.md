@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_folder_success_response
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L683-L697
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L737-L751
 visibility: private
 generated:
   by: okf-rs/0.3.0

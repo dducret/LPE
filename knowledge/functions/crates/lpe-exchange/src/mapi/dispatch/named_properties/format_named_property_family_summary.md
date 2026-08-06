@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_named_property_family_summary
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L589-L604
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L593-L608
 generated:
   by: okf-rs/0.3.0
 relationships:

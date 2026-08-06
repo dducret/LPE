@@ -6,6 +6,7 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
+  - functions/crates/lpe-exchange/src/service/ExchangeService/update_folder
   - functions/crates/lpe-exchange/src/service/ews/attachments/ExchangeService/create_attachment
   - functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/find_conversation
   - functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/get_conversation_items
@@ -35,6 +36,7 @@ relationships:
 
 # Called by
 
+- [update_folder](../../../../../../../functions/crates/lpe-exchange/src/service/ExchangeService/update_folder.md)
 - [create_attachment](../../../../../../../functions/crates/lpe-exchange/src/service/ews/attachments/ExchangeService/create_attachment.md)
 - [find_conversation](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/find_conversation.md)
 - [get_conversation_items](../../../../../../../functions/crates/lpe-exchange/src/service/ews/conversations/ExchangeService/get_conversation_items.md)

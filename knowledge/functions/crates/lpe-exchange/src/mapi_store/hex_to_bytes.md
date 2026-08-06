@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hex_to_bytes
-resource: crates/lpe-exchange/src/mapi_store.rs#L329-L340
+resource: crates/lpe-exchange/src/mapi_store.rs#L330-L341
 visibility: private
 generated:
   by: okf-rs/0.3.0

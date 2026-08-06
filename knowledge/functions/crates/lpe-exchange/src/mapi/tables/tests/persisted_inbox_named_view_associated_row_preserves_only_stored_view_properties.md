@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: persisted_inbox_named_view_associated_row_preserves_only_stored_view_properties
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8363-L8491
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8397-L8525
 visibility: private
 generated:
   by: okf-rs/0.3.0

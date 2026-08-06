@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_debug_handle_table
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L648-L655
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L652-L659
 visibility: private
 generated:
   by: okf-rs/0.3.0

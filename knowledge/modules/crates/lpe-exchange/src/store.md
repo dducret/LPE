@@ -1,14 +1,14 @@
 ---
 type: Rust Module
 title: store
-resource: crates/lpe-exchange/src/store.rs#L1-L1298
+resource: crates/lpe-exchange/src/store.rs#L1-L1304
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/anyhow-result
   - external/lpe-mail-auth-accountauthstore-accountprincipal-storefuture
-  - external/lpe-storage-accessiblecontact-accessibleevent-activesyncattachment-activesyncattachmentcontent-attachmentuploadinput-auditentryinput-calendareventattachment-cancelsubmissionresult-clientnote-clientreminder-clienttask-collaborationcollection-collaborationgrant-collaborationgrantinput-collaborationresourcekind-collaborationrights-conversationaction-createpublicfolderinput-delegatefreebusymessageobject-jmapemail-jmapemailfollowupupdate-jmapemailquery-jmapimportedemailinput-jmapmailbox-jmapmailboxcreateinput-jmapmailboxupdateinput-journalentry-mailboxdelegationgrantinput-mailboxfolderdelegationgrantinput-mailboxrule-managedretentionfoldercreateinput-mapicontactcreateinput-mapieventcommitinput-mapieventcommitoutcome-mapieventcreateinput-mapieventimportedmoveidentity-mapieventversion-mapimessageimportedmoveidentity-mapimessagemoveresult-mapistoreidentity-moveaccessibleeventtodeleteditemsresult-publicfolder-publicfolderitem-publicfolderperuserstate-publicfolderperuserstatepatch-publicfolderpermission-publicfolderpermissioninput-publicfolderreplica-publicfoldertree-recoverableitem-reminderquery-saveddraftmessage-searchfolderdefinition-senderdelegationgrantinput-senderdelegationright-sievescriptdocument-storage-submitmessageinput-submittedmessage-submittedrecipientinput-updatepublicfolderinput-upsertclientcontactinput-upsertclienteventinput-upsertclientnoteinput-upsertclienttaskinput-upsertconversationactioninput-upsertjournalentryinput-upsertpublicfolderiteminput-upsertsearchfolderinput
+  - external/lpe-storage-accessiblecontact-accessibleevent-activesyncattachment-activesyncattachmentcontent-attachmentuploadinput-auditentryinput-calendareventattachment-cancelsubmissionresult-clientnote-clientreminder-clienttask-collaborationcollection-collaborationgrant-collaborationgrantinput-collaborationresourcekind-collaborationrights-conversationaction-createpublicfolderinput-delegatefreebusymessageobject-jmapemail-jmapemailfollowupupdate-jmapemailquery-jmapimportedemailinput-jmapmailbox-jmapmailboxcreateinput-jmapmailboxupdateinput-journalentry-mailboxdelegationgrantinput-mailboxfolderdelegationgrantinput-mailboxrule-managedretentionfoldercreateinput-mapicontactcommitinput-mapicontactcommitoutcome-mapicontactcreateinput-mapieventcommitinput-mapieventcommitoutcome-mapieventcreateinput-mapieventimportedmoveidentity-mapieventversion-mapimessageimportedmoveidentity-mapimessagemoveresult-mapistoreidentity-moveaccessibleeventtodeleteditemsresult-publicfolder-publicfolderitem-publicfolderperuserstate-publicfolderperuserstatepatch-publicfolderpermission-publicfolderpermissioninput-publicfolderreplica-publicfoldertree-recoverableitem-reminderquery-saveddraftmessage-searchfolderdefinition-senderdelegationgrantinput-senderdelegationright-sievescriptdocument-storage-submitmessageinput-submittedmessage-submittedrecipientinput-updatepublicfolderinput-upsertclientcontactinput-upsertclienteventinput-upsertclientnoteinput-upsertclienttaskinput-upsertconversationactioninput-upsertjournalentryinput-upsertpublicfolderiteminput-upsertsearchfolderinput
   - external/sqlx-row
   - external/uuid-uuid
   - external/crate-mapi-notifications-mapinotificationevent-mapinotificationkind
@@ -48,15 +48,16 @@ relationships:
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
     MailboxFolderDelegationGrantInput, MailboxRule, ManagedRetentionFolderCreateInput,
-    MapiContactCreateInput, MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
-    MapiEventImportedMoveIdentity, MapiEventVersion, MapiMessageImportedMoveIdentity,
-    MapiMessageMoveResult, MapiStoreIdentity, MoveAccessibleEventToDeletedItemsResult,
-    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
-    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    MapiContactCommitInput, MapiContactCommitOutcome, MapiContactCreateInput, MapiEventCommitInput,
+    MapiEventCommitOutcome, MapiEventCreateInput, MapiEventImportedMoveIdentity, MapiEventVersion,
+    MapiMessageImportedMoveIdentity, MapiMessageMoveResult, MapiStoreIdentity,
+    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
+    SenderDelegationRight, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
     UpsertSearchFolderInput,
 }`

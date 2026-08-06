@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_url_by_label
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L291-L301
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L306-L316
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mail
-resource: crates/lpe-jmap/src/mail.rs#L1-L1427
+resource: crates/lpe-jmap/src/mail.rs#L1-L1433
 generated:
   by: okf-rs/0.3.0
 relationships:

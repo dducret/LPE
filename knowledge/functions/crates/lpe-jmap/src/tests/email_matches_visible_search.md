@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_matches_visible_search
-resource: crates/lpe-jmap/src/tests.rs#L206-L235
+resource: crates/lpe-jmap/src/tests.rs#L207-L236
 visibility: private
 generated:
   by: okf-rs/0.3.0

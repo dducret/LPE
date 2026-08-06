@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: well_known_named_properties
-resource: crates/lpe-exchange/src/mapi/properties/named.rs#L123-L380
+resource: crates/lpe-exchange/src/mapi/properties/named.rs#L123-L384
 generated:
   by: okf-rs/0.3.0
 relationships:

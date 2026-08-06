@@ -10,9 +10,10 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/permissions/owner_permission
   - functions/crates/lpe-exchange/src/mapi/properties/mailbox_property_value_with_context_for_account
-  - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_property_value
+  - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_rights
   - functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_definition_property_value
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value_with_change_number
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/collaboration_folder_tables_follow_effective_collection_grants
 ---
 
 # Signature
@@ -27,6 +28,7 @@ relationships:
 
 - [owner_permission](../../../../../../functions/crates/lpe-exchange/src/mapi/permissions/owner_permission.md)
 - [mailbox_property_value_with_context_for_account](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/mailbox_property_value_with_context_for_account.md)
-- [collaboration_folder_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_property_value.md)
+- [collaboration_folder_rights](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_rights.md)
 - [search_folder_definition_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/search_folders/search_folder_definition_property_value.md)
 - [special_folder_property_value_with_change_number](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_folder_property_value_with_change_number.md)
+- [collaboration_folder_tables_follow_effective_collection_grants](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/collaboration_folder_tables_follow_effective_collection_grants.md)

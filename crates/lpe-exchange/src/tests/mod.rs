@@ -13,6 +13,7 @@ use lpe_storage::{
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, ManagedRetentionFolderCreateInput,
+    MapiContactCommitInput, MapiContactCommitOutcome, MapiContactCommitResult,
     MapiContactCreateInput, MapiContactCreateResult, MapiContactVersion, MapiEventCommitInput,
     MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput, MapiEventCreateResult,
     MapiEventIdentityMove, MapiEventImportedMoveIdentity, MapiEventReminderState, MapiEventVersion,
@@ -8257,6 +8258,13 @@ impl ExchangeStore for FakeStore {
                         contact,
                         mapi_object_id: source_object_id,
                         version: MapiContactVersion {
+                            canonical_modseq: self
+                                .contact_versions
+                                .lock()
+                                .unwrap()
+                                .get(&contact_id)
+                                .copied()
+                                .unwrap_or(1) as i64,
                             change_number: current_change_number,
                             change_key: current_change_key,
                             predecessor_change_list: current_predecessor_change_list,
@@ -8377,6 +8385,13 @@ impl ExchangeStore for FakeStore {
                     contact,
                     mapi_object_id: source_object_id,
                     version: MapiContactVersion {
+                        canonical_modseq: self
+                            .contact_versions
+                            .lock()
+                            .unwrap()
+                            .get(&contact_id)
+                            .copied()
+                            .unwrap_or(1) as i64,
                         change_number,
                         change_key,
                         predecessor_change_list,
@@ -8490,6 +8505,7 @@ impl ExchangeStore for FakeStore {
         self.contact_versions.lock().unwrap().insert(contact_id, 1);
         self.contacts.lock().unwrap().push(contact.clone());
         let version = MapiContactVersion {
+            canonical_modseq: 1,
             change_number,
             change_key,
             predecessor_change_list,
@@ -8501,6 +8517,107 @@ impl ExchangeStore for FakeStore {
                 mapi_object_id: source_object_id,
                 version,
                 import_disposition: lpe_storage::MapiContactImportDisposition::Applied,
+            }))
+        })
+    }
+
+    fn commit_mapi_contact_update<'a>(
+        &'a self,
+        input: MapiContactCommitInput,
+    ) -> StoreFuture<'a, MapiContactCommitOutcome> {
+        let mut contacts = self.contacts.lock().unwrap();
+        let Some(contact) = contacts.iter_mut().find(|contact| contact.id == input.contact_id) else {
+            return Box::pin(async { Ok(MapiContactCommitOutcome::NotFound) });
+        };
+        if !contact.rights.may_write {
+            return Box::pin(async { Ok(MapiContactCommitOutcome::AccessDenied) });
+        }
+        let mut versions = self.contact_versions.lock().unwrap();
+        let current_modseq = versions.get(&input.contact_id).copied().unwrap_or(1) as i64;
+        if current_modseq != input.expected_modseq && !input.force_save {
+            return Box::pin(async { Ok(MapiContactCommitOutcome::ObjectModified) });
+        }
+        contact.name = input.contact.name;
+        contact.role = input.contact.role;
+        contact.email = input.contact.email;
+        contact.phone = input.contact.phone;
+        contact.team = input.contact.team;
+        contact.notes = input.contact.notes;
+        contact.structured_name = input.contact.structured_name;
+        contact.emails_json = input.contact.emails_json.unwrap_or_default();
+        contact.phones_json = input.contact.phones_json.unwrap_or_default();
+        contact.addresses_json = input.contact.addresses_json.unwrap_or_default();
+        contact.urls_json = input.contact.urls_json.unwrap_or_default();
+        contact.organization_name = input.contact.organization_name;
+        contact.job_title = input.contact.job_title;
+        if input.contact.raw_vcard_is_explicit {
+            contact.raw_vcard = input.contact.raw_vcard;
+        }
+        if input.contact.source_is_explicit {
+            contact.source = input.contact.source;
+        }
+        let contact = contact.clone();
+        let next_modseq = current_modseq.saturating_add(1);
+        versions.insert(input.contact_id, next_modseq as u64);
+        drop(versions);
+
+        let mut custom_values = self.mapi_custom_property_values.lock().unwrap();
+        for property_tag in &input.custom_property_deletes {
+            custom_values.retain(|key, _| {
+                !(key.0 == input.principal_account_id
+                    && key.1 == MapiCustomPropertyObjectKind::Contact
+                    && key.2 == input.contact_id
+                    && key.3 == *property_tag)
+            });
+        }
+        for value in &input.custom_property_upserts {
+            custom_values.insert(
+                (
+                    input.principal_account_id,
+                    MapiCustomPropertyObjectKind::Contact,
+                    input.contact_id,
+                    value.property_tag,
+                    value.property_type,
+                ),
+                value.property_value.clone(),
+            );
+        }
+        drop(custom_values);
+
+        let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+        let change_number = *next_counter;
+        *next_counter = next_counter.saturating_add(1);
+        drop(next_counter);
+        let change_key = mapi_mailstore::change_key_for_change_number(change_number);
+        let predecessor_change_list = mapi_mailstore::predecessor_change_list(change_number);
+        let last_modification_time = 134_000_000_000_000_000u64.saturating_add(change_number);
+        self.mapi_identity_change_numbers
+            .lock()
+            .unwrap()
+            .insert(input.contact_id, change_number);
+        self.mapi_identity_change_keys
+            .lock()
+            .unwrap()
+            .insert(input.contact_id, change_key.clone());
+        self.mapi_identity_predecessor_change_lists
+            .lock()
+            .unwrap()
+            .insert(input.contact_id, predecessor_change_list.clone());
+        self.mapi_identity_last_modification_times
+            .lock()
+            .unwrap()
+            .insert(input.contact_id, last_modification_time);
+        let version = MapiContactVersion {
+            canonical_modseq: next_modseq,
+            change_number,
+            change_key,
+            predecessor_change_list,
+            last_modification_time,
+        };
+        Box::pin(async move {
+            Ok(MapiContactCommitOutcome::Saved(MapiContactCommitResult {
+                contact,
+                version,
             }))
         })
     }

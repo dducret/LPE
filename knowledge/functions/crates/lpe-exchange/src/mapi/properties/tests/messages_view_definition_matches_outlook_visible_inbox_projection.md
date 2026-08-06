@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: messages_view_definition_matches_outlook_visible_inbox_projection
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5529-L5558
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5666-L5695
 visibility: private
 generated:
   by: okf-rs/0.3.0

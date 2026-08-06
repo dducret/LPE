@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_account_session
-resource: crates/lpe-jmap/src/store.rs#L520-L522
+resource: crates/lpe-jmap/src/store.rs#L528-L530
 visibility: private
 generated:
   by: okf-rs/0.3.0

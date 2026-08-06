@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: audit
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L6126-L6132
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L6207-L6213
 visibility: private
 generated:
   by: okf-rs/0.3.0

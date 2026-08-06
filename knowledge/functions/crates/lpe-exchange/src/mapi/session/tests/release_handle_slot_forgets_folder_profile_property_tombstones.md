@@ -7,7 +7,6 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
-  - functions/crates/lpe-exchange/src/mapi/session/tests/principal
   - functions/crates/lpe-exchange/src/mapi/session/lifecycle/create_session
   - functions/crates/lpe-exchange/src/mapi/session/lifecycle/remove_session
   - functions/crates/lpe-exchange/src/mapi/session/release_handle_slot
@@ -19,7 +18,6 @@ relationships:
 
 # Calls
 
-- [principal](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/principal.md)
 - [create_session](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/create_session.md)
 - [remove_session](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/remove_session.md)
 - [release_handle_slot](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/release_handle_slot.md)

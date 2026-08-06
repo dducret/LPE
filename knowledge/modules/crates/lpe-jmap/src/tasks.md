@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tasks
-resource: crates/lpe-jmap/src/tasks.rs#L1-L668
+resource: crates/lpe-jmap/src/tasks.rs#L1-L687
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -33,6 +33,7 @@ relationships:
 - [task_matches_filter](../../../../functions/crates/lpe-jmap/src/tasks/task_matches_filter.md)
 - [task_sort_key](../../../../functions/crates/lpe-jmap/src/tasks/task_sort_key.md)
 - [parse_task_input](../../../../functions/crates/lpe-jmap/src/tasks/parse_task_input.md)
+- [parse_task_priority](../../../../functions/crates/lpe-jmap/src/tasks/parse_task_priority.md)
 - [parse_task_list_create](../../../../functions/crates/lpe-jmap/src/tasks/parse_task_list_create.md)
 - [parse_task_list_update](../../../../functions/crates/lpe-jmap/src/tasks/parse_task_list_update.md)
 - [reject_unknown_task_properties](../../../../functions/crates/lpe-jmap/src/tasks/reject_unknown_task_properties.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: MapiConversationActionMessage
-resource: crates/lpe-exchange/src/mapi_store.rs#L263-L268
+resource: crates/lpe-exchange/src/mapi_store.rs#L264-L269
 generated:
   by: okf-rs/0.3.0
 ---

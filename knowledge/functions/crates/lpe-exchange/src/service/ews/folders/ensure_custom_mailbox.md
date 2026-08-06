@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ensure_custom_mailbox
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L623-L629
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L666-L672
 generated:
   by: okf-rs/0.3.0
 relationships:

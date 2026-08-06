@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_predecessors_include
-resource: crates/lpe-storage/src/mapi_contacts.rs#L856-L872
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1101-L1117
 visibility: private
 generated:
   by: okf-rs/0.3.0

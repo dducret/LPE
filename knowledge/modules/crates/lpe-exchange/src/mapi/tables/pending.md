@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: pending
-resource: crates/lpe-exchange/src/mapi/tables/pending.rs#L1-L610
+resource: crates/lpe-exchange/src/mapi/tables/pending.rs#L1-L612
 generated:
   by: okf-rs/0.3.0
 relationships:

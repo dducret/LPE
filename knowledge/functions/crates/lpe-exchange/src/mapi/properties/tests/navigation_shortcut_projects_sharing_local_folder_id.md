@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: navigation_shortcut_projects_sharing_local_folder_id
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6883-L6920
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7020-L7057
 visibility: private
 generated:
   by: okf-rs/0.3.0

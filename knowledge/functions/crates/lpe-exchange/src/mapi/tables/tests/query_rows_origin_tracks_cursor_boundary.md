@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query_rows_origin_tracks_cursor_boundary
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1378-L1486
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1412-L1520
 visibility: private
 generated:
   by: okf-rs/0.3.0

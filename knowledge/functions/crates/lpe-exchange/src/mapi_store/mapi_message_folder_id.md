@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_message_folder_id
-resource: crates/lpe-exchange/src/mapi_store.rs#L916-L922
+resource: crates/lpe-exchange/src/mapi_store.rs#L923-L929
 visibility: private
 generated:
   by: okf-rs/0.3.0

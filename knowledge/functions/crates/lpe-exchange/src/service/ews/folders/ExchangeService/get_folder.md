@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: get_folder
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L252-L406
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L267-L431
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -15,7 +15,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/request_ids/request_contains_folder_reference
   - functions/crates/lpe-exchange/src/service/ews/folders/root_folder_xml
   - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/root_child_folder_count
-  - functions/crates/lpe-exchange/src/service/ews/folders/folder_xml
+  - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/collection_folder_xml
   called_by:
   - functions/crates/lpe-exchange/src/service/ews/dispatch/ExchangeService/handle
 ---
@@ -35,7 +35,7 @@ relationships:
 - [request_contains_folder_reference](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/request_ids/request_contains_folder_reference.md)
 - [root_folder_xml](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/root_folder_xml.md)
 - [root_child_folder_count](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/root_child_folder_count.md)
-- [folder_xml](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/folder_xml.md)
+- [collection_folder_xml](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/collection_folder_xml.md)
 
 # Called by
 

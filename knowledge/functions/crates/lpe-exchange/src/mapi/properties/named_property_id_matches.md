@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: named_property_id_matches
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1018-L1020
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1041-L1043
 visibility: private
 generated:
   by: okf-rs/0.3.0

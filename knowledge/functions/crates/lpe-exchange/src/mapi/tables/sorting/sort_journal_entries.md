@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sort_journal_entries
-resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L357-L387
+resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L383-L413
 generated:
   by: okf-rs/0.3.0
 relationships:

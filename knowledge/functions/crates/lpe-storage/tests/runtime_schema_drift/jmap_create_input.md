@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_create_input
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L659-L672
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L669-L682
 visibility: private
 generated:
   by: okf-rs/0.3.0

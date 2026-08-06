@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: apply_pending_recipient_changes
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L646-L668
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L669-L691
 generated:
   by: okf-rs/0.3.0
 relationships:

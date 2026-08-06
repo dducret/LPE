@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_mapi_cross_protocol_interoperability_gate
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L3556-L3978
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L3637-L4059
 visibility: private
 generated:
   by: okf-rs/0.3.0

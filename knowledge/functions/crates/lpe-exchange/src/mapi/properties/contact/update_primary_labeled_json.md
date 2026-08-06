@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_primary_labeled_json
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L539-L566
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L555-L582
 visibility: private
 generated:
   by: okf-rs/0.3.0

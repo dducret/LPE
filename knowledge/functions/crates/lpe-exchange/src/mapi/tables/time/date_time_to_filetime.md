@@ -7,7 +7,6 @@ generated:
 relationships:
   calls:
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-domain/src/civil_time/days_from_civil
   - functions/crates/lpe-exchange/src/mapi/tables/time/unix_seconds_to_filetime
   called_by:
   - functions/crates/lpe-exchange/src/mapi/properties/tests/mapi_over_http_calendar_writes_map_supported_mapi_fields_to_canonical_event_fields
@@ -26,7 +25,6 @@ relationships:
 # Calls
 
 - [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [days_from_civil](../../../../../../../functions/crates/lpe-domain/src/civil_time/days_from_civil.md)
 - [unix_seconds_to_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/time/unix_seconds_to_filetime.md)
 
 # Called by

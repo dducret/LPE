@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: attachments_for_message
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L870-L886
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L902-L918
 generated:
   by: okf-rs/0.3.0
 ---

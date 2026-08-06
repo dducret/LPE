@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: method_dispatch_requires_declared_capabilities
-resource: crates/lpe-jmap/src/tests.rs#L7725-L7800
+resource: crates/lpe-jmap/src/tests.rs#L8213-L8288
 visibility: private
 generated:
   by: okf-rs/0.3.0

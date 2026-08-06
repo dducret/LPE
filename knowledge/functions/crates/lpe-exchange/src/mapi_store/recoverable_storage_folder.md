@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: recoverable_storage_folder
-resource: crates/lpe-exchange/src/mapi_store.rs#L964-L971
+resource: crates/lpe-exchange/src/mapi_store.rs#L971-L978
 generated:
   by: okf-rs/0.3.0
 relationships:

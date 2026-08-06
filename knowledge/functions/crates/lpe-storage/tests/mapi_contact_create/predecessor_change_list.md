@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: predecessor_change_list
-resource: crates/lpe-storage/tests/mapi_contact_create.rs#L708-L713
+resource: crates/lpe-storage/tests/mapi_contact_create.rs#L807-L812
 visibility: private
 generated:
   by: okf-rs/0.3.0

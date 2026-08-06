@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: postgres_mapi_audit
-resource: crates/lpe-exchange/src/tests/mod.rs#L179-L185
+resource: crates/lpe-exchange/src/tests/mod.rs#L180-L186
 visibility: private
 generated:
   by: okf-rs/0.3.0

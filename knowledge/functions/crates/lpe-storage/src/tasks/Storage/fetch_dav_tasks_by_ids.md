@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_dav_tasks_by_ids
-resource: crates/lpe-storage/src/tasks.rs#L1123-L1205
+resource: crates/lpe-storage/src/tasks.rs#L1152-L1239
 generated:
   by: okf-rs/0.3.0
 relationships:

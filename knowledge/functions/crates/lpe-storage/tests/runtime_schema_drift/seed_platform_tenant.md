@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: seed_platform_tenant
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L321-L334
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L331-L344
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: run_runtime_drift_validation
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L80-L295
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L80-L305
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -23,6 +23,7 @@ relationships:
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_managed_retention_folder_path
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_path
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_jmap_path
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_cross_account_jmap_copy_bcc_projection
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_cancellation_path
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_index_plan_paths
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_cross_protocol_interoperability_gate
@@ -66,6 +67,7 @@ relationships:
 - [exercise_managed_retention_folder_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_managed_retention_folder_path.md)
 - [exercise_submission_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_path.md)
 - [exercise_jmap_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_jmap_path.md)
+- [exercise_cross_account_jmap_copy_bcc_projection](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_cross_account_jmap_copy_bcc_projection.md)
 - [exercise_submission_cancellation_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_submission_cancellation_path.md)
 - [exercise_index_plan_paths](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_index_plan_paths.md)
 - [exercise_mapi_cross_protocol_interoperability_gate](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mapi_cross_protocol_interoperability_gate.md)

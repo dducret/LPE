@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_weekday_to_rrule
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L562-L564
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L559-L561
 visibility: private
 generated:
   by: okf-rs/0.3.0

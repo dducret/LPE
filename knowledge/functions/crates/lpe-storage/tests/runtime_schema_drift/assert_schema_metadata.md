@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_schema_metadata
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L307-L319
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L317-L329
 visibility: private
 generated:
   by: okf-rs/0.3.0

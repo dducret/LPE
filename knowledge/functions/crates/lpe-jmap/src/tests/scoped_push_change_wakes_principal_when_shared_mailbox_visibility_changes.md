@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: scoped_push_change_wakes_principal_when_shared_mailbox_visibility_changes
-resource: crates/lpe-jmap/src/tests.rs#L11279-L11317
+resource: crates/lpe-jmap/src/tests.rs#L11767-L11805
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_jmap_task_list
-resource: crates/lpe-jmap/src/store.rs#L1067-L1069
+resource: crates/lpe-jmap/src/store.rs#L1093-L1095
 visibility: private
 generated:
   by: okf-rs/0.3.0

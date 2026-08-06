@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mapi_over_http
-resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L1-L749
+resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L1-L750
 generated:
   by: okf-rs/0.3.0
 relationships:

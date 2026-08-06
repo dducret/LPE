@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_message_returns_visible_recipient_rows
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1982-L2064
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2092-L2174
 visibility: private
 generated:
   by: okf-rs/0.3.0

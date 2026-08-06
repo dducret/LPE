@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_json_contact_value
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L553-L562
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L701-L710
 visibility: private
 generated:
   by: okf-rs/0.3.0

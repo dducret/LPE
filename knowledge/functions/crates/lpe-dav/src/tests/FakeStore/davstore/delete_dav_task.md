@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_dav_task
-resource: crates/lpe-dav/src/tests.rs#L726-L747
+resource: crates/lpe-dav/src/tests.rs#L730-L751
 visibility: private
 generated:
   by: okf-rs/0.3.0

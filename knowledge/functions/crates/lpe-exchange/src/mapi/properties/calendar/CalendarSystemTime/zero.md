@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: zero
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L365-L374
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L379-L388
 visibility: private
 generated:
   by: okf-rs/0.3.0

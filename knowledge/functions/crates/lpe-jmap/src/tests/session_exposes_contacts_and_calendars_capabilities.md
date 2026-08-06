@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_exposes_contacts_and_calendars_capabilities
-resource: crates/lpe-jmap/src/tests.rs#L10659-L10719
+resource: crates/lpe-jmap/src/tests.rs#L11147-L11207
 visibility: private
 generated:
   by: okf-rs/0.3.0

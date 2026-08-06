@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_journal_entry
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L54-L69
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L56-L71
 visibility: private
 generated:
   by: okf-rs/0.3.0

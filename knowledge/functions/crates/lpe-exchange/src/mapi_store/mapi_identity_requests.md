@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_identity_requests
-resource: crates/lpe-exchange/src/mapi_store.rs#L737-L871
+resource: crates/lpe-exchange/src/mapi_store.rs#L744-L878
 visibility: private
 generated:
   by: okf-rs/0.3.0

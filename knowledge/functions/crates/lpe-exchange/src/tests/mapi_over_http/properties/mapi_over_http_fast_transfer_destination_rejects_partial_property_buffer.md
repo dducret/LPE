@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_fast_transfer_destination_rejects_partial_property_buffer
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4526-L4577
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4528-L4579
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: columns
-resource: crates/lpe-exchange/src/mapi/tables/columns.rs#L1-L451
+resource: crates/lpe-exchange/src/mapi/tables/columns.rs#L1-L462
 generated:
   by: okf-rs/0.3.0
 relationships:

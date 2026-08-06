@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: compare_optional_mapi_values
-resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L389-L405
+resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L415-L431
 visibility: private
 generated:
   by: okf-rs/0.3.0

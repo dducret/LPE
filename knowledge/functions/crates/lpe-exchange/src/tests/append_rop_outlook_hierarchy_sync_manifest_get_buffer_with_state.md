@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state
-resource: crates/lpe-exchange/src/tests/mod.rs#L15520-L15574
+resource: crates/lpe-exchange/src/tests/mod.rs#L15645-L15699
 visibility: private
 generated:
   by: okf-rs/0.3.0

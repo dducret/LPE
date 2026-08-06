@@ -9,8 +9,6 @@ relationships:
   calls:
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/parse_digits
-  - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/days_in_month
-  - functions/crates/lpe-domain/src/civil_time/days_from_civil
   - functions/crates/lpe-domain/src/civil_time/windows_filetime_from_signed_unix_seconds
   called_by:
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/email_delivery_time
@@ -26,8 +24,6 @@ relationships:
 
 - [get](../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
 - [parse_digits](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/parse_digits.md)
-- [days_in_month](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/days_in_month.md)
-- [days_from_civil](../../../../../../functions/crates/lpe-domain/src/civil_time/days_from_civil.md)
 - [windows_filetime_from_signed_unix_seconds](../../../../../../functions/crates/lpe-domain/src/civil_time/windows_filetime_from_signed_unix_seconds.md)
 
 # Called by

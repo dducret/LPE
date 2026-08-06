@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_dav_tasks
-resource: crates/lpe-dav/src/tests.rs#L396-L402
+resource: crates/lpe-dav/src/tests.rs#L398-L404
 visibility: private
 generated:
   by: okf-rs/0.3.0

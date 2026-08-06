@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: move_jmap_email_membership
-resource: crates/lpe-storage/src/message_ops.rs#L261-L710
+resource: crates/lpe-storage/src/message_ops.rs#L283-L732
 visibility: private
 generated:
   by: okf-rs/0.3.0

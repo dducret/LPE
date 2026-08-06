@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_sync_state_items
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L469-L477
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L512-L520
 visibility: private
 generated:
   by: okf-rs/0.3.0

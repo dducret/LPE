@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: modify_rules_response
-resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L331-L382
+resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L332-L383
 visibility: private
 generated:
   by: okf-rs/0.3.0

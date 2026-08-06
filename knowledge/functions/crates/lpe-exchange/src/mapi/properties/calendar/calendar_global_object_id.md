@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_global_object_id
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L402-L427
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L416-L441
 visibility: private
 generated:
   by: okf-rs/0.3.0

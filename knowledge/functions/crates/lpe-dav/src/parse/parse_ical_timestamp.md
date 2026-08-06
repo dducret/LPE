@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_ical_timestamp
-resource: crates/lpe-dav/src/parse.rs#L225-L237
+resource: crates/lpe-dav/src/parse.rs#L235-L247
 visibility: private
 generated:
   by: okf-rs/0.3.0

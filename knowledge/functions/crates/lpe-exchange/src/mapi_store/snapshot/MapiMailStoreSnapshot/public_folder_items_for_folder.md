@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: public_folder_items_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L923-L931
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L955-L963
 generated:
   by: okf-rs/0.3.0
 relationships:

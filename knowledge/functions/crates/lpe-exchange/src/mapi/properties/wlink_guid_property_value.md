@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wlink_guid_property_value
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1022-L1027
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1045-L1050
 visibility: private
 generated:
   by: okf-rs/0.3.0

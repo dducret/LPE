@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: blob_lookup_requires_referenced_type_capability
-resource: crates/lpe-jmap/src/tests.rs#L10623-L10656
+resource: crates/lpe-jmap/src/tests.rs#L11111-L11144
 visibility: private
 generated:
   by: okf-rs/0.3.0

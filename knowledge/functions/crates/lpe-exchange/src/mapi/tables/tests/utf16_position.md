@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: utf16_position
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8867-L8873
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8956-L8962
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: schema_contract
-resource: crates/lpe-storage/src/schema_contract.rs#L1-L3274
+resource: crates/lpe-storage/src/schema_contract.rs#L1-L3280
 generated:
   by: okf-rs/0.3.0
 relationships:

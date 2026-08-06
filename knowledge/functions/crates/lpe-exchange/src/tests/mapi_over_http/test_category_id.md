@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_category_id
-resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L64-L76
+resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L65-L77
 visibility: private
 generated:
   by: okf-rs/0.3.0

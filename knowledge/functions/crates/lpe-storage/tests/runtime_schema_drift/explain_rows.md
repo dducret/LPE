@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: explain_rows
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2763-L2768
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2844-L2849
 visibility: private
 generated:
   by: okf-rs/0.3.0

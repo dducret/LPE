@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_named_property_bootstrap_maps_session_property_ids
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1118-L1195
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1120-L1197
 visibility: private
 generated:
   by: okf-rs/0.3.0

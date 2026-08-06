@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: message_ops
-resource: crates/lpe-storage/src/message_ops.rs#L1-L1502
+resource: crates/lpe-storage/src/message_ops.rs#L1-L1525
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -19,6 +19,7 @@ relationships:
 - [delete_client_contact](../../../../functions/crates/lpe-storage/src/message_ops/Storage/delete_client_contact.md)
 - [delete_client_event](../../../../functions/crates/lpe-storage/src/message_ops/Storage/delete_client_event.md)
 - [copy_jmap_email](../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email.md)
+- [copy_jmap_email_between_accounts](../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts.md)
 - [move_jmap_email](../../../../functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email.md)
 - [move_jmap_email_from_mailbox](../../../../functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_from_mailbox.md)
 - [move_jmap_email_from_mailbox_with_mapi_identity](../../../../functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_from_mailbox_with_mapi_identity.md)

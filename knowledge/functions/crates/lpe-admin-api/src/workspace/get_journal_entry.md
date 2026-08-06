@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_journal_entry
-resource: crates/lpe-admin-api/src/workspace.rs#L1047-L1055
+resource: crates/lpe-admin-api/src/workspace.rs#L1049-L1057
 generated:
   by: okf-rs/0.3.0
 relationships:

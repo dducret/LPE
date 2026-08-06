@@ -1,13 +1,15 @@
 ---
 type: Rust Method
 title: handle_canonical_query_changes
-resource: crates/lpe-jmap/src/service/canonical.rs#L116-L217
+resource: crates/lpe-jmap/src/service/canonical.rs#L136-L257
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
-  - functions/crates/lpe-jmap/src/service/helpers/requested_account_id_from_arguments
+  - functions/crates/lpe-jmap/src/service/JmapService/requested_account_access
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
+  - functions/crates/lpe-jmap/src/service/helpers/requested_account_id_from_arguments
+  - functions/crates/lpe-jmap/src/mailboxes/mailbox_account_may_submit
   - functions/crates/lpe-jmap/src/service/canonical/JmapService/canonical_query_ids
   - functions/crates/lpe-jmap/src/service/helpers/canonical_query_state_method
   - functions/crates/lpe-jmap/src/service/helpers/canonical_query_filter
@@ -27,8 +29,10 @@ relationships:
 
 # Calls
 
-- [requested_account_id_from_arguments](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/requested_account_id_from_arguments.md)
+- [requested_account_access](../../../../../../../functions/crates/lpe-jmap/src/service/JmapService/requested_account_access.md)
 - [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
+- [requested_account_id_from_arguments](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/requested_account_id_from_arguments.md)
+- [mailbox_account_may_submit](../../../../../../../functions/crates/lpe-jmap/src/mailboxes/mailbox_account_may_submit.md)
 - [canonical_query_ids](../../../../../../../functions/crates/lpe-jmap/src/service/canonical/JmapService/canonical_query_ids.md)
 - [canonical_query_state_method](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/canonical_query_state_method.md)
 - [canonical_query_filter](../../../../../../../functions/crates/lpe-jmap/src/service/helpers/canonical_query_filter.md)

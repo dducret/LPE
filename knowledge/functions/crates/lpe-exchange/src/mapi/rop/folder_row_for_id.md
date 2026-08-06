@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_row_for_id
-resource: crates/lpe-exchange/src/mapi/rop.rs#L1612-L1620
+resource: crates/lpe-exchange/src/mapi/rop.rs#L1623-L1631
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: put_returns_forbidden_for_read_only_shared_calendar_collection
-resource: crates/lpe-dav/src/tests.rs#L1435-L1456
+resource: crates/lpe-dav/src/tests.rs#L1449-L1470
 visibility: private
 generated:
   by: okf-rs/0.3.0

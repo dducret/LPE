@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_properties_all_response_tag
-resource: crates/lpe-exchange/src/mapi/rop.rs#L1125-L1134
+resource: crates/lpe-exchange/src/mapi/rop.rs#L1143-L1152
 visibility: private
 generated:
   by: okf-rs/0.3.0

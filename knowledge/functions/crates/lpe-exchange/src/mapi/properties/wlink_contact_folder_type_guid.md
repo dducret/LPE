@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wlink_contact_folder_type_guid
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1081-L1086
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1104-L1109
 visibility: private
 generated:
   by: okf-rs/0.3.0

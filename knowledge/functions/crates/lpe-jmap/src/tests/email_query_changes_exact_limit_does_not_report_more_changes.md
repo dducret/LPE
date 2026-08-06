@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_query_changes_exact_limit_does_not_report_more_changes
-resource: crates/lpe-jmap/src/tests.rs#L4895-L4957
+resource: crates/lpe-jmap/src/tests.rs#L4972-L5034
 visibility: private
 generated:
   by: okf-rs/0.3.0

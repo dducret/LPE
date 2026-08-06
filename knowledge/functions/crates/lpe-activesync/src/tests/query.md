@@ -240,12 +240,15 @@ relationships:
   - functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription
   - functions/crates/lpe-storage/src/mailboxes/Storage/destroy_jmap_mailbox
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update
   - functions/crates/lpe-storage/src/mapi_contacts/commit_existing_contact_import_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/insert_contact_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/update_contact_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/insert_custom_properties_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/upsert_custom_properties_in_tx
+  - functions/crates/lpe-storage/src/mapi_contacts/delete_custom_properties_in_tx
+  - functions/crates/lpe-storage/src/mapi_contacts/fetch_principal_contact_identity_in_tx
   - functions/crates/lpe-storage/src/mapi_contacts/set_created_contact_modseq_in_tx
   - functions/crates/lpe-storage/src/mapi_events/Storage/move_calendar_events_to_collection_in_tx
   - functions/crates/lpe-storage/src/mapi_events/Storage/create_mapi_event
@@ -264,7 +267,7 @@ relationships:
   - functions/crates/lpe-storage/src/mapi_message_identity/rekey_active_mapi_message_identity_for_server_move_in_tx
   - functions/crates/lpe-storage/src/mapi_store_identity/ensure_mapi_mailbox_replica_in_tx
   - functions/crates/lpe-storage/src/message_ops/Storage/delete_client_contact
-  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email
+  - functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts
   - functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership
   - functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_followup_flags
   - functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_content
@@ -397,6 +400,7 @@ relationships:
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_managed_retention_folder_path
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_change_log_cursor_constraints
   - functions/crates/lpe-storage/tests/runtime_schema_drift/insert_mapi_special_folder_alias
+  - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_cross_account_jmap_copy_bcc_projection
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_index_plan_paths
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_custom_calendar_grant_path
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mailbox_move_path
@@ -655,12 +659,15 @@ relationships:
 - [set_mailbox_subscription](../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription.md)
 - [destroy_jmap_mailbox](../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/destroy_jmap_mailbox.md)
 - [rotate_active_mapi_contact_identities_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/rotate_active_mapi_contact_identities_in_tx.md)
+- [commit_mapi_contact_update](../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update.md)
 - [commit_existing_contact_import_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/commit_existing_contact_import_in_tx.md)
 - [allocate_contact_identity_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/allocate_contact_identity_in_tx.md)
 - [insert_contact_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/insert_contact_in_tx.md)
 - [update_contact_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/update_contact_in_tx.md)
 - [insert_custom_properties_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/insert_custom_properties_in_tx.md)
 - [upsert_custom_properties_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/upsert_custom_properties_in_tx.md)
+- [delete_custom_properties_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/delete_custom_properties_in_tx.md)
+- [fetch_principal_contact_identity_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/fetch_principal_contact_identity_in_tx.md)
 - [set_created_contact_modseq_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_contacts/set_created_contact_modseq_in_tx.md)
 - [move_calendar_events_to_collection_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/move_calendar_events_to_collection_in_tx.md)
 - [create_mapi_event](../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/create_mapi_event.md)
@@ -679,7 +686,7 @@ relationships:
 - [rekey_active_mapi_message_identity_for_server_move_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_message_identity/rekey_active_mapi_message_identity_for_server_move_in_tx.md)
 - [ensure_mapi_mailbox_replica_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_store_identity/ensure_mapi_mailbox_replica_in_tx.md)
 - [delete_client_contact](../../../../../functions/crates/lpe-storage/src/message_ops/Storage/delete_client_contact.md)
-- [copy_jmap_email](../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email.md)
+- [copy_jmap_email_between_accounts](../../../../../functions/crates/lpe-storage/src/message_ops/Storage/copy_jmap_email_between_accounts.md)
 - [move_jmap_email_membership](../../../../../functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership.md)
 - [update_jmap_email_followup_flags](../../../../../functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_followup_flags.md)
 - [update_jmap_email_content](../../../../../functions/crates/lpe-storage/src/message_ops/Storage/update_jmap_email_content.md)
@@ -812,6 +819,7 @@ relationships:
 - [exercise_managed_retention_folder_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_managed_retention_folder_path.md)
 - [exercise_change_log_cursor_constraints](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_change_log_cursor_constraints.md)
 - [insert_mapi_special_folder_alias](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/insert_mapi_special_folder_alias.md)
+- [exercise_cross_account_jmap_copy_bcc_projection](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_cross_account_jmap_copy_bcc_projection.md)
 - [exercise_index_plan_paths](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_index_plan_paths.md)
 - [exercise_custom_calendar_grant_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_custom_calendar_grant_path.md)
 - [exercise_mailbox_move_path](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_mailbox_move_path.md)

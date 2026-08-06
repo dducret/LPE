@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_jmap_task_reminder
-resource: crates/lpe-jmap/src/store.rs#L1150-L1168
+resource: crates/lpe-jmap/src/store.rs#L1176-L1194
 visibility: private
 generated:
   by: okf-rs/0.3.0

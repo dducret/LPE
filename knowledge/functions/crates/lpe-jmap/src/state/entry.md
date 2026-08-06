@@ -51,6 +51,7 @@ relationships:
   - functions/crates/lpe-jmap/src/service/JmapService/handle_reminder_set
   - functions/crates/lpe-jmap/src/service/object_state/JmapService/mail_object_state_entries_with_bcc
   - functions/crates/lpe-jmap/src/state/push_state_entries_to_types
+  - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/copy_jmap_email_between_accounts
   - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/add_calendar_event_attachment
   - functions/crates/lpe-jmap/src/websocket/JmapService/compute_push_changes
   - functions/crates/lpe-jmap/src/websocket/JmapService/current_push_states
@@ -111,6 +112,7 @@ relationships:
 - [handle_reminder_set](../../../../../functions/crates/lpe-jmap/src/service/JmapService/handle_reminder_set.md)
 - [mail_object_state_entries_with_bcc](../../../../../functions/crates/lpe-jmap/src/service/object_state/JmapService/mail_object_state_entries_with_bcc.md)
 - [push_state_entries_to_types](../../../../../functions/crates/lpe-jmap/src/state/push_state_entries_to_types.md)
+- [copy_jmap_email_between_accounts](../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/copy_jmap_email_between_accounts.md)
 - [add_calendar_event_attachment](../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/add_calendar_event_attachment.md)
 - [compute_push_changes](../../../../../functions/crates/lpe-jmap/src/websocket/JmapService/compute_push_changes.md)
 - [current_push_states](../../../../../functions/crates/lpe-jmap/src/websocket/JmapService/current_push_states.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hex_digit
-resource: crates/lpe-exchange/src/mapi_store.rs#L342-L349
+resource: crates/lpe-exchange/src/mapi_store.rs#L343-L350
 visibility: private
 generated:
   by: okf-rs/0.3.0

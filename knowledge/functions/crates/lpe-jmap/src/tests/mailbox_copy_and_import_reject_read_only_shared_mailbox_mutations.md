@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations
-resource: crates/lpe-jmap/src/tests.rs#L6955-L7044
+resource: crates/lpe-jmap/src/tests.rs#L7284-L7373
 visibility: private
 generated:
   by: okf-rs/0.3.0

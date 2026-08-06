@@ -81,6 +81,7 @@ pub use crate::mailboxes::{
     JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, ManagedRetentionFolderCreateInput,
 };
 pub use crate::mapi_contacts::{
+    MapiContactCommitInput, MapiContactCommitOutcome, MapiContactCommitResult,
     MapiContactCreateInput, MapiContactCreateResult, MapiContactCustomPropertyValue,
     MapiContactImportConflict, MapiContactImportDisposition, MapiContactImportObjectDeleted,
     MapiContactImportedIdentity, MapiContactVersion,

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_table_projects_missing_secondary_email_slots_as_empty_strings
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L786-L838
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L820-L872
 visibility: private
 generated:
   by: okf-rs/0.3.0

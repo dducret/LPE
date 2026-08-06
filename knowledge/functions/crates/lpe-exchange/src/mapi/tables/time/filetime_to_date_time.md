@@ -11,6 +11,8 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/time/unix_seconds_to_date_time
   called_by:
   - functions/crates/lpe-exchange/src/mapi/properties/message/filetime_to_rfc3339_utc
+  - functions/crates/lpe-exchange/src/mapi/properties/task/current_task_completion_time
+  - functions/crates/lpe-exchange/src/mapi/properties/task/task_completion_date_filetime
 ---
 
 # Signature
@@ -26,3 +28,5 @@ relationships:
 # Called by
 
 - [filetime_to_rfc3339_utc](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/filetime_to_rfc3339_utc.md)
+- [current_task_completion_time](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/current_task_completion_time.md)
+- [task_completion_date_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/task/task_completion_date_filetime.md)

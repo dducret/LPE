@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: remember_created_contact
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L541-L578
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L556-L593
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_pending_contact
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_updated_contact
 ---
 
 # Signature
@@ -22,3 +23,4 @@ relationships:
 # Called by
 
 - [save_pending_contact](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_pending_contact.md)
+- [remember_updated_contact](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_updated_contact.md)

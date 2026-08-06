@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxcmsg_setting_message_properties_preserves_html_cid_body
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L686-L759
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L688-L761
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bounded_meeting_cancellation_from_mapi
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L942-L979
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L987-L1024
 generated:
   by: okf-rs/0.3.0
 relationships:

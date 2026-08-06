@@ -1,10 +1,12 @@
 ---
 type: Rust Function
 title: mailbox_folder_xml
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L777-L805
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L837-L875
 generated:
   by: okf-rs/0.3.0
 relationships:
+  calls:
+  - functions/crates/lpe-exchange/src/service/ews/folders/folder_change_key
   called_by:
   - functions/crates/lpe-exchange/src/service/ExchangeService/create_folder_path
   - functions/crates/lpe-exchange/src/service/ExchangeService/copy_folder
@@ -19,6 +21,10 @@ relationships:
 # Signature
 
 `pub(in crate::service) fn mailbox_folder_xml(mailbox: &JmapMailbox) -> String`
+
+# Calls
+
+- [folder_change_key](../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/folder_change_key.md)
 
 # Called by
 

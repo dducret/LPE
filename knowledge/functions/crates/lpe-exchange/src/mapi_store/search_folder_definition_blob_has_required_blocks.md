@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: search_folder_definition_blob_has_required_blocks
-resource: crates/lpe-exchange/src/mapi_store.rs#L1167-L1216
+resource: crates/lpe-exchange/src/mapi_store.rs#L1174-L1223
 visibility: private
 generated:
   by: okf-rs/0.3.0

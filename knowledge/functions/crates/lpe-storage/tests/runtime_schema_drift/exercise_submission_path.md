@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_submission_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2362-L2404
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2372-L2414
 visibility: private
 generated:
   by: okf-rs/0.3.0

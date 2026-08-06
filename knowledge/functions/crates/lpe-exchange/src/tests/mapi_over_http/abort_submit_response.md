@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: abort_submit_response
-resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L704-L749
+resource: crates/lpe-exchange/src/tests/mapi_over_http.rs#L705-L750
 visibility: private
 generated:
   by: okf-rs/0.3.0

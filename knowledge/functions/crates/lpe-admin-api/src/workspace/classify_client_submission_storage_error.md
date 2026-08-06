@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: classify_client_submission_storage_error
-resource: crates/lpe-admin-api/src/workspace.rs#L1395-L1416
+resource: crates/lpe-admin-api/src/workspace.rs#L1397-L1418
 visibility: private
 generated:
   by: okf-rs/0.3.0

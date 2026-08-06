@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: clearable_pending_html_property
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L631-L639
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L676-L684
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: service
-resource: crates/lpe-exchange/src/service.rs#L1-L1065
+resource: crates/lpe-exchange/src/service.rs#L1-L1087
 generated:
   by: okf-rs/0.3.0
 relationships:

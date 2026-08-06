@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: EwsCatalogCoverage
-resource: crates/lpe-exchange/src/tests/ews.rs#L9250-L9254
+resource: crates/lpe-exchange/src/tests/ews.rs#L9691-L9695
 visibility: private
 generated:
   by: okf-rs/0.3.0

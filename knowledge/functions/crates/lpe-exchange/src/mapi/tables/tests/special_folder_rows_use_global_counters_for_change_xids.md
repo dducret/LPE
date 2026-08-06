@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_folder_rows_use_global_counters_for_change_xids
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L860-L877
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L894-L911
 visibility: private
 generated:
   by: okf-rs/0.3.0

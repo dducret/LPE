@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: folders
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L1-L857
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L1-L943
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -19,6 +19,7 @@ relationships:
 - [create_managed_folder](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/create_managed_folder.md)
 - [get_folder](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/get_folder.md)
 - [root_child_folder_count](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/root_child_folder_count.md)
+- [collection_folder_xml](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/collection_folder_xml.md)
 - [HierarchySyncFolder](../../../../../../classes/crates/lpe-exchange/src/service/ews/folders/HierarchySyncFolder.md)
 - [new](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/HierarchySyncFolder/new.md)
 - [hierarchy_sync_state](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/hierarchy_sync_state.md)
@@ -28,6 +29,7 @@ relationships:
 - [requested_folder_kinds](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/requested_folder_kinds.md)
 - [mailbox_by_id](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/mailbox_by_id.md)
 - [ensure_custom_mailbox](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ensure_custom_mailbox.md)
+- [validate_supplied_folder_change_key](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/validate_supplied_folder_change_key.md)
 - [create_folder_success_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/create_folder_success_response.md)
 - [create_public_folder_success_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/create_public_folder_success_response.md)
 - [folders_operation_success_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/folders_operation_success_response.md)
@@ -38,6 +40,9 @@ relationships:
 - [mailbox_folder_xml](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/mailbox_folder_xml.md)
 - [public_folder_xml](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/public_folder_xml.md)
 - [folder_change_key](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/folder_change_key.md)
+- [mailbox_folder_change_key](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/mailbox_folder_change_key.md)
+- [public_folder_change_key](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/public_folder_change_key.md)
+- [collection_folder_change_key](../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/collection_folder_change_key.md)
 
 # Imports
 

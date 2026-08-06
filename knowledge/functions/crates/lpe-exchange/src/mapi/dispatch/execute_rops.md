@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rops
-resource: crates/lpe-exchange/src/mapi/dispatch.rs#L936-L1683
+resource: crates/lpe-exchange/src/mapi/dispatch.rs#L938-L1685
 generated:
   by: okf-rs/0.3.0
 relationships:

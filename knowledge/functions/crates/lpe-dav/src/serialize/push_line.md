@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_line
-resource: crates/lpe-dav/src/serialize.rs#L85-L89
+resource: crates/lpe-dav/src/serialize.rs#L91-L95
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_ews_hold_mailboxes
-resource: crates/lpe-exchange/src/tests/mod.rs#L5428-L5450
+resource: crates/lpe-exchange/src/tests/mod.rs#L5432-L5454
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query_rows_ignores_incomplete_windowed_content_table_rows
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1576-L1672
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1610-L1706
 visibility: private
 generated:
   by: okf-rs/0.3.0

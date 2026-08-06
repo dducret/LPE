@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_set_search_criteria
-resource: crates/lpe-exchange/src/tests/mod.rs#L15030-L15045
+resource: crates/lpe-exchange/src/tests/mod.rs#L15155-L15170
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hex_bytes
-resource: crates/lpe-exchange/src/tests/mod.rs#L15813-L15825
+resource: crates/lpe-exchange/src/tests/mod.rs#L15938-L15950
 visibility: private
 generated:
   by: okf-rs/0.3.0

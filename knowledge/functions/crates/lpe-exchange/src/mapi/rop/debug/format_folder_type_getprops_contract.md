@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_folder_type_getprops_contract
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1282-L1394
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1288-L1400
 generated:
   by: okf-rs/0.3.0
 relationships:

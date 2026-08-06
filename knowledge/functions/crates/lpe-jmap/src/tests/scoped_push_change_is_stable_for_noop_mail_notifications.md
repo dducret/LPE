@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: scoped_push_change_is_stable_for_noop_mail_notifications
-resource: crates/lpe-jmap/src/tests.rs#L11253-L11276
+resource: crates/lpe-jmap/src/tests.rs#L11741-L11764
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_conversation_index
-resource: crates/lpe-exchange/src/tests/mod.rs#L15235-L15240
+resource: crates/lpe-exchange/src/tests/mod.rs#L15360-L15365
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_query_changes_report_mailbox_reorders
-resource: crates/lpe-jmap/src/tests.rs#L5437-L5531
+resource: crates/lpe-jmap/src/tests.rs#L5514-L5608
 visibility: private
 generated:
   by: okf-rs/0.3.0

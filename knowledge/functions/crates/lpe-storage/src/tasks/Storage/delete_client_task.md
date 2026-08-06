@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_client_task
-resource: crates/lpe-storage/src/tasks.rs#L976-L1046
+resource: crates/lpe-storage/src/tasks.rs#L1000-L1070
 generated:
   by: okf-rs/0.3.0
 relationships:

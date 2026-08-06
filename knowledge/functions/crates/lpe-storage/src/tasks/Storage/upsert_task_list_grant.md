@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_task_list_grant
-resource: crates/lpe-storage/src/tasks.rs#L368-L469
+resource: crates/lpe-storage/src/tasks.rs#L392-L493
 generated:
   by: okf-rs/0.3.0
 relationships:

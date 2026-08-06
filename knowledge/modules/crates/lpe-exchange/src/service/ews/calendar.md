@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: calendar
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L1-L653
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L1-L709
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -45,6 +45,12 @@ relationships:
 - [ews_datetime_parts](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_parts.md)
 - [ews_duration_minutes](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_duration_minutes.md)
 - [time_minutes](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/time_minutes.md)
+- [ews_datetime_minutes](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_datetime_minutes.md)
+- [ews_date_after_days](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_date_after_days.md)
+- [ews_date_parts](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_date_parts.md)
+- [days_in_month](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/days_in_month.md)
+- [days_from_civil](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/days_from_civil.md)
+- [civil_from_days](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/civil_from_days.md)
 
 # Imports
 

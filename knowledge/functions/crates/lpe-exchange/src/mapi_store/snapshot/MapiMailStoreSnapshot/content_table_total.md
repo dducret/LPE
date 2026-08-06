@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: content_table_total
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L854-L868
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L886-L900
 generated:
   by: okf-rs/0.3.0
 relationships:

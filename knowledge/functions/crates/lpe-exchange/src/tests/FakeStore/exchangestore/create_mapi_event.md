@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_mapi_event
-resource: crates/lpe-exchange/src/tests/mod.rs#L7924-L8133
+resource: crates/lpe-exchange/src/tests/mod.rs#L7928-L8137
 visibility: private
 generated:
   by: okf-rs/0.3.0

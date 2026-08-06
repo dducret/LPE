@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_create_event_input
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L112-L166
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L109-L163
 generated:
   by: okf-rs/0.3.0
 relationships:

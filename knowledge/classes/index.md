@@ -444,6 +444,7 @@
 - [ActiveSessionRequest](../classes/crates/lpe-exchange/src/mapi/session/lifecycle/ActiveSessionRequest.md) — Rust Struct
 - [CachedExecuteResponse](../classes/crates/lpe-exchange/src/mapi/session/types/CachedExecuteResponse.md) — Rust Struct
 - [DefaultViewAdvertisementState](../classes/crates/lpe-exchange/src/mapi/session/types/DefaultViewAdvertisementState.md) — Rust Struct
+- [MapiContactTransaction](../classes/crates/lpe-exchange/src/mapi/session/types/MapiContactTransaction.md) — Rust Struct
 - [MapiEventImportDisposition](../classes/crates/lpe-exchange/src/mapi/session/types/MapiEventImportDisposition.md) — Rust Enum
 - [MapiEventTransaction](../classes/crates/lpe-exchange/src/mapi/session/types/MapiEventTransaction.md) — Rust Struct
 - [MapiLogonIdentityDebug](../classes/crates/lpe-exchange/src/mapi/session/types/MapiLogonIdentityDebug.md) — Rust Struct
@@ -547,6 +548,7 @@
 - [CanonicalEwsObjectId](../classes/crates/lpe-exchange/src/service/ews/ids/CanonicalEwsObjectId.md) — Rust Struct
 - [ConvertIdOutput](../classes/crates/lpe-exchange/src/service/ews/ids/ConvertIdOutput.md) — Rust Struct
 - [ConvertIdSource](../classes/crates/lpe-exchange/src/service/ews/ids/ConvertIdSource.md) — Rust Struct
+- [UpdateItemChange](../classes/crates/lpe-exchange/src/service/ews/items/UpdateItemChange.md) — Rust Struct
 - [MailTipProjection](../classes/crates/lpe-exchange/src/service/ews/mail_tips/MailTipProjection.md) — Rust Struct
 - [RequestedServiceConfiguration](../classes/crates/lpe-exchange/src/service/ews/mail_tips/RequestedServiceConfiguration.md) — Rust Enum
 - [ParsedMailbox](../classes/crates/lpe-exchange/src/service/ews/mailboxes/ParsedMailbox.md) — Rust Struct
@@ -891,6 +893,9 @@
 - [ManagedRetentionFolderCreateInput](../classes/crates/lpe-storage/src/mailboxes/ManagedRetentionFolderCreateInput.md) — Rust Struct
 - [AllocatedContactIdentity](../classes/crates/lpe-storage/src/mapi_contacts/AllocatedContactIdentity.md) — Rust Struct
 - [ExistingContactIdentityCommit](../classes/crates/lpe-storage/src/mapi_contacts/ExistingContactIdentityCommit.md) — Rust Struct
+- [MapiContactCommitInput](../classes/crates/lpe-storage/src/mapi_contacts/MapiContactCommitInput.md) — Rust Struct
+- [MapiContactCommitOutcome](../classes/crates/lpe-storage/src/mapi_contacts/MapiContactCommitOutcome.md) — Rust Enum
+- [MapiContactCommitResult](../classes/crates/lpe-storage/src/mapi_contacts/MapiContactCommitResult.md) — Rust Struct
 - [MapiContactCreateInput](../classes/crates/lpe-storage/src/mapi_contacts/MapiContactCreateInput.md) — Rust Struct
 - [MapiContactCreateResult](../classes/crates/lpe-storage/src/mapi_contacts/MapiContactCreateResult.md) — Rust Struct
 - [MapiContactCustomPropertyValue](../classes/crates/lpe-storage/src/mapi_contacts/MapiContactCustomPropertyValue.md) — Rust Struct

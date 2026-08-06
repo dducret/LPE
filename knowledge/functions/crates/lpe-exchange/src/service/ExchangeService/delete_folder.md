@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_folder
-resource: crates/lpe-exchange/src/service.rs#L1015-L1064
+resource: crates/lpe-exchange/src/service.rs#L1037-L1086
 visibility: private
 generated:
   by: okf-rs/0.3.0

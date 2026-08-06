@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_folder_items_honors_max_changes_returned
-resource: crates/lpe-exchange/src/tests/ews.rs#L7819-L7871
+resource: crates/lpe-exchange/src/tests/ews.rs#L8260-L8312
 visibility: private
 generated:
   by: okf-rs/0.3.0

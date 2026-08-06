@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: scoped_push_change_reports_email_delivery_for_new_messages_only_state
-resource: crates/lpe-jmap/src/tests.rs#L11418-L11476
+resource: crates/lpe-jmap/src/tests.rs#L11906-L11964
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: submission
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1-L2454
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1-L2564
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -13,6 +13,10 @@ relationships:
 
 # Contains
 
+- [submit_new_mapi_message_with_identities](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities.md)
+- [mapi_over_http_submit_new_message_maps_normal_sender_identity](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_new_message_maps_normal_sender_identity.md)
+- [mapi_over_http_submit_new_message_maps_send_as_identity](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_new_message_maps_send_as_identity.md)
+- [mapi_over_http_submit_new_message_maps_send_on_behalf_identity](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_submit_new_message_maps_send_on_behalf_identity.md)
 - [mapi_over_http_microsoft_subrestriction_matches_message_recipients](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_subrestriction_matches_message_recipients.md)
 - [mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type.md)
 - [mapi_over_http_modify_recipients_string8_rows_save_canonically](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_string8_rows_save_canonically.md)

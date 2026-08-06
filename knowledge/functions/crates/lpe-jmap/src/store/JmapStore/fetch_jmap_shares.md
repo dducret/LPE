@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_shares
-resource: crates/lpe-jmap/src/store.rs#L490-L493
+resource: crates/lpe-jmap/src/store.rs#L498-L501
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/tests/mod.rs#L1-L15908
+resource: crates/lpe-exchange/src/tests/mod.rs#L1-L16033
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,7 +12,7 @@ relationships:
   - external/lpe-magika-detectionsource-detector-magikadetection-validator
   - external/lpe-mail-auth-accountauthstore-accountprincipal-storefuture
   - external/lpe-storage-recoverableitem
-  - external/lpe-storage-accessiblecontact-accessibleevent-accountlogin-activesyncattachment-activesyncattachmentcontent-attachmentuploadinput-authenticatedaccount-calendareventattachment-cancelsubmissionresult-clientnote-clientreminder-clienttask-collaborationcollection-collaborationgrant-collaborationgrantinput-collaborationresourcekind-collaborationrights-conversationaction-createpublicfolderinput-delegatefreebusymessageobject-jmapemail-jmapemailaddress-jmapemailmailboxstate-jmapemailquery-jmapimportedemailinput-jmapmailbox-jmapmailboxcreateinput-jmapmailboxupdateinput-journalentry-mailboxrule-managedretentionfoldercreateinput-mapicontactcreateinput-mapicontactcreateresult-mapicontactversion-mapieventcommitinput-mapieventcommitoutcome-mapieventcommitsuccess-mapieventcreateinput-mapieventcreateresult-mapieventidentitymove-mapieventimportedmoveidentity-mapieventreminderstate-mapieventversion-mapimessageidentitymove-mapimessageimportedmoveidentity-mapimessagemoveresult-moveaccessibleeventtodeleteditemsresult-publicfolder-publicfolderitem-publicfolderperuserstate-publicfolderperuserstatepatch-publicfolderpermission-publicfolderpermissioninput-publicfolderreplica-publicfolderrights-publicfoldertree-reminderquery-saveddraftmessage-searchfolderdefinition-senderdelegationgrantinput-senderdelegationright-sievescriptdocument-storage-storedaccountapppassword-submitmessageinput-submittedmessage-submittedrecipientinput-updatepublicfolderinput-upsertclientcontactinput-upsertclienteventinput-upsertclientnoteinput-upsertclienttaskinput-upsertconversationactioninput-upsertjournalentryinput-upsertpublicfolderiteminput-upsertsearchfolderinput
+  - external/lpe-storage-accessiblecontact-accessibleevent-accountlogin-activesyncattachment-activesyncattachmentcontent-attachmentuploadinput-authenticatedaccount-calendareventattachment-cancelsubmissionresult-clientnote-clientreminder-clienttask-collaborationcollection-collaborationgrant-collaborationgrantinput-collaborationresourcekind-collaborationrights-conversationaction-createpublicfolderinput-delegatefreebusymessageobject-jmapemail-jmapemailaddress-jmapemailmailboxstate-jmapemailquery-jmapimportedemailinput-jmapmailbox-jmapmailboxcreateinput-jmapmailboxupdateinput-journalentry-mailboxrule-managedretentionfoldercreateinput-mapicontactcommitinput-mapicontactcommitoutcome-mapicontactcommitresult-mapicontactcreateinput-mapicontactcreateresult-mapicontactversion-mapieventcommitinput-mapieventcommitoutcome-mapieventcommitsuccess-mapieventcreateinput-mapieventcreateresult-mapieventidentitymove-mapieventimportedmoveidentity-mapieventreminderstate-mapieventversion-mapimessageidentitymove-mapimessageimportedmoveidentity-mapimessagemoveresult-moveaccessibleeventtodeleteditemsresult-publicfolder-publicfolderitem-publicfolderperuserstate-publicfolderperuserstatepatch-publicfolderpermission-publicfolderpermissioninput-publicfolderreplica-publicfolderrights-publicfoldertree-reminderquery-saveddraftmessage-searchfolderdefinition-senderdelegationgrantinput-senderdelegationright-sievescriptdocument-storage-storedaccountapppassword-submitmessageinput-submittedmessage-submittedrecipientinput-updatepublicfolderinput-upsertclientcontactinput-upsertclienteventinput-upsertclientnoteinput-upsertclienttaskinput-upsertconversationactioninput-upsertjournalentryinput-upsertpublicfolderiteminput-upsertsearchfolderinput
   - external/sqlx-postgres-pgconnectoptions-pgpooloptions
   - external/sqlx-pgpool-row
   - external/std-collections-hashmap-env-str-fromstr-sync-atomic-atomicu64-ordering-arc-mutex-time-duration
@@ -198,6 +198,7 @@ relationships:
 - [fetch_mapi_event_versions](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_event_versions.md)
 - [create_mapi_event](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/create_mapi_event.md)
 - [create_mapi_contact](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/create_mapi_contact.md)
+- [commit_mapi_contact_update](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_contact_update.md)
 - [commit_mapi_event_update](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/commit_mapi_event_update.md)
 - [fetch_accessible_tasks_in_collection](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_in_collection.md)
 - [fetch_task_sync_versions](../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_task_sync_versions.md)
@@ -501,6 +502,7 @@ relationships:
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, ManagedRetentionFolderCreateInput,
+    MapiContactCommitInput, MapiContactCommitOutcome, MapiContactCommitResult,
     MapiContactCreateInput, MapiContactCreateResult, MapiContactVersion, MapiEventCommitInput,
     MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput, MapiEventCreateResult,
     MapiEventIdentityMove, MapiEventImportedMoveIdentity, MapiEventReminderState, MapiEventVersion,

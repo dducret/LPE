@@ -1,12 +1,13 @@
 ---
 type: Rust Module
 title: message
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/message.rs#L1-L316
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/message.rs#L1-L389
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/super-super
+  - external/super
   member_of:
   - packages/crates/lpe-exchange
 ---
@@ -19,10 +20,13 @@ relationships:
 - [summarize_message_getprops_materialization](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/summarize_message_getprops_materialization.md)
 - [normal_message_debug_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/normal_message_debug_property_value.md)
 - [format_normal_message_debug_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/format_normal_message_debug_value.md)
+- [test_email](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/test_email.md)
+- [normal_message_diagnostics_hide_bcc_outside_drafts_and_sent](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/normal_message_diagnostics_hide_bcc_outside_drafts_and_sent.md)
 
 # Imports
 
 - `super::super::*`
+- `super::*`
 
 # Member of
 

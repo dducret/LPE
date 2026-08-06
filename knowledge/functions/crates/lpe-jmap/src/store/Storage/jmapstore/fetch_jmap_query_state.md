@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_query_state
-resource: crates/lpe-jmap/src/store.rs#L604-L614
+resource: crates/lpe-jmap/src/store.rs#L612-L622
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: notes_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1168-L1173
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1200-L1205
 generated:
   by: okf-rs/0.3.0
 relationships:

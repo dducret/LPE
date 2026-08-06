@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_set_rejects_invisible_bidi_mixed_script_and_confusable_names
-resource: crates/lpe-jmap/src/tests.rs#L6368-L6443
+resource: crates/lpe-jmap/src/tests.rs#L6580-L6655
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_search_folders_by_ids
-resource: crates/lpe-jmap/src/tests.rs#L1202-L1215
+resource: crates/lpe-jmap/src/tests.rs#L1242-L1255
 visibility: private
 generated:
   by: okf-rs/0.3.0

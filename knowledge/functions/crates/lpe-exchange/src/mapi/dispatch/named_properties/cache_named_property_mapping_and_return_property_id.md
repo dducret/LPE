@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: cache_named_property_mapping_and_return_property_id
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L56-L64
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L60-L68
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: submitted_mapi_folder_id
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L635-L644
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L658-L667
 generated:
   by: okf-rs/0.3.0
 relationships:

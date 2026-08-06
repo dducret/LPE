@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: first_name
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L615-L620
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L763-L768
 visibility: private
 generated:
   by: okf-rs/0.3.0

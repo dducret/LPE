@@ -9,15 +9,16 @@ use lpe_storage::{
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
     MailboxFolderDelegationGrantInput, MailboxRule, ManagedRetentionFolderCreateInput,
-    MapiContactCreateInput, MapiEventCommitInput, MapiEventCommitOutcome, MapiEventCreateInput,
-    MapiEventImportedMoveIdentity, MapiEventVersion, MapiMessageImportedMoveIdentity,
-    MapiMessageMoveResult, MapiStoreIdentity, MoveAccessibleEventToDeletedItemsResult,
-    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
-    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    MapiContactCommitInput, MapiContactCommitOutcome, MapiContactCreateInput, MapiEventCommitInput,
+    MapiEventCommitOutcome, MapiEventCreateInput, MapiEventImportedMoveIdentity, MapiEventVersion,
+    MapiMessageImportedMoveIdentity, MapiMessageMoveResult, MapiStoreIdentity,
+    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
+    SenderDelegationRight, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
     UpsertSearchFolderInput,
 };
@@ -688,6 +689,11 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         input: MapiContactCreateInput,
     ) -> StoreFuture<'a, MapiContactCreateOutcome>;
+
+    fn commit_mapi_contact_update<'a>(
+        &'a self,
+        input: MapiContactCommitInput,
+    ) -> StoreFuture<'a, MapiContactCommitOutcome>;
 
     fn commit_mapi_event_update<'a>(
         &'a self,

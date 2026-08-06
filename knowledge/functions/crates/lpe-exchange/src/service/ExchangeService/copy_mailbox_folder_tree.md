@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: copy_mailbox_folder_tree
-resource: crates/lpe-exchange/src/service.rs#L755-L819
+resource: crates/lpe-exchange/src/service.rs#L777-L841
 visibility: private
 generated:
   by: okf-rs/0.3.0

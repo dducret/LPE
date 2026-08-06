@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1-L7273
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1-L7410
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -58,6 +58,7 @@ relationships:
 - [contact_property_projects_outlook_table_identity_columns](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/contact_property_projects_outlook_table_identity_columns.md)
 - [contact_entry_id_is_private_message_entry_id_not_a_sync_key](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/contact_entry_id_is_private_message_entry_id_not_a_sync_key.md)
 - [collaboration_item_properties_project_outlook_table_identity_columns](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/collaboration_item_properties_project_outlook_table_identity_columns.md)
+- [contact_and_task_access_follow_effective_canonical_rights](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/contact_and_task_access_follow_effective_canonical_rights.md)
 - [outlook_contact_search_source_columns_project_empty_values](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/outlook_contact_search_source_columns_project_empty_values.md)
 - [public_folder_projects_default_post_message_class_from_folder_class](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/public_folder_projects_default_post_message_class_from_folder_class.md)
 - [note_derived_folder_classes_project_default_post_message_class](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/note_derived_folder_classes_project_default_post_message_class.md)
@@ -92,6 +93,8 @@ relationships:
 - [followup_mail_projects_outlook_flag_properties](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/followup_mail_projects_outlook_flag_properties.md)
 - [reminder_signal_time_wins_independently_of_property_order](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/reminder_signal_time_wins_independently_of_property_order.md)
 - [reminder_named_properties_project_from_canonical_reminder_links](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/reminder_named_properties_project_from_canonical_reminder_links.md)
+- [task_properties_project_canonical_dates_status_priority_and_recurrence](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/task_properties_project_canonical_dates_status_priority_and_recurrence.md)
+- [task_property_updates_map_to_canonical_state_dates_and_priority](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/task_property_updates_map_to_canonical_state_dates_and_priority.md)
 - [zero_duration_events_project_non_zero_mapi_appointment_window](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/zero_duration_events_project_non_zero_mapi_appointment_window.md)
 - [calendar_projection_uses_canonical_all_day_status_and_participants](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_uses_canonical_all_day_status_and_participants.md)
 - [calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting.md)

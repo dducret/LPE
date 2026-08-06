@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: unsupported_reason_map
-resource: crates/lpe-exchange/src/tests/ews.rs#L9992-L9994
+resource: crates/lpe-exchange/src/tests/ews.rs#L10433-L10435
 visibility: private
 generated:
   by: okf-rs/0.3.0

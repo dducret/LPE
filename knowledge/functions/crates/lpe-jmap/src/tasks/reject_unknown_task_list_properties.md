@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reject_unknown_task_list_properties
-resource: crates/lpe-jmap/src/tasks.rs#L650-L658
+resource: crates/lpe-jmap/src/tasks.rs#L669-L677
 visibility: private
 generated:
   by: okf-rs/0.3.0

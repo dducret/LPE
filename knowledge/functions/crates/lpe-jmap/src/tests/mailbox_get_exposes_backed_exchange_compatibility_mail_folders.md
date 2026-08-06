@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_get_exposes_backed_exchange_compatibility_mail_folders
-resource: crates/lpe-jmap/src/tests.rs#L6541-L6615
+resource: crates/lpe-jmap/src/tests.rs#L6753-L6827
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: draft_mailbox
-resource: crates/lpe-jmap/src/tests.rs#L365-L378
+resource: crates/lpe-jmap/src/tests.rs#L366-L379
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: submit_message
-resource: crates/lpe-storage/src/submission.rs#L581-L940
+resource: crates/lpe-storage/src/submission.rs#L583-L943
 generated:
   by: okf-rs/0.3.0
 relationships:

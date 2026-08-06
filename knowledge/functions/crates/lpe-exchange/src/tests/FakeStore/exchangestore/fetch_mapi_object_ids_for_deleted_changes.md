@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_object_ids_for_deleted_changes
-resource: crates/lpe-exchange/src/tests/mod.rs#L6798-L6825
+resource: crates/lpe-exchange/src/tests/mod.rs#L6802-L6829
 visibility: private
 generated:
   by: okf-rs/0.3.0

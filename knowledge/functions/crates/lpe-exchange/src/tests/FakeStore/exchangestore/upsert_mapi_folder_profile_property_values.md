@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_mapi_folder_profile_property_values
-resource: crates/lpe-exchange/src/tests/mod.rs#L7201-L7219
+resource: crates/lpe-exchange/src/tests/mod.rs#L7205-L7223
 visibility: private
 generated:
   by: okf-rs/0.3.0

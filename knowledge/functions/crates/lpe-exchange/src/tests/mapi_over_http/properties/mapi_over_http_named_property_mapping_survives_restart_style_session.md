@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_named_property_mapping_survives_restart_style_session
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1330-L1469
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1332-L1471
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_unknown_property_type_terminates_current_buffer
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L7075-L7093
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L7077-L7095
 visibility: private
 generated:
   by: okf-rs/0.3.0

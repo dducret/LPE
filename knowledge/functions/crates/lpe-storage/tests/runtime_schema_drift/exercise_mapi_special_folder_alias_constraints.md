@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_mapi_special_folder_alias_constraints
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2214-L2323
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2224-L2333
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_folder_open_stream_returns_empty_missing_binary_property
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6006-L6061
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6008-L6063
 visibility: private
 generated:
   by: okf-rs/0.3.0

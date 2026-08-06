@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_content_restriction
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2661-L2673
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2710-L2722
 visibility: private
 generated:
   by: okf-rs/0.3.0

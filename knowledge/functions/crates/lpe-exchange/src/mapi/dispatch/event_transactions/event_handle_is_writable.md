@@ -8,6 +8,9 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_create_attachment_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_delete_attachment_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_existing_contact
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_values
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_deletions
@@ -21,6 +24,9 @@ relationships:
 
 - [append_create_attachment_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_create_attachment_response.md)
 - [append_delete_attachment_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/attachments/append_delete_attachment_response.md)
+- [save_existing_contact](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_existing_contact.md)
+- [stage_contact_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_values.md)
+- [stage_contact_property_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions.md)
 - [save_existing_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event.md)
 - [stage_event_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_values.md)
 - [stage_event_property_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_deletions.md)

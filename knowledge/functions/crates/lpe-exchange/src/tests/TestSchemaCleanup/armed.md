@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: armed
-resource: crates/lpe-exchange/src/tests/mod.rs#L101-L106
+resource: crates/lpe-exchange/src/tests/mod.rs#L102-L107
 visibility: private
 generated:
   by: okf-rs/0.3.0

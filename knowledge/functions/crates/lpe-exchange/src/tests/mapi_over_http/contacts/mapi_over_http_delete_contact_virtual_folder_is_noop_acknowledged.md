@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_delete_contact_virtual_folder_is_noop_acknowledged
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1044-L1065
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1133-L1154
 visibility: private
 generated:
   by: okf-rs/0.3.0

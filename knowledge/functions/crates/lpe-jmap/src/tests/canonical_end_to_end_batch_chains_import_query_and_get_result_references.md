@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_end_to_end_batch_chains_import_query_and_get_result_references
-resource: crates/lpe-jmap/src/tests.rs#L10293-L10402
+resource: crates/lpe-jmap/src/tests.rs#L10781-L10890
 visibility: private
 generated:
   by: okf-rs/0.3.0

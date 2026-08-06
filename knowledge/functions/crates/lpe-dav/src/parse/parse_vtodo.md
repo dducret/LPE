@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_vtodo
-resource: crates/lpe-dav/src/parse.rs#L146-L204
+resource: crates/lpe-dav/src/parse.rs#L146-L214
 generated:
   by: okf-rs/0.3.0
 relationships:

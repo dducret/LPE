@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_omits_submission_for_shared_mailbox_without_sender_grant
-resource: crates/lpe-jmap/src/tests.rs#L2623-L2650
+resource: crates/lpe-jmap/src/tests.rs#L2700-L2727
 visibility: private
 generated:
   by: okf-rs/0.3.0

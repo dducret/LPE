@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: canonical
-resource: crates/lpe-jmap/src/service/canonical.rs#L1-L598
+resource: crates/lpe-jmap/src/service/canonical.rs#L1-L638
 generated:
   by: okf-rs/0.3.0
 relationships:

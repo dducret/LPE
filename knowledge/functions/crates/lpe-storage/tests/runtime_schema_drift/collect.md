@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collect
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L297-L305
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L307-L315
 visibility: private
 generated:
   by: okf-rs/0.3.0

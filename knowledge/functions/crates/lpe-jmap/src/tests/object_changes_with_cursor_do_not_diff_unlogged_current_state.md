@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: object_changes_with_cursor_do_not_diff_unlogged_current_state
-resource: crates/lpe-jmap/src/tests.rs#L12509-L12574
+resource: crates/lpe-jmap/src/tests.rs#L12999-L13064
 visibility: private
 generated:
   by: okf-rs/0.3.0

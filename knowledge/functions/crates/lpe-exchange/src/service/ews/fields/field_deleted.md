@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/calendar/parse_update_event_input
   - functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input
   - functions/crates/lpe-exchange/src/service/ews/contacts/deleted_or_updated_contact_entry
+  - functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_addresses_json
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_emails_json
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_urls_json
   - functions/crates/lpe-exchange/src/service/ews/fields/deleted_or_updated_text
@@ -34,6 +35,7 @@ relationships:
 - [parse_update_event_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/parse_update_event_input.md)
 - [parse_update_contact_input](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input.md)
 - [deleted_or_updated_contact_entry](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/deleted_or_updated_contact_entry.md)
+- [ews_updated_contact_addresses_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_addresses_json.md)
 - [ews_updated_contact_emails_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_emails_json.md)
 - [ews_updated_contact_urls_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_urls_json.md)
 - [deleted_or_updated_text](../../../../../../../functions/crates/lpe-exchange/src/service/ews/fields/deleted_or_updated_text.md)

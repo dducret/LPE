@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_journal_entry_property_tags
-resource: crates/lpe-exchange/src/mapi/tables/columns.rs#L431-L451
+resource: crates/lpe-exchange/src/mapi/tables/columns.rs#L442-L462
 generated:
   by: okf-rs/0.3.0
 relationships:

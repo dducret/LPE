@@ -1393,6 +1393,7 @@ where
             MapiObject::Contact {
                 folder_id,
                 contact_id,
+                ..
             } => {
                 apply_canonical_contact_property_values(
                     store,

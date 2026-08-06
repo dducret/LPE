@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fmt
-resource: crates/lpe-storage/src/mapi_contacts.rs#L98-L100
+resource: crates/lpe-storage/src/mapi_contacts.rs#L125-L127
 visibility: private
 generated:
   by: okf-rs/0.3.0

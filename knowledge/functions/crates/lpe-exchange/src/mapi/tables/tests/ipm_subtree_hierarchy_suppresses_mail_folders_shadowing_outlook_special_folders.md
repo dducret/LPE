@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3612-L3941
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3646-L3975
 visibility: private
 generated:
   by: okf-rs/0.3.0

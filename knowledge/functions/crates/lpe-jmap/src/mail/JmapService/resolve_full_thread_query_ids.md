@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: resolve_full_thread_query_ids
-resource: crates/lpe-jmap/src/mail.rs#L1282-L1305
+resource: crates/lpe-jmap/src/mail.rs#L1288-L1311
 generated:
   by: okf-rs/0.3.0
 relationships:

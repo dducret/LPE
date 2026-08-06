@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: MapiMessage
-resource: crates/lpe-exchange/src/mapi_store.rs#L111-L118
+resource: crates/lpe-exchange/src/mapi_store.rs#L112-L119
 generated:
   by: okf-rs/0.3.0
 ---

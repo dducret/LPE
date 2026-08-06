@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_folder_root_reports_child_folders_for_client_bootstrap
-resource: crates/lpe-exchange/src/tests/ews.rs#L502-L534
+resource: crates/lpe-exchange/src/tests/ews.rs#L819-L851
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: websocket_push_states_include_submission_identity_mail_types
-resource: crates/lpe-jmap/src/tests.rs#L10949-L10988
+resource: crates/lpe-jmap/src/tests.rs#L11437-L11476
 visibility: private
 generated:
   by: okf-rs/0.3.0

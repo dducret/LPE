@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: new
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L451-L457
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L494-L500
 visibility: private
 generated:
   by: okf-rs/0.3.0

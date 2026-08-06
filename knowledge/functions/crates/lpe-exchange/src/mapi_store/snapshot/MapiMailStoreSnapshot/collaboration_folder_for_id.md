@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: collaboration_folder_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L943-L950
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L975-L982
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_item_summary_xml_with_change_key
-resource: crates/lpe-exchange/src/service/ews/tasks.rs#L7-L28
+resource: crates/lpe-exchange/src/service/ews/tasks.rs#L7-L32
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: load_task_list_in_tx
-resource: crates/lpe-storage/src/tasks.rs#L1444-L1479
+resource: crates/lpe-storage/src/tasks.rs#L1490-L1525
 generated:
   by: okf-rs/0.3.0
 relationships:

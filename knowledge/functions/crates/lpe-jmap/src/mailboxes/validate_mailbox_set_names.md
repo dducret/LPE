@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_mailbox_set_names
-resource: crates/lpe-jmap/src/mailboxes.rs#L670-L765
+resource: crates/lpe-jmap/src/mailboxes.rs#L678-L773
 visibility: private
 generated:
   by: okf-rs/0.3.0

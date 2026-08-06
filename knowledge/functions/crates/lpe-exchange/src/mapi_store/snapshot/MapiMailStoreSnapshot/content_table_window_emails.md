@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: content_table_window_emails
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L775-L816
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L807-L848
 generated:
   by: okf-rs/0.3.0
 relationships:

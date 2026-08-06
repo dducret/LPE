@@ -19,6 +19,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value
   - functions/crates/lpe-exchange/src/mapi/rop/fallback_default_specific_property
   - functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property
+  - functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property
   - functions/crates/lpe-exchange/src/mapi/rop/debug/log_get_properties_specific_debug
   - functions/crates/lpe-exchange/src/mapi/rop/debug/format_property_value_shapes_for_debug
   - functions/crates/lpe-exchange/src/mapi/rop/event_properties/serialize_event_object_property
@@ -80,6 +81,7 @@ relationships:
 - [write_mapi_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value.md)
 - [fallback_default_specific_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/fallback_default_specific_property.md)
 - [serialize_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property.md)
+- [serialize_contact_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property.md)
 - [log_get_properties_specific_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/debug/log_get_properties_specific_debug.md)
 - [format_property_value_shapes_for_debug](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/debug/format_property_value_shapes_for_debug.md)
 - [serialize_event_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/event_properties/serialize_event_object_property.md)

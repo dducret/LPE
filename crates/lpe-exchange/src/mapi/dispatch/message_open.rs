@@ -151,6 +151,10 @@ pub(super) fn append_open_message_response(
             MapiObject::Contact {
                 folder_id,
                 contact_id: message_id,
+                transaction: MapiContactTransaction::new(
+                    request.payload.get(8).copied().unwrap_or(0),
+                    snapshot.contact_modseq(contact.canonical_id),
+                ),
             },
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);

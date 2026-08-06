@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: conversation_action_property_value
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1179-L1254
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1202-L1277
 generated:
   by: okf-rs/0.3.0
 relationships:

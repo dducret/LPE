@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_organizer
-resource: crates/lpe-dav/src/parse.rs#L273-L280
+resource: crates/lpe-dav/src/parse.rs#L283-L290
 visibility: private
 generated:
   by: okf-rs/0.3.0

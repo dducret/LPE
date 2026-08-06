@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_mailbox_create
-resource: crates/lpe-jmap/src/mailboxes.rs#L570-L592
+resource: crates/lpe-jmap/src/mailboxes.rs#L578-L600
 visibility: private
 generated:
   by: okf-rs/0.3.0

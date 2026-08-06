@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_contact_source_empty_value
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L200-L212
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L215-L227
 visibility: private
 generated:
   by: okf-rs/0.3.0

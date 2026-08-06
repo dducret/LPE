@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_open_message
-resource: crates/lpe-exchange/src/tests/mod.rs#L15584-L15592
+resource: crates/lpe-exchange/src/tests/mod.rs#L15709-L15717
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -34,6 +34,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_does_not_open_unbacked_quick_step_config
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_create_resolves_named_email_addresses
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_shared_contact_read_only_rights_reject_mutations
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_sequence
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_rejects_nonempty_tombstone_without_canonical_mapping
@@ -82,6 +83,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_reads_empty_associated_config_body_stream
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_get_contents_table_requires_microsoft_folder_handle_without_batch_drift
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tasks/mapi_over_http_shared_task_read_only_rights_reject_mutations
 ---
 
 # Signature
@@ -119,6 +121,7 @@ relationships:
 - [mapi_over_http_does_not_open_unbacked_quick_step_config](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_does_not_open_unbacked_quick_step_config.md)
 - [mapi_over_http_outlook_contact_create_resolves_named_email_addresses](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_create_resolves_named_email_addresses.md)
 - [mapi_over_http_contact_crud_uses_canonical_contacts](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_crud_uses_canonical_contacts.md)
+- [mapi_over_http_shared_contact_read_only_rights_reject_mutations](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_shared_contact_read_only_rights_reject_mutations.md)
 - [mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property.md)
 - [mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_sequence](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_sequence.md)
 - [mapi_over_http_local_freebusy_rejects_nonempty_tombstone_without_canonical_mapping](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/free_busy/mapi_over_http_local_freebusy_rejects_nonempty_tombstone_without_canonical_mapping.md)
@@ -167,3 +170,4 @@ relationships:
 - [mapi_over_http_reads_empty_associated_config_body_stream](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_reads_empty_associated_config_body_stream.md)
 - [mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect.md)
 - [mapi_over_http_get_contents_table_requires_microsoft_folder_handle_without_batch_drift](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tables/mapi_over_http_get_contents_table_requires_microsoft_folder_handle_without_batch_drift.md)
+- [mapi_over_http_shared_task_read_only_rights_reject_mutations](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tasks/mapi_over_http_shared_task_read_only_rights_reject_mutations.md)

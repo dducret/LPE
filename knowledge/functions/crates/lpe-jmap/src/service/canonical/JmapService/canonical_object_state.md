@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: canonical_object_state
-resource: crates/lpe-jmap/src/service/canonical.rs#L419-L479
+resource: crates/lpe-jmap/src/service/canonical.rs#L459-L519
 generated:
   by: okf-rs/0.3.0
 relationships:

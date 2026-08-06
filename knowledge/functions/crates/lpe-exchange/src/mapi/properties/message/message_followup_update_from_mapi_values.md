@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_followup_update_from_mapi_values
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L742-L854
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L765-L877
 generated:
   by: okf-rs/0.3.0
 relationships:

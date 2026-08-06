@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: pdf
-resource: crates/lpe-exchange/src/tests/mod.rs#L4209-L4220
+resource: crates/lpe-exchange/src/tests/mod.rs#L4211-L4222
 visibility: private
 generated:
   by: okf-rs/0.3.0

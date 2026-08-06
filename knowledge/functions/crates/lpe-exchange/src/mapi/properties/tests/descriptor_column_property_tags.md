@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: descriptor_column_property_tags
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5397-L5399
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5534-L5536
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_flag_status
-resource: crates/lpe-exchange/src/mapi/properties/task.rs#L104-L110
+resource: crates/lpe-exchange/src/mapi/properties/task.rs#L141-L147
 visibility: private
 generated:
   by: okf-rs/0.3.0

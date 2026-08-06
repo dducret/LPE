@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_push_listener
-resource: crates/lpe-jmap/src/store.rs#L524-L527
+resource: crates/lpe-jmap/src/store.rs#L532-L535
 visibility: private
 generated:
   by: okf-rs/0.3.0

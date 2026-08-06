@@ -50,13 +50,40 @@ pub struct MapiContactCustomPropertyValue {
     pub property_value: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub struct MapiContactCommitInput {
+    pub principal_account_id: Uuid,
+    pub contact_id: Uuid,
+    pub expected_modseq: i64,
+    pub force_save: bool,
+    pub contact: UpsertClientContactInput,
+    pub custom_property_upserts: Vec<MapiContactCustomPropertyValue>,
+    pub custom_property_deletes: Vec<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapiContactVersion {
+    /// Canonical compare-and-swap token, distinct from the MAPI replica version.
+    pub canonical_modseq: i64,
     /// The 48-bit GLOBCNT. The Exchange adapter projects the wire CN with ReplId 1.
     pub change_number: u64,
     pub change_key: Vec<u8>,
     pub predecessor_change_list: Vec<u8>,
     pub last_modification_time: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct MapiContactCommitResult {
+    pub contact: AccessibleContact,
+    pub version: MapiContactVersion,
+}
+
+#[derive(Debug, Clone)]
+pub enum MapiContactCommitOutcome {
+    Saved(MapiContactCommitResult),
+    ObjectModified,
+    NotFound,
+    AccessDenied,
 }
 
 #[derive(Debug, Clone)]
@@ -248,6 +275,7 @@ impl Storage {
                         contact_book_id,
                         contact_id,
                         &normalized,
+                        false,
                         committed.last_modification_time,
                     )
                     .await?;
@@ -276,6 +304,14 @@ impl Storage {
                     .await?;
                 }
                 let version = MapiContactVersion {
+                    canonical_modseq: fetch_contact_modseq_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        owner_account_id,
+                        contact_book_id,
+                        contact_id,
+                    )
+                    .await?,
                     change_number: committed.identity.change_number,
                     change_key: committed.identity.change_key,
                     predecessor_change_list: committed.identity.predecessor_change_list,
@@ -416,6 +452,7 @@ impl Storage {
             },
         };
         let version = MapiContactVersion {
+            canonical_modseq: modseq,
             change_number: identity.change_number,
             change_key: identity.change_key,
             predecessor_change_list: identity.predecessor_change_list,
@@ -430,6 +467,188 @@ impl Storage {
             version,
             import_disposition: MapiContactImportDisposition::Applied,
         })
+    }
+
+    pub async fn commit_mapi_contact_update(
+        &self,
+        input: MapiContactCommitInput,
+    ) -> Result<MapiContactCommitOutcome> {
+        validate_mapi_contact_commit_input(&input)?;
+        let tenant_id = self
+            .tenant_id_for_account_id(input.principal_account_id)
+            .await?;
+        let mut tx = self.pool().begin().await?;
+        let contact = sqlx::query(
+            r#"
+            SELECT
+                contact.owner_account_id,
+                contact.contact_book_id,
+                contact.modseq,
+                contact.raw_vcard,
+                contact.import_source,
+                contact.source_uid,
+                contact.source_etag,
+                contact.source_payload_json,
+                (
+                    contact.owner_account_id = $3
+                    OR EXISTS (
+                        SELECT 1
+                        FROM contact_book_grants grant_row
+                        WHERE grant_row.tenant_id = contact.tenant_id
+                          AND grant_row.owner_account_id = contact.owner_account_id
+                          AND grant_row.contact_book_id = contact.contact_book_id
+                          AND grant_row.grantee_account_id = $3
+                          AND grant_row.may_write
+                    )
+                ) AS may_write
+            FROM contacts contact
+            WHERE contact.tenant_id = $1
+              AND contact.id = $2
+            FOR UPDATE OF contact
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(input.contact_id)
+        .bind(input.principal_account_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(contact) = contact else {
+            return Ok(MapiContactCommitOutcome::NotFound);
+        };
+        if !contact.get::<bool, _>("may_write") {
+            return Ok(MapiContactCommitOutcome::AccessDenied);
+        }
+
+        let owner_account_id = contact.get::<Uuid, _>("owner_account_id");
+        let contact_book_id = contact.get::<Uuid, _>("contact_book_id");
+        let current_modseq = contact.get::<i64, _>("modseq");
+        if current_modseq != input.expected_modseq && !input.force_save {
+            return Ok(MapiContactCommitOutcome::ObjectModified);
+        }
+        if input.contact.id != Some(input.contact_id) {
+            bail!("MAPI Contact update target does not match the canonical Contact id");
+        }
+
+        let mut effective_input = input.contact;
+        if !effective_input.raw_vcard_is_explicit {
+            effective_input.raw_vcard = contact.get("raw_vcard");
+        }
+        if !effective_input.source_is_explicit {
+            effective_input.source = ContactSourceFields {
+                import_source: contact.get("import_source"),
+                source_uid: contact.get("source_uid"),
+                source_etag: contact.get("source_etag"),
+                source_payload_json: contact.get("source_payload_json"),
+            };
+        }
+        let normalized = NormalizedContact::from_input(&effective_input)?;
+        let last_modification_time = current_filetime_in_tx(&mut tx).await?;
+        update_contact_in_tx(
+            &mut tx,
+            &tenant_id,
+            owner_account_id,
+            contact_book_id,
+            input.contact_id,
+            &normalized,
+            true,
+            last_modification_time,
+        )
+        .await?;
+        upsert_custom_properties_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.principal_account_id,
+            input.contact_id,
+            &input.custom_property_upserts,
+        )
+        .await?;
+        delete_custom_properties_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.principal_account_id,
+            input.contact_id,
+            &input.custom_property_deletes,
+        )
+        .await?;
+
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                owner_account_id,
+                CanonicalChangeCategory::Contacts.as_str(),
+            )
+            .await?;
+        set_created_contact_modseq_in_tx(
+            &mut tx,
+            &tenant_id,
+            owner_account_id,
+            contact_book_id,
+            input.contact_id,
+            modseq,
+        )
+        .await?;
+        self.rotate_active_mapi_contact_identities_in_tx(&mut tx, &tenant_id, input.contact_id)
+            .await?;
+        let identity = fetch_principal_contact_identity_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.principal_account_id,
+            input.contact_id,
+        )
+        .await?;
+        let affected_principals = contact_affected_principals_in_tx(
+            &mut tx,
+            &tenant_id,
+            owner_account_id,
+            contact_book_id,
+        )
+        .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner_account_id),
+            None,
+            "contact",
+            input.contact_id,
+            "updated",
+            modseq,
+            &affected_principals,
+            serde_json::json!({
+                "collectionId": contact_book_id,
+                "objectUid": input.contact_id.to_string(),
+                "created": false,
+                "customPropertiesChanged": !input.custom_property_upserts.is_empty()
+                    || !input.custom_property_deletes.is_empty(),
+                "mapiChangeNumber": identity.change_number,
+            }),
+        )
+        .await?;
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Contacts,
+            owner_account_id,
+        )
+        .await?;
+        tx.commit().await?;
+
+        let contact = self
+            .fetch_accessible_contacts_by_ids(input.principal_account_id, &[input.contact_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("MAPI Contact not visible after commit"))?;
+        Ok(MapiContactCommitOutcome::Saved(MapiContactCommitResult {
+            contact,
+            version: MapiContactVersion {
+                canonical_modseq: modseq,
+                change_number: identity.change_number,
+                change_key: identity.change_key,
+                predecessor_change_list: identity.predecessor_change_list,
+                last_modification_time,
+            },
+        }))
     }
 }
 
@@ -528,6 +747,32 @@ fn validate_custom_properties(values: &[MapiContactCustomPropertyValue]) -> Resu
         }
         if !tags.insert(value.property_tag) {
             bail!("MAPI custom property upserts contain a duplicate property tag");
+        }
+    }
+    Ok(())
+}
+
+fn validate_mapi_contact_commit_input(input: &MapiContactCommitInput) -> Result<()> {
+    if input.expected_modseq <= 0 {
+        bail!("MAPI Contact expected modseq must be positive");
+    }
+    if input.contact.id != Some(input.contact_id) {
+        bail!("MAPI Contact update target does not match the canonical Contact id");
+    }
+    NormalizedContact::from_input(&input.contact)?;
+    validate_custom_properties(&input.custom_property_upserts)?;
+
+    let mut delete_tags = HashSet::new();
+    for tag in &input.custom_property_deletes {
+        if !delete_tags.insert(*tag) {
+            bail!("MAPI custom property deletes contain a duplicate property tag");
+        }
+        if input
+            .custom_property_upserts
+            .iter()
+            .any(|value| value.property_tag == *tag)
+        {
+            bail!("MAPI custom property tag cannot be set and deleted in the same commit");
         }
     }
     Ok(())
@@ -1216,6 +1461,7 @@ async fn update_contact_in_tx(
     contact_book_id: Uuid,
     contact_id: Uuid,
     contact: &NormalizedContact,
+    preserve_import_source: bool,
     last_modification_time: u64,
 ) -> Result<()> {
     let filetime = i64::try_from(last_modification_time)
@@ -1242,13 +1488,13 @@ async fn update_contact_in_tx(
             urls_json = $21,
             notes = $22,
             raw_vcard = $23,
-            import_source = 'mapi',
-            source_uid = $24,
-            source_etag = $25,
-            source_payload_json = $26,
+            import_source = CASE WHEN $24 THEN import_source ELSE 'mapi' END,
+            source_uid = $25,
+            source_etag = $26,
+            source_payload_json = $27,
             updated_at = TIMESTAMPTZ '1601-01-01 00:00:00+00'
-                + ($27 / 10000000) * INTERVAL '1 second'
-                + (($27 / 10) % 1000000) * INTERVAL '1 microsecond'
+                + ($28 / 10000000) * INTERVAL '1 second'
+                + (($28 / 10) % 1000000) * INTERVAL '1 microsecond'
         WHERE tenant_id = $1
           AND owner_account_id = $2
           AND contact_book_id = $3
@@ -1278,6 +1524,7 @@ async fn update_contact_in_tx(
     .bind(&contact.urls_json)
     .bind(&contact.notes)
     .bind(contact.raw_vcard.as_deref())
+    .bind(preserve_import_source)
     .bind(contact.source_uid.as_deref())
     .bind(contact.source_etag.as_deref())
     .bind(&contact.source_payload_json)
@@ -1352,6 +1599,109 @@ async fn upsert_custom_properties_in_tx(
         .await?;
     }
     Ok(())
+}
+
+async fn delete_custom_properties_in_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tenant_id: &Uuid,
+    principal_account_id: Uuid,
+    contact_id: Uuid,
+    property_tags: &[u32],
+) -> Result<()> {
+    if property_tags.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        r#"
+        DELETE FROM mapi_custom_property_values
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'contact'
+          AND canonical_id = $3
+          AND property_tag = ANY($4)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(principal_account_id)
+    .bind(contact_id)
+    .bind(
+        property_tags
+            .iter()
+            .map(|tag| i64::from(*tag))
+            .collect::<Vec<_>>(),
+    )
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn fetch_contact_modseq_in_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tenant_id: &Uuid,
+    owner_account_id: Uuid,
+    contact_book_id: Uuid,
+    contact_id: Uuid,
+) -> Result<i64> {
+    sqlx::query_scalar(
+        r#"
+        SELECT modseq
+        FROM contacts
+        WHERE tenant_id = $1
+          AND owner_account_id = $2
+          AND contact_book_id = $3
+          AND id = $4
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(owner_account_id)
+    .bind(contact_book_id)
+    .bind(contact_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(Into::into)
+}
+
+async fn fetch_principal_contact_identity_in_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    tenant_id: &Uuid,
+    principal_account_id: Uuid,
+    contact_id: Uuid,
+) -> Result<AllocatedContactIdentity> {
+    let row = sqlx::query(
+        r#"
+        SELECT
+            mapi_object_id,
+            mapi_change_number,
+            change_key,
+            predecessor_change_list
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'contact'
+          AND canonical_id = $3
+          AND deleted_at IS NULL
+        FOR SHARE
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(principal_account_id)
+    .bind(contact_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| anyhow!("MAPI Contact identity is missing for the principal"))?;
+    let object_id = u64::try_from(row.get::<i64, _>("mapi_object_id"))
+        .map_err(|_| anyhow!("stored MAPI Contact object id is invalid"))?;
+    let change_number = u64::try_from(row.get::<i64, _>("mapi_change_number"))
+        .map_err(|_| anyhow!("stored MAPI Contact change number is invalid"))?;
+    if object_id == 0 || change_number == 0 {
+        bail!("stored MAPI Contact identity is invalid");
+    }
+    Ok(AllocatedContactIdentity {
+        object_id,
+        change_number,
+        change_key: row.get("change_key"),
+        predecessor_change_list: row.get("predecessor_change_list"),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

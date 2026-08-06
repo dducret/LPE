@@ -2,9 +2,10 @@ use std::{env, str::FromStr, sync::OnceLock, time::Duration};
 
 use anyhow::{Context, Result};
 use lpe_storage::{
-    CanonicalChangeCategory, ContactNameFields, ContactSourceFields, MapiContactCreateInput,
-    MapiContactCustomPropertyValue, MapiContactImportDisposition, MapiContactImportObjectDeleted,
-    MapiContactImportedIdentity, Storage, UpsertClientContactInput,
+    CanonicalChangeCategory, ContactNameFields, ContactSourceFields, MapiContactCommitInput,
+    MapiContactCommitOutcome, MapiContactCreateInput, MapiContactCustomPropertyValue,
+    MapiContactImportDisposition, MapiContactImportObjectDeleted, MapiContactImportedIdentity,
+    Storage, UpsertClientContactInput,
 };
 use serde_json::json;
 use sqlx::{
@@ -690,6 +691,104 @@ async fn mapi_contact_create_is_atomic_and_preserves_reserved_import_identity() 
     );
     assert!(online.version.last_modification_time > IMPORTED_LAST_MODIFICATION_TIME);
     assert_eq!(online.version.last_modification_time % 10, 0);
+
+    fixture.cleanup().await
+}
+
+#[tokio::test]
+async fn mapi_contact_commit_is_atomic_and_rejects_a_stale_modseq() -> Result<()> {
+    let _guard = database_test_lock().lock().await;
+    let Some(fixture) = contact_fixture().await? else {
+        return Ok(());
+    };
+    let contact_id = Uuid::new_v4();
+    let created = fixture
+        .storage
+        .create_mapi_contact(create_input(fixture.account_id, contact_id, None))
+        .await?;
+
+    let mut updated_input = contact_input(fixture.account_id, contact_id, "René mis à jour");
+    updated_input.email = "rene.updated@example.test".to_string();
+    updated_input.emails_json = Some(json!([{
+        "email": "rene.updated@example.test",
+        "label": "work",
+        "isDefault": true
+    }]));
+    let saved = fixture
+        .storage
+        .commit_mapi_contact_update(MapiContactCommitInput {
+            principal_account_id: fixture.account_id,
+            contact_id,
+            expected_modseq: created.version.canonical_modseq,
+            force_save: false,
+            contact: updated_input,
+            custom_property_upserts: vec![MapiContactCustomPropertyValue {
+                property_tag: 0x8002_001F,
+                property_type: 0x001F,
+                property_value: "nouvelle catégorie".as_bytes().to_vec(),
+            }],
+            custom_property_deletes: vec![0x8001_001F],
+        })
+        .await?;
+    let MapiContactCommitOutcome::Saved(saved) = saved else {
+        panic!("the current MAPI Contact commit must save");
+    };
+    assert_eq!(saved.contact.name, "René mis à jour");
+    assert_eq!(saved.contact.email, "rene.updated@example.test");
+    assert!(saved.version.canonical_modseq > created.version.canonical_modseq);
+    assert!(saved.version.change_number > created.version.change_number);
+    assert_ne!(saved.version.change_key, created.version.change_key);
+
+    let stale = fixture
+        .storage
+        .commit_mapi_contact_update(MapiContactCommitInput {
+            principal_account_id: fixture.account_id,
+            contact_id,
+            expected_modseq: created.version.canonical_modseq,
+            force_save: false,
+            contact: contact_input(fixture.account_id, contact_id, "Écrasement interdit"),
+            custom_property_upserts: Vec::new(),
+            custom_property_deletes: Vec::new(),
+        })
+        .await?;
+    assert!(matches!(stale, MapiContactCommitOutcome::ObjectModified));
+    let persisted_name = sqlx::query_scalar::<_, String>(
+        "SELECT display_name FROM contacts WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(contact_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(persisted_name, "René mis à jour");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mapi_custom_property_values \
+             WHERE canonical_id = $1 AND property_tag = $2",
+        )
+        .bind(contact_id)
+        .bind(i64::from(0x8001_001Fu32))
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        0
+    );
+
+    let forced = fixture
+        .storage
+        .commit_mapi_contact_update(MapiContactCommitInput {
+            principal_account_id: fixture.account_id,
+            contact_id,
+            expected_modseq: created.version.canonical_modseq,
+            force_save: true,
+            contact: contact_input(fixture.account_id, contact_id, "Écrasement forcé"),
+            custom_property_upserts: Vec::new(),
+            custom_property_deletes: Vec::new(),
+        })
+        .await?;
+    let MapiContactCommitOutcome::Saved(forced) = forced else {
+        panic!("ForceSave must bypass only the stale modseq check");
+    };
+    assert_eq!(forced.contact.name, "Écrasement forcé");
+    assert!(forced.version.canonical_modseq > saved.version.canonical_modseq);
 
     fixture.cleanup().await
 }

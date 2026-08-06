@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_message_id
-resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L407-L416
+resource: crates/lpe-exchange/src/mapi/tables/sorting.rs#L433-L442
 generated:
   by: okf-rs/0.3.0
 relationships:

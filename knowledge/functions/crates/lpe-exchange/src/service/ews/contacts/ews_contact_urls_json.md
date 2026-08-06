@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_contact_urls_json
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L492-L507
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L552-L567
 visibility: private
 generated:
   by: okf-rs/0.3.0

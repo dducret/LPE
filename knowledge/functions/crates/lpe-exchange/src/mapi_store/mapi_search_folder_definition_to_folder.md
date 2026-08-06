@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_search_folder_definition_to_folder
-resource: crates/lpe-exchange/src/mapi_store.rs#L351-L374
+resource: crates/lpe-exchange/src/mapi_store.rs#L352-L375
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_is_unsupported_for_object
-resource: crates/lpe-exchange/src/mapi/rop.rs#L836-L856
+resource: crates/lpe-exchange/src/mapi/rop.rs#L854-L874
 generated:
   by: okf-rs/0.3.0
 relationships:

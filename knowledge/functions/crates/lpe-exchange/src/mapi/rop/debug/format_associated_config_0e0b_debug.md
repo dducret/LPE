@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_associated_config_0e0b_debug
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L851-L898
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L857-L904
 generated:
   by: okf-rs/0.3.0
 relationships:

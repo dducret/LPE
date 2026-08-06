@@ -11,6 +11,9 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/delete_associated_config_properties
   - functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/set_associated_config_properties
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_values
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/apply_contact_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/delete_conversation_action_properties
   - functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/stage_virtual_conversation_action_property_delete
   - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/apply_mapi_property_values_to_map
@@ -68,6 +71,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/attachments/attachment_property_value
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version
   - functions/crates/lpe-exchange/src/mapi/properties/contact/contact_property_value_with_identity
+  - functions/crates/lpe-exchange/src/mapi/properties/contact/contact_input_from_mapi_with_deletions
   - functions/crates/lpe-exchange/src/mapi/properties/folder/folder_local_commit_time_max_property_value
   - functions/crates/lpe-exchange/src/mapi/properties/folder/special_folder_identification_property_value
   - functions/crates/lpe-exchange/src/mapi/properties/message/email_property_value
@@ -87,6 +91,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/modeled_zero_or_default_property
   - functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property
   - functions/crates/lpe-exchange/src/mapi/rop/serialize_session_folder_row
+  - functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property
   - functions/crates/lpe-exchange/src/mapi/rop/debug/format_common_view_descriptor_response_values
   - functions/crates/lpe-exchange/src/mapi/rop/debug/format_default_view_entry_id_decoding
   - functions/crates/lpe-exchange/src/mapi/rop/debug/format_folder_type_getprops_contract
@@ -145,6 +150,9 @@ relationships:
 
 - [delete_associated_config_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/delete_associated_config_properties.md)
 - [set_associated_config_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/set_associated_config_properties.md)
+- [stage_contact_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_values.md)
+- [stage_contact_property_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions.md)
+- [apply_contact_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/apply_contact_property_values.md)
 - [delete_conversation_action_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/delete_conversation_action_properties.md)
 - [stage_virtual_conversation_action_property_delete](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/stage_virtual_conversation_action_property_delete.md)
 - [apply_mapi_property_values_to_map](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/apply_mapi_property_values_to_map.md)
@@ -202,6 +210,7 @@ relationships:
 - [attachment_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/attachments/attachment_property_value.md)
 - [event_property_value_with_optional_version](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version.md)
 - [contact_property_value_with_identity](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/contact_property_value_with_identity.md)
+- [contact_input_from_mapi_with_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/contact_input_from_mapi_with_deletions.md)
 - [folder_local_commit_time_max_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/folder/folder_local_commit_time_max_property_value.md)
 - [special_folder_identification_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/folder/special_folder_identification_property_value.md)
 - [email_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/email_property_value.md)
@@ -221,6 +230,7 @@ relationships:
 - [modeled_zero_or_default_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/modeled_zero_or_default_property.md)
 - [serialize_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property.md)
 - [serialize_session_folder_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_session_folder_row.md)
+- [serialize_contact_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property.md)
 - [format_common_view_descriptor_response_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/debug/format_common_view_descriptor_response_values.md)
 - [format_default_view_entry_id_decoding](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/debug/format_default_view_entry_id_decoding.md)
 - [format_folder_type_getprops_contract](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/debug/format_folder_type_getprops_contract.md)

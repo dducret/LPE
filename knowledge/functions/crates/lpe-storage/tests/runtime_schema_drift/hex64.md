@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hex64
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L674-L676
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L684-L686
 visibility: private
 generated:
   by: okf-rs/0.3.0

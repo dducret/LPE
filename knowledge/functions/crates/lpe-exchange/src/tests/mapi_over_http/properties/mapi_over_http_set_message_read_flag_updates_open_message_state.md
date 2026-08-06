@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_message_read_flag_updates_open_message_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L3596-L3665
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L3598-L3667
 visibility: private
 generated:
   by: okf-rs/0.3.0

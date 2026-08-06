@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_create_contact_input
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L121-L180
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L124-L186
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -13,8 +13,11 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/xml/attribute_value
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_emails_json
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_phones_json
+  - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_addresses_json
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_urls_json
   called_by:
+  - functions/crates/lpe-exchange/src/service/ews/contacts/create_contact_requires_name_and_primary_email
+  - functions/crates/lpe-exchange/src/service/ews/contacts/physical_addresses_round_trip_and_targeted_update_preserves_other_rows
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/create_item
 ---
 
@@ -31,8 +34,11 @@ relationships:
 - [attribute_value](../../../../../../../functions/crates/lpe-exchange/src/service/ews/xml/attribute_value.md)
 - [ews_contact_emails_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_emails_json.md)
 - [ews_contact_phones_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_phones_json.md)
+- [ews_contact_addresses_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_addresses_json.md)
 - [ews_contact_urls_json](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_urls_json.md)
 
 # Called by
 
+- [create_contact_requires_name_and_primary_email](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/create_contact_requires_name_and_primary_email.md)
+- [physical_addresses_round_trip_and_targeted_update_preserves_other_rows](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/physical_addresses_round_trip_and_targeted_update_preserves_other_rows.md)
 - [create_item](../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/create_item.md)

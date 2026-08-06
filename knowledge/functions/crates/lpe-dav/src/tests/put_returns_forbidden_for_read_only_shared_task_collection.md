@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: put_returns_forbidden_for_read_only_shared_task_collection
-resource: crates/lpe-dav/src/tests.rs#L1303-L1324
+resource: crates/lpe-dav/src/tests.rs#L1317-L1338
 visibility: private
 generated:
   by: okf-rs/0.3.0

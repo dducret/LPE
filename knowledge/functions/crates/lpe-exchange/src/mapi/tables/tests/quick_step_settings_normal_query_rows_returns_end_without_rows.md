@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: quick_step_settings_normal_query_rows_returns_end_without_rows
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L975-L1024
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1009-L1058
 visibility: private
 generated:
   by: okf-rs/0.3.0

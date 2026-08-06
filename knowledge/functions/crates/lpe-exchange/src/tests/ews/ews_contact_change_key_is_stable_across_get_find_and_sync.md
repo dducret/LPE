@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_contact_change_key_is_stable_across_get_find_and_sync
-resource: crates/lpe-exchange/src/tests/ews.rs#L6925-L7053
+resource: crates/lpe-exchange/src/tests/ews.rs#L7279-L7407
 visibility: private
 generated:
   by: okf-rs/0.3.0

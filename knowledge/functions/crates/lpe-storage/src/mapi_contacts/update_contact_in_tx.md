@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_contact_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1212-L1291
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1457-L1538
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -11,11 +11,12 @@ relationships:
   - functions/crates/lpe-activesync/src/tests/query
   called_by:
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update
 ---
 
 # Signature
 
-`async fn update_contact_in_tx( tx: &mut sqlx::Transaction<'_, Postgres>, tenant_id: &Uuid, owner_account_id: Uuid, contact_book_id: Uuid, contact_id: Uuid, contact: &NormalizedContact, last_modification_time: u64, ) -> Result<()>`
+`async fn update_contact_in_tx( tx: &mut sqlx::Transaction<'_, Postgres>, tenant_id: &Uuid, owner_account_id: Uuid, contact_book_id: Uuid, contact_id: Uuid, contact: &NormalizedContact, preserve_import_source: bool, last_modification_time: u64, ) -> Result<()>`
 
 # Calls
 
@@ -25,3 +26,4 @@ relationships:
 # Called by
 
 - [create_mapi_contact](../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact.md)
+- [commit_mapi_contact_update](../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update.md)

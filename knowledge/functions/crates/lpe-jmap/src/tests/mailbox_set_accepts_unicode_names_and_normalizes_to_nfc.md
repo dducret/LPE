@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_set_accepts_unicode_names_and_normalizes_to_nfc
-resource: crates/lpe-jmap/src/tests.rs#L6119-L6169
+resource: crates/lpe-jmap/src/tests.rs#L6331-L6381
 visibility: private
 generated:
   by: okf-rs/0.3.0

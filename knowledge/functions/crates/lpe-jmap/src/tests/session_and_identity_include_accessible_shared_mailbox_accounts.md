@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_and_identity_include_accessible_shared_mailbox_accounts
-resource: crates/lpe-jmap/src/tests.rs#L2517-L2620
+resource: crates/lpe-jmap/src/tests.rs#L2594-L2697
 visibility: private
 generated:
   by: okf-rs/0.3.0

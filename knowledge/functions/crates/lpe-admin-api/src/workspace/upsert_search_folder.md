@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upsert_search_folder
-resource: crates/lpe-admin-api/src/workspace.rs#L1109-L1117
+resource: crates/lpe-admin-api/src/workspace.rs#L1111-L1119
 generated:
   by: okf-rs/0.3.0
 relationships:

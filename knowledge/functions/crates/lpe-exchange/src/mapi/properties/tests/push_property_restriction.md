@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_property_restriction
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2648-L2659
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2697-L2708
 visibility: private
 generated:
   by: okf-rs/0.3.0

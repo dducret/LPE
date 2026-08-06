@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: rop
-resource: crates/lpe-exchange/src/mapi/rop.rs#L1-L1623
+resource: crates/lpe-exchange/src/mapi/rop.rs#L1-L1634
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -14,6 +14,7 @@ relationships:
   - external/super
   - external/pub-in-crate-mapi-use-attachments
   - external/pub-in-crate-mapi-use-buffer
+  - external/pub-in-crate-mapi-use-contact-properties
   - external/pub-in-crate-mapi-use-debug
   - external/pub-in-crate-mapi-use-errors
   - external/pub-in-crate-mapi-use-event-properties
@@ -70,6 +71,7 @@ relationships:
 - `super::*`
 - `pub(in crate::mapi) use attachments::*`
 - `pub(in crate::mapi) use buffer::*`
+- `pub(in crate::mapi) use contact_properties::*`
 - `pub(in crate::mapi) use debug::*`
 - `pub(in crate::mapi) use errors::*`
 - `pub(in crate::mapi) use event_properties::*`

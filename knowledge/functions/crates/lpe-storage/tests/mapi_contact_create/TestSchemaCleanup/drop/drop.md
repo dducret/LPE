@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: drop
-resource: crates/lpe-storage/tests/mapi_contact_create.rs#L56-L104
+resource: crates/lpe-storage/tests/mapi_contact_create.rs#L57-L105
 visibility: private
 generated:
   by: okf-rs/0.3.0

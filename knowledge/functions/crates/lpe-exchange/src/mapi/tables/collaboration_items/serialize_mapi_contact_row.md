@@ -13,7 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_property_default
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_contact_query_row_summary
-  - functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property
+  - functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property
   - functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response
   - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner
 ---
@@ -33,6 +33,6 @@ relationships:
 # Called by
 
 - [format_contact_query_row_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_contact_query_row_summary.md)
-- [serialize_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property.md)
+- [serialize_contact_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property.md)
 - [rop_find_row_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response.md)
 - [rop_query_rows_response_inner](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner.md)

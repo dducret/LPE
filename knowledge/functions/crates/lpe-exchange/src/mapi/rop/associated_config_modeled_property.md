@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_modeled_property
-resource: crates/lpe-exchange/src/mapi/rop.rs#L732-L754
+resource: crates/lpe-exchange/src/mapi/rop.rs#L750-L772
 visibility: private
 generated:
   by: okf-rs/0.3.0

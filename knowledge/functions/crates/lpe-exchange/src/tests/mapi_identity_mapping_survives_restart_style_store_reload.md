@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_identity_mapping_survives_restart_style_store_reload
-resource: crates/lpe-exchange/src/tests/mod.rs#L633-L670
+resource: crates/lpe-exchange/src/tests/mod.rs#L634-L671
 visibility: private
 generated:
   by: okf-rs/0.3.0

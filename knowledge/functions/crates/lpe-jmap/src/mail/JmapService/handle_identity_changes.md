@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: handle_identity_changes
-resource: crates/lpe-jmap/src/mail.rs#L947-L970
+resource: crates/lpe-jmap/src/mail.rs#L953-L976
 generated:
   by: okf-rs/0.3.0
 relationships:

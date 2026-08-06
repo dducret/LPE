@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stage_delegate_freebusy_property_values
-resource: crates/lpe-exchange/src/mapi/dispatch/property_mutations.rs#L408-L444
+resource: crates/lpe-exchange/src/mapi/dispatch/property_mutations.rs#L410-L446
 visibility: private
 generated:
   by: okf-rs/0.3.0

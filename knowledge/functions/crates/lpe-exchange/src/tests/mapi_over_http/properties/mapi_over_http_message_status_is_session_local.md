@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_message_status_is_session_local
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1472-L1543
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1474-L1545
 visibility: private
 generated:
   by: okf-rs/0.3.0

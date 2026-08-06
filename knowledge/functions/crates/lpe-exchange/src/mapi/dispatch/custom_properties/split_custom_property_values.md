@@ -8,6 +8,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/is_custom_property_tag
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/staged_contact_commit_input
   - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/split_object_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/validate_pending_event_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/validate_staged_event_property_values
@@ -26,6 +27,7 @@ relationships:
 
 # Called by
 
+- [staged_contact_commit_input](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/staged_contact_commit_input.md)
 - [split_object_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/split_object_property_values.md)
 - [validate_pending_event_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/validate_pending_event_property_values.md)
 - [validate_staged_event_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/validate_staged_event_property_values.md)

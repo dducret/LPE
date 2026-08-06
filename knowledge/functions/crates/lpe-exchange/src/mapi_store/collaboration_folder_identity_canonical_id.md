@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_folder_identity_canonical_id
-resource: crates/lpe-exchange/src/mapi_store.rs#L1013-L1018
+resource: crates/lpe-exchange/src/mapi_store.rs#L1020-L1025
 generated:
   by: okf-rs/0.3.0
 relationships:

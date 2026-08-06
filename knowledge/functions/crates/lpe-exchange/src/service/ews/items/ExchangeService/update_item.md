@@ -1,25 +1,27 @@
 ---
 type: Rust Method
 title: update_item
-resource: crates/lpe-exchange/src/service/ews/items.rs#L280-L520
+resource: crates/lpe-exchange/src/service/ews/items.rs#L280-L550
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/validate_mutating_item_change_keys
-  - functions/crates/lpe-exchange/src/service/ews/request_ids/requested_item_references
+  - functions/crates/lpe-exchange/src/service/ews/items/requested_update_item_changes
   - functions/crates/lpe-exchange/src/service/ews/responses/operation_error_response
-  - functions/crates/lpe-exchange/src/service/ews/mail/parse_update_message_flags
   - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/contact_change_keys
+  - functions/crates/lpe-exchange/src/service/ews/items/validate_required_item_change_key
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/change_key_for
+  - functions/crates/lpe-exchange/src/service/ews/items/update_item_change_content
+  - functions/crates/lpe-exchange/src/service/ews/sync_state/event_change_keys
+  - functions/crates/lpe-exchange/src/service/ews/calendar/parse_update_event_input
+  - functions/crates/lpe-exchange/src/service/ews/mail/parse_update_message_flags
   - functions/crates/lpe-exchange/src/service/ews/items/validate_supplied_item_change_key
   - functions/crates/lpe-exchange/src/service/ews/mail/message_change_key
   - functions/crates/lpe-exchange/src/service/ews/mail/message_item_xml
-  - functions/crates/lpe-exchange/src/service/ews/sync_state/contact_change_keys
-  - functions/crates/lpe-exchange/src/service/ews/sync_state/change_key_for
   - functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input
   - functions/crates/lpe-exchange/src/service/ews/contacts/contact_item_xml_with_change_key
-  - functions/crates/lpe-exchange/src/service/ews/sync_state/event_change_keys
-  - functions/crates/lpe-exchange/src/service/ews/calendar/parse_update_event_input
   - functions/crates/lpe-exchange/src/service/ews/calendar/calendar_item_xml_with_change_key
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_by_ids
   - functions/crates/lpe-exchange/src/service/ews/sync_state/task_change_keys
@@ -42,19 +44,21 @@ relationships:
 # Calls
 
 - [validate_mutating_item_change_keys](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/validate_mutating_item_change_keys.md)
-- [requested_item_references](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/request_ids/requested_item_references.md)
+- [requested_update_item_changes](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/requested_update_item_changes.md)
 - [operation_error_response](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/responses/operation_error_response.md)
-- [parse_update_message_flags](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail/parse_update_message_flags.md)
 - [next](../../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [contact_change_keys](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/contact_change_keys.md)
+- [validate_required_item_change_key](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/validate_required_item_change_key.md)
+- [change_key_for](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/change_key_for.md)
+- [update_item_change_content](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/update_item_change_content.md)
+- [event_change_keys](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/event_change_keys.md)
+- [parse_update_event_input](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/parse_update_event_input.md)
+- [parse_update_message_flags](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail/parse_update_message_flags.md)
 - [validate_supplied_item_change_key](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/items/validate_supplied_item_change_key.md)
 - [message_change_key](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail/message_change_key.md)
 - [message_item_xml](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/mail/message_item_xml.md)
-- [contact_change_keys](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/contact_change_keys.md)
-- [change_key_for](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/change_key_for.md)
 - [parse_update_contact_input](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/parse_update_contact_input.md)
 - [contact_item_xml_with_change_key](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/contact_item_xml_with_change_key.md)
-- [event_change_keys](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/event_change_keys.md)
-- [parse_update_event_input](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/parse_update_event_input.md)
 - [calendar_item_xml_with_change_key](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/calendar_item_xml_with_change_key.md)
 - [fetch_accessible_tasks_by_ids](../../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_accessible_tasks_by_ids.md)
 - [task_change_keys](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/task_change_keys.md)

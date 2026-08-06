@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_folder_set_properties_rejects_protocol_local_values
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5751-L5818
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5753-L5820
 visibility: private
 generated:
   by: okf-rs/0.3.0

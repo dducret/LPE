@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: cleanup
-resource: crates/lpe-exchange/src/tests/mod.rs#L165-L176
+resource: crates/lpe-exchange/src/tests/mod.rs#L166-L177
 visibility: private
 generated:
   by: okf-rs/0.3.0

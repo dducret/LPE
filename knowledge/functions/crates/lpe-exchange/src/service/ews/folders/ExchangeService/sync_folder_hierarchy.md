@@ -1,14 +1,14 @@
 ---
 type: Rust Method
 title: sync_folder_hierarchy
-resource: crates/lpe-exchange/src/service/ews/folders.rs#L83-L199
+resource: crates/lpe-exchange/src/service/ews/folders.rs#L95-L214
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   - functions/crates/lpe-exchange/src/service/ews/folders/mailbox_folder_xml
-  - functions/crates/lpe-exchange/src/service/ews/folders/folder_xml
+  - functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/collection_folder_xml
   - functions/crates/lpe-exchange/src/service/ews/folders/public_folder_xml
   - functions/crates/lpe-exchange/src/service/ews/sync_state/requested_sync_state
   - functions/crates/lpe-exchange/src/service/ews/folders/hierarchy_sync_state_items
@@ -26,7 +26,7 @@ relationships:
 
 - [push](../../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
 - [mailbox_folder_xml](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/mailbox_folder_xml.md)
-- [folder_xml](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/folder_xml.md)
+- [collection_folder_xml](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/ExchangeService/collection_folder_xml.md)
 - [public_folder_xml](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/public_folder_xml.md)
 - [requested_sync_state](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/sync_state/requested_sync_state.md)
 - [hierarchy_sync_state_items](../../../../../../../../functions/crates/lpe-exchange/src/service/ews/folders/hierarchy_sync_state_items.md)

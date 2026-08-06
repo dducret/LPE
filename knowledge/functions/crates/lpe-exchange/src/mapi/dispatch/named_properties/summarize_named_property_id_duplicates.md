@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: summarize_named_property_id_duplicates
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L673-L724
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L677-L728
 generated:
   by: okf-rs/0.3.0
 relationships:

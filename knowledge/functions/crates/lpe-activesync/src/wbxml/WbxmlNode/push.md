@@ -642,6 +642,7 @@ relationships:
   - functions/crates/lpe-exchange/src/service/ews/calendar/push_interval_part
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_email_entries_xml
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_phone_entries_xml
+  - functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_addresses_json
   - functions/crates/lpe-exchange/src/service/ews/contacts/push_json_contact_value
   - functions/crates/lpe-exchange/src/service/ews/delegation/parse_ews_delegate_users
   - functions/crates/lpe-exchange/src/service/ews/directory/expand_dl_response
@@ -1191,6 +1192,7 @@ relationships:
   - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/save_jmap_upload_blob
   - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/save_draft_message
   - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/submit_draft_message
+  - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/copy_jmap_email_between_accounts
   - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/import_jmap_email
   - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/create_accessible_contact
   - functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/create_accessible_calendar_collection
@@ -1929,6 +1931,7 @@ relationships:
 - [push_interval_part](../../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/push_interval_part.md)
 - [ews_contact_email_entries_xml](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_email_entries_xml.md)
 - [ews_contact_phone_entries_xml](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_phone_entries_xml.md)
+- [ews_updated_contact_addresses_json](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_updated_contact_addresses_json.md)
 - [push_json_contact_value](../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/push_json_contact_value.md)
 - [parse_ews_delegate_users](../../../../../../functions/crates/lpe-exchange/src/service/ews/delegation/parse_ews_delegate_users.md)
 - [expand_dl_response](../../../../../../functions/crates/lpe-exchange/src/service/ews/directory/expand_dl_response.md)
@@ -2478,6 +2481,7 @@ relationships:
 - [save_jmap_upload_blob](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/save_jmap_upload_blob.md)
 - [save_draft_message](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/save_draft_message.md)
 - [submit_draft_message](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/submit_draft_message.md)
+- [copy_jmap_email_between_accounts](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/copy_jmap_email_between_accounts.md)
 - [import_jmap_email](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/import_jmap_email.md)
 - [create_accessible_contact](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/create_accessible_contact.md)
 - [create_accessible_calendar_collection](../../../../../../functions/crates/lpe-jmap/src/tests/FakeStore/jmapstore/create_accessible_calendar_collection.md)

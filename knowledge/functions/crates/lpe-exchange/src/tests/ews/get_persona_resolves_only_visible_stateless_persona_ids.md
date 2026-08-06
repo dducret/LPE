@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_persona_resolves_only_visible_stateless_persona_ids
-resource: crates/lpe-exchange/src/tests/ews.rs#L1314-L1367
+resource: crates/lpe-exchange/src/tests/ews.rs#L1631-L1684
 visibility: private
 generated:
   by: okf-rs/0.3.0

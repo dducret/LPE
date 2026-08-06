@@ -1,13 +1,14 @@
 ---
 type: Rust Function
 title: contact_item_xml_with_change_key
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L25-L90
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L25-L93
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_email_entries_xml
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_phone_entries_xml
+  - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_physical_addresses_xml
   - functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_url_by_label
   called_by:
   - functions/crates/lpe-exchange/src/service/ews/items/ExchangeService/get_item
@@ -23,6 +24,7 @@ relationships:
 
 - [ews_contact_email_entries_xml](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_email_entries_xml.md)
 - [ews_contact_phone_entries_xml](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_phone_entries_xml.md)
+- [ews_contact_physical_addresses_xml](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_physical_addresses_xml.md)
 - [ews_contact_url_by_label](../../../../../../../functions/crates/lpe-exchange/src/service/ews/contacts/ews_contact_url_by_label.md)
 
 # Called by

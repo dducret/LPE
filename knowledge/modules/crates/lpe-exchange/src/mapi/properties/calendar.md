@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: calendar
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1-L1062
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1-L1107
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -18,6 +18,7 @@ relationships:
 - [event_property_value_with_reminder](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder.md)
 - [versioned_event_property_value_with_reminder](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/versioned_event_property_value_with_reminder.md)
 - [event_property_value_with_optional_version](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version.md)
+- [event_mapi_access](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_mapi_access.md)
 - [calendar_organizer](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_organizer.md)
 - [calendar_organizer_name](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_organizer_name.md)
 - [calendar_organizer_email](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_organizer_email.md)
@@ -42,6 +43,7 @@ relationships:
 - [calendar_global_object_id](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_global_object_id.md)
 - [event_reminder_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_reminder_property_value.md)
 - [default_event_for_mapping](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_for_mapping.md)
+- [calendar_item_access_follows_canonical_grant](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_item_access_follows_canonical_grant.md)
 - [default_event_input](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_input.md)
 - [event_input_from_mapi](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_input_from_mapi.md)
 - [clearable_pending_text_property](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/clearable_pending_text_property.md)

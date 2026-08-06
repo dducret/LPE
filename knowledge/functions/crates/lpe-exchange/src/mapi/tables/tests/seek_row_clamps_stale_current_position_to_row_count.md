@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: seek_row_clamps_stale_current_position_to_row_count
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2606-L2642
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2640-L2676
 visibility: private
 generated:
   by: okf-rs/0.3.0

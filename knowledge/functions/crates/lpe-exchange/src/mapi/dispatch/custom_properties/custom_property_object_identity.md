@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: custom_property_object_identity
-resource: crates/lpe-exchange/src/mapi/dispatch/custom_properties.rs#L341-L411
+resource: crates/lpe-exchange/src/mapi/dispatch/custom_properties.rs#L341-L412
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_attendee
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L610-L619
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L607-L616
 visibility: private
 generated:
   by: okf-rs/0.3.0

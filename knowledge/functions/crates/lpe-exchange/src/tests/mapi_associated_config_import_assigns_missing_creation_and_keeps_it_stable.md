@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_associated_config_import_assigns_missing_creation_and_keeps_it_stable
-resource: crates/lpe-exchange/src/tests/mod.rs#L959-L1087
+resource: crates/lpe-exchange/src/tests/mod.rs#L960-L1088
 visibility: private
 generated:
   by: okf-rs/0.3.0

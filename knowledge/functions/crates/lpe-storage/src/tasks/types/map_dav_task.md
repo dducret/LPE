@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: map_dav_task
-resource: crates/lpe-storage/src/tasks/types.rs#L192-L216
+resource: crates/lpe-storage/src/tasks/types.rs#L200-L226
 generated:
   by: okf-rs/0.3.0
 ---

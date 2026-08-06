@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_mailbox_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1238-L1264
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1248-L1274
 visibility: private
 generated:
   by: okf-rs/0.3.0

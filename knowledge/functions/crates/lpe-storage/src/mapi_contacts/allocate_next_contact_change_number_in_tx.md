@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: allocate_next_contact_change_number_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L924-L929
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1169-L1174
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_serializes_organizer_and_participant_status
-resource: crates/lpe-dav/src/tests.rs#L1052-L1097
+resource: crates/lpe-dav/src/tests.rs#L1056-L1101
 visibility: private
 generated:
   by: okf-rs/0.3.0

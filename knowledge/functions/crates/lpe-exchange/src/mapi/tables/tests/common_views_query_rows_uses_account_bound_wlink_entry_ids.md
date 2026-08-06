@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_query_rows_uses_account_bound_wlink_entry_ids
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5007-L5045
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5041-L5079
 visibility: private
 generated:
   by: okf-rs/0.3.0

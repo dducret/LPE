@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_jmap_share
-resource: crates/lpe-jmap/src/tests.rs#L2292-L2303
+resource: crates/lpe-jmap/src/tests.rs#L2369-L2380
 visibility: private
 generated:
   by: okf-rs/0.3.0

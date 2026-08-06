@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: src
-resource: crates/lpe-storage/src/lib.rs#L1-L155
+resource: crates/lpe-storage/src/lib.rs#L1-L156
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -18,7 +18,7 @@ relationships:
   - external/pub-use-crate-jmap-blobs-jmapquota-jmapuploadblob
   - external/pub-use-crate-jmap-queries-jmapemailquery-jmapstoredquerystate-jmapthreadquery
   - external/pub-use-crate-mailboxes-jmapmailbox-jmapmailboxcreateinput-jmapmailboxupdateinput-managedretentionfoldercreateinput
-  - external/pub-use-crate-mapi-contacts-mapicontactcreateinput-mapicontactcreateresult-mapicontactcustompropertyvalue-mapicontactimportconflict-mapicontactimportdisposition-mapicontactimportobjectdeleted-mapicontactimportedidentity-mapicontactversion
+  - external/pub-use-crate-mapi-contacts-mapicontactcommitinput-mapicontactcommitoutcome-mapicontactcommitresult-mapicontactcreateinput-mapicontactcreateresult-mapicontactcustompropertyvalue-mapicontactimportconflict-mapicontactimportdisposition-mapicontactimportobjectdeleted-mapicontactimportedidentity-mapicontactversion
   - external/pub-use-crate-mapi-events-mapieventcommitinput-mapieventcommitoutcome-mapieventcommitsuccess-mapieventcreateinput-mapieventcreateresult-mapieventcustompropertyvalue-mapieventimportedidentity-mapieventreminderpatch-mapieventreminderstate-mapieventversion
   - external/pub-use-crate-mapi-store-identity-mapimessageidentitymove-mapimessageimportedmoveidentity-mapimessagemoveresult-mapistoreidentity
   - external/pub-use-crate-notes-journal-clientnote-clientreminder-journalentry-reminderquery-upsertclientnoteinput-upsertjournalentryinput
@@ -83,6 +83,7 @@ relationships:
     JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, ManagedRetentionFolderCreateInput,
 }`
 - `pub use crate::mapi_contacts::{
+    MapiContactCommitInput, MapiContactCommitOutcome, MapiContactCommitResult,
     MapiContactCreateInput, MapiContactCreateResult, MapiContactCustomPropertyValue,
     MapiContactImportConflict, MapiContactImportDisposition, MapiContactImportObjectDeleted,
     MapiContactImportedIdentity, MapiContactVersion,

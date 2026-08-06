@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: filter_mailboxes
-resource: crates/lpe-jmap/src/mailboxes.rs#L631-L668
+resource: crates/lpe-jmap/src/mailboxes.rs#L639-L676
 visibility: private
 generated:
   by: okf-rs/0.3.0

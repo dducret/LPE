@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_mapi_folder_id
-resource: crates/lpe-exchange/src/tests/mod.rs#L15734-L15736
+resource: crates/lpe-exchange/src/tests/mod.rs#L15859-L15861
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -145,6 +145,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_recoverable_copy_is_rejected_without_restore_side_effect
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_recoverable_root_message_mutations_are_parseable_not_supported
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_hierarchy_sync_does_not_publish_recoverable_items
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_subrestriction_matches_message_recipients
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_string8_rows_save_canonically
@@ -423,6 +424,7 @@ relationships:
 - [mapi_over_http_recoverable_copy_is_rejected_without_restore_side_effect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_recoverable_copy_is_rejected_without_restore_side_effect.md)
 - [mapi_over_http_recoverable_root_message_mutations_are_parseable_not_supported](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_recoverable_root_message_mutations_are_parseable_not_supported.md)
 - [mapi_over_http_hierarchy_sync_does_not_publish_recoverable_items](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items/mapi_over_http_hierarchy_sync_does_not_publish_recoverable_items.md)
+- [submit_new_mapi_message_with_identities](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities.md)
 - [mapi_over_http_microsoft_subrestriction_matches_message_recipients](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_subrestriction_matches_message_recipients.md)
 - [mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_microsoft_modify_recipients_accepts_type_flags_and_rejects_invalid_type.md)
 - [mapi_over_http_modify_recipients_string8_rows_save_canonically](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/mapi_over_http_modify_recipients_string8_rows_save_canonically.md)

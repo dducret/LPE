@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: tenant_id
-resource: crates/lpe-jmap/src/tests.rs#L361-L363
+resource: crates/lpe-jmap/src/tests.rs#L362-L364
 visibility: private
 generated:
   by: okf-rs/0.3.0

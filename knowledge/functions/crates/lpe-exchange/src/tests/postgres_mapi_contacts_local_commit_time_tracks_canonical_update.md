@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: postgres_mapi_contacts_local_commit_time_tracks_canonical_update
-resource: crates/lpe-exchange/src/tests/mod.rs#L495-L562
+resource: crates/lpe-exchange/src/tests/mod.rs#L496-L563
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_address_book_provider_email_list
-resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L283-L289
+resource: crates/lpe-exchange/src/mapi/properties/contact.rs#L298-L304
 visibility: private
 generated:
   by: okf-rs/0.3.0

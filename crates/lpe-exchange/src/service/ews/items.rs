@@ -285,7 +285,11 @@ where
         let result = async {
             self.validate_mutating_item_change_keys(principal, request)
                 .await?;
-            let item_references = requested_item_references(request);
+            let item_changes = requested_update_item_changes(request)?;
+            let item_references = item_changes
+                .iter()
+                .map(|change| change.reference.clone())
+                .collect::<Vec<_>>();
             let ids = item_references
                 .iter()
                 .map(|reference| reference.id.clone())
@@ -331,6 +335,68 @@ where
                 ));
             }
 
+            if (!contact_ids.is_empty() || !event_ids.is_empty()) && ids.len() > 1 {
+                return Ok(operation_error_response(
+                    "UpdateItem",
+                    "ErrorInvalidOperation",
+                    "UpdateItem does not support atomic batches containing contact or calendar changes.",
+                ));
+            }
+
+            let mut contact_update = None;
+            if let Some(contact_id) = contact_ids.first().copied() {
+                let existing = self
+                    .store
+                    .fetch_accessible_contacts_by_ids(principal.account_id, &[contact_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("contact not found"))?;
+                let change_keys = contact_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&existing),
+                )
+                .await?;
+                let id = format!("contact:{contact_id}");
+                validate_required_item_change_key(
+                    &item_references,
+                    &id,
+                    change_key_for(&change_keys, contact_id, "contact")?,
+                )?;
+                contact_update = Some((
+                    contact_id,
+                    existing,
+                    update_item_change_content(&item_changes, &id)?,
+                ));
+            }
+
+            let mut event_update = None;
+            if let Some(event_id) = event_ids.first().copied() {
+                let existing = self
+                    .store
+                    .fetch_accessible_events_by_ids(principal.account_id, &[event_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("event not found"))?;
+                let change_keys = event_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&existing),
+                )
+                .await?;
+                let id = format!("event:{event_id}");
+                validate_required_item_change_key(
+                    &item_references,
+                    &id,
+                    change_key_for(&change_keys, event_id, "calendar")?,
+                )?;
+                let update_request = update_item_change_content(&item_changes, &id)?;
+                let input = parse_update_event_input(principal, &existing, update_request)?;
+                event_update = Some((event_id, existing, input));
+            }
+
             let mut items = String::new();
             if !message_ids.is_empty() {
                 let Some((unread, flagged)) = parse_update_message_flags(request)? else {
@@ -370,31 +436,13 @@ where
                     items.push_str(&message_item_xml(&updated));
                 }
             }
-            for contact_id in contact_ids {
-                let existing = self
-                    .store
-                    .fetch_accessible_contacts_by_ids(principal.account_id, &[contact_id])
-                    .await?
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| anyhow!("contact not found"))?;
-                let change_keys = contact_change_keys(
-                    &self.store,
-                    principal.account_id,
-                    std::slice::from_ref(&existing),
-                )
-                .await?;
-                validate_supplied_item_change_key(
-                    &item_references,
-                    &format!("contact:{contact_id}"),
-                    change_key_for(&change_keys, contact_id, "contact")?,
-                )?;
+            if let Some((contact_id, existing, update_request)) = contact_update {
                 let updated = self
                     .store
                     .update_accessible_contact(
                         principal.account_id,
                         contact_id,
-                        parse_update_contact_input(principal, &existing, request),
+                        parse_update_contact_input(principal, &existing, update_request),
                     )
                     .await?;
                 let change_keys =
@@ -405,31 +453,13 @@ where
                     change_key_for(&change_keys, updated.id, "contact")?,
                 ));
             }
-            for event_id in event_ids {
-                let existing = self
-                    .store
-                    .fetch_accessible_events_by_ids(principal.account_id, &[event_id])
-                    .await?
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| anyhow!("event not found"))?;
-                let change_keys = event_change_keys(
-                    &self.store,
-                    principal.account_id,
-                    std::slice::from_ref(&existing),
-                )
-                .await?;
-                validate_supplied_item_change_key(
-                    &item_references,
-                    &format!("event:{event_id}"),
-                    change_key_for(&change_keys, event_id, "calendar")?,
-                )?;
+            if let Some((event_id, _existing, input)) = event_update {
                 let updated = self
                     .store
                     .update_accessible_event(
                         principal.account_id,
                         event_id,
-                        parse_update_event_input(principal, &existing, request)?,
+                        input,
                     )
                     .await?;
                 let change_keys =
@@ -1155,6 +1185,7 @@ where
             self.validate_mutating_item_change_keys(principal, request)
                 .await?;
             let ids = requested_item_ids(request);
+            let item_references = requested_item_references(request);
             let contact_ids = ids
                 .iter()
                 .filter_map(|id| id.strip_prefix("contact:"))
@@ -1195,25 +1226,99 @@ where
                     "DeleteItem currently supports only contact, calendar, task, message, and public folder item ids.",
                 ));
             }
+            let delete_type = attribute_value_after(request, "DeleteItem", "DeleteType")
+                .map(EwsDeleteType::parse)
+                .transpose()?
+                .unwrap_or(EwsDeleteType::MoveToDeletedItems);
+
+            if (!contact_ids.is_empty() || !event_ids.is_empty()) && ids.len() > 1 {
+                return Ok(operation_error_response(
+                    "DeleteItem",
+                    "ErrorInvalidOperation",
+                    "DeleteItem does not support atomic batches containing contact or calendar items.",
+                ));
+            }
+            if !contact_ids.is_empty() && delete_type != EwsDeleteType::HardDelete {
+                return Ok(operation_error_response(
+                    "DeleteItem",
+                    "ErrorInvalidOperation",
+                    "DeleteItem supports contacts only with DeleteType=HardDelete.",
+                ));
+            }
+            if !event_ids.is_empty() && delete_type == EwsDeleteType::SoftDelete {
+                return Ok(operation_error_response(
+                    "DeleteItem",
+                    "ErrorInvalidOperation",
+                    "DeleteItem does not support DeleteType=SoftDelete for calendar items.",
+                ));
+            }
+
+            for contact_id in &contact_ids {
+                let contact = self
+                    .store
+                    .fetch_accessible_contacts_by_ids(principal.account_id, &[*contact_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("contact not found"))?;
+                let change_keys = contact_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&contact),
+                )
+                .await?;
+                validate_required_item_change_key(
+                    &item_references,
+                    &format!("contact:{contact_id}"),
+                    change_key_for(&change_keys, *contact_id, "contact")?,
+                )?;
+            }
+            for event_id in &event_ids {
+                let event = self
+                    .store
+                    .fetch_accessible_events_by_ids(principal.account_id, &[*event_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("event not found"))?;
+                let change_keys = event_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&event),
+                )
+                .await?;
+                validate_required_item_change_key(
+                    &item_references,
+                    &format!("event:{event_id}"),
+                    change_key_for(&change_keys, *event_id, "calendar")?,
+                )?;
+            }
+
             for contact_id in contact_ids {
                 self.store
                     .delete_accessible_contact(principal.account_id, contact_id)
                     .await?;
             }
             for event_id in event_ids {
-                self.store
-                    .delete_accessible_event(principal.account_id, event_id)
-                    .await?;
+                if delete_type == EwsDeleteType::MoveToDeletedItems {
+                    self.store
+                        .move_accessible_event_to_deleted_items(
+                            principal.account_id,
+                            event_id,
+                            None,
+                        )
+                        .await?;
+                } else {
+                    self.store
+                        .delete_accessible_event(principal.account_id, event_id)
+                        .await?;
+                }
             }
             for task_id in task_ids {
                 self.store
                     .delete_accessible_task(principal.account_id, task_id)
                     .await?;
             }
-            let delete_type = attribute_value_after(request, "DeleteItem", "DeleteType")
-                .map(EwsDeleteType::parse)
-                .transpose()?
-                .unwrap_or(EwsDeleteType::MoveToDeletedItems);
             let mailboxes = self
                 .store
                 .fetch_jmap_mailboxes(principal.account_id)
@@ -1446,9 +1551,64 @@ fn validate_supplied_item_change_key(
     Ok(())
 }
 
+struct UpdateItemChange<'a> {
+    reference: RequestedItemReference,
+    content: &'a str,
+}
+
+fn requested_update_item_changes(request: &str) -> Result<Vec<UpdateItemChange<'_>>> {
+    let changes = element_contents(request, "ItemChange")
+        .into_iter()
+        .map(|content| {
+            let references = requested_item_references(content);
+            let [reference] = references.as_slice() else {
+                bail!("each UpdateItem ItemChange requires exactly one ItemId");
+            };
+            Ok(UpdateItemChange {
+                reference: reference.clone(),
+                content,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if changes.is_empty() {
+        bail!("UpdateItem requires at least one ItemChange");
+    }
+    Ok(changes)
+}
+
+fn update_item_change_content<'a>(
+    changes: &'a [UpdateItemChange<'a>],
+    id: &str,
+) -> Result<&'a str> {
+    changes
+        .iter()
+        .find(|change| change.reference.id == id)
+        .map(|change| change.content)
+        .ok_or_else(|| anyhow!("UpdateItem ItemChange was not found for {id}"))
+}
+
+fn validate_required_item_change_key(
+    references: &[RequestedItemReference],
+    id: &str,
+    current_change_key: &str,
+) -> Result<()> {
+    let supplied_change_key = references
+        .iter()
+        .find(|reference| reference.id == id)
+        .and_then(|reference| reference.change_key.as_deref())
+        .ok_or_else(|| anyhow!("stale EWS ChangeKey for {id}: missing ChangeKey"))?;
+    if supplied_change_key != current_change_key {
+        bail!("stale EWS ChangeKey for {id}");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::validate_supplied_item_change_key;
+    use super::{
+        requested_update_item_changes, update_item_change_content,
+        validate_required_item_change_key, validate_supplied_item_change_key,
+    };
     use crate::service::ews::request_ids::RequestedItemReference;
 
     #[test]
@@ -1464,5 +1624,50 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("stale EWS ChangeKey"));
+    }
+
+    #[test]
+    fn missing_required_change_key_is_a_conflict() {
+        let error = validate_required_item_change_key(
+            &[RequestedItemReference {
+                id: "contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string(),
+                change_key: None,
+            }],
+            "contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "current",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("stale EWS ChangeKey"));
+        assert!(error.to_string().contains("missing ChangeKey"));
+    }
+
+    #[test]
+    fn update_item_changes_keep_each_item_payload_local() {
+        let changes = requested_update_item_changes(
+            concat!(
+                "<m:UpdateItem><m:ItemChanges>",
+                "<t:ItemChange><t:ItemId Id=\"contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\" ChangeKey=\"a\"/>",
+                "<t:Updates><t:Contact><t:DisplayName>Ada</t:DisplayName></t:Contact></t:Updates></t:ItemChange>",
+                "<t:ItemChange><t:ItemId Id=\"event:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\" ChangeKey=\"b\"/>",
+                "<t:Updates><t:CalendarItem><t:Subject>Planning</t:Subject></t:CalendarItem></t:Updates></t:ItemChange>",
+                "</m:ItemChanges></m:UpdateItem>"
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(changes.len(), 2);
+        assert!(update_item_change_content(
+            &changes,
+            "contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        )
+        .unwrap()
+        .contains("Ada"));
+        assert!(!update_item_change_content(
+            &changes,
+            "contact:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        )
+        .unwrap()
+        .contains("Planning"));
     }
 }

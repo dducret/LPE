@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_public_folder_permission
-resource: crates/lpe-exchange/src/mapi_store.rs#L723-L735
+resource: crates/lpe-exchange/src/mapi_store.rs#L730-L742
 visibility: private
 generated:
   by: okf-rs/0.3.0

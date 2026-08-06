@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: folders
-resource: crates/lpe-exchange/src/mapi/tables/folders.rs#L1-L937
+resource: crates/lpe-exchange/src/mapi/tables/folders.rs#L1-L936
 generated:
   by: okf-rs/0.3.0
 relationships:

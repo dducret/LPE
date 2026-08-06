@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_reminder_property_tags
-resource: crates/lpe-exchange/src/mapi/tables/columns.rs#L385-L409
+resource: crates/lpe-exchange/src/mapi/tables/columns.rs#L396-L420
 generated:
   by: okf-rs/0.3.0
 relationships:

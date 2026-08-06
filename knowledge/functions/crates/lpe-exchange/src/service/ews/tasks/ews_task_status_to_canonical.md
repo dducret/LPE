@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_task_status_to_canonical
-resource: crates/lpe-exchange/src/service/ews/tasks.rs#L188-L190
+resource: crates/lpe-exchange/src/service/ews/tasks.rs#L214-L216
 visibility: private
 generated:
   by: okf-rs/0.3.0

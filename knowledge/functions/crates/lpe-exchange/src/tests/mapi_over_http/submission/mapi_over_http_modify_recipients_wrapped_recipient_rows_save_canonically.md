@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonically
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L318-L374
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L446-L502
 visibility: private
 generated:
   by: okf-rs/0.3.0

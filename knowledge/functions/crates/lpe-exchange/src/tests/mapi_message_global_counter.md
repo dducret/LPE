@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_message_global_counter
-resource: crates/lpe-exchange/src/tests/mod.rs#L13773-L13775
+resource: crates/lpe-exchange/src/tests/mod.rs#L13898-L13900
 visibility: private
 generated:
   by: okf-rs/0.3.0

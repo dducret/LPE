@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_organizer
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L158-L166
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L172-L180
 visibility: private
 generated:
   by: okf-rs/0.3.0

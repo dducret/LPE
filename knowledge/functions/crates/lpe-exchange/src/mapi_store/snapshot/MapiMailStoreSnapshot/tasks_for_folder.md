@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: tasks_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1000-L1005
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1032-L1037
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count
   - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner
   - functions/crates/lpe-exchange/src/mapi/tables/row_keys/table_row_keys
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/tasks/mapi_over_http_shared_task_read_only_rights_reject_mutations
 ---
 
 # Signature
@@ -26,3 +27,4 @@ relationships:
 - [table_position_and_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count.md)
 - [rop_query_rows_response_inner](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner.md)
 - [table_row_keys](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_keys/table_row_keys.md)
+- [mapi_over_http_shared_task_read_only_rights_reject_mutations](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/tasks/mapi_over_http_shared_task_read_only_rights_reject_mutations.md)

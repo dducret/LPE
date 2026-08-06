@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids_ex
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5886-L5945
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5888-L5947
 visibility: private
 generated:
   by: okf-rs/0.3.0

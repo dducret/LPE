@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wlink_journal_folder_type_guid
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1102-L1107
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1125-L1130
 visibility: private
 generated:
   by: okf-rs/0.3.0

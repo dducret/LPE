@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_note_property_tags
-resource: crates/lpe-exchange/src/mapi/tables/columns.rs#L411-L429
+resource: crates/lpe-exchange/src/mapi/tables/columns.rs#L422-L440
 generated:
   by: okf-rs/0.3.0
 relationships:

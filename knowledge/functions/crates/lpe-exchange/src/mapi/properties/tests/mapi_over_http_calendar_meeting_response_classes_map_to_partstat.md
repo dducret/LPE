@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_meeting_response_classes_map_to_partstat
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4229-L4263
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4366-L4400
 visibility: private
 generated:
   by: okf-rs/0.3.0

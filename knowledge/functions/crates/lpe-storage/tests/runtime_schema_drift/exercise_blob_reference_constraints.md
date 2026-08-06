@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_blob_reference_constraints
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L336-L617
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L346-L627
 visibility: private
 generated:
   by: okf-rs/0.3.0

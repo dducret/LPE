@@ -37,7 +37,15 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
   - reads and writes canonical mailbox, contacts, calendar, and task state
   - emits opaque EWS ChangeKeys derived from stable item identity and durable
     canonical revision; supplied stale ChangeKeys are rejected before mutation
-    with the EWS conflict result
+    with the EWS conflict result; calendar and contact updates/deletes require
+    a current ChangeKey and reject an absent or stale value before mutation
+  - applies a single calendar/contact EWS item change only after its target,
+    ChangeKey, authorization, update shape, and delete mode validate. Multi-item
+    calendar/contact mutation batches are rejected before mutation until the
+    canonical store provides an atomic batch transaction.
+  - maps calendar `MoveToDeletedItems` to the canonical deleted-items lifecycle,
+    permits contact deletion only as canonical hard deletion, and rejects other
+    unsupported contact/calendar EWS delete modes before mutation
   - contact updates preserve canonical rich fields, vCard/source metadata, and unsupported structured arrays when an EWS request omits them; explicit delete/update instructions clear only the addressed fields
   - treats Outlook-visible Suggested Contacts as the canonical `contact_books.role = 'suggested_contacts'` folder containing durable `contacts`
   - does not expose private `recipient_suggestions` rows as contacts, directory entries, shared contact grants, search results, or AI-facing data
@@ -49,6 +57,10 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
   - `EMSMDB` maps mailbox synchronization to canonical mailbox state
   - `NSPI` maps address-book behavior to canonical account/contact visibility
   - contact property updates merge into canonical contacts and do not erase rich contact fields, vCard/source metadata, or structured arrays that the MAPI property set did not address
+  - existing Contact Message handles stage supported property sets and clears
+    independently. A successful `RopSaveChangesMessage` atomically commits the
+    canonical merge, identity/version successor, and sync-visible change; a
+    failed save or handle release leaves canonical state unchanged.
   - recipient autocomplete suggestions are owner-scoped compose assistance and must not become NSPI address-book rows; `Bcc` recipients are never learned or projected as suggestions
   - session context must remain authenticated and bounded to the mailbox principal
   - send and draft flows must use canonical submission and draft persistence

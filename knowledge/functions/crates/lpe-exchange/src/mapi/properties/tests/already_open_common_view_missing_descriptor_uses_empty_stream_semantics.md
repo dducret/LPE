@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: already_open_common_view_missing_descriptor_uses_empty_stream_semantics
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5885-L5970
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6022-L6107
 visibility: private
 generated:
   by: okf-rs/0.3.0

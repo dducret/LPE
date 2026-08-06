@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: submit_message
-resource: crates/lpe-exchange/src/tests/mod.rs#L11941-L12029
+resource: crates/lpe-exchange/src/tests/mod.rs#L12065-L12154
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -13,7 +13,7 @@ relationships:
 
 # Signature
 
-`fn submit_message<'a>( &'a self, input: SubmitMessageInput, _audit: lpe_storage::AuditEntryInput, ) -> StoreFuture<'a, SubmittedMessage>`
+`fn submit_message<'a>( &'a self, input: SubmitMessageInput, audit: lpe_storage::AuditEntryInput, ) -> StoreFuture<'a, SubmittedMessage>`
 
 # Calls
 

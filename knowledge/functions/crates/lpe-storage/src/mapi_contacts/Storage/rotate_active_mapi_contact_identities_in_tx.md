@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: rotate_active_mapi_contact_identities_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L121-L186
+resource: crates/lpe-storage/src/mapi_contacts.rs#L148-L213
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-storage/src/mapi_events/mapi_change_key
   - functions/crates/lpe-storage/src/mapi_events/merge_predecessor_change_list
   called_by:
+  - functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update
   - functions/crates/lpe-storage/src/workspace/Storage/upsert_client_contact_in_book_role
 ---
 
@@ -29,4 +30,5 @@ relationships:
 
 # Called by
 
+- [commit_mapi_contact_update](../../../../../../functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update.md)
 - [upsert_client_contact_in_book_role](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/upsert_client_contact_in_book_role.md)

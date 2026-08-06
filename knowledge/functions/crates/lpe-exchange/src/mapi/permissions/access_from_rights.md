@@ -7,6 +7,7 @@ generated:
 relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/permissions/append_modify_permissions_response
+  - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_access
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/folder_access_for_principal
 ---
 
@@ -17,4 +18,5 @@ relationships:
 # Called by
 
 - [append_modify_permissions_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/permissions/append_modify_permissions_response.md)
+- [collaboration_folder_access](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_access.md)
 - [folder_access_for_principal](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/folder_access_for_principal.md)

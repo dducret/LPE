@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_find_row_response_for_message_class
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8563-L8596
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8597-L8630
 visibility: private
 generated:
   by: okf-rs/0.3.0

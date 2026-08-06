@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_jmap_share
-resource: crates/lpe-jmap/src/store.rs#L1263-L1328
+resource: crates/lpe-jmap/src/store.rs#L1289-L1354
 visibility: private
 generated:
   by: okf-rs/0.3.0

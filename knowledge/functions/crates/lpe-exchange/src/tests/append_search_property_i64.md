@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_search_property_i64
-resource: crates/lpe-exchange/src/tests/mod.rs#L15086-L15091
+resource: crates/lpe-exchange/src/tests/mod.rs#L15211-L15216
 visibility: private
 generated:
   by: okf-rs/0.3.0

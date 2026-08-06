@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: drop
-resource: crates/lpe-exchange/src/tests/mod.rs#L114-L161
+resource: crates/lpe-exchange/src/tests/mod.rs#L115-L162
 visibility: private
 generated:
   by: okf-rs/0.3.0

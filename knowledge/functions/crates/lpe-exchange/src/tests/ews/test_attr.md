@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_attr
-resource: crates/lpe-exchange/src/tests/ews.rs#L5104-L5108
+resource: crates/lpe-exchange/src/tests/ews.rs#L5437-L5441
 visibility: private
 generated:
   by: okf-rs/0.3.0

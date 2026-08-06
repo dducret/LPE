@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_push_folder_change
-resource: crates/lpe-exchange/src/tests/mod.rs#L14552-L14578
+resource: crates/lpe-exchange/src/tests/mod.rs#L14677-L14703
 visibility: private
 generated:
   by: okf-rs/0.3.0

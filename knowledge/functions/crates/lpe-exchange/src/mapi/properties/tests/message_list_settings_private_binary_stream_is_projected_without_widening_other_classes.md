@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_list_settings_private_binary_stream_is_projected_without_widening_other_classes
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6192-L6314
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6329-L6451
 visibility: private
 generated:
   by: okf-rs/0.3.0

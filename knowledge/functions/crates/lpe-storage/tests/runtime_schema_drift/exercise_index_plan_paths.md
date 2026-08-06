@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_index_plan_paths
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2613-L2761
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L2694-L2842
 visibility: private
 generated:
   by: okf-rs/0.3.0

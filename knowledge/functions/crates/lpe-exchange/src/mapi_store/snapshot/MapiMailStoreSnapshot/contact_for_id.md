@@ -1,13 +1,16 @@
 ---
 type: Rust Method
 title: contact_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L969-L979
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1001-L1011
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_search_results
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_existing_contact
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_values
+  - functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions
   - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/custom_property_object_identity
   - functions/crates/lpe-exchange/src/mapi/dispatch/message_open/append_open_message_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_delete_messages_response
@@ -15,7 +18,8 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/object_ids/debug_object_scope_for_id
   - functions/crates/lpe-exchange/src/mapi/properties/contact/apply_canonical_contact_property_values
   - functions/crates/lpe-exchange/src/mapi/rop/rop_get_properties_specific_response_with_custom
-  - functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property
+  - functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_updated_contact
 ---
 
 # Signature
@@ -28,6 +32,9 @@ relationships:
 
 # Called by
 
+- [save_existing_contact](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_save/save_existing_contact.md)
+- [stage_contact_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_values.md)
+- [stage_contact_property_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/contact_transactions/stage_contact_property_deletions.md)
 - [custom_property_object_identity](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/custom_property_object_identity.md)
 - [append_open_message_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/message_open/append_open_message_response.md)
 - [append_delete_messages_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_delete_messages_response.md)
@@ -35,4 +42,5 @@ relationships:
 - [debug_object_scope_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/object_ids/debug_object_scope_for_id.md)
 - [apply_canonical_contact_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/apply_canonical_contact_property_values.md)
 - [rop_get_properties_specific_response_with_custom](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/rop_get_properties_specific_response_with_custom.md)
-- [serialize_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property.md)
+- [serialize_contact_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/contact_properties/serialize_contact_object_property.md)
+- [remember_updated_contact](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_updated_contact.md)

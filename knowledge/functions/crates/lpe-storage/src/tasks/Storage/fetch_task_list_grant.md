@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_task_list_grant
-resource: crates/lpe-storage/src/tasks.rs#L539-L586
+resource: crates/lpe-storage/src/tasks.rs#L563-L610
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_search_hierarchy_row_belongs_to_search_folder
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1111-L1131
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1145-L1165
 visibility: private
 generated:
   by: okf-rs/0.3.0

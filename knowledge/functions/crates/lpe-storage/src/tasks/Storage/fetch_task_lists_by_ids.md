@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_task_lists_by_ids
-resource: crates/lpe-storage/src/tasks.rs#L689-L754
+resource: crates/lpe-storage/src/tasks.rs#L713-L778
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rop_get_properties_specific_response
-resource: crates/lpe-exchange/src/mapi/rop.rs#L47-L65
+resource: crates/lpe-exchange/src/mapi/rop.rs#L49-L67
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_view_named_view_folder_type_guid
-resource: crates/lpe-exchange/src/mapi/properties.rs#L1109-L1114
+resource: crates/lpe-exchange/src/mapi/properties.rs#L1132-L1137
 generated:
   by: okf-rs/0.3.0
 relationships:

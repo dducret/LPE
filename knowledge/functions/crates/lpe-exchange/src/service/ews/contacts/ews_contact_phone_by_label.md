@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ews_contact_phone_by_label
-resource: crates/lpe-exchange/src/service/ews/contacts.rs#L377-L379
+resource: crates/lpe-exchange/src/service/ews/contacts.rs#L437-L439
 visibility: private
 generated:
   by: okf-rs/0.3.0

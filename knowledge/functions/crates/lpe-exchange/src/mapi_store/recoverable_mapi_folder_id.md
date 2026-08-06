@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: recoverable_mapi_folder_id
-resource: crates/lpe-exchange/src/mapi_store.rs#L955-L962
+resource: crates/lpe-exchange/src/mapi_store.rs#L962-L969
 generated:
   by: okf-rs/0.3.0
 relationships:

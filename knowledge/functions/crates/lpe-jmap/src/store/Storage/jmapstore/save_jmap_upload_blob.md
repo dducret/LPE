@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: save_jmap_upload_blob
-resource: crates/lpe-jmap/src/store.rs#L799-L807
+resource: crates/lpe-jmap/src/store.rs#L807-L815
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: api_request_rejects_unsupported_declared_capabilities
-resource: crates/lpe-jmap/src/tests.rs#L7870-L7898
+resource: crates/lpe-jmap/src/tests.rs#L8358-L8386
 visibility: private
 generated:
   by: okf-rs/0.3.0

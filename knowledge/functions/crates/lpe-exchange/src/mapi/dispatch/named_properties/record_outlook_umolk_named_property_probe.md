@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_outlook_umolk_named_property_probe
-resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L387-L450
+resource: crates/lpe-exchange/src/mapi/dispatch/named_properties.rs#L391-L454
 visibility: private
 generated:
   by: okf-rs/0.3.0

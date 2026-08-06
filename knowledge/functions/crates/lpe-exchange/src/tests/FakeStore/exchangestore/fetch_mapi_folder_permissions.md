@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_folder_permissions
-resource: crates/lpe-exchange/src/tests/mod.rs#L7232-L7255
+resource: crates/lpe-exchange/src/tests/mod.rs#L7236-L7259
 visibility: private
 generated:
   by: okf-rs/0.3.0

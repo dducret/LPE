@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_remove_all_recipients_clears_pending_message_recipients
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L537-L611
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L665-L739
 visibility: private
 generated:
   by: okf-rs/0.3.0

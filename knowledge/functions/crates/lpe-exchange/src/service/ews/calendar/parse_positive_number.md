@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_positive_number
-resource: crates/lpe-exchange/src/service/ews/calendar.rs#L551-L560
+resource: crates/lpe-exchange/src/service/ews/calendar.rs#L548-L557
 visibility: private
 generated:
   by: okf-rs/0.3.0

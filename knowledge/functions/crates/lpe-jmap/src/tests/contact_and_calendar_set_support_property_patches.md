@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_and_calendar_set_support_property_patches
-resource: crates/lpe-jmap/src/tests.rs#L12354-L12427
+resource: crates/lpe-jmap/src/tests.rs#L12844-L12917
 visibility: private
 generated:
   by: okf-rs/0.3.0

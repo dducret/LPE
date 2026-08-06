@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_requested_view_descriptor_contract
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L916-L951
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L922-L957
 generated:
   by: okf-rs/0.3.0
 relationships:

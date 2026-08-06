@@ -7,6 +7,7 @@ generated:
 relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/permissions/append_modify_permissions_response
+  - functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_access
 ---
 
 # Signature
@@ -16,3 +17,4 @@ relationships:
 # Called by
 
 - [append_modify_permissions_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/permissions/append_modify_permissions_response.md)
+- [collaboration_folder_access](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/collaboration_folder_access.md)

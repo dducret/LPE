@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: log_get_properties_specific_debug
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L390-L526
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L396-L532
 generated:
   by: okf-rs/0.3.0
 relationships:

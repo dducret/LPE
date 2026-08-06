@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upsert_client_task
-resource: crates/lpe-admin-api/src/workspace.rs#L953-L977
+resource: crates/lpe-admin-api/src/workspace.rs#L953-L979
 generated:
   by: okf-rs/0.3.0
 relationships:

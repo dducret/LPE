@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: swapped_todo_minutes
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L974-L980
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L997-L1003
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_task_list
-resource: crates/lpe-storage/src/tasks.rs#L818-L899
+resource: crates/lpe-storage/src/tasks.rs#L842-L923
 generated:
   by: okf-rs/0.3.0
 relationships:

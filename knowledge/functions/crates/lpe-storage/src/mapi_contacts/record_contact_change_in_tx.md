@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_contact_change_in_tx
-resource: crates/lpe-storage/src/mapi_contacts.rs#L1358-L1416
+resource: crates/lpe-storage/src/mapi_contacts.rs#L1708-L1766
 visibility: private
 generated:
   by: okf-rs/0.3.0
