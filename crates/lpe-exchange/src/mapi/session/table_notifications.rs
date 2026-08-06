@@ -88,7 +88,9 @@ impl MapiSession {
             }
             let hierarchy_table_event = folder_counts_modified_event(event)
                 .as_ref()
-                .and_then(folder_counts_hierarchy_table_event);
+                .and_then(|folder_event| {
+                    folder_counts_hierarchy_table_event(event, folder_event)
+                });
             hierarchy_table_event.is_some_and(|hierarchy_table_event| {
                 self.handles.iter().any(|(handle, object)| {
                     self.table_notification_active_handles.contains(handle)
@@ -123,7 +125,9 @@ impl MapiSession {
             let folder_event = folder_counts_modified_event(&event);
             let hierarchy_table_event = folder_event
                 .as_ref()
-                .and_then(folder_counts_hierarchy_table_event);
+                .and_then(|folder_event| {
+                    folder_counts_hierarchy_table_event(&event, folder_event)
+                });
             let mut event_deliveries = Vec::new();
             for (handle, object) in &self.handles {
                 match object {
@@ -239,7 +243,7 @@ impl MapiSession {
         let folder_event = folder_counts_modified_event(event);
         let hierarchy_table_event = folder_event
             .as_ref()
-            .and_then(folder_counts_hierarchy_table_event);
+            .and_then(|folder_event| folder_counts_hierarchy_table_event(event, folder_event));
         self.handles.iter().any(|(handle, object)| match object {
             MapiObject::NotificationSubscription { registration } => {
                 (event.is_complete_for_wire() && registration_matches_event(registration, event))
@@ -287,8 +291,17 @@ fn folder_counts_modified_event(event: &MapiNotificationEvent) -> Option<MapiNot
 }
 
 fn folder_counts_hierarchy_table_event(
+    source_event: &MapiNotificationEvent,
     folder_event: &MapiNotificationEvent,
 ) -> Option<MapiNotificationEvent> {
+    // [MS-OXCNOTIF] section 3.1.4.3 permits no table notification. Do not
+    // derive a parent-hierarchy row from NewMail: cached Outlook otherwise
+    // prioritizes hierarchy ICS and defers the Inbox contents sync triggered
+    // by the explicit NewMail subscription. The folder ObjectModified event
+    // remains available to explicit count-change subscribers.
+    if source_event.event_mask & 0x0FFF == MapiNotificationEventMask::NewMail.as_u16() {
+        return None;
+    }
     // [MS-OXCNOTIF] section 3.1.4.3: changing a folder's content counts also
     // changes that folder's row in the automatically subscribed parent table.
     let mut table_event = folder_event.clone();

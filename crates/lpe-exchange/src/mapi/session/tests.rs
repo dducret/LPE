@@ -306,6 +306,78 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
 }
 
 #[test]
+fn session_new_mail_delivery_omits_parent_hierarchy_table_notification() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let hierarchy_handle = 19;
+    session.handles.insert(
+        hierarchy_handle,
+        MapiObject::HierarchyTable {
+            folder_id: ROOT_FOLDER_ID,
+            depth: true,
+            depth_folder_ids: HashSet::from([crate::mapi::identity::IPM_SUBTREE_FOLDER_ID]),
+            columns: Vec::new(),
+            columns_set: true,
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            deleted_advertised_special_folders: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        },
+    );
+    session.remember_table_notification_eligibility(hierarchy_handle, 0, true);
+    session
+        .table_notification_active_handles
+        .insert(hierarchy_handle);
+    let notification_handle = 20;
+    session.handles.insert(
+        notification_handle,
+        MapiObject::NotificationSubscription {
+            registration: crate::mapi::notifications::MapiNotificationRegistration {
+                logon_id: 0,
+                notification_types: MapiNotificationEventMask::NewMail.as_u16(),
+                folder_id: None,
+            },
+        },
+    );
+
+    session.record_notification(
+        MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            MapiNotificationEventMask::NewMail.as_u16(),
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            Some(0x0000_0001_00c7_0001),
+            None,
+            1,
+            1,
+            Some(5),
+            Some(3),
+            "created".to_string(),
+            None,
+            None,
+            Some("Incoming message".to_string()),
+            Some("IPM.Note".to_string()),
+        )
+        .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+    );
+
+    let (deliveries, _) = session.take_pending_notification_delivery_batch();
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].0, notification_handle);
+    assert_eq!(deliveries[0].1, 0);
+    assert_eq!(deliveries[0].2.kind, MapiNotificationKind::Content);
+    assert_eq!(
+        deliveries[0].2.event_mask,
+        MapiNotificationEventMask::NewMail.as_u16()
+    );
+}
+
+#[test]
 fn session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts(
 ) {
     let principal = principal();
