@@ -73,6 +73,7 @@ struct FakeStore {
     updated_mailboxes: Arc<Mutex<Vec<JmapMailboxUpdateInput>>>,
     active_sieve_script: Arc<Mutex<Option<String>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
+    copied_emails: Arc<Mutex<HashMap<Uuid, Vec<JmapEmail>>>>,
     submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
     submitted_draft_actors: Arc<Mutex<Vec<Uuid>>>,
     submitted_draft_sources: Arc<Mutex<Vec<String>>>,
@@ -1141,7 +1142,7 @@ impl JmapStore for FakeStore {
         Ok(())
     }
 
-    async fn fetch_jmap_emails(&self, _account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>> {
+    async fn fetch_jmap_emails(&self, account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>> {
         Ok(ids
             .iter()
             .filter_map(|id| {
@@ -1149,6 +1150,14 @@ impl JmapStore for FakeStore {
                     .iter()
                     .find(|email| email.id == *id)
                     .cloned()
+                    .or_else(|| {
+                        self.copied_emails
+                            .lock()
+                            .unwrap()
+                            .get(&account_id)
+                            .and_then(|emails| emails.iter().find(|email| email.id == *id))
+                            .cloned()
+                    })
                     .map(|mut email| {
                         email.bcc.clear();
                         email
@@ -1159,12 +1168,25 @@ impl JmapStore for FakeStore {
 
     async fn fetch_jmap_emails_with_protected_bcc(
         &self,
-        _account_id: Uuid,
+        account_id: Uuid,
         ids: &[Uuid],
     ) -> Result<Vec<JmapEmail>> {
         Ok(ids
             .iter()
-            .filter_map(|id| self.emails.iter().find(|email| email.id == *id).cloned())
+            .filter_map(|id| {
+                self.emails
+                    .iter()
+                    .find(|email| email.id == *id)
+                    .cloned()
+                    .or_else(|| {
+                        self.copied_emails
+                            .lock()
+                            .unwrap()
+                            .get(&account_id)
+                            .and_then(|emails| emails.iter().find(|email| email.id == *id))
+                            .cloned()
+                    })
+            })
             .collect())
     }
 
@@ -1425,21 +1447,49 @@ impl JmapStore for FakeStore {
 
     async fn copy_jmap_email(
         &self,
-        _account_id: Uuid,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
+        self.copy_jmap_email_between_accounts(
+            account_id,
+            account_id,
+            message_id,
+            target_mailbox_id,
+            audit,
+        )
+        .await
+    }
+
+    async fn copy_jmap_email_between_accounts(
+        &self,
+        _source_account_id: Uuid,
+        target_account_id: Uuid,
         _message_id: Uuid,
         target_mailbox_id: Uuid,
         _audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
         let mut email = FakeStore::draft_email();
+        let target_mailbox = self
+            .mailboxes
+            .iter()
+            .find(|mailbox| mailbox.id == target_mailbox_id);
+        let target_role = target_mailbox
+            .map(|mailbox| mailbox.role.clone())
+            .unwrap_or_default();
+        let target_name = target_mailbox
+            .map(|mailbox| mailbox.name.clone())
+            .unwrap_or_else(|| "Archive".to_string());
         email.id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
         email.mailbox_id = target_mailbox_id;
         email.mailbox_ids = vec![target_mailbox_id];
-        email.mailbox_role = "".to_string();
-        email.mailbox_name = "Archive".to_string();
+        email.mailbox_role = target_role.clone();
+        email.mailbox_name = target_name.clone();
         email.mailbox_states = vec![JmapEmailMailboxState {
             mailbox_id: target_mailbox_id,
-            role: "".to_string(),
-            name: "Archive".to_string(),
+            role: target_role,
+            name: target_name,
             modseq: 1,
             unread: email.unread,
             flagged: email.flagged,
@@ -1458,6 +1508,13 @@ impl JmapStore for FakeStore {
             categories: email.categories.clone(),
             draft: false,
         }];
+        email.bcc.clear();
+        self.copied_emails
+            .lock()
+            .unwrap()
+            .entry(target_account_id)
+            .or_default()
+            .push(email.clone());
         Ok(email)
     }
 
@@ -5704,6 +5761,141 @@ async fn identity_changes_tracks_sender_identity_projection() {
 }
 
 #[tokio::test]
+async fn identity_shared_account_reads_use_the_same_authorization_model() {
+    let shared = FakeStore::shared_account();
+    let shared_identity = SenderIdentity {
+        id: format!("self:{}", shared.account_id),
+        owner_account_id: shared.account_id,
+        email: shared.email.clone(),
+        display_name: shared.display_name.clone(),
+        authorization_kind: "send-as".to_string(),
+        sender_address: None,
+        sender_display: None,
+    };
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        accessible_mailbox_accounts: vec![
+            FakeStore::mailbox_access(),
+            FakeStore::shared_mailbox_access(true, false),
+        ],
+        sender_identities: vec![shared_identity.clone()],
+        ..Default::default()
+    });
+    let account_id = shared.account_id.to_string();
+
+    let initial = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_SUBMISSION_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Identity/get".to_string(),
+                        json!({"accountId": account_id.clone()}),
+                        "get".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Identity/query".to_string(),
+                        json!({"accountId": shared.account_id.to_string()}),
+                        "query".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(initial.method_responses[0].1["accountId"], account_id);
+    assert_eq!(
+        initial.method_responses[0].1["list"][0]["id"],
+        shared_identity.id
+    );
+    assert_eq!(
+        initial.method_responses[1].1["ids"],
+        json!([shared_identity.id])
+    );
+
+    let query_changes = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_SUBMISSION_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Identity/queryChanges".to_string(),
+                    json!({
+                        "accountId": shared.account_id.to_string(),
+                        "sinceQueryState": initial.method_responses[1].1["queryState"]
+                    }),
+                    "changes".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        query_changes.method_responses[0].1["accountId"],
+        shared.account_id.to_string()
+    );
+    assert_eq!(query_changes.method_responses[0].1["removed"], json!([]));
+    assert_eq!(query_changes.method_responses[0].1["added"], json!([]));
+}
+
+#[tokio::test]
+async fn identity_shared_account_reads_reject_inaccessible_accounts() {
+    let shared = FakeStore::shared_account();
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        accessible_mailbox_accounts: vec![FakeStore::mailbox_access()],
+        ..Default::default()
+    });
+    let account_id = shared.account_id.to_string();
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_SUBMISSION_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Identity/get".to_string(),
+                        json!({"accountId": account_id.clone()}),
+                        "get".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Identity/query".to_string(),
+                        json!({"accountId": shared.account_id.to_string()}),
+                        "query".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Identity/queryChanges".to_string(),
+                        json!({
+                            "accountId": shared.account_id.to_string(),
+                            "sinceQueryState": "not-used"
+                        }),
+                        "changes".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    for method in response.method_responses {
+        assert_eq!(method.0, "error");
+        assert_eq!(method.1["description"], "accountId is not accessible");
+    }
+}
+
+#[tokio::test]
 async fn email_submission_get_state_tracks_submission_rows() {
     let queued = FakeStore::email_submission();
     let mut delivered = queued.clone();
@@ -7174,6 +7366,165 @@ async fn mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations() {
         "write access is not granted on this mailbox account"
     );
     assert_eq!(store.imported_emails.lock().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn email_copy_allows_shared_source_to_owned_target_without_exposing_bcc() {
+    let shared = FakeStore::shared_account();
+    let sent_mailbox = JmapMailbox {
+        id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
+        parent_id: None,
+        role: "sent".to_string(),
+        name: "Sent".to_string(),
+        sort_order: 10,
+        modseq: 1,
+        total_emails: 0,
+        unread_emails: 0,
+        size_octets: 0,
+        is_subscribed: true,
+    };
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![sent_mailbox.clone()],
+        emails: vec![FakeStore::draft_email()],
+        accessible_mailbox_accounts: vec![
+            FakeStore::mailbox_access(),
+            FakeStore::shared_mailbox_access(false, false),
+        ],
+        ..Default::default()
+    });
+
+    let copied = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Email/copy".to_string(),
+                    json!({
+                        "fromAccountId": shared.account_id.to_string(),
+                        "create": {
+                            "copy": {
+                                "emailId": FakeStore::draft_email().id.to_string(),
+                                "mailboxIds": {sent_mailbox.id.to_string(): true}
+                            }
+                        }
+                    }),
+                    "copy".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    let copied_id = copied.method_responses[0].1["created"]["copy"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let projection = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Email/get".to_string(),
+                    json!({"ids": [copied_id], "properties": ["id", "bcc"]}),
+                    "get".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        projection.method_responses[0].1["list"][0]["bcc"],
+        Value::Null
+    );
+}
+
+#[tokio::test]
+async fn email_copy_rejects_inaccessible_source_and_read_only_target() {
+    let shared = FakeStore::shared_account();
+    let source_rejected = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::draft_mailbox()],
+        emails: vec![FakeStore::draft_email()],
+        accessible_mailbox_accounts: vec![FakeStore::mailbox_access()],
+        ..Default::default()
+    });
+    let rejected_source = source_rejected
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Email/copy".to_string(),
+                    json!({
+                        "fromAccountId": shared.account_id.to_string(),
+                        "create": {"copy": {
+                            "emailId": FakeStore::draft_email().id.to_string(),
+                            "mailboxIds": {FakeStore::draft_mailbox().id.to_string(): true}
+                        }}
+                    }),
+                    "source".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected_source.method_responses[0].0, "error");
+    assert_eq!(
+        rejected_source.method_responses[0].1["description"],
+        "accountId is not accessible"
+    );
+
+    let target_rejected = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::draft_mailbox()],
+        emails: vec![FakeStore::draft_email()],
+        accessible_mailbox_accounts: vec![
+            FakeStore::mailbox_access(),
+            FakeStore::shared_mailbox_read_only_access(false, false),
+        ],
+        ..Default::default()
+    });
+    let rejected_target = target_rejected
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Email/copy".to_string(),
+                    json!({
+                        "accountId": shared.account_id.to_string(),
+                        "fromAccountId": FakeStore::account().account_id.to_string(),
+                        "create": {"copy": {
+                            "emailId": FakeStore::draft_email().id.to_string(),
+                            "mailboxIds": {FakeStore::draft_mailbox().id.to_string(): true}
+                        }}
+                    }),
+                    "target".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rejected_target.method_responses[0].1["notCreated"]["copy"]["description"],
+        "write access is not granted on this mailbox account"
+    );
 }
 
 #[tokio::test]

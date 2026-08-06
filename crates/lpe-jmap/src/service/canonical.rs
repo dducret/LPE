@@ -55,13 +55,33 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
         data_type: &str,
     ) -> Result<Value> {
-        let account_id = requested_account_id_from_arguments(&arguments, account)?;
-        let mut all_ids = self
-            .canonical_objects(account, account_id, data_type)
-            .await?
-            .into_iter()
-            .filter_map(|object| object.get("id").and_then(Value::as_str).map(str::to_string))
-            .collect::<Vec<_>>();
+        let identity_account_access = if data_type == "Identity" {
+            Some(
+                self.requested_account_access(
+                    account,
+                    arguments.get("accountId").and_then(Value::as_str),
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let account_id = match identity_account_access.as_ref() {
+            Some(access) => access.account_id,
+            None => requested_account_id_from_arguments(&arguments, account)?,
+        };
+        let mut all_ids = if identity_account_access
+            .as_ref()
+            .is_some_and(|access| !crate::mailboxes::mailbox_account_may_submit(access))
+        {
+            Vec::new()
+        } else {
+            self.canonical_objects(account, account_id, data_type)
+                .await?
+                .into_iter()
+                .filter_map(|object| object.get("id").and_then(Value::as_str).map(str::to_string))
+                .collect::<Vec<_>>()
+        };
         all_ids.sort();
         let position = query_position(
             &all_ids,
@@ -119,15 +139,35 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
         data_type: &str,
     ) -> Result<Value> {
-        let account_id = requested_account_id_from_arguments(&arguments, account)?;
+        let identity_account_access = if data_type == "Identity" {
+            Some(
+                self.requested_account_access(
+                    account,
+                    arguments.get("accountId").and_then(Value::as_str),
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let account_id = match identity_account_access.as_ref() {
+            Some(access) => access.account_id,
+            None => requested_account_id_from_arguments(&arguments, account)?,
+        };
         let since_query_state = arguments
             .get("sinceQueryState")
             .and_then(Value::as_str)
             .ok_or_else(|| anyhow!("sinceQueryState is required"))?
             .to_string();
-        let mut ids = self
-            .canonical_query_ids(account, account_id, data_type, &arguments)
-            .await?;
+        let mut ids = if identity_account_access
+            .as_ref()
+            .is_some_and(|access| !crate::mailboxes::mailbox_account_may_submit(access))
+        {
+            Vec::new()
+        } else {
+            self.canonical_query_ids(account, account_id, data_type, &arguments)
+                .await?
+        };
         ids.sort();
         let total = ids.len() as u64;
         let method_name = canonical_query_state_method(data_type);

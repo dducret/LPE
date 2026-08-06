@@ -168,6 +168,16 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             "JMAP query SQL path",
             exercise_jmap_path(&storage, &fixture, submitted.as_ref()).await,
         );
+        if let Some(submitted) = submitted.as_ref() {
+            collect(
+                &mut failures,
+                "cross-account JMAP copy Bcc projection",
+                exercise_cross_account_jmap_copy_bcc_projection(
+                    &storage, pool, &fixture, submitted,
+                )
+                .await,
+            );
+        }
         collect(
             &mut failures,
             "submission cancellation SQL path",
@@ -2606,6 +2616,77 @@ async fn exercise_jmap_path(
         )
         .await
         .context("fetch_jmap_query_state")?;
+
+    Ok(())
+}
+
+async fn exercise_cross_account_jmap_copy_bcc_projection(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+    submitted: &SubmittedMessage,
+) -> Result<()> {
+    let target_account_id = Uuid::new_v4();
+    let target_mailbox_id = Uuid::new_v4();
+    let domain_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT primary_domain_id FROM accounts WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await
+    .context("load source account domain for cross-account JMAP copy")?;
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES ($1, $2, $3, $4, 'Cross-account copy target')
+        "#,
+    )
+    .bind(target_account_id)
+    .bind(fixture.tenant_id)
+    .bind(domain_id)
+    .bind(format!("copy-target-{}", fixture.account_email))
+    .execute(pool)
+    .await
+    .context("seed cross-account JMAP copy target")?;
+    sqlx::query(
+        r#"
+        INSERT INTO mailboxes (
+            id, tenant_id, account_id, role, display_name, sort_order, uid_validity
+        )
+        VALUES ($1, $2, $3, 'sent', 'Sent', 0, 1)
+        "#,
+    )
+    .bind(target_mailbox_id)
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .execute(pool)
+    .await
+    .context("seed cross-account JMAP copy target mailbox")?;
+
+    storage
+        .copy_jmap_email_between_accounts(
+            fixture.account_id,
+            target_account_id,
+            submitted.message_id,
+            target_mailbox_id,
+            audit(
+                "alice@example.test",
+                "jmap-email-copy",
+                "cross-account Bcc projection",
+            ),
+        )
+        .await
+        .context("copy JMAP email to a different account")?;
+
+    let target_emails = storage
+        .fetch_jmap_emails_with_protected_bcc(target_account_id, &[submitted.message_id])
+        .await
+        .context("fetch copied email with protected Bcc path")?;
+    anyhow::ensure!(
+        target_emails.len() == 1 && target_emails[0].bcc.is_empty(),
+        "cross-account JMAP copy must not expose source protected Bcc"
+    );
 
     Ok(())
 }

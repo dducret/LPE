@@ -991,17 +991,22 @@ CREATE TABLE protected_bcc_recipients (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
     message_id UUID NOT NULL,
+    owner_account_id UUID NOT NULL,
     address TEXT NOT NULL CHECK (address = lower(btrim(address)) AND address <> ''),
     display_name TEXT,
     ordinal INTEGER NOT NULL DEFAULT 0 CHECK (ordinal >= 0),
     metadata_scope TEXT NOT NULL DEFAULT 'audit-compliance' CHECK (metadata_scope = 'audit-compliance'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, message_id, ordinal),
-    FOREIGN KEY (tenant_id, message_id) REFERENCES messages (tenant_id, id) ON DELETE CASCADE
+    FOREIGN KEY (tenant_id, message_id) REFERENCES messages (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX protected_bcc_recipients_message_idx
     ON protected_bcc_recipients (tenant_id, message_id, ordinal);
+
+CREATE INDEX protected_bcc_recipients_owner_idx
+    ON protected_bcc_recipients (tenant_id, owner_account_id, message_id, ordinal);
 
 CREATE TABLE mime_parts (
     id UUID PRIMARY KEY,

@@ -1097,6 +1097,7 @@ impl Storage {
             SELECT r.message_id, r.address, r.display_name
             FROM protected_bcc_recipients r
             WHERE r.tenant_id = $1
+              AND r.owner_account_id = $2
               AND r.message_id = ANY($3)
               AND EXISTS (
                   SELECT 1

@@ -393,8 +393,8 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .await?;
         let from_account_id = from_account_access.account_id;
         let account_id = account_access.account_id;
-        if from_account_id != account_id {
-            bail!("cross-account Email/copy is not supported");
+        if !from_account_access.may_read {
+            bail!("read access is not granted on this mailbox account");
         }
         let may_write = crate::mailboxes::mailbox_account_may_write(&account_access);
 
@@ -427,7 +427,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     };
                     match self
                         .store
-                        .copy_jmap_email(account_id, email_id, mailbox_id, audit)
+                        .copy_jmap_email_between_accounts(
+                            from_account_id,
+                            account_id,
+                            email_id,
+                            mailbox_id,
+                            audit,
+                        )
                         .await
                     {
                         Ok(email) => {

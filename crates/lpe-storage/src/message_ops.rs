@@ -92,7 +92,28 @@ impl Storage {
         target_mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
-        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        self.copy_jmap_email_between_accounts(
+            account_id,
+            account_id,
+            message_id,
+            target_mailbox_id,
+            audit,
+        )
+        .await
+    }
+
+    pub async fn copy_jmap_email_between_accounts(
+        &self,
+        source_account_id: Uuid,
+        target_account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
+        let tenant_id = self.tenant_id_for_account_id(source_account_id).await?;
+        if self.tenant_id_for_account_id(target_account_id).await? != tenant_id {
+            bail!("source and target mailbox accounts must belong to the same tenant");
+        }
         let mut tx = self.pool.begin().await?;
         let target_role = sqlx::query_scalar::<_, String>(
             r#"
@@ -103,7 +124,7 @@ impl Storage {
             "#,
         )
         .bind(&tenant_id)
-        .bind(account_id)
+        .bind(target_account_id)
         .bind(target_mailbox_id)
         .fetch_optional(&mut *tx)
         .await?
@@ -121,7 +142,7 @@ impl Storage {
             "#,
         )
         .bind(&tenant_id)
-        .bind(account_id)
+        .bind(source_account_id)
         .bind(message_id)
         .fetch_optional(&mut *tx)
         .await?
@@ -140,7 +161,7 @@ impl Storage {
             "#,
         )
         .bind(&tenant_id)
-        .bind(account_id)
+        .bind(target_account_id)
         .bind(target_mailbox_id)
         .bind(message_id)
         .fetch_one(&mut *tx)
@@ -153,7 +174,7 @@ impl Storage {
             .allocate_mailbox_membership_in_tx(
                 &mut tx,
                 &tenant_id,
-                account_id,
+                target_account_id,
                 target_mailbox_id,
                 message_id,
                 source.try_get("thread_id")?,
@@ -171,7 +192,7 @@ impl Storage {
                 subject_text, participants_visible, body_text, attachment_text, search_vector
             )
             SELECT
-                tenant_id, account_id, $3, message_id,
+                tenant_id, $4, $3, message_id,
                 subject_text, participants_visible, body_text, attachment_text, search_vector
             FROM mail_search_documents
             WHERE tenant_id = $1 AND message_id = $2
@@ -182,13 +203,14 @@ impl Storage {
         .bind(&tenant_id)
         .bind(message_id)
         .bind(membership_id)
+        .bind(target_account_id)
         .execute(&mut *tx)
         .await?;
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, target_account_id).await?;
         tx.commit().await?;
 
-        self.fetch_jmap_emails(account_id, &[message_id])
+        self.fetch_jmap_emails(target_account_id, &[message_id])
             .await?
             .into_iter()
             .next()
@@ -1225,13 +1247,14 @@ impl Storage {
         for (ordinal, recipient) in input.bcc.iter().enumerate() {
             sqlx::query(
                 r#"
-                INSERT INTO protected_bcc_recipients (id, tenant_id, message_id, address, display_name, ordinal, metadata_scope)
-                VALUES ($1, $2, $3, $4, $5, $6, 'audit-compliance')
+                INSERT INTO protected_bcc_recipients (id, tenant_id, message_id, owner_account_id, address, display_name, ordinal, metadata_scope)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 'audit-compliance')
                 "#,
             )
             .bind(Uuid::new_v4())
             .bind(&tenant_id)
             .bind(message_id)
+            .bind(input.account_id)
             .bind(&recipient.address)
             .bind(recipient.display_name.as_deref())
             .bind(ordinal as i32)

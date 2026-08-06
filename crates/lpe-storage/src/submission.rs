@@ -115,14 +115,15 @@ impl Storage {
             sqlx::query(
                 r#"
                 INSERT INTO protected_bcc_recipients (
-                    id, tenant_id, message_id, address, display_name, ordinal
+                    id, tenant_id, message_id, owner_account_id, address, display_name, ordinal
                 )
-                VALUES ($1, $2, $3, $4, $5, $6)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 "#,
             )
             .bind(Uuid::new_v4())
             .bind(&tenant_id)
             .bind(message_id)
+            .bind(account_id)
             .bind(&recipient.address)
             .bind(recipient.display_name.as_deref())
             .bind(ordinal as i32)
@@ -447,14 +448,15 @@ impl Storage {
             sqlx::query(
                 r#"
                 INSERT INTO protected_bcc_recipients (
-                    id, tenant_id, message_id, address, display_name, ordinal, metadata_scope
+                    id, tenant_id, message_id, owner_account_id, address, display_name, ordinal, metadata_scope
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, 'audit-compliance')
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 'audit-compliance')
                 "#,
             )
             .bind(Uuid::new_v4())
             .bind(&tenant_id)
             .bind(message_id)
+            .bind(input.account_id)
             .bind(&recipient.address)
             .bind(recipient.display_name.as_deref())
             .bind(ordinal as i32)
@@ -760,14 +762,15 @@ impl Storage {
                         sqlx::query(
                             r#"
                             INSERT INTO protected_bcc_recipients (
-                                id, tenant_id, message_id, address, display_name, ordinal, metadata_scope
+                                id, tenant_id, message_id, owner_account_id, address, display_name, ordinal, metadata_scope
                             )
-                            VALUES ($1, $2, $3, $4, $5, $6, 'audit-compliance')
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, 'audit-compliance')
                             "#,
                         )
                         .bind(Uuid::new_v4())
                         .bind(&tenant_id)
                         .bind(message_id)
+                        .bind(input.account_id)
                         .bind(&recipient.address)
                         .bind(recipient.display_name.as_deref())
                         .bind(ordinal as i32)

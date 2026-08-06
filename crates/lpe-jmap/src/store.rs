@@ -276,6 +276,14 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         target_mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail>;
+    async fn copy_jmap_email_between_accounts(
+        &self,
+        source_account_id: Uuid,
+        target_account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail>;
     async fn import_jmap_email(
         &self,
         input: JmapImportedEmailInput,
@@ -876,6 +884,24 @@ impl JmapStore for Storage {
     ) -> Result<JmapEmail> {
         self.copy_jmap_email(account_id, message_id, target_mailbox_id, audit)
             .await
+    }
+
+    async fn copy_jmap_email_between_accounts(
+        &self,
+        source_account_id: Uuid,
+        target_account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
+        self.copy_jmap_email_between_accounts(
+            source_account_id,
+            target_account_id,
+            message_id,
+            target_mailbox_id,
+            audit,
+        )
+        .await
     }
 
     async fn import_jmap_email(

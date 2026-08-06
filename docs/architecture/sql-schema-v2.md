@@ -498,7 +498,9 @@ successful job.
 
 Visible recipients live in `message_recipients` with `to`, `cc`, `from`,
 `sender`, and `reply_to` roles. `Bcc` lives only in
-`protected_bcc_recipients`.
+`protected_bcc_recipients`, scoped to the account that created the protected
+recipient metadata. A copied mailbox membership never grants its target
+account access to the source account's `Bcc` metadata.
 
 The following tables must never include `Bcc` addresses or display names:
 

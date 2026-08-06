@@ -107,6 +107,8 @@
   - external or client-provided files require validation
 - Safety:
   - `Bcc` must not appear in standard search or user-facing projections
+  - cross-account `Email/copy` preserves canonical message and membership
+    state, but never grants the target account access to source protected `Bcc`
   - no JMAP-specific mailbox state engine
   - no `MAPI` session or subsystem objects are modeled in JMAP
   - no direct `SMTP`

@@ -3077,6 +3077,12 @@ fn bcc_is_absent_from_search_log_cursor_and_ai_projection_tables() {
         SCHEMA.contains("CREATE TABLE protected_bcc_recipients"),
         "Bcc must remain in the explicit protected metadata table"
     );
+    let protected_bcc_definition = table_definition("protected_bcc_recipients");
+    assert!(
+        protected_bcc_definition.contains("owner_account_id UUID NOT NULL")
+            && protected_bcc_definition.contains("FOREIGN KEY (tenant_id, owner_account_id)"),
+        "protected Bcc recipients must remain scoped to their owner account"
+    );
     assert!(
         JMAP_BLOBS_STORAGE.contains("strip_protected_bcc_headers"),
         "JMAP raw-message blob projection must keep protected Bcc stripping outside canonical message storage"
