@@ -688,7 +688,19 @@ where
         let result = async {
             let display_name = element_text(request, "DisplayName")
                 .ok_or_else(|| anyhow!("UpdateFolder currently requires DisplayName."))?;
+            let supplied_change_key = attribute_values_for_tag(request, "FolderId", "ChangeKey")
+                .into_iter()
+                .next();
             if let Some(folder_id) = requested_public_folder_ids(request).into_iter().next() {
+                let current = self
+                    .store
+                    .fetch_public_folder(principal.account_id, folder_id)
+                    .await?;
+                validate_supplied_folder_change_key(
+                    supplied_change_key,
+                    &public_folder_change_key(&current),
+                    &format!("public-folder:{folder_id}"),
+                )?;
                 let folder = self
                     .store
                     .update_public_folder(
@@ -721,7 +733,13 @@ where
                 .store
                 .fetch_jmap_mailboxes(principal.account_id)
                 .await?;
-            ensure_custom_mailbox(mailbox_by_id(&mailboxes, folder_id)?)?;
+            let current = mailbox_by_id(&mailboxes, folder_id)?;
+            ensure_custom_mailbox(current)?;
+            validate_supplied_folder_change_key(
+                supplied_change_key,
+                &mailbox_folder_change_key(current),
+                &format!("mailbox:{folder_id}"),
+            )?;
             let mailbox = self
                 .store
                 .update_jmap_mailbox(
@@ -748,7 +766,11 @@ where
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response("UpdateFolder", "ErrorInvalidOperation", &error.to_string())
+            operation_error_response(
+                "UpdateFolder",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
         }))
     }
 

@@ -32,21 +32,33 @@ where
             .fetch_accessible_contact_collections(principal.account_id)
             .await?
         {
-            folders.push_str(&folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts"));
+            folders.push_str(
+                &self
+                    .collection_folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts")
+                    .await?,
+            );
         }
         for collection in self
             .store
             .fetch_accessible_calendar_collections(principal.account_id)
             .await?
         {
-            folders.push_str(&folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"));
+            folders.push_str(
+                &self
+                    .collection_folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar")
+                    .await?,
+            );
         }
         for collection in self
             .store
             .fetch_accessible_task_collections(principal.account_id)
             .await?
         {
-            folders.push_str(&folder_xml(&collection, TASKS_FOLDER_ID, "Task"));
+            folders.push_str(
+                &self
+                    .collection_folder_xml(&collection, TASKS_FOLDER_ID, "Task")
+                    .await?,
+            );
         }
         for tree in self
             .store
@@ -106,7 +118,8 @@ where
             folders.push(HierarchySyncFolder::new(
                 format!("contacts|{}", collection.id),
                 collection.id.clone(),
-                folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts"),
+                self.collection_folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts")
+                    .await?,
             ));
         }
         for collection in self
@@ -117,7 +130,8 @@ where
             folders.push(HierarchySyncFolder::new(
                 format!("calendar|{}", collection.id),
                 collection.id.clone(),
-                folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"),
+                self.collection_folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar")
+                    .await?,
             ));
         }
         for collection in self
@@ -128,7 +142,8 @@ where
             folders.push(HierarchySyncFolder::new(
                 format!("tasks|{}", collection.id),
                 collection.id.clone(),
-                folder_xml(&collection, TASKS_FOLDER_ID, "Task"),
+                self.collection_folder_xml(&collection, TASKS_FOLDER_ID, "Task")
+                    .await?,
             ));
         }
         for tree in self
@@ -320,41 +335,51 @@ where
                     ));
                 }
                 FolderKind::Contacts => {
-                    folders.push_str(
-                        &self
-                            .store
-                            .fetch_accessible_contact_collections(principal.account_id)
-                            .await?
-                            .into_iter()
-                            .map(|collection| {
-                                folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts")
-                            })
-                            .collect::<String>(),
-                    );
+                    for collection in self
+                        .store
+                        .fetch_accessible_contact_collections(principal.account_id)
+                        .await?
+                    {
+                        folders.push_str(
+                            &self
+                                .collection_folder_xml(
+                                    &collection,
+                                    CONTACTS_FOLDER_ID,
+                                    "Contacts",
+                                )
+                                .await?,
+                        );
+                    }
                 }
                 FolderKind::Calendar => {
-                    folders.push_str(
-                        &self
-                            .store
-                            .fetch_accessible_calendar_collections(principal.account_id)
-                            .await?
-                            .into_iter()
-                            .map(|collection| {
-                                folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar")
-                            })
-                            .collect::<String>(),
-                    );
+                    for collection in self
+                        .store
+                        .fetch_accessible_calendar_collections(principal.account_id)
+                        .await?
+                    {
+                        folders.push_str(
+                            &self
+                                .collection_folder_xml(
+                                    &collection,
+                                    CALENDAR_FOLDER_ID,
+                                    "Calendar",
+                                )
+                                .await?,
+                        );
+                    }
                 }
                 FolderKind::Tasks => {
-                    folders.push_str(
-                        &self
-                            .store
-                            .fetch_accessible_task_collections(principal.account_id)
-                            .await?
-                            .into_iter()
-                            .map(|collection| folder_xml(&collection, TASKS_FOLDER_ID, "Task"))
-                            .collect::<String>(),
-                    );
+                    for collection in self
+                        .store
+                        .fetch_accessible_task_collections(principal.account_id)
+                        .await?
+                    {
+                        folders.push_str(
+                            &self
+                                .collection_folder_xml(&collection, TASKS_FOLDER_ID, "Task")
+                                .await?,
+                        );
+                    }
                 }
                 FolderKind::Mailbox => {
                     let mailbox_ids = self
@@ -436,6 +461,24 @@ where
                 .into_iter()
                 .filter(|tree| tree.root_folder_id.is_some())
                 .count())
+    }
+
+    async fn collection_folder_xml(
+        &self,
+        collection: &CollaborationCollection,
+        distinguished_id: &str,
+        class: &str,
+    ) -> Result<String> {
+        let revision = self
+            .store
+            .fetch_account_category_modseq(collection.owner_account_id, &collection.kind)
+            .await?;
+        Ok(folder_xml(
+            collection,
+            distinguished_id,
+            class,
+            &collection_folder_change_key(collection, revision),
+        ))
     }
 }
 
@@ -628,6 +671,17 @@ pub(in crate::service) fn ensure_custom_mailbox(mailbox: &JmapMailbox) -> Result
     }
 }
 
+pub(in crate::service) fn validate_supplied_folder_change_key(
+    supplied_change_key: Option<&str>,
+    current_change_key: &str,
+    id: &str,
+) -> Result<()> {
+    if matches!(supplied_change_key, Some(change_key) if change_key != current_change_key) {
+        bail!("stale EWS ChangeKey for {id}");
+    }
+    Ok(())
+}
+
 pub(in crate::service) fn create_folder_success_response(mailbox: &JmapMailbox) -> String {
     format!(
         concat!(
@@ -738,6 +792,7 @@ pub(in crate::service) fn folder_xml(
     collection: &CollaborationCollection,
     distinguished_id: &str,
     class: &str,
+    change_key: &str,
 ) -> String {
     let element = match distinguished_id {
         CONTACTS_FOLDER_ID => "ContactsFolder",
@@ -768,7 +823,7 @@ pub(in crate::service) fn folder_xml(
         ),
         element = element,
         id = escape_xml(&collection.id),
-        change_key = escape_xml(&folder_change_key(&collection.id)),
+        change_key = escape_xml(change_key),
         display = escape_xml(&collection.display_name),
         class = class,
         may_read = collection.rights.may_read,
@@ -810,7 +865,7 @@ pub(in crate::service) fn mailbox_folder_xml(mailbox: &JmapMailbox) -> String {
             "</t:Folder>"
         ),
         id = mailbox.id,
-        change_key = folder_change_key(&mailbox.id.to_string()),
+        change_key = mailbox_folder_change_key(mailbox),
         parent_id = escape_xml(&parent_id),
         parent_change_key = escape_xml(&parent_change_key),
         display = escape_xml(&mailbox.name),
@@ -853,7 +908,7 @@ pub(in crate::service) fn public_folder_xml(
             "</t:Folder>"
         ),
         id = folder.id,
-        change_key = folder_change_key(&format!("public-folder:{}", folder.id)),
+        change_key = public_folder_change_key(folder),
         parent_id = escape_xml(&parent_id),
         parent_change_key = escape_xml(&parent_change_key),
         class = escape_xml(&folder.folder_class),
@@ -869,4 +924,20 @@ pub(in crate::service) fn public_folder_xml(
 
 pub(in crate::service) fn folder_change_key(id: &str) -> String {
     format!("ck-{id}")
+}
+
+pub(in crate::service) fn mailbox_folder_change_key(mailbox: &JmapMailbox) -> String {
+    versioned_change_key("mailbox-folder", &mailbox.id.to_string(), &mailbox.modseq.to_string())
+}
+
+pub(in crate::service) fn public_folder_change_key(folder: &PublicFolder) -> String {
+    versioned_change_key(
+        "public-folder",
+        &folder.id.to_string(),
+        &folder.change_counter.to_string(),
+    )
+}
+
+fn collection_folder_change_key(collection: &CollaborationCollection, revision: u64) -> String {
+    versioned_change_key("collection-folder", &collection.id, &revision.to_string())
 }

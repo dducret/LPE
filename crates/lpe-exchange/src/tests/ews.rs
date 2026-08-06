@@ -35,7 +35,8 @@ async fn find_folder_lists_contact_and_calendar_folders() {
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
     assert!(body.contains("<t:ContactsFolder>"));
     assert!(body.contains("<t:CalendarFolder>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:FolderId Id=\"default\" ChangeKey=\"ck-v1-"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-v1-"));
     assert!(
         body.find("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"")
             .unwrap()
@@ -184,7 +185,7 @@ async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
     assert!(body.contains("<t:Create><t:Folder>"));
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-v1-"));
     assert!(
         body.find("<t:Create><t:Folder>").unwrap()
             < body.find("<t:Create><t:ContactsFolder>").unwrap()
@@ -459,6 +460,197 @@ async fn copy_move_and_update_folder_use_canonical_mailbox_changes() {
 }
 
 #[tokio::test]
+async fn folder_change_keys_follow_canonical_revisions_and_reject_stale_updates() {
+    let source_id = "11111111-1111-1111-1111-111111111111";
+    let target_id = "22222222-2222-2222-2222-222222222222";
+    let public_folder_id = "aaaaaaaa-1111-1111-1111-111111111111";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(source_id, "custom", "Source"),
+            FakeStore::mailbox(target_id, "custom", "Target"),
+        ])),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            public_folder_id,
+            None,
+            "Shared",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:FolderId Id="mailbox:{source_id}"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let initial = response_text(response).await;
+    let initial_key = test_item_change_key(&initial, &format!("mailbox:{source_id}"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id="mailbox:{source_id}" ChangeKey="{initial_key}"/><t:Updates><t:SetFolderField><t:FieldURI FieldURI="folder:DisplayName"/><t:Folder><t:DisplayName>Renamed Source</t:DisplayName></t:Folder></t:SetFolderField></t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let renamed = response_text(response).await;
+    let renamed_key = test_item_change_key(&renamed, &format!("mailbox:{source_id}"));
+    assert_ne!(renamed_key, initial_key);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:MoveFolder><m:ToFolderId><t:FolderId Id="mailbox:{target_id}"/></m:ToFolderId><m:FolderIds><t:FolderId Id="mailbox:{source_id}"/></m:FolderIds></m:MoveFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let moved = response_text(response).await;
+    let moved_key = test_item_change_key(&moved, &format!("mailbox:{source_id}"));
+    assert_ne!(moved_key, renamed_key);
+
+    let update_count = store.updated_mailboxes.lock().unwrap().len();
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id="mailbox:{source_id}" ChangeKey="{initial_key}"/><t:Updates><t:SetFolderField><t:FieldURI FieldURI="folder:DisplayName"/><t:Folder><t:DisplayName>Stale Rename</t:DisplayName></t:Folder></t:SetFolderField></t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorIrresolvableConflict</m:ResponseCode>"));
+    assert_eq!(store.updated_mailboxes.lock().unwrap().len(), update_count);
+    let source = store
+        .mailboxes
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|mailbox| mailbox.id == Uuid::parse_str(source_id).unwrap())
+        .unwrap()
+        .clone();
+    assert_eq!(source.name, "Renamed Source");
+    assert_eq!(source.parent_id, Some(Uuid::parse_str(target_id).unwrap()));
+
+    store
+        .update_jmap_mailbox(
+            JmapMailboxUpdateInput {
+                account_id: FakeStore::account().account_id,
+                mailbox_id: Uuid::parse_str(source_id).unwrap(),
+                name: Some("JMAP Rename".to_string()),
+                parent_id: None,
+                sort_order: None,
+                is_subscribed: None,
+            },
+            lpe_storage::AuditEntryInput {
+                actor: "alice@example.test".to_string(),
+                action: "jmap-mailbox-set".to_string(),
+                subject: source_id.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:FolderId Id="mailbox:{source_id}"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let jmap_updated = response_text(response).await;
+    assert_ne!(
+        test_item_change_key(&jmap_updated, &format!("mailbox:{source_id}")),
+        moved_key
+    );
+
+    let update_count = store.updated_mailboxes.lock().unwrap().len();
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id="mailbox:{source_id}" ChangeKey="{moved_key}"/><t:Updates><t:SetFolderField><t:FieldURI FieldURI="folder:DisplayName"/><t:Folder><t:DisplayName>Stale JMAP Rename</t:DisplayName></t:Folder></t:SetFolderField></t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorIrresolvableConflict</m:ResponseCode>"));
+    assert_eq!(store.updated_mailboxes.lock().unwrap().len(), update_count);
+    assert!(store
+        .mailboxes
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|mailbox| mailbox.id == Uuid::parse_str(source_id).unwrap()
+            && mailbox.name == "JMAP Rename"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:FolderId Id="public-folder:{public_folder_id}"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let initial = response_text(response).await;
+    let initial_key = test_item_change_key(&initial, &format!("public-folder:{public_folder_id}"));
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id="public-folder:{public_folder_id}" ChangeKey="{initial_key}"/><t:Updates><t:SetFolderField><t:FieldURI FieldURI="folder:DisplayName"/><t:Folder><t:DisplayName>Renamed Shared</t:DisplayName></t:Folder></t:SetFolderField></t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let renamed = response_text(response).await;
+    assert_ne!(
+        test_item_change_key(&renamed, &format!("public-folder:{public_folder_id}")),
+        initial_key
+    );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id="public-folder:{public_folder_id}" ChangeKey="{initial_key}"/><t:Updates><t:SetFolderField><t:FieldURI FieldURI="folder:DisplayName"/><t:Folder><t:DisplayName>Stale Shared</t:DisplayName></t:Folder></t:SetFolderField></t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>ErrorIrresolvableConflict</m:ResponseCode>"));
+    assert!(store
+        .public_folders
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|folder| folder.id == Uuid::parse_str(public_folder_id).unwrap()
+            && folder.display_name == "Renamed Shared"));
+}
+
+#[tokio::test]
 async fn empty_folder_deletes_messages_and_subfolders_through_canonical_paths() {
     let parent_id = "11111111-1111-1111-1111-111111111111";
     let child_id = "22222222-2222-2222-2222-222222222222";
@@ -717,7 +909,7 @@ async fn create_folder_uses_canonical_mailbox_store() {
     let body = response_text(response).await;
     assert!(body.contains("<m:CreateFolderResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-v1-"));
     assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
     assert_eq!(created_mailboxes.lock().unwrap()[0].name, "RCA Sync");
 }
@@ -1222,7 +1414,7 @@ async fn get_folder_returns_system_mailbox_by_distinguished_id() {
     let body = response_text(response).await;
     assert!(body.contains("<m:GetFolderResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:55555555-5555-5555-5555-555555555555\" ChangeKey=\"ck-55555555-5555-5555-5555-555555555555\"/>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:55555555-5555-5555-5555-555555555555\" ChangeKey=\"ck-v1-"));
     assert!(body.contains("<t:DisplayName>Inbox</t:DisplayName>"));
 }
 
