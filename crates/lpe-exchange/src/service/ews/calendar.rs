@@ -95,18 +95,15 @@ pub(in crate::service) fn ews_datetime(date: &str, time: &str) -> String {
 }
 
 pub(in crate::service) fn event_end_datetime(event: &AccessibleEvent) -> String {
-    let (hour, minute) = event
-        .time
-        .split_once(':')
-        .and_then(|(hour, minute)| Some((hour.parse::<i32>().ok()?, minute.parse::<i32>().ok()?)))
-        .unwrap_or((0, 0));
-    let total = hour
-        .saturating_mul(60)
-        .saturating_add(minute)
-        .saturating_add(event.duration_minutes.max(0));
-    let end_hour = (total / 60).min(23);
-    let end_minute = total % 60;
-    ews_datetime(&event.date, &format!("{end_hour:02}:{end_minute:02}"))
+    let start_minutes = time_minutes(&event.time).unwrap_or(0);
+    let total_minutes = i64::from(start_minutes) + i64::from(event.duration_minutes.max(0));
+    let end_date = ews_date_after_days(&event.date, total_minutes / 1_440)
+        .unwrap_or_else(|| event.date.clone());
+    let end_minutes = total_minutes % 1_440;
+    ews_datetime(
+        &end_date,
+        &format!("{:02}:{:02}", end_minutes / 60, end_minutes % 60),
+    )
 }
 
 pub(in crate::service) fn parse_create_event_input(
@@ -640,14 +637,73 @@ fn ews_datetime_parts(value: &str) -> Option<(String, String)> {
 }
 
 fn ews_duration_minutes(start: &str, end: &str) -> Option<i32> {
-    let (_, start_time) = ews_datetime_parts(start)?;
-    let (_, end_time) = ews_datetime_parts(end)?;
-    let start_minutes = time_minutes(&start_time)?;
-    let end_minutes = time_minutes(&end_time)?;
-    (end_minutes > start_minutes).then_some(end_minutes - start_minutes)
+    let start_minutes = ews_datetime_minutes(start)?;
+    let end_minutes = ews_datetime_minutes(end)?;
+    i32::try_from(end_minutes - start_minutes)
+        .ok()
+        .filter(|duration| *duration >= 0)
 }
 
 fn time_minutes(value: &str) -> Option<i32> {
     let (hour, minute) = value.split_once(':')?;
-    Some(hour.parse::<i32>().ok()? * 60 + minute.parse::<i32>().ok()?)
+    let hour = hour.parse::<i32>().ok()?;
+    let minute = minute.parse::<i32>().ok()?;
+    ((0..24).contains(&hour) && (0..60).contains(&minute)).then_some(hour * 60 + minute)
+}
+
+fn ews_datetime_minutes(value: &str) -> Option<i64> {
+    let (date, time) = ews_datetime_parts(value)?;
+    Some(days_from_civil(ews_date_parts(&date)?)? * 1_440 + i64::from(time_minutes(&time)?))
+}
+
+fn ews_date_after_days(date: &str, days: i64) -> Option<String> {
+    let date = days_from_civil(ews_date_parts(date)?)?.checked_add(days)?;
+    let (year, month, day) = civil_from_days(date);
+    Some(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+fn ews_date_parts(value: &str) -> Option<(i32, u32, u32)> {
+    let mut parts = value.split('-');
+    let year = parts.next()?.parse().ok()?;
+    let month = parts.next()?.parse().ok()?;
+    let day = parts.next()?.parse().ok()?;
+    (parts.next().is_none()
+        && (1..=12).contains(&month)
+        && (1..=days_in_month(year, month)).contains(&day))
+    .then_some((year, month, day))
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+fn days_from_civil((year, month, day): (i32, u32, u32)) -> Option<i64> {
+    let year = i64::from(year) - if month <= 2 { 1 } else { 0 };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month = i64::from(month);
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    day_of_era
+        .checked_add(era.checked_mul(146_097)?)?
+        .checked_sub(719_468)
+}
+
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let days = days + 719_468;
+    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_parameter = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_parameter + 2) / 5 + 1;
+    let month = month_parameter + if month_parameter < 10 { 3 } else { -9 };
+    (year + if month <= 2 { 1 } else { 0 }, month, day)
 }

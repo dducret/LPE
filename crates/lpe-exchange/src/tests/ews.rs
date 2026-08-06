@@ -223,6 +223,7 @@ async fn create_folder_path_creates_nested_mailboxes_and_sync_reports_changes() 
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:DisplayName>Projects</t:DisplayName>"));
     assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
+    assert!(body.contains("<t:ParentFolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-44444444-4444-4444-4444-444444444444\"/>"));
     let created = store.created_mailboxes.lock().unwrap().clone();
     assert_eq!(created.len(), 2);
     assert_eq!(created[0].name, "Projects");
@@ -248,6 +249,16 @@ async fn create_folder_path_creates_nested_mailboxes_and_sync_reports_changes() 
     let body = response_text(response).await;
     assert!(body.contains("<t:DisplayName>Projects</t:DisplayName>"));
     assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444402"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:ParentFolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-44444444-4444-4444-4444-444444444444\"/>"));
 }
 
 #[tokio::test]
@@ -311,6 +322,21 @@ async fn copy_move_and_update_folder_use_canonical_mailbox_changes() {
         store.updated_mailboxes.lock().unwrap()[0].parent_id,
         Some(Some(Uuid::parse_str(target_id).unwrap()))
     );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:FolderId Id="mailbox:{child_id}"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains(&format!(
+        "<t:ParentFolderId Id=\"mailbox:{target_id}\" ChangeKey=\"ck-{target_id}\"/>"
+    )));
 
     let response = service
         .handle(
@@ -7254,8 +7280,8 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
                     <t:CalendarItem>
                       <t:Subject>RCA Calendar</t:Subject>
                       <t:Location>Room 1</t:Location>
-                      <t:Start>2026-05-04T09:30:00Z</t:Start>
-                      <t:End>2026-05-04T10:15:00Z</t:End>
+                      <t:Start>2026-05-04T23:30:00Z</t:Start>
+                      <t:End>2026-05-05T01:30:00Z</t:End>
                       <t:Recurrence>
                         <t:WeeklyRecurrence>
                           <t:Interval>1</t:Interval>
@@ -7291,6 +7317,7 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
         created_events[0].recurrence_rule,
         "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=5"
     );
+    assert_eq!(created_events[0].duration_minutes, 120);
     assert_eq!(created_events[0].attendees, "Bob, Carol");
     assert!(created_events[0]
         .attendees_json
@@ -7316,8 +7343,8 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     assert!(body.contains("<t:Create><t:CalendarItem>"));
     assert!(body.contains("event:cccccccc-cccc-cccc-cccc-cccccccccccc"));
     assert!(body.contains("<t:Subject>RCA Calendar</t:Subject>"));
-    assert!(body.contains("<t:Start>2026-05-04T09:30:00Z</t:Start>"));
-    assert!(body.contains("<t:End>2026-05-04T10:15:00Z</t:End>"));
+    assert!(body.contains("<t:Start>2026-05-04T23:30:00Z</t:Start>"));
+    assert!(body.contains("<t:End>2026-05-05T01:30:00Z</t:End>"));
     assert!(body.contains("<t:WeeklyRecurrence>"));
     assert!(body.contains("<t:DaysOfWeek>Monday Wednesday</t:DaysOfWeek>"));
     assert!(body.contains("<t:NumberOfOccurrences>5</t:NumberOfOccurrences>"));
@@ -9182,9 +9209,9 @@ async fn find_item_returns_calendar_items_from_canonical_store() {
             owner_display_name: collection.owner_display_name.clone(),
             rights: collection.rights.clone(),
             date: "2026-05-04".to_string(),
-            time: "09:30".to_string(),
+            time: "23:30".to_string(),
             time_zone: "UTC".to_string(),
-            duration_minutes: 45,
+            duration_minutes: 1_560,
             all_day: false,
             status: "confirmed".to_string(),
             sequence: 0,
@@ -9215,8 +9242,8 @@ async fn find_item_returns_calendar_items_from_canonical_store() {
     assert!(body.contains("<m:FindItemResponse>"));
     assert!(body.contains("<t:CalendarItem>"));
     assert!(body.contains("event:cccccccc-cccc-cccc-cccc-cccccccccccc"));
-    assert!(body.contains("<t:Start>2026-05-04T09:30:00Z</t:Start>"));
-    assert!(body.contains("<t:End>2026-05-04T10:15:00Z</t:End>"));
+    assert!(body.contains("<t:Start>2026-05-04T23:30:00Z</t:Start>"));
+    assert!(body.contains("<t:End>2026-05-06T01:30:00Z</t:End>"));
 }
 
 fn retention_policy_tag(

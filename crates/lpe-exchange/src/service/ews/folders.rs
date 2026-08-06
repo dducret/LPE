@@ -775,11 +775,19 @@ pub(in crate::service) fn folder_xml(
 }
 
 pub(in crate::service) fn mailbox_folder_xml(mailbox: &JmapMailbox) -> String {
+    let parent_id = mailbox
+        .parent_id
+        .map(|id| format!("mailbox:{id}"))
+        .unwrap_or_else(|| "msgfolderroot".to_string());
+    let parent_change_key = mailbox
+        .parent_id
+        .map(|id| folder_change_key(&id.to_string()))
+        .unwrap_or_else(|| "root".to_string());
     format!(
         concat!(
             "<t:Folder>",
             "<t:FolderId Id=\"mailbox:{id}\" ChangeKey=\"{change_key}\"/>",
-            "<t:ParentFolderId Id=\"msgfolderroot\" ChangeKey=\"root\"/>",
+            "<t:ParentFolderId Id=\"{parent_id}\" ChangeKey=\"{parent_change_key}\"/>",
             "<t:FolderClass>IPF.Note</t:FolderClass>",
             "<t:DisplayName>{display}</t:DisplayName>",
             "<t:TotalCount>{total_count}</t:TotalCount>",
@@ -798,6 +806,8 @@ pub(in crate::service) fn mailbox_folder_xml(mailbox: &JmapMailbox) -> String {
         ),
         id = mailbox.id,
         change_key = folder_change_key(&mailbox.id.to_string()),
+        parent_id = escape_xml(&parent_id),
+        parent_change_key = escape_xml(&parent_change_key),
         display = escape_xml(&mailbox.name),
         total_count = mailbox.total_emails,
         unread_count = mailbox.unread_emails,
