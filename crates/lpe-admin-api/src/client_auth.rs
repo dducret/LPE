@@ -30,6 +30,7 @@ use crate::{
 
 pub(crate) async fn client_login(
     State(storage): State<Storage>,
+    headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> Result<(HeaderMap, Json<ClientLoginResponse>), (StatusCode, String)> {
     let security = storage
@@ -122,7 +123,10 @@ pub(crate) async fn client_login(
             "session creation failed".to_string(),
         ))?;
 
-    Ok((mail_session_headers(&token), Json(ClientLoginResponse { token, account })))
+    Ok((
+        mail_session_headers(&token, session_cookie_is_secure(&headers)),
+        Json(ClientLoginResponse { token, account }),
+    ))
 }
 
 pub(crate) async fn client_logout(
@@ -136,7 +140,7 @@ pub(crate) async fn client_logout(
             .map_err(internal_error)?;
     }
     Ok((
-        cleared_mail_session_headers(),
+        cleared_mail_session_headers(session_cookie_is_secure(&headers)),
         Json(HealthResponse {
             service: "lpe-admin-api",
             status: "ok",
@@ -516,28 +520,66 @@ pub(crate) async fn client_oidc_callback(
             },
         )
         .await;
-    Ok((mail_session_headers(&token), Redirect::to("/mail/")))
+    Ok((
+        mail_session_headers(&token, session_cookie_is_secure(&headers)),
+        Redirect::to("/mail/"),
+    ))
 }
 
-fn mail_session_headers(token: &str) -> HeaderMap {
+fn mail_session_headers(token: &str, secure: bool) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
         "set-cookie",
         HeaderValue::from_str(&format!(
-            "lpe_mail_session={token}; Path=/; HttpOnly; Secure; SameSite=Strict"
+            "lpe_mail_session={token}; Path=/; HttpOnly; SameSite=Strict{}",
+            secure.then_some("; Secure").unwrap_or_default(),
         ))
         .expect("session tokens are UUIDs"),
     );
     headers
 }
 
-fn cleared_mail_session_headers() -> HeaderMap {
+fn cleared_mail_session_headers(secure: bool) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
         "set-cookie",
-        HeaderValue::from_static(
-            "lpe_mail_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
-        ),
+        HeaderValue::from_str(&format!(
+            "lpe_mail_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{}",
+            secure.then_some("; Secure").unwrap_or_default(),
+        ))
+        .expect("static session cookie attributes are valid"),
     );
     headers
+}
+
+fn session_cookie_is_secure(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("https"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{mail_session_headers, session_cookie_is_secure};
+    use axum::http::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn mailbox_session_cookie_is_secure_only_on_an_https_edge() {
+        let mut https = HeaderMap::new();
+        https.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+        assert!(session_cookie_is_secure(&https));
+        assert!(mail_session_headers("token", true)["set-cookie"]
+            .to_str()
+            .unwrap()
+            .contains("; Secure"));
+
+        let http = HeaderMap::new();
+        assert!(!session_cookie_is_secure(&http));
+        assert!(!mail_session_headers("token", false)["set-cookie"]
+            .to_str()
+            .unwrap()
+            .contains("; Secure"));
+    }
 }

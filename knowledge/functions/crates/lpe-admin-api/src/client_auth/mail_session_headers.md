@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mail_session_headers
-resource: crates/lpe-admin-api/src/client_auth.rs#L522-L532
+resource: crates/lpe-admin-api/src/client_auth.rs#L529-L540
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -16,7 +16,7 @@ relationships:
 
 # Signature
 
-`fn mail_session_headers(token: &str) -> HeaderMap`
+`fn mail_session_headers(token: &str, secure: bool) -> HeaderMap`
 
 # Calls
 

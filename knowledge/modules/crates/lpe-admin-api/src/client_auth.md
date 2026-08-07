@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: client_auth
-resource: crates/lpe-admin-api/src/client_auth.rs#L1-L543
+resource: crates/lpe-admin-api/src/client_auth.rs#L1-L585
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,6 +12,8 @@ relationships:
   - external/lpe-mail-auth-issue-oauth-access-token-normalize-scope-default-oauth-access-scope
   - external/lpe-storage-auditentryinput-authenticatedaccount-healthresponse-storage
   - external/crate-account-oidc-http-account-session-token-bad-request-error-internal-error-public-origin-require-account-security-client-oauth-access-token-seconds-client-session-minutes-generate-app-password-secret-hash-password-verify-password-totp-types-accountapppasswordsresponse-accountauthfactorsresponse-apiresult-clientloginresponse-clientoauthaccesstokenresponse-clientoidcmetadataresponse-clientoidcstartresponse-createaccountapppasswordrequest-createaccountapppasswordresponse-createclientoauthaccesstokenrequest-enrolltotprequest-enrolltotpresponse-loginrequest-verifytotprequest
+  - external/super-mail-session-headers-session-cookie-is-secure
+  - external/axum-http-headermap-headervalue
   member_of:
   - packages/crates/lpe-admin-api
 ---
@@ -34,6 +36,8 @@ relationships:
 - [client_oidc_callback](../../../../functions/crates/lpe-admin-api/src/client_auth/client_oidc_callback.md)
 - [mail_session_headers](../../../../functions/crates/lpe-admin-api/src/client_auth/mail_session_headers.md)
 - [cleared_mail_session_headers](../../../../functions/crates/lpe-admin-api/src/client_auth/cleared_mail_session_headers.md)
+- [session_cookie_is_secure](../../../../functions/crates/lpe-admin-api/src/client_auth/session_cookie_is_secure.md)
+- [mailbox_session_cookie_is_secure_only_on_an_https_edge](../../../../functions/crates/lpe-admin-api/src/client_auth/mailbox_session_cookie_is_secure_only_on_an_https_edge.md)
 
 # Imports
 
@@ -64,6 +68,8 @@ relationships:
         VerifyTotpRequest,
     },
 }`
+- `super::{mail_session_headers, session_cookie_is_secure}`
+- `axum::http::{HeaderMap, HeaderValue}`
 
 # Member of
 

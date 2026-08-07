@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: account_auth_factors
-resource: crates/lpe-admin-api/src/client_auth.rs#L154-L164
+resource: crates/lpe-admin-api/src/client_auth.rs#L158-L168
 generated:
   by: okf-rs/0.3.0
 relationships:

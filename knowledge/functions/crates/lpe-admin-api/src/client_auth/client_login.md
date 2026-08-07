@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: client_login
-resource: crates/lpe-admin-api/src/client_auth.rs#L31-L126
+resource: crates/lpe-admin-api/src/client_auth.rs#L31-L130
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,11 +12,12 @@ relationships:
   - functions/crates/lpe-storage/src/auth/Storage/create_account_session
   - functions/crates/lpe-admin-api/src/security/client_session_minutes
   - functions/crates/lpe-admin-api/src/client_auth/mail_session_headers
+  - functions/crates/lpe-admin-api/src/client_auth/session_cookie_is_secure
 ---
 
 # Signature
 
-`pub(crate) async fn client_login( State(storage): State<Storage>, Json(request): Json<LoginRequest>, ) -> Result<(HeaderMap, Json<ClientLoginResponse>), (StatusCode, String)>`
+`pub(crate) async fn client_login( State(storage): State<Storage>, headers: HeaderMap, Json(request): Json<LoginRequest>, ) -> Result<(HeaderMap, Json<ClientLoginResponse>), (StatusCode, String)>`
 
 # Calls
 
@@ -26,3 +27,4 @@ relationships:
 - [create_account_session](../../../../../functions/crates/lpe-storage/src/auth/Storage/create_account_session.md)
 - [client_session_minutes](../../../../../functions/crates/lpe-admin-api/src/security/client_session_minutes.md)
 - [mail_session_headers](../../../../../functions/crates/lpe-admin-api/src/client_auth/mail_session_headers.md)
+- [session_cookie_is_secure](../../../../../functions/crates/lpe-admin-api/src/client_auth/session_cookie_is_secure.md)

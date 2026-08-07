@@ -5,6 +5,8 @@ resource: crates/lpe-admin-api/src/access.rs#L32-L46
 generated:
   by: okf-rs/0.3.0
 relationships:
+  calls:
+  - functions/crates/lpe-admin-api/src/http/account_session_token
   called_by:
   - functions/crates/lpe-admin-api/src/client_auth/client_me
   - functions/crates/lpe-admin-api/src/client_auth/account_auth_factors
@@ -77,6 +79,10 @@ relationships:
 # Signature
 
 `pub(crate) async fn require_account( storage: &Storage, headers: &HeaderMap, ) -> std::result::Result<AuthenticatedAccount, (StatusCode, String)>`
+
+# Calls
+
+- [account_session_token](../../../../../functions/crates/lpe-admin-api/src/http/account_session_token.md)
 
 # Called by
 

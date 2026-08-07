@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: client_logout
-resource: crates/lpe-admin-api/src/client_auth.rs#L128-L145
+resource: crates/lpe-admin-api/src/client_auth.rs#L132-L149
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-admin-api/src/http/account_session_token
   - functions/crates/lpe-storage/src/auth/Storage/delete_account_session
   - functions/crates/lpe-admin-api/src/client_auth/cleared_mail_session_headers
+  - functions/crates/lpe-admin-api/src/client_auth/session_cookie_is_secure
 ---
 
 # Signature
@@ -20,3 +21,4 @@ relationships:
 - [account_session_token](../../../../../functions/crates/lpe-admin-api/src/http/account_session_token.md)
 - [delete_account_session](../../../../../functions/crates/lpe-storage/src/auth/Storage/delete_account_session.md)
 - [cleared_mail_session_headers](../../../../../functions/crates/lpe-admin-api/src/client_auth/cleared_mail_session_headers.md)
+- [session_cookie_is_secure](../../../../../functions/crates/lpe-admin-api/src/client_auth/session_cookie_is_secure.md)

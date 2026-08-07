@@ -1558,8 +1558,10 @@
 - [enroll_account_totp](../functions/crates/lpe-admin-api/src/client_auth/enroll_account_totp.md) — Rust Function
 - [list_account_app_passwords](../functions/crates/lpe-admin-api/src/client_auth/list_account_app_passwords.md) — Rust Function
 - [mail_session_headers](../functions/crates/lpe-admin-api/src/client_auth/mail_session_headers.md) — Rust Function
+- [mailbox_session_cookie_is_secure_only_on_an_https_edge](../functions/crates/lpe-admin-api/src/client_auth/mailbox_session_cookie_is_secure_only_on_an_https_edge.md) — Rust Function
 - [revoke_account_app_password](../functions/crates/lpe-admin-api/src/client_auth/revoke_account_app_password.md) — Rust Function
 - [revoke_account_factor](../functions/crates/lpe-admin-api/src/client_auth/revoke_account_factor.md) — Rust Function
+- [session_cookie_is_secure](../functions/crates/lpe-admin-api/src/client_auth/session_cookie_is_secure.md) — Rust Function
 - [verify_account_totp_factor](../functions/crates/lpe-admin-api/src/client_auth/verify_account_totp_factor.md) — Rust Function
 - [exch_autodiscover_enabled](../functions/crates/lpe-admin-api/src/client_config/PublishedEndpoints/exch_autodiscover_enabled.md) — Rust Method
 - [exchange_autodiscover_enabled](../functions/crates/lpe-admin-api/src/client_config/PublishedEndpoints/exchange_autodiscover_enabled.md) — Rust Method

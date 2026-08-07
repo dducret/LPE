@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: create_client_oauth_access_token
-resource: crates/lpe-admin-api/src/client_auth.rs#L358-L402
+resource: crates/lpe-admin-api/src/client_auth.rs#L362-L406
 generated:
   by: okf-rs/0.3.0
 relationships:

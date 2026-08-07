@@ -67,6 +67,7 @@ relationships:
   - functions/crates/lpe-admin-api/src/admin_auth/oidc_callback
   - functions/crates/lpe-admin-api/src/app/router
   - functions/crates/lpe-admin-api/src/client_auth/client_oidc_callback
+  - functions/crates/lpe-admin-api/src/client_auth/session_cookie_is_secure
   - functions/crates/lpe-admin-api/src/client_config/router
   - functions/crates/lpe-admin-api/src/client_config/PublishedEndpoints/from_headers
   - functions/crates/lpe-admin-api/src/client_config/header_value
@@ -1057,6 +1058,7 @@ relationships:
 - [oidc_callback](../../../../../../../functions/crates/lpe-admin-api/src/admin_auth/oidc_callback.md)
 - [router](../../../../../../../functions/crates/lpe-admin-api/src/app/router.md)
 - [client_oidc_callback](../../../../../../../functions/crates/lpe-admin-api/src/client_auth/client_oidc_callback.md)
+- [session_cookie_is_secure](../../../../../../../functions/crates/lpe-admin-api/src/client_auth/session_cookie_is_secure.md)
 - [router](../../../../../../../functions/crates/lpe-admin-api/src/client_config/router.md)
 - [from_headers](../../../../../../../functions/crates/lpe-admin-api/src/client_config/PublishedEndpoints/from_headers.md)
 - [header_value](../../../../../../../functions/crates/lpe-admin-api/src/client_config/header_value.md)

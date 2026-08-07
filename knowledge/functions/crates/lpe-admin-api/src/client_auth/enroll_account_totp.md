@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: enroll_account_totp
-resource: crates/lpe-admin-api/src/client_auth.rs#L166-L210
+resource: crates/lpe-admin-api/src/client_auth.rs#L170-L214
 generated:
   by: okf-rs/0.3.0
 relationships:

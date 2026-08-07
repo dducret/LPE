@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: create_account_app_password
-resource: crates/lpe-admin-api/src/client_auth.rs#L292-L326
+resource: crates/lpe-admin-api/src/client_auth.rs#L296-L330
 generated:
   by: okf-rs/0.3.0
 relationships:

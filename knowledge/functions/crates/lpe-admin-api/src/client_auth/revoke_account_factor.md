@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: revoke_account_factor
-resource: crates/lpe-admin-api/src/client_auth.rs#L250-L278
+resource: crates/lpe-admin-api/src/client_auth.rs#L254-L282
 generated:
   by: okf-rs/0.3.0
 relationships:

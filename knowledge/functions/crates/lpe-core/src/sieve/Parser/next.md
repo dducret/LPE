@@ -33,6 +33,7 @@ relationships:
   - functions/crates/lpe-activesync/src/snapshot/rrule_until_to_compact
   - functions/crates/lpe-activesync/src/tests/first_sync_collection
   - functions/crates/lpe-activesync/src/tests/ping_reports_changed_folder_ids_as_folder_values
+  - functions/crates/lpe-admin-api/src/client_auth/session_cookie_is_secure
   - functions/crates/lpe-admin-api/src/client_config/xml_tag_value
   - functions/crates/lpe-admin-api/src/client_config/public_scheme
   - functions/crates/lpe-admin-api/src/client_config/header_value
@@ -394,6 +395,7 @@ relationships:
 - [rrule_until_to_compact](../../../../../../functions/crates/lpe-activesync/src/snapshot/rrule_until_to_compact.md)
 - [first_sync_collection](../../../../../../functions/crates/lpe-activesync/src/tests/first_sync_collection.md)
 - [ping_reports_changed_folder_ids_as_folder_values](../../../../../../functions/crates/lpe-activesync/src/tests/ping_reports_changed_folder_ids_as_folder_values.md)
+- [session_cookie_is_secure](../../../../../../functions/crates/lpe-admin-api/src/client_auth/session_cookie_is_secure.md)
 - [xml_tag_value](../../../../../../functions/crates/lpe-admin-api/src/client_config/xml_tag_value.md)
 - [public_scheme](../../../../../../functions/crates/lpe-admin-api/src/client_config/public_scheme.md)
 - [header_value](../../../../../../functions/crates/lpe-admin-api/src/client_config/header_value.md)
