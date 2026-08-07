@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upsert_client_note_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1185-L1202
+resource: crates/lpe-admin-api/src/workspace.rs#L1204-L1221
 visibility: private
 generated:
   by: okf-rs/0.3.0

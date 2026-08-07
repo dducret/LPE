@@ -5,7 +5,7 @@ use super::{
     list_journal_entries_with_store, list_recoverable_items_with_store,
     list_search_folders_with_store, map_submit_message_request, map_update_message_flag_request,
     outlook_profile_state_with_store, purge_recoverable_item_with_store,
-    query_client_reminders_with_store, resolve_client_sender_fields,
+    query_client_reminders_with_store, resolve_client_mailbox_access, resolve_client_sender_fields,
     restore_recoverable_item_with_store, submit_message_with_store, update_message_flag_with_store,
     upsert_client_note_with_store, upsert_journal_entry_with_store,
     upsert_search_folder_with_store,
@@ -797,6 +797,57 @@ async fn submit_message_handler_uses_canonical_submission_store_path() {
 }
 
 #[tokio::test]
+async fn delegated_mailbox_access_requires_a_canonical_grant() {
+    let authenticated = account();
+    let delegated_account_id = Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb);
+    let store = FakeSubmissionStore {
+        session: Some(authenticated.clone()),
+        accessible_mailbox_accounts: vec![owned_mailbox_access(&authenticated)],
+        submitted: Arc::new(Mutex::new(Vec::new())),
+        audits: Arc::new(Mutex::new(Vec::new())),
+        flag_updates: Arc::new(Mutex::new(Vec::new())),
+    };
+
+    let error = resolve_client_mailbox_access(&store, &authenticated, delegated_account_id)
+        .await
+        .expect_err("a mailbox without a canonical delegation grant must be denied");
+
+    assert_eq!(error.0, axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(error.1, "authenticated account cannot access this mailbox");
+}
+
+#[tokio::test]
+async fn delegated_mailbox_access_returns_the_canonical_rights() {
+    let authenticated = account();
+    let delegated = MailboxAccountAccess {
+        tenant_id: authenticated.tenant_id,
+        account_id: Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb),
+        email: "shared@example.test".to_string(),
+        display_name: "Shared mailbox".to_string(),
+        is_owned: false,
+        may_read: true,
+        may_write: true,
+        may_send_as: false,
+        may_send_on_behalf: false,
+    };
+    let store = FakeSubmissionStore {
+        session: Some(authenticated.clone()),
+        accessible_mailbox_accounts: vec![owned_mailbox_access(&authenticated), delegated.clone()],
+        submitted: Arc::new(Mutex::new(Vec::new())),
+        audits: Arc::new(Mutex::new(Vec::new())),
+        flag_updates: Arc::new(Mutex::new(Vec::new())),
+    };
+
+    assert_eq!(
+        resolve_client_mailbox_access(&store, &authenticated, delegated.account_id)
+            .await
+            .unwrap()
+            .account_id,
+        delegated.account_id
+    );
+}
+
+#[tokio::test]
 async fn update_message_flag_handler_uses_canonical_flag_store_path() {
     let authenticated = account();
     let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
@@ -1129,9 +1180,11 @@ async fn outlook_profile_api_helper_reads_canonical_profile_state() {
     assert_eq!(profile.search_folders_count, 1);
     assert_eq!(profile.rules_count, 1);
     assert!(profile.ipm_subtree_ost_id_present);
-    assert!(profile
-        .unsupported_client_local_state
-        .contains(&"client_local_ost_cache".to_string()));
+    assert!(
+        profile
+            .unsupported_client_local_state
+            .contains(&"client_local_ost_cache".to_string())
+    );
 }
 
 #[tokio::test]

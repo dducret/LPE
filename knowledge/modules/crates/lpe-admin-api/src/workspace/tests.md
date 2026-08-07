@@ -1,12 +1,12 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L1-L1155
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L1-L1208
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
-  - external/super-classify-client-submission-storage-error-delete-client-note-with-store-delete-journal-entry-with-store-delete-search-folder-with-store-get-client-note-with-store-get-journal-entry-with-store-get-search-folder-with-store-list-client-notes-with-store-list-journal-entries-with-store-list-recoverable-items-with-store-list-search-folders-with-store-map-submit-message-request-map-update-message-flag-request-outlook-profile-state-with-store-purge-recoverable-item-with-store-query-client-reminders-with-store-resolve-client-sender-fields-restore-recoverable-item-with-store-submit-message-with-store-update-message-flag-with-store-upsert-client-note-with-store-upsert-journal-entry-with-store-upsert-search-folder-with-store
+  - external/super-classify-client-submission-storage-error-delete-client-note-with-store-delete-journal-entry-with-store-delete-search-folder-with-store-get-client-note-with-store-get-journal-entry-with-store-get-search-folder-with-store-list-client-notes-with-store-list-journal-entries-with-store-list-recoverable-items-with-store-list-search-folders-with-store-map-submit-message-request-map-update-message-flag-request-outlook-profile-state-with-store-purge-recoverable-item-with-store-query-client-reminders-with-store-resolve-client-mailbox-access-resolve-client-sender-fields-restore-recoverable-item-with-store-submit-message-with-store-update-message-flag-with-store-upsert-client-note-with-store-upsert-journal-entry-with-store-upsert-search-folder-with-store
   - external/crate-types-recoverableitemsqueryrequest-reminderqueryrequest-restorerecoverableitemrequest-submitmessagerequest-updatemessageflagrequest-upsertclientnoterequest-upsertjournalentryrequest-upsertsearchfolderrequest
   - external/axum-http-headermap-headervalue
   - external/lpe-storage-auditentryinput-authenticatedaccount-clientnote-clientreminder-jmapemail-jmapemailaddress-jmapemailfollowupupdate-jmapemailmailboxstate-journalentry-mailboxaccountaccess-outlookprofilestate-recoverableitem-reminderquery-searchfolderdefinition-submitmessageinput-submittedmessage-upsertclientnoteinput-upsertjournalentryinput-upsertsearchfolderinput
@@ -66,6 +66,8 @@ relationships:
 - [client_submission_storage_errors_keep_actionable_status_codes](../../../../../functions/crates/lpe-admin-api/src/workspace/tests/client_submission_storage_errors_keep_actionable_status_codes.md)
 - [map_submit_message_request_preserves_web_submission_source](../../../../../functions/crates/lpe-admin-api/src/workspace/tests/map_submit_message_request_preserves_web_submission_source.md)
 - [submit_message_handler_uses_canonical_submission_store_path](../../../../../functions/crates/lpe-admin-api/src/workspace/tests/submit_message_handler_uses_canonical_submission_store_path.md)
+- [delegated_mailbox_access_requires_a_canonical_grant](../../../../../functions/crates/lpe-admin-api/src/workspace/tests/delegated_mailbox_access_requires_a_canonical_grant.md)
+- [delegated_mailbox_access_returns_the_canonical_rights](../../../../../functions/crates/lpe-admin-api/src/workspace/tests/delegated_mailbox_access_returns_the_canonical_rights.md)
 - [update_message_flag_handler_uses_canonical_flag_store_path](../../../../../functions/crates/lpe-admin-api/src/workspace/tests/update_message_flag_handler_uses_canonical_flag_store_path.md)
 - [update_message_flag_request_maps_complete_and_clear_states](../../../../../functions/crates/lpe-admin-api/src/workspace/tests/update_message_flag_request_maps_complete_and_clear_states.md)
 - [update_message_flag_request_maps_due_date_controls](../../../../../functions/crates/lpe-admin-api/src/workspace/tests/update_message_flag_request_maps_due_date_controls.md)
@@ -86,7 +88,7 @@ relationships:
     list_journal_entries_with_store, list_recoverable_items_with_store,
     list_search_folders_with_store, map_submit_message_request, map_update_message_flag_request,
     outlook_profile_state_with_store, purge_recoverable_item_with_store,
-    query_client_reminders_with_store, resolve_client_sender_fields,
+    query_client_reminders_with_store, resolve_client_mailbox_access, resolve_client_sender_fields,
     restore_recoverable_item_with_store, submit_message_with_store, update_message_flag_with_store,
     upsert_client_note_with_store, upsert_journal_entry_with_store,
     upsert_search_folder_with_store,

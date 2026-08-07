@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: protocol_router
-resource: crates/lpe-admin-api/src/app.rs#L381-L392
+resource: crates/lpe-admin-api/src/app.rs#L390-L401
 visibility: private
 generated:
   by: okf-rs/0.3.0

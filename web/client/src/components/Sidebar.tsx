@@ -17,6 +17,7 @@ export function Sidebar(props: {
   onCloseComposer: () => void;
   collapsed: boolean;
   mobileOpen: boolean;
+  isNarrowScreen: boolean;
   onToggleCollapse: () => void;
   onCloseMobile: () => void;
 }) {
@@ -47,7 +48,12 @@ export function Sidebar(props: {
   ];
 
   return (
-    <aside className={props.collapsed ? props.mobileOpen ? "rail is-collapsed is-mobile-open" : "rail is-collapsed" : props.mobileOpen ? "rail is-mobile-open" : "rail"}>
+    <aside
+      id="client-sidebar"
+      className={props.collapsed ? props.mobileOpen ? "rail is-collapsed is-mobile-open" : "rail is-collapsed" : props.mobileOpen ? "rail is-mobile-open" : "rail"}
+      aria-hidden={props.isNarrowScreen && !props.mobileOpen ? true : undefined}
+      inert={props.isNarrowScreen && !props.mobileOpen}
+    >
       <div className="sidebar-column">
         <div className="sidebar-toolbar">
           <div className="brand-lockup">
@@ -57,7 +63,7 @@ export function Sidebar(props: {
               <p className="brand-subtitle">{props.copy.productSubtitle}</p>
             </div>
           </div>
-          <button className="ghost-button collapse-toggle" type="button" aria-label={props.collapsed ? props.copy.compose : props.copy.rightPaneTitle} title={props.collapsed ? props.copy.compose : props.copy.rightPaneTitle} onClick={props.onToggleCollapse}>
+          <button className="ghost-button collapse-toggle" type="button" aria-label={props.collapsed ? props.copy.navigation.expand : props.copy.navigation.collapse} title={props.collapsed ? props.copy.navigation.expand : props.copy.navigation.collapse} onClick={props.onToggleCollapse}>
             {props.collapsed ? "→" : "←"}
           </button>
         </div>
@@ -92,11 +98,11 @@ export function Sidebar(props: {
 
         <div className="folder-panel is-tight">
           <p className="panel-title">{props.copy.favoritesLabel}</p>
-          <button className="tree-item" type="button" title={props.copy.folders.focused} onClick={() => { props.setSection("mail"); props.setFolder("focused"); props.onCloseComposer(); props.onCloseMobile(); }}>
+          <button className="tree-item" type="button" title={props.copy.folders.focused} aria-label={props.copy.folders.focused} onClick={() => { props.setSection("mail"); props.setFolder("focused"); props.onCloseComposer(); props.onCloseMobile(); }}>
             <span className="tree-item-icon">•</span>
             <span className="sidebar-label">{props.copy.folders.focused}</span>
           </button>
-          <button className="tree-item" type="button" title={props.copy.folders.inbox} onClick={() => { props.setSection("mail"); props.setFolder("inbox"); props.onCloseComposer(); props.onCloseMobile(); }}>
+          <button className="tree-item" type="button" title={props.copy.folders.inbox} aria-label={props.copy.folders.inbox} onClick={() => { props.setSection("mail"); props.setFolder("inbox"); props.onCloseComposer(); props.onCloseMobile(); }}>
             <span className="tree-item-icon">•</span>
             <span className="sidebar-label">{props.copy.folders.inbox}</span>
             <span className="sidebar-meta">{props.counts.inbox}</span>

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: store_attachment_blob_in_tx
-resource: crates/lpe-storage/src/attachments.rs#L997-L1042
+resource: crates/lpe-storage/src/attachments.rs#L1024-L1069
 visibility: private
 generated:
   by: okf-rs/0.3.0

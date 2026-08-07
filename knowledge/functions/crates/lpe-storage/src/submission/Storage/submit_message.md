@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: submit_message
-resource: crates/lpe-storage/src/submission.rs#L583-L943
+resource: crates/lpe-storage/src/submission.rs#L643-L1019
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/submission/Storage/resolve_submission_authorization_in_tx
+  - functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx
   - functions/crates/lpe-storage/src/submission/types/participants_normalized
   - functions/crates/lpe-storage/src/shared/Storage/load_account_domain_id_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/store_message_blob_in_tx
@@ -46,6 +47,7 @@ relationships:
 - [tenant_id_for_account_id](../../../../../../functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [resolve_submission_authorization_in_tx](../../../../../../functions/crates/lpe-storage/src/submission/Storage/resolve_submission_authorization_in_tx.md)
+- [fetch_draft_attachment_inputs_in_tx](../../../../../../functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx.md)
 - [participants_normalized](../../../../../../functions/crates/lpe-storage/src/submission/types/participants_normalized.md)
 - [load_account_domain_id_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/load_account_domain_id_in_tx.md)
 - [store_message_blob_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/store_message_blob_in_tx.md)

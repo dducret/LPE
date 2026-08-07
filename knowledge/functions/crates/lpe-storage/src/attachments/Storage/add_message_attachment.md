@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: add_message_attachment
-resource: crates/lpe-storage/src/attachments.rs#L762-L883
+resource: crates/lpe-storage/src/attachments.rs#L789-L910
 generated:
   by: okf-rs/0.3.0
 relationships:

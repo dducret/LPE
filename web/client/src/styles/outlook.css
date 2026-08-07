@@ -1,40 +1,28 @@
-/* Outlook-style client layer, aligned with the administration console surfaces. */
-:root {
-  --outlook-blue: #2564cf;
-  --outlook-blue-strong: #174ea6;
-  --admin-bg: #eef3f8;
-  --admin-top: #f8fafc;
-  --admin-bottom: #e2ebf3;
-  --admin-panel: rgba(255, 255, 255, 0.74);
-  --admin-panel-strong: rgba(255, 255, 255, 0.92);
-  --admin-panel-soft: rgba(248, 251, 254, 0.84);
-  --admin-line: rgba(204, 216, 229, 0.92);
-  --admin-line-strong: rgba(181, 197, 213, 0.96);
-  --admin-dark: #0f1822;
-  --admin-dark-soft: #152232;
-  --admin-shadow: 0 12px 28px rgba(17, 27, 39, 0.07);
-  --admin-shadow-strong: 0 26px 60px rgba(12, 20, 31, 0.18);
+/* Outlook-style client layer, using the shared web theme tokens. */
+
+.app-shell {
+  --outlook-blue: var(--lpe-primary);
+  --outlook-blue-strong: var(--lpe-primary-strong);
+  --admin-bg: var(--lpe-bg);
+  --admin-top: var(--lpe-surface-soft);
+  --admin-bottom: var(--lpe-bg-deep);
+  --admin-panel: var(--lpe-surface);
+  --admin-panel-strong: var(--lpe-surface-strong);
+  --admin-panel-soft: var(--lpe-surface-soft);
+  --admin-line: var(--lpe-border);
+  --admin-line-strong: var(--lpe-border-strong);
+  --admin-dark: var(--lpe-nav);
+  --admin-dark-soft: var(--lpe-nav-soft);
+  --admin-shadow: var(--lpe-shadow-panel);
+  --admin-shadow-strong: var(--lpe-shadow-soft);
   --admin-radius-xs: 8px;
-  --admin-radius-sm: 10px;
-  --admin-radius-md: 12px;
-  --admin-radius-lg: 16px;
-  --accent: var(--outlook-blue);
-  --accent-strong: var(--outlook-blue-strong);
-  --accent-soft: rgba(37, 100, 207, 0.12);
-  --line: var(--admin-line);
-  --surface: var(--admin-panel);
-  --surface-strong: var(--admin-panel-strong);
-  --surface-soft: var(--admin-panel-soft);
-  --radius-sm: var(--admin-radius-sm);
-  --radius-md: var(--admin-radius-md);
-  --radius-lg: var(--admin-radius-lg);
-  --shadow-panel: var(--admin-shadow);
+  --admin-radius-sm: var(--lpe-radius-sm);
+  --admin-radius-md: var(--lpe-radius-md);
+  --admin-radius-lg: var(--lpe-radius-lg);
 }
 
 body {
-  background:
-    linear-gradient(135deg, rgba(37, 100, 207, 0.06), transparent 34%),
-    linear-gradient(180deg, var(--admin-top) 0%, var(--admin-bg) 58%, var(--admin-bottom) 100%);
+  background: var(--lpe-bg);
 }
 
 .app-shell {
@@ -606,5 +594,44 @@ body {
   .form-grid,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+.mobile-detail-back {
+  display: none;
+}
+
+/* Keep mail work dense and calm: one surface per pane, without glass layering. */
+.workspace-toolbar,
+.workspace-heading-panel,
+.sync-status-strip,
+.list-pane,
+.reading-pane-card,
+.reading-empty-state,
+.editor-shell,
+.settings-card {
+  background: var(--lpe-surface-strong);
+  backdrop-filter: none;
+}
+
+.workspace-compose-button,
+.compose-button,
+.brand-mark {
+  background: var(--lpe-primary);
+  box-shadow: none;
+}
+
+@media (max-width: 900px) {
+  .content-grid.is-mobile-detail-open .list-pane {
+    display: none;
+  }
+
+  .content-grid:not(.is-mobile-detail-open) .detail-pane {
+    display: none;
+  }
+
+  .mobile-detail-back {
+    display: inline-flex;
+    margin: 0 0 0.75rem;
   }
 }

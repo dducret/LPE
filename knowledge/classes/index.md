@@ -186,6 +186,9 @@
 - [OidcStatePayload](../classes/crates/lpe-admin-api/src/account_oidc/OidcStatePayload.md) — Rust Struct
 - [OidcTokenResponse](../classes/crates/lpe-admin-api/src/account_oidc/OidcTokenResponse.md) — Rust Struct
 - [FakeDetector](../classes/crates/lpe-admin-api/src/app/FakeDetector.md) — Rust Struct
+- [ClientAttachmentUploadResponse](../classes/crates/lpe-admin-api/src/client_attachments/ClientAttachmentUploadResponse.md) — Rust Struct
+- [FakeDetector](../classes/crates/lpe-admin-api/src/client_attachments/FakeDetector.md) — Rust Struct
+- [MessageAttachmentQuery](../classes/crates/lpe-admin-api/src/client_attachments/MessageAttachmentQuery.md) — Rust Struct
 - [AutodiscoverJsonQuery](../classes/crates/lpe-admin-api/src/client_config/AutodiscoverJsonQuery.md) — Rust Struct
 - [PublishedEndpoints](../classes/crates/lpe-admin-api/src/client_config/PublishedEndpoints.md) — Rust Struct
 - [XmlNode](../classes/crates/lpe-admin-api/src/client_config/tests/XmlNode.md) — Rust Struct
@@ -276,6 +279,7 @@
 - [UpsertSieveScriptRequest](../classes/crates/lpe-admin-api/src/types/UpsertSieveScriptRequest.md) — Rust Struct
 - [UpsertTaskListGrantRequest](../classes/crates/lpe-admin-api/src/types/UpsertTaskListGrantRequest.md) — Rust Struct
 - [VerifyTotpRequest](../classes/crates/lpe-admin-api/src/types/VerifyTotpRequest.md) — Rust Struct
+- [ClientWorkspaceQuery](../classes/crates/lpe-admin-api/src/workspace/mailbox_access/ClientWorkspaceQuery.md) — Rust Struct
 - [FakeOutlookStore](../classes/crates/lpe-admin-api/src/workspace/tests/FakeOutlookStore.md) — Rust Struct
 - [FakeSubmissionStore](../classes/crates/lpe-admin-api/src/workspace/tests/FakeSubmissionStore.md) — Rust Struct
 - [FlagUpdate](../classes/crates/lpe-admin-api/src/workspace/tests/FlagUpdate.md) — Rust Struct

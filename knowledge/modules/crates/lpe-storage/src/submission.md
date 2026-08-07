@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: submission
-resource: crates/lpe-storage/src/submission.rs#L1-L1532
+resource: crates/lpe-storage/src/submission.rs#L1-L1608
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -9,7 +9,7 @@ relationships:
   - external/anyhow-anyhow-bail-result
   - external/sqlx-postgres-row
   - external/uuid-uuid
-  - external/crate-mapi-message-identity-rotate-active-mapi-message-identity-in-tx-normalize-email-normalize-subject-sha256-hex-trim-optional-text-auditentryinput-jmapemailrecipientrow-storage
+  - external/crate-blob-store-durableblobkind-postgresblobstore-mapi-message-identity-rotate-active-mapi-message-identity-in-tx-normalize-email-normalize-subject-sha256-hex-trim-optional-text-auditentryinput-jmapemailrecipientrow-storage
   - external/types-canonical-submission-phases-source-protocol-sql-submission-authorization-kind-sql-canonicalsubmissionphase-resolvedsubmissionauthorization
   - external/pub-crate-use-types-normalize-bcc-recipients-normalize-visible-recipients-participants-normalized-push-recipients-sender-authorization-kind-from-str-sender-identity-id-accountidentity
   - external/pub-use-types-attachmentuploadinput-cancelsubmissionresult-mailboxaccountaccess-mailboxdelegationgrant-mailboxdelegationgrantinput-mailboxdelegationoverview-mailboxfolderdelegationgrantinput-saveddraftmessage-senderauthorizationkind-senderdelegationgrant-senderdelegationgrantinput-senderdelegationright-senderidentity-submissionaccountidentity-submitmessageinput-submittedmessage-submittedrecipientinput
@@ -20,6 +20,7 @@ relationships:
 # Contains
 
 - [insert_visible_recipient](../../../../functions/crates/lpe-storage/src/submission/insert_visible_recipient.md)
+- [fetch_draft_attachment_inputs_in_tx](../../../../functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx.md)
 - [replace_message_recipients](../../../../functions/crates/lpe-storage/src/submission/Storage/replace_message_recipients.md)
 - [save_draft_message](../../../../functions/crates/lpe-storage/src/submission/Storage/save_draft_message.md)
 - [submit_message](../../../../functions/crates/lpe-storage/src/submission/Storage/submit_message.md)
@@ -41,9 +42,10 @@ relationships:
 - `sqlx::{Postgres, Row}`
 - `uuid::Uuid`
 - `crate::{
-    mapi_message_identity::rotate_active_mapi_message_identity_in_tx, normalize_email,
-    normalize_subject, sha256_hex, trim_optional_text, AuditEntryInput, JmapEmailRecipientRow,
-    Storage,
+    blob_store::{DurableBlobKind, PostgresBlobStore},
+    mapi_message_identity::rotate_active_mapi_message_identity_in_tx,
+    normalize_email, normalize_subject, sha256_hex, trim_optional_text, AuditEntryInput,
+    JmapEmailRecipientRow, Storage,
 }`
 - `types::{
     canonical_submission_phases, source_protocol_sql, submission_authorization_kind_sql,

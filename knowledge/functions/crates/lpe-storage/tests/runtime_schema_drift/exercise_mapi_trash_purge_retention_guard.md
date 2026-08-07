@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_mapi_trash_purge_retention_guard
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L5730-L6205
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L5751-L6226
 visibility: private
 generated:
   by: okf-rs/0.3.0

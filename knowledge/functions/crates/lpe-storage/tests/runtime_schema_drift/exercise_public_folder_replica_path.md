@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_public_folder_replica_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L4561-L4791
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L4582-L4812
 visibility: private
 generated:
   by: okf-rs/0.3.0

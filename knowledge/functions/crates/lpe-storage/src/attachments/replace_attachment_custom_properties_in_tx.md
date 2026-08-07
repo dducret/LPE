@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: replace_attachment_custom_properties_in_tx
-resource: crates/lpe-storage/src/attachments.rs#L1060-L1087
+resource: crates/lpe-storage/src/attachments.rs#L1087-L1114
 visibility: private
 generated:
   by: okf-rs/0.3.0

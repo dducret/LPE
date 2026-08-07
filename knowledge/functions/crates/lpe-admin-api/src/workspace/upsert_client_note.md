@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upsert_client_note
-resource: crates/lpe-admin-api/src/workspace.rs#L1033-L1041
+resource: crates/lpe-admin-api/src/workspace.rs#L1052-L1060
 generated:
   by: okf-rs/0.3.0
 relationships:

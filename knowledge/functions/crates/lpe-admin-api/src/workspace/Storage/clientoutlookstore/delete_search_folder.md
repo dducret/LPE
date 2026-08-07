@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_search_folder
-resource: crates/lpe-admin-api/src/workspace.rs#L243-L249
+resource: crates/lpe-admin-api/src/workspace.rs#L248-L254
 visibility: private
 generated:
   by: okf-rs/0.3.0

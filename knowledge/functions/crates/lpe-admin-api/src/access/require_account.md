@@ -8,6 +8,8 @@ relationships:
   calls:
   - functions/crates/lpe-admin-api/src/http/account_session_token
   called_by:
+  - functions/crates/lpe-admin-api/src/client_attachments/upload_draft_attachment
+  - functions/crates/lpe-admin-api/src/client_attachments/download_message_attachment
   - functions/crates/lpe-admin-api/src/client_auth/client_me
   - functions/crates/lpe-admin-api/src/client_auth/account_auth_factors
   - functions/crates/lpe-admin-api/src/client_auth/enroll_account_totp
@@ -86,6 +88,8 @@ relationships:
 
 # Called by
 
+- [upload_draft_attachment](../../../../../functions/crates/lpe-admin-api/src/client_attachments/upload_draft_attachment.md)
+- [download_message_attachment](../../../../../functions/crates/lpe-admin-api/src/client_attachments/download_message_attachment.md)
 - [client_me](../../../../../functions/crates/lpe-admin-api/src/client_auth/client_me.md)
 - [account_auth_factors](../../../../../functions/crates/lpe-admin-api/src/client_auth/account_auth_factors.md)
 - [enroll_account_totp](../../../../../functions/crates/lpe-admin-api/src/client_auth/enroll_account_totp.md)

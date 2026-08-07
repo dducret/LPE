@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: display_name
-resource: crates/lpe-storage/src/workspace.rs#L128-L130
+resource: crates/lpe-storage/src/workspace.rs#L133-L135
 generated:
   by: okf-rs/0.3.0
 ---

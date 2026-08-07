@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: ingest_message_attachments_in_tx
-resource: crates/lpe-storage/src/attachments.rs#L233-L329
+resource: crates/lpe-storage/src/attachments.rs#L260-L356
 generated:
   by: okf-rs/0.3.0
 relationships:

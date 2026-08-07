@@ -83,7 +83,10 @@ export type ClientIdentity = {
 export type ClientWorkspacePayload = {
   messages: Message[];
   events: EventItem[];
+  eventCollectionIds: Record<string, string>;
   contacts: ContactItem[];
+  contactBooks: CollaborationCollection[];
+  calendarCollections: CollaborationCollection[];
   tasks: TaskItem[];
 };
 

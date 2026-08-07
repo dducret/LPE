@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_client_event
-resource: crates/lpe-storage/src/workspace.rs#L630-L632
+resource: crates/lpe-storage/src/workspace.rs#L467-L469
 generated:
   by: okf-rs/0.3.0
 relationships:

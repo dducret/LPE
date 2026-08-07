@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: list_client_contacts
-resource: crates/lpe-admin-api/src/workspace.rs#L639-L652
+resource: crates/lpe-admin-api/src/workspace.rs#L658-L671
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -6,6 +6,7 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
+  - functions/crates/lpe-admin-api/src/client_attachments/read_multipart_attachment
   - functions/crates/lpe-admin-api/src/console/upload_pst_import
   - functions/tools/rca_outlook/ews/ews_call
   - functions/tools/rca_outlook_connectivity_check/check_pox_autodiscover
@@ -27,6 +28,7 @@ relationships:
 
 # Called by
 
+- [read_multipart_attachment](../../../../functions/crates/lpe-admin-api/src/client_attachments/read_multipart_attachment.md)
 - [upload_pst_import](../../../../functions/crates/lpe-admin-api/src/console/upload_pst_import.md)
 - [ews_call](../../../../functions/tools/rca_outlook/ews/ews_call.md)
 - [check_pox_autodiscover](../../../../functions/tools/rca_outlook_connectivity_check/check_pox_autodiscover.md)

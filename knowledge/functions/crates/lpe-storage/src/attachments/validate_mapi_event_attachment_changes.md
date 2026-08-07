@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_mapi_event_attachment_changes
-resource: crates/lpe-storage/src/attachments.rs#L1089-L1122
+resource: crates/lpe-storage/src/attachments.rs#L1116-L1149
 generated:
   by: okf-rs/0.3.0
 relationships:

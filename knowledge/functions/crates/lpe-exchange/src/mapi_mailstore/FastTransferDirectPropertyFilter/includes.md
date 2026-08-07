@@ -40,7 +40,6 @@ relationships:
   - functions/web/client/src/client-helpers/filterNotes
   - functions/web/client/src/client-helpers/filterJournalEntries
   - functions/web/client/src/components/EventEditor/addResource
-  - functions/web/client/src/useClientWorkspace/mapClientError
   - functions/web/client/src/useClientWorkspace/mapSubmitError
   - functions/web/client/src/useClientWorkspace/useClientWorkspace
   - functions/web/shared/src/i18n/isLocale
@@ -88,7 +87,6 @@ relationships:
 - [filterNotes](../../../../../../functions/web/client/src/client-helpers/filterNotes.md)
 - [filterJournalEntries](../../../../../../functions/web/client/src/client-helpers/filterJournalEntries.md)
 - [addResource](../../../../../../functions/web/client/src/components/EventEditor/addResource.md)
-- [mapClientError](../../../../../../functions/web/client/src/useClientWorkspace/mapClientError.md)
 - [mapSubmitError](../../../../../../functions/web/client/src/useClientWorkspace/mapSubmitError.md)
 - [useClientWorkspace](../../../../../../functions/web/client/src/useClientWorkspace/useClientWorkspace.md)
 - [isLocale](../../../../../../functions/web/shared/src/i18n/isLocale.md)

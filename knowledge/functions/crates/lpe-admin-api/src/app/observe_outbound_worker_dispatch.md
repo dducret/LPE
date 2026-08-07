@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: observe_outbound_worker_dispatch
-resource: crates/lpe-admin-api/src/app.rs#L406-L408
+resource: crates/lpe-admin-api/src/app.rs#L415-L417
 generated:
   by: okf-rs/0.3.0
 relationships:

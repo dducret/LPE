@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_client_notes
-resource: crates/lpe-admin-api/src/workspace.rs#L170-L172
+resource: crates/lpe-admin-api/src/workspace.rs#L175-L177
 visibility: private
 generated:
   by: okf-rs/0.3.0

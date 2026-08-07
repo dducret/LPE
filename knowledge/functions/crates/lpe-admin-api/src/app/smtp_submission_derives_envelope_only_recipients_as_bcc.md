@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: smtp_submission_derives_envelope_only_recipients_as_bcc
-resource: crates/lpe-admin-api/src/app.rs#L782-L809
+resource: crates/lpe-admin-api/src/app.rs#L791-L818
 visibility: private
 generated:
   by: okf-rs/0.3.0

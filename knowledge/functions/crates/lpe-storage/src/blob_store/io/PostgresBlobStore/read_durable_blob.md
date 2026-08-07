@@ -19,6 +19,7 @@ relationships:
   - functions/crates/lpe-storage/src/blob_store/tests/durable_blob_store_writes_reads_stats_and_verifies
   - functions/crates/lpe-storage/src/blob_store/tests/s3_compatible_backend_put_read_stat_and_verify_round_trip
   - functions/crates/lpe-storage/src/pst/Storage/export_mailbox_to_pst
+  - functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx
 ---
 
 # Signature
@@ -42,3 +43,4 @@ relationships:
 - [durable_blob_store_writes_reads_stats_and_verifies](../../../../../../../functions/crates/lpe-storage/src/blob_store/tests/durable_blob_store_writes_reads_stats_and_verifies.md)
 - [s3_compatible_backend_put_read_stat_and_verify_round_trip](../../../../../../../functions/crates/lpe-storage/src/blob_store/tests/s3_compatible_backend_put_read_stat_and_verify_round_trip.md)
 - [export_mailbox_to_pst](../../../../../../../functions/crates/lpe-storage/src/pst/Storage/export_mailbox_to_pst.md)
+- [fetch_draft_attachment_inputs_in_tx](../../../../../../../functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx.md)

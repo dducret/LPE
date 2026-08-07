@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: useClientWorkspace
-resource: web/client/src/useClientWorkspace.ts#L130-L1107
+resource: web/client/src/useClientWorkspace.ts#L154-L1283
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -19,6 +19,9 @@ relationships:
   - functions/web/client/src/useClientWorkspace/buildMessagePayload
   - functions/web/client/src/useClientWorkspace/mapClientError
   - functions/web/client/src/useClientWorkspace/mapSubmitError
+  - functions/web/client/src/useClientWorkspace/apiVoid
+  - functions/web/client/src/useClientWorkspace/apiBlob
+  - functions/tools/test_rca_outlook_trace_summary/FakePath/open
   - functions/web/client/src/useClientWorkspace/followupDueIso
   - functions/web/client/src/useClientWorkspace/reminderIso
   called_by:
@@ -27,7 +30,7 @@ relationships:
 
 # Signature
 
-`function useClientWorkspace(copy: ClientCopy, authToken: string | null, identity: ClientIdentity | null)`
+`function useClientWorkspace( copy: ClientCopy, authToken: string | null, identity: ClientIdentity | null, onSessionExpired?: () => void )`
 
 # Calls
 
@@ -44,6 +47,9 @@ relationships:
 - [buildMessagePayload](../../../../../functions/web/client/src/useClientWorkspace/buildMessagePayload.md)
 - [mapClientError](../../../../../functions/web/client/src/useClientWorkspace/mapClientError.md)
 - [mapSubmitError](../../../../../functions/web/client/src/useClientWorkspace/mapSubmitError.md)
+- [apiVoid](../../../../../functions/web/client/src/useClientWorkspace/apiVoid.md)
+- [apiBlob](../../../../../functions/web/client/src/useClientWorkspace/apiBlob.md)
+- [open](../../../../../functions/tools/test_rca_outlook_trace_summary/FakePath/open.md)
 - [followupDueIso](../../../../../functions/web/client/src/useClientWorkspace/followupDueIso.md)
 - [reminderIso](../../../../../functions/web/client/src/useClientWorkspace/reminderIso.md)
 

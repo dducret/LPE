@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_calendar_attachment_content
-resource: crates/lpe-storage/src/attachments.rs#L625-L642
+resource: crates/lpe-storage/src/attachments.rs#L652-L669
 generated:
   by: okf-rs/0.3.0
 ---

@@ -1,7 +1,7 @@
 ---
 type: TypeScript Module
 title: useClientWorkspace
-resource: web/client/src/useClientWorkspace.ts#L1-L1107
+resource: web/client/src/useClientWorkspace.ts#L1-L1283
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -16,7 +16,10 @@ relationships:
 
 # Contains
 
+- [notifySessionExpired](../../../../functions/web/client/src/useClientWorkspace/notifySessionExpired.md)
 - [apiJson](../../../../functions/web/client/src/useClientWorkspace/apiJson.md)
+- [apiBlob](../../../../functions/web/client/src/useClientWorkspace/apiBlob.md)
+- [apiVoid](../../../../functions/web/client/src/useClientWorkspace/apiVoid.md)
 - [mapClientError](../../../../functions/web/client/src/useClientWorkspace/mapClientError.md)
 - [mapSubmitError](../../../../functions/web/client/src/useClientWorkspace/mapSubmitError.md)
 - [splitRecipients](../../../../functions/web/client/src/useClientWorkspace/splitRecipients.md)

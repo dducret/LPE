@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: list_search_folders
-resource: crates/lpe-admin-api/src/workspace.rs#L1108-L1115
+resource: crates/lpe-admin-api/src/workspace.rs#L1127-L1134
 generated:
   by: okf-rs/0.3.0
 relationships:

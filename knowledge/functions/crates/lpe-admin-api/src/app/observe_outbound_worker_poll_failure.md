@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: observe_outbound_worker_poll_failure
-resource: crates/lpe-admin-api/src/app.rs#L402-L404
+resource: crates/lpe-admin-api/src/app.rs#L411-L413
 generated:
   by: okf-rs/0.3.0
 relationships:

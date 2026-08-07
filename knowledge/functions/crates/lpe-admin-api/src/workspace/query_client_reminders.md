@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query_client_reminders
-resource: crates/lpe-admin-api/src/workspace.rs#L1098-L1106
+resource: crates/lpe-admin-api/src/workspace.rs#L1117-L1125
 generated:
   by: okf-rs/0.3.0
 relationships:

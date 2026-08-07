@@ -342,6 +342,7 @@ relationships:
   - functions/crates/lpe-storage/src/storage_visibility/tests/insert_failed_migration
   - functions/crates/lpe-storage/src/storage_visibility/tests/s3_compatible_pool_health_checks_active_object_placement
   - functions/crates/lpe-storage/src/submission/insert_visible_recipient
+  - functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx
   - functions/crates/lpe-storage/src/submission/Storage/replace_message_recipients
   - functions/crates/lpe-storage/src/submission/Storage/save_draft_message
   - functions/crates/lpe-storage/src/submission/Storage/submit_message
@@ -761,6 +762,7 @@ relationships:
 - [insert_failed_migration](../../../../../functions/crates/lpe-storage/src/storage_visibility/tests/insert_failed_migration.md)
 - [s3_compatible_pool_health_checks_active_object_placement](../../../../../functions/crates/lpe-storage/src/storage_visibility/tests/s3_compatible_pool_health_checks_active_object_placement.md)
 - [insert_visible_recipient](../../../../../functions/crates/lpe-storage/src/submission/insert_visible_recipient.md)
+- [fetch_draft_attachment_inputs_in_tx](../../../../../functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx.md)
 - [replace_message_recipients](../../../../../functions/crates/lpe-storage/src/submission/Storage/replace_message_recipients.md)
 - [save_draft_message](../../../../../functions/crates/lpe-storage/src/submission/Storage/save_draft_message.md)
 - [submit_message](../../../../../functions/crates/lpe-storage/src/submission/Storage/submit_message.md)

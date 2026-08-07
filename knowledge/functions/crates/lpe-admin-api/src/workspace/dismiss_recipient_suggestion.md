@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: dismiss_recipient_suggestion
-resource: crates/lpe-admin-api/src/workspace.rs#L751-L765
+resource: crates/lpe-admin-api/src/workspace.rs#L770-L784
 generated:
   by: okf-rs/0.3.0
 relationships:

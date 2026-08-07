@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: attachment_disposition
-resource: crates/lpe-storage/src/attachments.rs#L1154-L1159
+resource: crates/lpe-storage/src/attachments.rs#L1181-L1186
 visibility: private
 generated:
   by: okf-rs/0.3.0

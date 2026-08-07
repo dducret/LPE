@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: media_type_label
-resource: crates/lpe-storage/src/attachments.rs#L1204-L1222
+resource: crates/lpe-storage/src/attachments.rs#L1231-L1249
 visibility: private
 generated:
   by: okf-rs/0.3.0

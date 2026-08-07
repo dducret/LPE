@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: find_submission_account_by_email_in_same_tenant
-resource: crates/lpe-storage/src/submission.rs#L1388-L1417
+resource: crates/lpe-storage/src/submission.rs#L1464-L1493
 generated:
   by: okf-rs/0.3.0
 relationships:

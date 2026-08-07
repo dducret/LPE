@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: list_contact_books
-resource: crates/lpe-admin-api/src/workspace.rs#L626-L637
+resource: crates/lpe-admin-api/src/workspace.rs#L645-L656
 generated:
   by: okf-rs/0.3.0
 relationships:

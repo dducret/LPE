@@ -3677,6 +3677,26 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
         draft.delivery_status == "draft",
         "MAPI draft save must create canonical draft state"
     );
+    storage
+        .add_message_attachment(
+            fixture.account_id,
+            draft.message_id,
+            AttachmentUploadInput {
+                file_name: "draft-submit.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                disposition: Some("attachment".to_string()),
+                content_id: None,
+                blob_bytes: b"%PDF-draft-submit".to_vec(),
+            },
+            audit(
+                "alice@example.test",
+                "draft-attachment-add",
+                "draft-submit.pdf",
+            ),
+        )
+        .await
+        .context("add canonical attachment to MAPI draft")?
+        .context("canonical MAPI draft must accept its attachment")?;
 
     let draft_jmap = storage
         .fetch_jmap_emails(fixture.account_id, &[draft.message_id])
@@ -3746,8 +3766,9 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
         sent_draft_jmap.mailbox_ids == vec![draft_submission.sent_mailbox_id]
             && sent_draft_jmap.mailbox_role == "sent"
             && sent_draft_jmap.delivery_status == "queued"
+            && sent_draft_jmap.has_attachments
             && sent_draft_jmap.bcc.is_empty(),
-        "MAPI draft submit must create authoritative canonical Sent visible through JMAP"
+        "MAPI draft submit must retain canonical attachments in Sent through JMAP"
     );
 
     let submitted = storage

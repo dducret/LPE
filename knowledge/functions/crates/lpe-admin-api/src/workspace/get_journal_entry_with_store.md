@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_journal_entry_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1227-L1240
+resource: crates/lpe-admin-api/src/workspace.rs#L1246-L1259
 visibility: private
 generated:
   by: okf-rs/0.3.0

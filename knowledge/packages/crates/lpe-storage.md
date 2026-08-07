@@ -65,6 +65,7 @@ generated:
 - [types](../../modules/crates/lpe-storage/src/types.md)
 - [util](../../modules/crates/lpe-storage/src/util.md)
 - [workspace](../../modules/crates/lpe-storage/src/workspace.md)
+- [client_workspace](../../modules/crates/lpe-storage/src/workspace/client_workspace.md)
 - [mapi_contact_create](../../modules/crates/lpe-storage/tests/mapi_contact_create.md)
 - [mapi_event_commit](../../modules/crates/lpe-storage/tests/mapi_event_commit.md)
 - [outlook_cache_fidelity_update](../../modules/crates/lpe-storage/tests/outlook_cache_fidelity_update.md)

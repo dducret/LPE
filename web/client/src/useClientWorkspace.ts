@@ -4,6 +4,7 @@ import type { ClientCopy } from "./i18n";
 import type {
   ClientIdentity,
   ClientSyncStatus,
+  CollaborationCollection,
   CollaborationOverview,
   ClientWorkspacePayload,
   ContactItem,
@@ -27,6 +28,14 @@ import type {
   TaskItem
 } from "./client-types";
 
+const sessionExpiredEvent = "lpe-client-session-expired";
+
+function notifySessionExpired(status: number, detail: string) {
+  if (status === 401 || (status === 403 && /(?:invalid|expired|missing).*(?:session|token)|(?:session|token).*(?:invalid|expired|missing)/i.test(detail))) {
+    window.dispatchEvent(new Event(sessionExpiredEvent));
+  }
+}
+
 async function apiJson<T>(path: string, _token: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api/${path}`, {
     ...options,
@@ -38,16 +47,32 @@ async function apiJson<T>(path: string, _token: string, options: RequestInit = {
   });
   if (!response.ok) {
     const detail = (await response.text()).trim();
+    notifySessionExpired(response.status, detail);
     throw new Error(detail || `Request failed: ${response.status}`);
   }
   return (await response.json()) as T;
 }
 
+async function apiBlob(path: string, options: RequestInit = {}): Promise<Blob> {
+  const response = await fetch(`/api/${path}`, { ...options, credentials: "same-origin" });
+  if (!response.ok) {
+    const detail = (await response.text()).trim();
+    notifySessionExpired(response.status, detail);
+    throw new Error(detail || `Request failed: ${response.status}`);
+  }
+  return response.blob();
+}
+
+async function apiVoid(path: string, options: RequestInit = {}): Promise<void> {
+  const response = await fetch(`/api/${path}`, { ...options, credentials: "same-origin" });
+  if (!response.ok) {
+    const detail = (await response.text()).trim();
+    notifySessionExpired(response.status, detail);
+    throw new Error(detail || `Request failed: ${response.status}`);
+  }
+}
+
 function mapClientError(error: unknown, fallback: string) {
-  const detail = error instanceof Error ? error.message.toLowerCase() : "";
-  if (detail.includes("quota")) return "Quota exceeded. Free space or ask an administrator for a larger quota.";
-  if (detail.includes("not found")) return "The requested item no longer exists.";
-  if (detail.includes("forbidden")) return "This action is not allowed for the current account.";
   return fallback;
 }
 
@@ -65,7 +90,6 @@ function mapSubmitError(error: unknown, copy: ClientCopy) {
   ) {
     return copy.sendPermissionError;
   }
-  if (detail && !lowered.startsWith("request failed")) return detail;
   return copy.saveError;
 }
 
@@ -127,14 +151,24 @@ function reminderIso(minutesFromNow: number) {
   return new Date(Date.now() + minutesFromNow * 60 * 1000).toISOString();
 }
 
-export function useClientWorkspace(copy: ClientCopy, authToken: string | null, identity: ClientIdentity | null) {
+export function useClientWorkspace(
+  copy: ClientCopy,
+  authToken: string | null,
+  identity: ClientIdentity | null,
+  onSessionExpired?: () => void
+) {
   const [section, setSection] = React.useState<Section>("mail");
   const [folder, setFolder] = React.useState<Folder>("inbox");
   const [contactBook, setContactBook] = React.useState<ContactBookId>("default");
+  const [calendarCollectionId, setCalendarCollectionId] = React.useState("");
+  const [workspaceMailboxAccountId, setWorkspaceMailboxAccountId] = React.useState("");
   const [query, setQuery] = React.useState("");
   const [mail, setMail] = React.useState<Message[]>([]);
   const [events, setEvents] = React.useState<EventItem[]>([]);
   const [contacts, setContacts] = React.useState<ContactItem[]>([]);
+  const [contactBooks, setContactBooks] = React.useState<CollaborationCollection[]>([]);
+  const [calendarCollections, setCalendarCollections] = React.useState<CollaborationCollection[]>([]);
+  const [eventCollectionIds, setEventCollectionIds] = React.useState<Record<string, string>>({});
   const [tasks, setTasks] = React.useState<TaskItem[]>([]);
   const [notes, setNotes] = React.useState<NoteItem[]>([]);
   const [journalEntries, setJournalEntries] = React.useState<JournalEntryItem[]>([]);
@@ -179,47 +213,92 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   });
   const [sieveForm, setSieveForm] = React.useState({
     name: "vacation",
-    content: "require [\"vacation\"];\n\nvacation :days 7 :subject \"Out of office\" \"I am currently away.\";",
+    content: "",
     activate: true
   });
 
-  const loadWorkspace = React.useCallback(async () => {
+  const clearWorkspaceState = React.useCallback(() => {
+    setFolder("inbox");
+    setContactBook("default");
+    setCalendarCollectionId("");
+    setQuery("");
+    setMail([]);
+    setEvents([]);
+    setContacts([]);
+    setContactBooks([]);
+    setCalendarCollections([]);
+    setEventCollectionIds({});
+    setTasks([]);
+    setNotes([]);
+    setJournalEntries([]);
+    setReminders([]);
+    setTaskLists([]);
+    setCollaboration(null);
+    setMailboxDelegation(null);
+    setSieve(null);
+    setMessageId("");
+    setEventId("");
+    setContactId("");
+    setTaskId("");
+    setNoteId("");
+    setJournalEntryId("");
+    setReminderId("");
+    setMode("closed");
+    setDraft(blankDraft());
+    setDraftMessageId(null);
+    setNotice("");
+    setLoadError("");
+    setLoading(false);
+    setMessageBusy(false);
+    setLastRefreshedAt(null);
+    setPushConnected(false);
+    setWorkspaceMailboxAccountId("");
+  }, []);
+
+  React.useEffect(() => {
+    const handleSessionExpired = () => {
+      clearWorkspaceState();
+      onSessionExpired?.();
+    };
+    window.addEventListener(sessionExpiredEvent, handleSessionExpired);
+    return () => window.removeEventListener(sessionExpiredEvent, handleSessionExpired);
+  }, [clearWorkspaceState, onSessionExpired]);
+
+  const loadWorkspace = React.useCallback(async (requestedMailboxAccountId?: string) => {
     if (!authToken || !identity) {
-      setMail([]);
-      setEvents([]);
-      setContacts([]);
-      setTasks([]);
-      setNotes([]);
-      setJournalEntries([]);
-      setReminders([]);
-      setTaskLists([]);
-      setLastRefreshedAt(null);
+      clearWorkspaceState();
       return;
     }
+
+    const accountId = requestedMailboxAccountId || workspaceMailboxAccountId || identity.account_id;
 
     setLoading(true);
     setLoadError("");
     try {
       const [payload, nextNotes, nextJournalEntries, nextReminders] = await Promise.all([
-        apiJson<ClientWorkspacePayload>("mail/workspace", authToken),
+        apiJson<ClientWorkspacePayload>(`mail/workspace?accountId=${encodeURIComponent(accountId)}`, authToken),
         apiJson<NoteItem[]>("mail/notes", authToken),
         apiJson<JournalEntryItem[]>("mail/journal", authToken),
         apiJson<ReminderItem[]>("mail/reminders", authToken)
       ]);
       setMail(payload.messages);
       setEvents(payload.events);
+      setEventCollectionIds(payload.eventCollectionIds);
       setContacts(payload.contacts);
+      setContactBooks(payload.contactBooks);
+      setCalendarCollections(payload.calendarCollections);
       setTasks(payload.tasks);
       setNotes(nextNotes);
       setJournalEntries(nextJournalEntries);
       setReminders(nextReminders);
+      setWorkspaceMailboxAccountId(accountId);
       setLastRefreshedAt(new Date().toISOString());
     } catch {
       setLoadError(copy.loadError);
     } finally {
       setLoading(false);
     }
-  }, [authToken, copy.loadError, identity]);
+  }, [authToken, clearWorkspaceState, copy.loadError, identity, workspaceMailboxAccountId]);
 
   const loadSettings = React.useCallback(async () => {
     if (!authToken || !identity) {
@@ -287,6 +366,14 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     ];
   }, [identity, mailboxDelegation]);
 
+  const selectWorkspaceMailbox = React.useCallback((accountId: string) => {
+    if (!composerMailboxes.some((mailbox) => mailbox.accountId === accountId && mailbox.mayRead)) return;
+    setFolder("inbox");
+    setMessageId("");
+    setMode("closed");
+    void loadWorkspace(accountId);
+  }, [composerMailboxes, loadWorkspace]);
+
   React.useEffect(() => {
     if (!identity || composerMailboxes.length === 0) return;
     setDraft((current) => {
@@ -302,6 +389,18 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       return { ...current, mailboxAccountId: selected.accountId, senderMode: nextSenderMode };
     });
   }, [composerMailboxes, identity]);
+
+  React.useEffect(() => {
+    if (!contactBooks.some((book) => book.id === contactBook)) {
+      setContactBook(contactBooks[0]?.id ?? "default");
+    }
+  }, [contactBook, contactBooks]);
+
+  React.useEffect(() => {
+    if (calendarCollectionId && !calendarCollections.some((collection) => collection.id === calendarCollectionId)) {
+      setCalendarCollectionId("");
+    }
+  }, [calendarCollectionId, calendarCollections]);
 
   React.useEffect(() => {
     if (!authToken) {
@@ -353,9 +452,11 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const filtered = React.useMemo(() => filterMessages(mail, folder, query), [folder, mail, query]);
   const filteredEvents = React.useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return events;
-    return events.filter((item) => [item.title, item.location, item.attendees, item.notes, item.date, item.time].join(" ").toLowerCase().includes(needle));
-  }, [events, query]);
+    return events.filter((item) =>
+      (!calendarCollectionId || eventCollectionIds[item.id] === calendarCollectionId)
+      && (!needle || [item.title, item.location, item.attendees, item.notes, item.date, item.time].join(" ").toLowerCase().includes(needle))
+    );
+  }, [calendarCollectionId, eventCollectionIds, events, query]);
   const filteredContacts = React.useMemo(() => filterContacts(contacts, contactBook, query), [contactBook, contacts, query]);
   const filteredTasks = React.useMemo(() => filterTasks(tasks, query), [query, tasks]);
   const filteredNotes = React.useMemo(() => filterNotes(notes, query), [notes, query]);
@@ -435,7 +536,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   }), [collaboration, contacts.length, events.length, journalEntries.length, lastRefreshedAt, mail.length, mailboxDelegation, notes.length, pushConnected, reminders.length, tasks.length]);
 
   const openComposer = React.useCallback((next: Mode, item?: Message) => {
-    const defaultMailboxAccountId = identity?.account_id ?? "";
+    const defaultMailboxAccountId = workspaceMailboxAccountId || identity?.account_id || "";
     setSection("mail");
     setMode(next);
     setDraftMessageId(next === "draft" && item ? item.id : null);
@@ -462,7 +563,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       subject: item.subject.toLowerCase().startsWith("fwd:") ? item.subject : `Fwd: ${item.subject}`,
       body: quoteMessage(item)
     });
-  }, [identity]);
+  }, [identity, workspaceMailboxAccountId]);
 
   const closeComposer = React.useCallback(() => {
     setMode("closed");
@@ -527,6 +628,62 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     await loadWorkspace();
     pushNotice(copy.noticeSyncDone);
   }, [copy.noticeSyncDone, loadWorkspace, pushNotice]);
+
+  const uploadDraftAttachment = React.useCallback(async (file: File) => {
+    if (!authToken || !identity || !file || messageBusy) return;
+    const mailbox = composerMailboxes.find((entry) => entry.accountId === draft.mailboxAccountId) ?? composerMailboxes[0];
+    if (!mailbox || (mailbox.accountId !== identity.account_id && !mailbox.mayWrite)) {
+      pushNotice(copy.saveError);
+      return;
+    }
+
+    setMessageBusy(true);
+    try {
+      let messageId = draftMessageId;
+      if (!messageId) {
+        const saved = await apiJson<{ messageId: string }>("mail/messages/draft", authToken, {
+          method: "POST",
+          body: JSON.stringify(buildMessagePayload(identity, mailbox, draft, null))
+        });
+        messageId = saved.messageId;
+        setDraftMessageId(saved.messageId);
+        setMessageId(saved.messageId);
+      }
+      const formData = new FormData();
+      formData.append("file", file);
+      await apiVoid(
+        `mail/messages/${messageId}/attachments?accountId=${encodeURIComponent(mailbox.accountId)}`,
+        { method: "POST", body: formData }
+      );
+      await loadWorkspace(mailbox.accountId);
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    } finally {
+      setMessageBusy(false);
+    }
+  }, [authToken, composerMailboxes, copy.saveError, draft, draftMessageId, identity, loadWorkspace, messageBusy, pushNotice]);
+
+  const openAttachment = React.useCallback(async (message: Message, attachment: { id: string; name: string }) => {
+    if (!authToken) return;
+    const accountId = workspaceMailboxAccountId || identity?.account_id;
+    if (!accountId) return;
+    try {
+      const blob = await apiBlob(
+        `mail/messages/${message.id}/attachments/${attachment.id}?accountId=${encodeURIComponent(accountId)}`
+      );
+      const url = URL.createObjectURL(blob);
+      const opened = window.open(url, "_blank", "noopener");
+      if (!opened) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = attachment.name;
+        link.click();
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, identity?.account_id, pushNotice, workspaceMailboxAccountId]);
 
   const toggleMessageFlag = React.useCallback(async (message: Message) => {
     if (!authToken || messageBusy) return;
@@ -648,7 +805,12 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const deleteDraft = React.useCallback(async () => {
     if (!authToken || !draftMessageId) return;
     try {
-      await apiJson(`mail/messages/${draftMessageId}/draft`, authToken, { method: "DELETE" });
+      const accountId = workspaceMailboxAccountId || identity?.account_id;
+      await apiJson(
+        `mail/messages/${draftMessageId}/draft${accountId ? `?accountId=${encodeURIComponent(accountId)}` : ""}`,
+        authToken,
+        { method: "DELETE" }
+      );
       setMode("closed");
       setDraftMessageId(null);
       setMessageId("");
@@ -658,7 +820,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     } catch {
       pushNotice(copy.saveError);
     }
-  }, [authToken, copy.noticeDraftDeleted, copy.saveError, draftMessageId, identity, loadWorkspace, pushNotice]);
+  }, [authToken, copy.noticeDraftDeleted, copy.saveError, draftMessageId, identity, loadWorkspace, pushNotice, workspaceMailboxAccountId]);
 
   const saveContact = React.useCallback(async () => {
     if (!authToken) return;
@@ -705,7 +867,11 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     try {
       const item = await apiJson<EventItem>("mail/calendar/events", authToken, {
         method: "POST",
-        body: JSON.stringify({ id: currentEvent?.id ?? null, ...eventForm })
+        body: JSON.stringify({
+          id: currentEvent?.id ?? null,
+          collectionId: currentEvent ? undefined : (calendarCollectionId || undefined),
+          ...eventForm
+        })
       });
       await loadWorkspace();
       setEventId(item.id);
@@ -713,7 +879,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     } catch {
       pushNotice(copy.saveError);
     }
-  }, [authToken, copy, currentEvent, eventForm, loadWorkspace, pushNotice]);
+  }, [authToken, calendarCollectionId, copy, currentEvent, eventForm, loadWorkspace, pushNotice]);
 
   const deleteEvent = React.useCallback(async () => {
     if (!authToken || !currentEvent) return;
@@ -905,22 +1071,22 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
         body: JSON.stringify({ granteeEmail: mailboxForm.granteeEmail })
       });
       await loadSettings();
-      pushNotice("Mailbox delegation updated.");
+      pushNotice(copy.settings.mailboxDelegationSaved);
     } catch (error) {
       pushNotice(mapClientError(error, copy.saveError));
     }
-  }, [authToken, copy.saveError, copy.validationContact, loadSettings, mailboxForm.granteeEmail, pushNotice]);
+  }, [authToken, copy.saveError, copy.settings.mailboxDelegationSaved, copy.validationContact, loadSettings, mailboxForm.granteeEmail, pushNotice]);
 
   const deleteMailboxDelegation = React.useCallback(async (granteeAccountId: string) => {
     if (!authToken) return;
     try {
       await apiJson(`mail/delegation/mailboxes/${granteeAccountId}`, authToken, { method: "DELETE" });
       await loadSettings();
-      pushNotice("Mailbox delegation removed.");
+      pushNotice(copy.settings.mailboxDelegationRemoved);
     } catch (error) {
       pushNotice(mapClientError(error, copy.saveError));
     }
-  }, [authToken, copy.saveError, loadSettings, pushNotice]);
+  }, [authToken, copy.saveError, copy.settings.mailboxDelegationRemoved, loadSettings, pushNotice]);
 
   const saveSenderDelegation = React.useCallback(async () => {
     if (!authToken || !mailboxForm.granteeEmail.trim()) return pushNotice(copy.validationContact);
@@ -930,22 +1096,22 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
         body: JSON.stringify({ granteeEmail: mailboxForm.granteeEmail, senderRight: mailboxForm.senderRight })
       });
       await loadSettings();
-      pushNotice("Sender delegation updated.");
+      pushNotice(copy.settings.senderDelegationSaved);
     } catch (error) {
       pushNotice(mapClientError(error, copy.saveError));
     }
-  }, [authToken, copy.saveError, copy.validationContact, loadSettings, mailboxForm, pushNotice]);
+  }, [authToken, copy.saveError, copy.settings.senderDelegationSaved, copy.validationContact, loadSettings, mailboxForm, pushNotice]);
 
   const deleteSenderDelegation = React.useCallback(async (senderRight: string, granteeAccountId: string) => {
     if (!authToken) return;
     try {
       await apiJson(`mail/delegation/sender/${senderRight}/${granteeAccountId}`, authToken, { method: "DELETE" });
       await loadSettings();
-      pushNotice("Sender delegation removed.");
+      pushNotice(copy.settings.senderDelegationRemoved);
     } catch (error) {
       pushNotice(mapClientError(error, copy.saveError));
     }
-  }, [authToken, copy.saveError, loadSettings, pushNotice]);
+  }, [authToken, copy.saveError, copy.settings.senderDelegationRemoved, loadSettings, pushNotice]);
 
   const saveSieve = React.useCallback(async () => {
     if (!authToken || !sieveForm.name.trim() || !sieveForm.content.trim()) return pushNotice(copy.validationMessage);
@@ -955,11 +1121,11 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
         body: JSON.stringify(sieveForm)
       });
       await loadSettings();
-      pushNotice("Sieve script saved.");
+      pushNotice(copy.settings.sieveSaved);
     } catch (error) {
       pushNotice(mapClientError(error, copy.saveError));
     }
-  }, [authToken, copy.saveError, copy.validationMessage, loadSettings, pushNotice, sieveForm]);
+  }, [authToken, copy.saveError, copy.settings.sieveSaved, copy.validationMessage, loadSettings, pushNotice, sieveForm]);
 
   const loadSieveScript = React.useCallback(async (name: string) => {
     if (!authToken) return;
@@ -976,11 +1142,11 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     try {
       await apiJson(`mail/sieve/${encodeURIComponent(name)}`, authToken, { method: "DELETE" });
       await loadSettings();
-      pushNotice("Sieve script deleted.");
+      pushNotice(copy.settings.sieveDeleted);
     } catch (error) {
       pushNotice(mapClientError(error, copy.saveError));
     }
-  }, [authToken, copy.saveError, loadSettings, pushNotice]);
+  }, [authToken, copy.saveError, copy.settings.sieveDeleted, loadSettings, pushNotice]);
 
   const activateSieve = React.useCallback(async (name: string | null) => {
     if (!authToken) return;
@@ -990,11 +1156,11 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
         body: JSON.stringify({ name })
       });
       await loadSettings();
-      pushNotice(name ? "Sieve script activated." : "Sieve script disabled.");
+      pushNotice(name ? copy.settings.sieveActivated : copy.settings.sieveDeactivated);
     } catch (error) {
       pushNotice(mapClientError(error, copy.saveError));
     }
-  }, [authToken, copy.saveError, loadSettings, pushNotice]);
+  }, [authToken, copy.saveError, copy.settings.sieveActivated, copy.settings.sieveDeactivated, loadSettings, pushNotice]);
 
   return {
     section,
@@ -1003,6 +1169,10 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     setFolder,
     contactBook,
     setContactBook,
+    contactBooks,
+    calendarCollectionId,
+    setCalendarCollectionId,
+    calendarCollections,
     query,
     setQuery,
     mail,
@@ -1053,6 +1223,9 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     filteredReminders,
     current,
     composerMailboxes,
+    mailboxAccounts: composerMailboxes,
+    workspaceMailboxAccountId,
+    selectWorkspaceMailbox,
     currentEvent,
     currentContact,
     currentTask,
@@ -1061,6 +1234,9 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     currentReminder,
     openComposer,
     saveMessage,
+    draftMessageId,
+    uploadDraftAttachment,
+    openAttachment,
     toggleMessageFlag,
     completeMessageFlag,
     setMessageFlagDue,

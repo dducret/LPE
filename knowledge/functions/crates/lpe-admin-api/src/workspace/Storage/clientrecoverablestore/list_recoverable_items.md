@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: list_recoverable_items
-resource: crates/lpe-admin-api/src/workspace.rs#L260-L266
+resource: crates/lpe-admin-api/src/workspace.rs#L265-L271
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -12,6 +12,7 @@ relationships:
   - functions/LPE-CT/web/modules/app/trace-actions/runSpamTest
   - functions/LPE-CT/web/modules/app/ui/renderDrawerContent
   - functions/LPE-CT/web/modules/app/ui/closeDrawer
+  - functions/web/client/src/App/App
 ---
 
 # Signature
@@ -26,3 +27,4 @@ relationships:
 - [runSpamTest](../../../../../../../functions/LPE-CT/web/modules/app/trace-actions/runSpamTest.md)
 - [renderDrawerContent](../../../../../../../functions/LPE-CT/web/modules/app/ui/renderDrawerContent.md)
 - [closeDrawer](../../../../../../../functions/LPE-CT/web/modules/app/ui/closeDrawer.md)
+- [App](../../../../../../../functions/web/client/src/App/App.md)

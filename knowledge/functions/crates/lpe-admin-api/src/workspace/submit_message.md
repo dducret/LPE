@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: submit_message
-resource: crates/lpe-admin-api/src/workspace.rs#L308-L316
+resource: crates/lpe-admin-api/src/workspace.rs#L320-L328
 generated:
   by: okf-rs/0.3.0
 relationships:

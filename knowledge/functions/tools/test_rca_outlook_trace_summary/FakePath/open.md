@@ -22,6 +22,7 @@ relationships:
   - functions/tools/rca_outlook/http/request
   - functions/tools/rca_outlook_trace_summary/summarize_rr
   - functions/tools/rca_outlook_trace_summary/summarize_log
+  - functions/web/client/src/useClientWorkspace/useClientWorkspace
 ---
 
 # Signature
@@ -46,3 +47,4 @@ relationships:
 - [request](../../../../functions/tools/rca_outlook/http/request.md)
 - [summarize_rr](../../../../functions/tools/rca_outlook_trace_summary/summarize_rr.md)
 - [summarize_log](../../../../functions/tools/rca_outlook_trace_summary/summarize_log.md)
+- [useClientWorkspace](../../../../functions/web/client/src/useClientWorkspace/useClientWorkspace.md)

@@ -1,14 +1,14 @@
 ---
 type: Rust Function
 title: submit_message_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L318-L362
+resource: crates/lpe-admin-api/src/workspace.rs#L330-L374
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-admin-api/src/workspace/require_account_from_store
-  - functions/crates/lpe-admin-api/src/workspace/resolve_client_mailbox_access
+  - functions/crates/lpe-admin-api/src/workspace/mailbox_access/resolve_client_mailbox_access
   - functions/crates/lpe-admin-api/src/workspace/map_submit_message_request
   - functions/crates/lpe-admin-api/src/observability/record_mail_submission
   called_by:
@@ -23,7 +23,7 @@ relationships:
 # Calls
 
 - [require_account_from_store](../../../../../functions/crates/lpe-admin-api/src/workspace/require_account_from_store.md)
-- [resolve_client_mailbox_access](../../../../../functions/crates/lpe-admin-api/src/workspace/resolve_client_mailbox_access.md)
+- [resolve_client_mailbox_access](../../../../../functions/crates/lpe-admin-api/src/workspace/mailbox_access/resolve_client_mailbox_access.md)
 - [map_submit_message_request](../../../../../functions/crates/lpe-admin-api/src/workspace/map_submit_message_request.md)
 - [record_mail_submission](../../../../../functions/crates/lpe-admin-api/src/observability/record_mail_submission.md)
 

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_client_note
-resource: crates/lpe-admin-api/src/workspace.rs#L182-L184
+resource: crates/lpe-admin-api/src/workspace.rs#L187-L189
 visibility: private
 generated:
   by: okf-rs/0.3.0

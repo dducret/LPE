@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_canonical_search_folder_and_rule_replay
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L4245-L4559
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L4266-L4580
 visibility: private
 generated:
   by: okf-rs/0.3.0

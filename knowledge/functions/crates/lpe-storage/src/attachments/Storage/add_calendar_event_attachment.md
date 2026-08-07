@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: add_calendar_event_attachment
-resource: crates/lpe-storage/src/attachments.rs#L421-L566
+resource: crates/lpe-storage/src/attachments.rs#L448-L593
 generated:
   by: okf-rs/0.3.0
 relationships:

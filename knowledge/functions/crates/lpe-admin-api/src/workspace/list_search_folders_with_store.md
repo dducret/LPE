@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: list_search_folders_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1297-L1306
+resource: crates/lpe-admin-api/src/workspace.rs#L1316-L1325
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_client_task
-resource: crates/lpe-admin-api/src/workspace.rs#L997-L1012
+resource: crates/lpe-admin-api/src/workspace.rs#L1016-L1031
 generated:
   by: okf-rs/0.3.0
 relationships:

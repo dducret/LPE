@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_event_json_comparison_ignores_whitespace
-resource: crates/lpe-storage/src/workspace.rs#L1505-L1515
+resource: crates/lpe-storage/src/workspace.rs#L1307-L1317
 visibility: private
 generated:
   by: okf-rs/0.3.0

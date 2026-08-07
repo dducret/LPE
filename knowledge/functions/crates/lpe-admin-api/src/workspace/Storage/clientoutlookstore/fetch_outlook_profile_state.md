@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_outlook_profile_state
-resource: crates/lpe-admin-api/src/workspace.rs#L251-L256
+resource: crates/lpe-admin-api/src/workspace.rs#L256-L261
 visibility: private
 generated:
   by: okf-rs/0.3.0

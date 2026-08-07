@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_search_folders_by_ids
-resource: crates/lpe-admin-api/src/workspace.rs#L228-L234
+resource: crates/lpe-admin-api/src/workspace.rs#L233-L239
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_input_from_request
-resource: crates/lpe-admin-api/src/workspace.rs#L767-L792
+resource: crates/lpe-admin-api/src/workspace.rs#L786-L811
 visibility: private
 generated:
   by: okf-rs/0.3.0

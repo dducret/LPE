@@ -96,6 +96,7 @@
 - [admin_auth](../modules/crates/lpe-admin-api/src/admin_auth.md) — Rust Module
 - [app](../modules/crates/lpe-admin-api/src/app.md) — Rust Module
 - [bootstrap](../modules/crates/lpe-admin-api/src/bootstrap.md) — Rust Module
+- [client_attachments](../modules/crates/lpe-admin-api/src/client_attachments.md) — Rust Module
 - [client_auth](../modules/crates/lpe-admin-api/src/client_auth.md) — Rust Module
 - [client_config](../modules/crates/lpe-admin-api/src/client_config.md) — Rust Module
 - [tests](../modules/crates/lpe-admin-api/src/client_config/tests.md) — Rust Module
@@ -116,6 +117,7 @@
 - [types](../modules/crates/lpe-admin-api/src/types.md) — Rust Module
 - [util](../modules/crates/lpe-admin-api/src/util.md) — Rust Module
 - [workspace](../modules/crates/lpe-admin-api/src/workspace.md) — Rust Module
+- [mailbox_access](../modules/crates/lpe-admin-api/src/workspace/mailbox_access.md) — Rust Module
 - [public_folders](../modules/crates/lpe-admin-api/src/workspace/public_folders.md) — Rust Module
 - [tests](../modules/crates/lpe-admin-api/src/workspace/tests.md) — Rust Module
 - [src](../modules/crates/lpe-ai/src.md) — Rust Module
@@ -593,6 +595,7 @@
 - [types](../modules/crates/lpe-storage/src/types.md) — Rust Module
 - [util](../modules/crates/lpe-storage/src/util.md) — Rust Module
 - [workspace](../modules/crates/lpe-storage/src/workspace.md) — Rust Module
+- [client_workspace](../modules/crates/lpe-storage/src/workspace/client_workspace.md) — Rust Module
 - [mapi_contact_create](../modules/crates/lpe-storage/tests/mapi_contact_create.md) — Rust Module
 - [mapi_event_commit](../modules/crates/lpe-storage/tests/mapi_event_commit.md) — Rust Module
 - [outlook_cache_fidelity_update](../modules/crates/lpe-storage/tests/outlook_cache_fidelity_update.md) — Rust Module

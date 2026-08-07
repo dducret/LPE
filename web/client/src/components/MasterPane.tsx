@@ -1,6 +1,7 @@
 import React from "react";
 import type { ClientCopy } from "../i18n";
-import type { ContactBookId, ContactItem, EventItem, Folder, JournalEntryItem, Message, Mode, NoteItem, ReminderItem, Section, TaskItem } from "../client-types";
+import type { CollaborationCollection, ContactBookId, ContactItem, EventItem, Folder, JournalEntryItem, Message, Mode, NoteItem, ReminderItem, Section, TaskItem } from "../client-types";
+import { TabButton, Tabs } from "../../../ui/src/components/primitives";
 
 export function MasterPane(props: {
   copy: ClientCopy;
@@ -8,6 +9,10 @@ export function MasterPane(props: {
   folder: Folder;
   contactBook: ContactBookId;
   setContactBook: (contactBook: ContactBookId) => void;
+  contactBooks: CollaborationCollection[];
+  calendarCollectionId: string;
+  setCalendarCollectionId: (collectionId: string) => void;
+  calendarCollections: CollaborationCollection[];
   mode: Mode;
   filteredMessages: Message[];
   events: EventItem[];
@@ -31,6 +36,24 @@ export function MasterPane(props: {
   onSelectJournalEntry: (id: string) => void;
   onSelectReminder: (id: string) => void;
 }) {
+  function taskStatusLabel(status: string) {
+    if (status === "needs-action") return props.copy.taskStatuses.needsAction;
+    if (status === "in-process") return props.copy.taskStatuses.inProcess;
+    if (status === "completed") return props.copy.taskStatuses.completed;
+    if (status === "cancelled") return props.copy.taskStatuses.cancelled;
+    return status;
+  }
+
+  function enumLabel(value: string) {
+    if (value === "active") return props.copy.enumValues.active;
+    if (value === "dismissed") return props.copy.enumValues.dismissed;
+    if (value === "mail") return props.copy.enumValues.mail;
+    if (value === "task") return props.copy.enumValues.task;
+    if (value === "calendar") return props.copy.enumValues.calendar;
+    if (value === "phone-call") return props.copy.enumValues.phoneCall;
+    return value;
+  }
+
   const countLabel = props.section === "mail"
     ? props.copy.messageCount.replace("{count}", String(props.filteredMessages.length))
     : props.section === "calendar"
@@ -89,28 +112,27 @@ export function MasterPane(props: {
           </div>
         </>
       ) : null}
-      {props.section === "calendar" ? <div className="agenda-list">{props.events.map((item) => <button className={props.eventId === item.id ? "agenda-card is-active" : "agenda-card"} key={item.id} type="button" onClick={() => props.onSelectEvent(item.id)}><span className="agenda-time">{item.time}</span><div><strong>{item.title}</strong><p>{item.location}</p><span>{item.attendees}</span></div></button>)}{props.events.length === 0 ? <div className="empty-state">{props.copy.noCalendarEvents}</div> : null}</div> : null}
+      {props.section === "calendar" ? <><Tabs className="collection-tabs" aria-label={props.copy.sections.calendar}><TabButton active={!props.calendarCollectionId} onClick={() => props.setCalendarCollectionId("")}>{props.copy.sections.calendar}</TabButton>{props.calendarCollections.map((collection) => <TabButton active={props.calendarCollectionId === collection.id} key={collection.id} onClick={() => props.setCalendarCollectionId(collection.id)}>{collection.displayName}</TabButton>)}</Tabs><div className="agenda-list">{props.events.map((item) => <button className={props.eventId === item.id ? "agenda-card is-active" : "agenda-card"} key={item.id} type="button" onClick={() => props.onSelectEvent(item.id)}><span className="agenda-time">{item.time}</span><div><strong>{item.title}</strong><p>{item.location}</p><span>{item.attendees}</span></div></button>)}{props.events.length === 0 ? <div className="empty-state">{props.copy.noCalendarEvents}</div> : null}</div></> : null}
       {props.section === "contacts" ? (
         <>
-          <div className="segmented-control" aria-label={props.copy.sections.contacts}>
-            {(["default", "suggested_contacts", "quick_contacts", "im_contact_list"] as ContactBookId[]).map((item) => (
-              <button
-                key={item}
-                className={props.contactBook === item ? "is-active" : ""}
-                type="button"
-                onClick={() => props.setContactBook(item)}
+          <Tabs className="collection-tabs" aria-label={props.copy.sections.contacts}>
+            {props.contactBooks.map((book) => (
+              <TabButton
+                key={book.id}
+                active={props.contactBook === book.id}
+                onClick={() => props.setContactBook(book.id)}
               >
-                {props.copy.contactBooks[item as keyof typeof props.copy.contactBooks]}
-              </button>
+                {book.displayName}
+              </TabButton>
             ))}
-          </div>
+          </Tabs>
           <div className="contact-list">{props.contacts.map((item) => <button className={props.contactId === item.id ? "contact-card is-active" : "contact-card"} key={item.id} type="button" onClick={() => props.onSelectContact(item.id)}><div className="contact-avatar">{item.name.slice(0, 2).toUpperCase()}</div><div><strong>{item.name}</strong><p>{item.role}</p><span>{item.team}</span></div></button>)}{props.contacts.length === 0 ? <div className="empty-state">{props.copy.noContacts}</div> : null}</div>
         </>
       ) : null}
-      {props.section === "tasks" ? <div className="agenda-list">{props.tasks.map((item) => <button className={props.taskId === item.id ? "agenda-card is-active" : "agenda-card"} key={item.id} type="button" onClick={() => props.onSelectTask(item.id)}><span className="agenda-time">{item.status}</span><div><strong>{item.title}</strong><p>{item.description}</p><span>{item.dueAt ?? props.copy.noDate}</span></div></button>)}{props.tasks.length === 0 ? <div className="empty-state">{props.copy.emptyObjects.tasks}</div> : null}</div> : null}
+      {props.section === "tasks" ? <div className="agenda-list">{props.tasks.map((item) => <button className={props.taskId === item.id ? "agenda-card is-active" : "agenda-card"} key={item.id} type="button" onClick={() => props.onSelectTask(item.id)}><span className="agenda-time">{taskStatusLabel(item.status)}</span><div><strong>{item.title}</strong><p>{item.description}</p><span>{item.dueAt ?? props.copy.noDate}</span></div></button>)}{props.tasks.length === 0 ? <div className="empty-state">{props.copy.emptyObjects.tasks}</div> : null}</div> : null}
       {props.section === "notes" ? <div className="contact-list">{props.notes.map((item) => <button className={props.noteId === item.id ? "contact-card is-active" : "contact-card"} key={item.id} type="button" onClick={() => props.onSelectNote(item.id)}><div className="contact-avatar">{item.color.slice(0, 2).toUpperCase()}</div><div><strong>{item.title || props.copy.untitledDraft}</strong><p>{item.bodyText}</p><span>{item.updatedAt}</span></div></button>)}{props.notes.length === 0 ? <div className="empty-state">{props.copy.emptyObjects.notes}</div> : null}</div> : null}
-      {props.section === "journal" ? <div className="agenda-list">{props.journalEntries.map((item) => <button className={props.journalEntryId === item.id ? "agenda-card is-active" : "agenda-card"} key={item.id} type="button" onClick={() => props.onSelectJournalEntry(item.id)}><span className="agenda-time">{item.entryType}</span><div><strong>{item.subject}</strong><p>{item.bodyText}</p><span>{item.occurredAt ?? item.startsAt ?? props.copy.noDate}</span></div></button>)}{props.journalEntries.length === 0 ? <div className="empty-state">{props.copy.emptyObjects.journal}</div> : null}</div> : null}
-      {props.section === "reminders" ? <div className="agenda-list">{props.reminders.map((item) => { const id = `${item.sourceType}:${item.sourceId}`; return <button className={props.reminderId === id ? "agenda-card is-active" : "agenda-card"} key={id} type="button" onClick={() => props.onSelectReminder(id)}><span className="agenda-time">{item.status}</span><div><strong>{item.title}</strong><p>{item.sourceType}</p><span>{item.reminderAt}</span></div></button>; })}{props.reminders.length === 0 ? <div className="empty-state">{props.copy.emptyObjects.reminders}</div> : null}</div> : null}
+      {props.section === "journal" ? <div className="agenda-list">{props.journalEntries.map((item) => <button className={props.journalEntryId === item.id ? "agenda-card is-active" : "agenda-card"} key={item.id} type="button" onClick={() => props.onSelectJournalEntry(item.id)}><span className="agenda-time">{enumLabel(item.entryType)}</span><div><strong>{item.subject}</strong><p>{item.bodyText}</p><span>{item.occurredAt ?? item.startsAt ?? props.copy.noDate}</span></div></button>)}{props.journalEntries.length === 0 ? <div className="empty-state">{props.copy.emptyObjects.journal}</div> : null}</div> : null}
+      {props.section === "reminders" ? <div className="agenda-list">{props.reminders.map((item) => { const id = `${item.sourceType}:${item.sourceId}`; return <button className={props.reminderId === id ? "agenda-card is-active" : "agenda-card"} key={id} type="button" onClick={() => props.onSelectReminder(id)}><span className="agenda-time">{enumLabel(item.status)}</span><div><strong>{item.title}</strong><p>{enumLabel(item.sourceType)}</p><span>{item.reminderAt}</span></div></button>; })}{props.reminders.length === 0 ? <div className="empty-state">{props.copy.emptyObjects.reminders}</div> : null}</div> : null}
     </section>
   );
 }

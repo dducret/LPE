@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: preserve_empty
-resource: crates/lpe-admin-api/src/workspace.rs#L890-L896
+resource: crates/lpe-admin-api/src/workspace.rs#L909-L915
 visibility: private
 generated:
   by: okf-rs/0.3.0

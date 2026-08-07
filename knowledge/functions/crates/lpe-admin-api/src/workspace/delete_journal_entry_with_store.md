@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_journal_entry_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1268-L1278
+resource: crates/lpe-admin-api/src/workspace.rs#L1287-L1297
 visibility: private
 generated:
   by: okf-rs/0.3.0

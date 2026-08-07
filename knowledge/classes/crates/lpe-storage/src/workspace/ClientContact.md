@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: ClientContact
-resource: crates/lpe-storage/src/workspace.rs#L75-L93
+resource: crates/lpe-storage/src/workspace.rs#L80-L98
 generated:
   by: okf-rs/0.3.0
 ---

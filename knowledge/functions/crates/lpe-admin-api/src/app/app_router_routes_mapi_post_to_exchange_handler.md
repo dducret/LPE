@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: app_router_routes_mapi_post_to_exchange_handler
-resource: crates/lpe-admin-api/src/app.rs#L471-L497
+resource: crates/lpe-admin-api/src/app.rs#L480-L506
 visibility: private
 generated:
   by: okf-rs/0.3.0

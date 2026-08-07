@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: purge_recoverable_item_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L579-L601
+resource: crates/lpe-admin-api/src/workspace.rs#L598-L620
 visibility: private
 generated:
   by: okf-rs/0.3.0

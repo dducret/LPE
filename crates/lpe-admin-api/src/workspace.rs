@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     extract::{Path as AxumPath, Query, State},
     http::{HeaderMap, StatusCode},
-    Json,
 };
 use lpe_storage::{
     AccessibleContact, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
@@ -29,6 +29,11 @@ use crate::{
 
 mod public_folders;
 pub(crate) use public_folders::*;
+mod mailbox_access;
+use mailbox_access::{
+    ClientWorkspaceQuery, classify_client_mailbox_access_error, ensure_client_mailbox_read_access,
+    ensure_client_mailbox_write_access, resolve_client_mailbox_access,
+};
 
 #[allow(async_fn_in_trait)]
 trait ClientSessionStore {
@@ -295,11 +300,18 @@ impl ClientRecoverableStore for Storage {
 pub(crate) async fn client_workspace(
     State(storage): State<Storage>,
     headers: HeaderMap,
+    Query(query): Query<ClientWorkspaceQuery>,
 ) -> ApiResult<ClientWorkspace> {
     let account = require_account(&storage, &headers).await?;
+    let target_account_id = query.account_id.unwrap_or(account.account_id);
+    let mailbox_access = storage
+        .require_mailbox_account_access(account.account_id, target_account_id)
+        .await
+        .map_err(classify_client_mailbox_access_error)?;
+    ensure_client_mailbox_read_access(&mailbox_access)?;
     Ok(Json(
         storage
-            .fetch_client_workspace(account.account_id)
+            .fetch_client_workspace(account.account_id, target_account_id)
             .await
             .map_err(internal_error)?,
     ))
@@ -492,11 +504,18 @@ pub(crate) async fn delete_draft_message(
     State(storage): State<Storage>,
     headers: HeaderMap,
     AxumPath(message_id): AxumPath<Uuid>,
+    Query(query): Query<ClientWorkspaceQuery>,
 ) -> ApiResult<HealthResponse> {
     let account = require_account(&storage, &headers).await?;
+    let target_account_id = query.account_id.unwrap_or(account.account_id);
+    let mailbox_access = storage
+        .require_mailbox_account_access(account.account_id, target_account_id)
+        .await
+        .map_err(classify_client_mailbox_access_error)?;
+    ensure_client_mailbox_write_access(&mailbox_access)?;
     storage
         .delete_draft_message(
-            account.account_id,
+            target_account_id,
             message_id,
             AuditEntryInput {
                 actor: account.email,
@@ -1377,37 +1396,6 @@ async fn require_account_from_store<S: ClientSessionStore>(
             StatusCode::UNAUTHORIZED,
             "invalid or expired session".to_string(),
         ))
-}
-
-async fn resolve_client_mailbox_access<S: ClientSubmissionStore>(
-    storage: &S,
-    account: &AuthenticatedAccount,
-    requested_account_id: Uuid,
-) -> std::result::Result<MailboxAccountAccess, (StatusCode, String)> {
-    let accessible = storage
-        .fetch_accessible_mailbox_accounts(account.account_id)
-        .await
-        .map_err(internal_error)?;
-    accessible
-        .into_iter()
-        .find(|entry| entry.account_id == requested_account_id)
-        .ok_or((
-            StatusCode::FORBIDDEN,
-            "authenticated account cannot access this mailbox".to_string(),
-        ))
-}
-
-fn ensure_client_mailbox_write_access(
-    mailbox_access: &MailboxAccountAccess,
-) -> std::result::Result<(), (StatusCode, String)> {
-    if mailbox_access.is_owned || mailbox_access.may_write {
-        Ok(())
-    } else {
-        Err((
-            StatusCode::FORBIDDEN,
-            "authenticated account cannot write drafts in this mailbox".to_string(),
-        ))
-    }
 }
 
 fn classify_client_submission_storage_error(error: anyhow::Error) -> (StatusCode, String) {

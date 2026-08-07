@@ -24,6 +24,7 @@ relationships:
   - functions/crates/lpe-activesync/src/service/sync_helpers/decode_sync_state
   - functions/crates/lpe-activesync/src/tests/bearer_headers_with_protocol_version
   - functions/crates/lpe-activesync/src/tests/enforced_mode_validates_later_command_policy_key
+  - functions/crates/lpe-admin-api/src/client_attachments/attachment_content_response
   - functions/crates/lpe-admin-api/src/client_auth/mail_session_headers
   - functions/crates/lpe-admin-api/src/client_auth/cleared_mail_session_headers
   - functions/crates/lpe-admin-api/src/client_config/tests/parse_xml
@@ -705,6 +706,7 @@ relationships:
 - [decode_sync_state](../../../../../../functions/crates/lpe-activesync/src/service/sync_helpers/decode_sync_state.md)
 - [bearer_headers_with_protocol_version](../../../../../../functions/crates/lpe-activesync/src/tests/bearer_headers_with_protocol_version.md)
 - [enforced_mode_validates_later_command_policy_key](../../../../../../functions/crates/lpe-activesync/src/tests/enforced_mode_validates_later_command_policy_key.md)
+- [attachment_content_response](../../../../../../functions/crates/lpe-admin-api/src/client_attachments/attachment_content_response.md)
 - [mail_session_headers](../../../../../../functions/crates/lpe-admin-api/src/client_auth/mail_session_headers.md)
 - [cleared_mail_session_headers](../../../../../../functions/crates/lpe-admin-api/src/client_auth/cleared_mail_session_headers.md)
 - [parse_xml](../../../../../../functions/crates/lpe-admin-api/src/client_config/tests/parse_xml.md)

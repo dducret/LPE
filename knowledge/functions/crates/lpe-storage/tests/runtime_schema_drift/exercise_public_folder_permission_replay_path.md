@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_public_folder_permission_replay_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L4793-L5061
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L4814-L5082
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: attachments
-resource: crates/lpe-storage/src/attachments.rs#L1-L1262
+resource: crates/lpe-storage/src/attachments.rs#L1-L1289
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -23,6 +23,7 @@ relationships:
 - [CalendarEventAttachment](../../../../classes/crates/lpe-storage/src/attachments/CalendarEventAttachment.md)
 - [MapiEventAttachmentUpsert](../../../../classes/crates/lpe-storage/src/attachments/MapiEventAttachmentUpsert.md)
 - [MapiEventAttachmentChanges](../../../../classes/crates/lpe-storage/src/attachments/MapiEventAttachmentChanges.md)
+- [message_is_visible_draft](../../../../functions/crates/lpe-storage/src/attachments/Storage/message_is_visible_draft.md)
 - [insert_calendar_event_attachment_in_tx](../../../../functions/crates/lpe-storage/src/attachments/Storage/insert_calendar_event_attachment_in_tx.md)
 - [delete_calendar_event_attachment_in_tx](../../../../functions/crates/lpe-storage/src/attachments/Storage/delete_calendar_event_attachment_in_tx.md)
 - [fetch_calendar_event_attachments_in_tx](../../../../functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_event_attachments_in_tx.md)

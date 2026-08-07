@@ -47,6 +47,33 @@ pub struct MapiEventAttachmentChanges {
 }
 
 impl Storage {
+    pub async fn message_is_visible_draft(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<bool> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let is_draft = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM mailbox_messages
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND message_id = $3
+                  AND visibility = 'visible'
+                  AND is_draft = TRUE
+            )
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(is_draft)
+    }
+
     pub(crate) async fn insert_calendar_event_attachment_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_search_folders
-resource: crates/lpe-admin-api/src/workspace.rs#L221-L226
+resource: crates/lpe-admin-api/src/workspace.rs#L226-L231
 visibility: private
 generated:
   by: okf-rs/0.3.0

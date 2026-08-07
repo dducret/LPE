@@ -1,7 +1,7 @@
 ---
 type: TypeScript Module
 title: client-types
-resource: web/client/src/client-types.ts#L1-L301
+resource: web/client/src/client-types.ts#L1-L304
 generated:
   by: okf-rs/0.3.0
 relationships:

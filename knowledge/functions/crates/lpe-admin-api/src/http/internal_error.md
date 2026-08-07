@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-admin-api/src/integration/classify_submission_storage_error
   - functions/crates/lpe-admin-api/src/storage/storage_policy_error
   - functions/crates/lpe-admin-api/src/workspace/classify_client_submission_storage_error
+  - functions/crates/lpe-admin-api/src/workspace/mailbox_access/classify_client_mailbox_access_error
 ---
 
 # Signature
@@ -20,3 +21,4 @@ relationships:
 - [classify_submission_storage_error](../../../../../functions/crates/lpe-admin-api/src/integration/classify_submission_storage_error.md)
 - [storage_policy_error](../../../../../functions/crates/lpe-admin-api/src/storage/storage_policy_error.md)
 - [classify_client_submission_storage_error](../../../../../functions/crates/lpe-admin-api/src/workspace/classify_client_submission_storage_error.md)
+- [classify_client_mailbox_access_error](../../../../../functions/crates/lpe-admin-api/src/workspace/mailbox_access/classify_client_mailbox_access_error.md)

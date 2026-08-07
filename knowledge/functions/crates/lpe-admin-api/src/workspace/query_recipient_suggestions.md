@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query_recipient_suggestions
-resource: crates/lpe-admin-api/src/workspace.rs#L737-L749
+resource: crates/lpe-admin-api/src/workspace.rs#L756-L768
 generated:
   by: okf-rs/0.3.0
 relationships:

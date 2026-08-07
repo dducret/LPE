@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: purge_recoverable_item
-resource: crates/lpe-admin-api/src/workspace.rs#L285-L292
+resource: crates/lpe-admin-api/src/workspace.rs#L290-L297
 visibility: private
 generated:
   by: okf-rs/0.3.0

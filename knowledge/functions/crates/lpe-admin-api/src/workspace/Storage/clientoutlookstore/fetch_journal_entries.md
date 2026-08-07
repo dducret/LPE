@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_journal_entries
-resource: crates/lpe-admin-api/src/workspace.rs#L190-L192
+resource: crates/lpe-admin-api/src/workspace.rs#L195-L197
 visibility: private
 generated:
   by: okf-rs/0.3.0

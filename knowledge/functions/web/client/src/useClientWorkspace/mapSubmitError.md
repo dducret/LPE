@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: mapSubmitError
-resource: web/client/src/useClientWorkspace.ts#L54-L70
+resource: web/client/src/useClientWorkspace.ts#L79-L94
 generated:
   by: okf-rs/0.3.0
 relationships:

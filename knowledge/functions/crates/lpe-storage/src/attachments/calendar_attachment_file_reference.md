@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_attachment_file_reference
-resource: crates/lpe-storage/src/attachments.rs#L1124-L1126
+resource: crates/lpe-storage/src/attachments.rs#L1151-L1153
 generated:
   by: okf-rs/0.3.0
 relationships:

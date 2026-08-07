@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: ClientEvent
-resource: crates/lpe-storage/src/workspace.rs#L51-L71
+resource: crates/lpe-storage/src/workspace.rs#L56-L76
 generated:
   by: okf-rs/0.3.0
 ---

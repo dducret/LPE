@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upsert_client_event
-resource: crates/lpe-admin-api/src/workspace.rs#L816-L888
+resource: crates/lpe-admin-api/src/workspace.rs#L835-L907
 generated:
   by: okf-rs/0.3.0
 relationships:

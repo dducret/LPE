@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_draft_message_in_tx
-resource: crates/lpe-storage/src/submission.rs#L1419-L1531
+resource: crates/lpe-storage/src/submission.rs#L1495-L1607
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: replace_message_recipients
-resource: crates/lpe-storage/src/submission.rs#L59-L186
+resource: crates/lpe-storage/src/submission.rs#L116-L243
 generated:
   by: okf-rs/0.3.0
 relationships:

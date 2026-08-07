@@ -1,17 +1,18 @@
 ---
 type: Rust Module
 title: workspace
-resource: crates/lpe-admin-api/src/workspace.rs#L1-L1503
+resource: crates/lpe-admin-api/src/workspace.rs#L1-L1491
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
-  - external/axum-extract-path-as-axumpath-query-state-http-headermap-statuscode-json
+  - external/axum-json-extract-path-as-axumpath-query-state-http-headermap-statuscode
   - external/lpe-storage-accessiblecontact-auditentryinput-authenticatedaccount-clientcontact-clientevent-clientnote-clientreminder-clienttask-clienttasklist-clientworkspace-collaborationcollection-healthresponse-jmapemail-jmapemailfollowupupdate-journalentry-mailboxaccountaccess-outlookprofilestate-recipientsuggestion-recoverableitem-reminderquery-saveddraftmessage-searchfolderdefinition-storage-submitmessageinput-submittedmessage-submittedrecipientinput-upsertclientcontactinput-upsertclienteventinput-upsertclientnoteinput-upsertclienttaskinput-upsertjournalentryinput-upsertsearchfolderinput
   - external/tracing-info
   - external/uuid-uuid
   - external/crate-http-bad-request-error-internal-error-observability-require-account-types-apiresult-patchclientcontactrequest-recipientsuggestionquery-recoverableitemsqueryrequest-reminderqueryrequest-restorerecoverableitemrequest-submitmessagerequest-submitrecipientrequest-updatemessageflagrequest-upsertclientcontactrequest-upsertclienteventrequest-upsertclientnoterequest-upsertclienttaskrequest-upsertjournalentryrequest-upsertsearchfolderrequest
   - external/pub-crate-use-public-folders
+  - external/mailbox-access-clientworkspacequery-classify-client-mailbox-access-error-ensure-client-mailbox-read-access-ensure-client-mailbox-write-access-resolve-client-mailbox-access
   member_of:
   - packages/crates/lpe-admin-api
 ---
@@ -104,8 +105,6 @@ relationships:
 - [delete_search_folder_with_store](../../../../functions/crates/lpe-admin-api/src/workspace/delete_search_folder_with_store.md)
 - [outlook_profile_state_with_store](../../../../functions/crates/lpe-admin-api/src/workspace/outlook_profile_state_with_store.md)
 - [require_account_from_store](../../../../functions/crates/lpe-admin-api/src/workspace/require_account_from_store.md)
-- [resolve_client_mailbox_access](../../../../functions/crates/lpe-admin-api/src/workspace/resolve_client_mailbox_access.md)
-- [ensure_client_mailbox_write_access](../../../../functions/crates/lpe-admin-api/src/workspace/ensure_client_mailbox_write_access.md)
 - [classify_client_submission_storage_error](../../../../functions/crates/lpe-admin-api/src/workspace/classify_client_submission_storage_error.md)
 - [map_submit_message_request](../../../../functions/crates/lpe-admin-api/src/workspace/map_submit_message_request.md)
 - [resolve_client_sender_fields](../../../../functions/crates/lpe-admin-api/src/workspace/resolve_client_sender_fields.md)
@@ -114,9 +113,9 @@ relationships:
 # Imports
 
 - `axum::{
+    Json,
     extract::{Path as AxumPath, Query, State},
     http::{HeaderMap, StatusCode},
-    Json,
 }`
 - `lpe_storage::{
     AccessibleContact, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
@@ -141,6 +140,10 @@ relationships:
     },
 }`
 - `pub(crate) use public_folders::*`
+- `mailbox_access::{
+    ClientWorkspaceQuery, classify_client_mailbox_access_error, ensure_client_mailbox_read_access,
+    ensure_client_mailbox_write_access, resolve_client_mailbox_access,
+}`
 
 # Member of
 

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_search_folder
-resource: crates/lpe-admin-api/src/workspace.rs#L236-L241
+resource: crates/lpe-admin-api/src/workspace.rs#L241-L246
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -20,6 +20,10 @@
 - Mailbox delegation:
   - supports shared mailbox projection
   - supports delegated mailbox read/write where granted
+  - `/api/mail/workspace?accountId={mailbox-account-id}` authorizes the target
+    account before loading its canonical mailbox state; the workspace projection
+    continues to use the authenticated principal's access-aware contact and
+    calendar collection visibility
   - accepts bounded Outlook `RopModifyPermissions` folder ACL rows only when they map to same-tenant canonical mailbox delegation grants
   - supports `send-as` and `send-on-behalf` checks during canonical submission
   - does not create protocol-specific submitted-message logic

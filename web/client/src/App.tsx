@@ -40,7 +40,6 @@ export function App() {
   const copy = messages[locale];
   const [authToken, setAuthToken] = React.useState<string | null>("session");
   const [identity, setIdentity] = React.useState<ClientIdentity | null>(null);
-  const workspace = useClientWorkspace(copy, authToken, identity);
   const [loginForm, setLoginForm] = React.useState({ email: "", password: "", totp_code: "" });
   const [loginError, setLoginError] = React.useState("");
   const [loginBusy, setLoginBusy] = React.useState(false);
@@ -48,7 +47,30 @@ export function App() {
   const [accountMenuOpen, setAccountMenuOpen] = React.useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
   const [sidebarMobileOpen, setSidebarMobileOpen] = React.useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = React.useState(false);
+  const [isNarrowScreen, setIsNarrowScreen] = React.useState(() => window.matchMedia("(max-width: 900px)").matches);
   const accountMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const accountMenuTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const accountMenuActionRef = React.useRef<HTMLButtonElement | null>(null);
+  const sidebarTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+
+  const closeAccountMenu = React.useCallback((restoreFocus = true) => {
+    setAccountMenuOpen(false);
+    if (restoreFocus) requestAnimationFrame(() => accountMenuTriggerRef.current?.focus());
+  }, []);
+  const closeSidebarMobile = React.useCallback((restoreFocus = true) => {
+    setSidebarMobileOpen(false);
+    if (restoreFocus) requestAnimationFrame(() => sidebarTriggerRef.current?.focus());
+  }, []);
+  const handleSessionExpired = React.useCallback(() => {
+    setAuthToken(null);
+    setIdentity(null);
+    setAccountMenuOpen(false);
+    setSidebarMobileOpen(false);
+    setMobileDetailOpen(false);
+    window.history.replaceState(null, "", "/mail/");
+  }, []);
+  const workspace = useClientWorkspace(copy, authToken, identity, handleSessionExpired);
 
   React.useEffect(() => {
     document.documentElement.lang = locale;
@@ -68,29 +90,56 @@ export function App() {
       })
       .catch(() => {
         if (!cancelled) {
-          setAuthToken(null);
-          setIdentity(null);
+          handleSessionExpired();
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [authToken]);
+  }, [authToken, handleSessionExpired]);
 
   React.useEffect(() => {
     if (!accountMenuOpen) return;
     function handlePointerDown(event: PointerEvent) {
       if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
-        setAccountMenuOpen(false);
+        closeAccountMenu();
       }
     }
     window.addEventListener("pointerdown", handlePointerDown);
     return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [accountMenuOpen, closeAccountMenu]);
+
+  React.useEffect(() => {
+    if (!accountMenuOpen) return;
+    accountMenuActionRef.current?.focus();
   }, [accountMenuOpen]);
 
   React.useEffect(() => {
-    setSidebarMobileOpen(false);
+    const mediaQuery = window.matchMedia("(max-width: 900px)");
+    const updateScreen = () => setIsNarrowScreen(mediaQuery.matches);
+    updateScreen();
+    mediaQuery.addEventListener("change", updateScreen);
+    return () => mediaQuery.removeEventListener("change", updateScreen);
+  }, []);
+
+  React.useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (accountMenuOpen) {
+        event.preventDefault();
+        closeAccountMenu();
+      } else if (sidebarMobileOpen) {
+        event.preventDefault();
+        closeSidebarMobile();
+      }
+    }
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [accountMenuOpen, closeAccountMenu, closeSidebarMobile, sidebarMobileOpen]);
+
+  React.useEffect(() => {
+    if (sidebarMobileOpen) closeSidebarMobile(false);
   }, [workspace.section, workspace.folder]);
 
   React.useEffect(() => {
@@ -232,7 +281,15 @@ export function App() {
     <main className="app-shell">
       <header className="app-header">
         <div className="app-header-left">
-          <button className="header-action shell-toggle" type="button" aria-label={sidebarMobileOpen ? copy.editorActions.cancel : copy.accountMenuLabel} aria-expanded={sidebarMobileOpen} onClick={() => setSidebarMobileOpen((value) => !value)}>☰</button>
+          <button
+            ref={sidebarTriggerRef}
+            className="header-action shell-toggle"
+            type="button"
+            aria-label={sidebarMobileOpen ? copy.navigation.close : copy.navigation.open}
+            aria-expanded={sidebarMobileOpen}
+            aria-controls="client-sidebar"
+            onClick={() => sidebarMobileOpen ? closeSidebarMobile(false) : setSidebarMobileOpen(true)}
+          >☰</button>
           <span className="header-app-icon">▦</span>
           <div className="header-product">
             <strong>{copy.productTitle}</strong>
@@ -245,21 +302,21 @@ export function App() {
         </div>
         <div className="app-header-right">
           <div className="account-menu-shell" ref={accountMenuRef}>
-            <button className="account-menu-trigger" type="button" aria-haspopup="menu" aria-expanded={accountMenuOpen} aria-label={copy.accountMenuLabel} onClick={() => setAccountMenuOpen((value) => !value)}>
+            <button ref={accountMenuTriggerRef} className="account-menu-trigger" type="button" aria-haspopup="dialog" aria-expanded={accountMenuOpen} aria-controls="account-menu-popover" aria-label={copy.accountMenuLabel} onClick={() => setAccountMenuOpen((value) => !value)}>
               <span className="header-account">{copy.signedInAs.replace("{email}", identity.email)}</span>
             </button>
             {accountMenuOpen ? (
-              <div className="account-menu-popover" role="menu">
-                <strong>{copy.accountMenuTitle}</strong>
+              <div className="account-menu-popover" id="account-menu-popover" role="dialog" aria-modal="false" aria-labelledby="account-menu-title">
+                <strong id="account-menu-title">{copy.accountMenuTitle}</strong>
                 <span>{identity.email}</span>
-                <Button variant="ghost" size="sm" type="button" onClick={() => void logoutClient()}>{copy.logout}</Button>
+                <Button ref={accountMenuActionRef} variant="ghost" size="sm" type="button" onClick={() => void logoutClient()}>{copy.logout}</Button>
               </div>
             ) : null}
           </div>
         </div>
       </header>
 
-      {sidebarMobileOpen ? <button className="shell-overlay" type="button" aria-label={copy.editorActions.cancel} onClick={() => setSidebarMobileOpen(false)} /> : null}
+      {sidebarMobileOpen ? <button className="shell-overlay" type="button" aria-label={copy.navigation.close} onClick={() => closeSidebarMobile()} /> : null}
       <div className={sidebarCollapsed ? "shell-row is-sidebar-collapsed" : "shell-row"}>
         <Sidebar
           copy={copy}
@@ -272,18 +329,27 @@ export function App() {
           eventCount={workspace.events.length}
           draftCount={workspace.mail.filter((item) => item.folder === "drafts").length}
           mailboxOwner={identity.email}
-          onCompose={() => workspace.openComposer("new")}
+          onCompose={() => { workspace.openComposer("new"); setMobileDetailOpen(true); }}
           onCloseComposer={workspace.closeComposer}
           collapsed={sidebarCollapsed}
           mobileOpen={sidebarMobileOpen}
+          isNarrowScreen={isNarrowScreen}
           onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
-          onCloseMobile={() => setSidebarMobileOpen(false)}
+          onCloseMobile={() => closeSidebarMobile()}
         />
 
         <section className="workspace">
           <div className="workspace-toolbar">
             <div className="workspace-toolbar-actions">
-              <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => workspace.openComposer("new")}>{copy.compose}</Button>
+              <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => { workspace.openComposer("new"); setMobileDetailOpen(true); }}>{copy.compose}</Button>
+              {isMailWorkspace && workspace.mailboxAccounts.length > 1 ? (
+                <label className="locale-picker compact">
+                  <span>{copy.mailboxLabel}</span>
+                  <Select value={workspace.workspaceMailboxAccountId} onChange={(event) => workspace.selectWorkspaceMailbox(event.target.value)}>
+                    {workspace.mailboxAccounts.map((mailbox) => <option key={mailbox.accountId} value={mailbox.accountId}>{`${mailbox.displayName} <${mailbox.email}>`}</option>)}
+                  </Select>
+                </label>
+              ) : null}
             </div>
             <div className="workspace-toolbar-summary">
               {isMailWorkspace ? <span className="workspace-chip">{copy.summaryUnread.replace("{count}", String(unreadCount))}</span> : null}
@@ -329,7 +395,7 @@ export function App() {
             </div>
           </section>
 
-          <div className={showMailPane || workspace.section !== "mail" ? "content-grid has-detail" : "content-grid"}>
+          <div className={`${showMailPane || workspace.section !== "mail" ? "content-grid has-detail" : "content-grid"}${mobileDetailOpen ? " is-mobile-detail-open" : ""}`}>
             {workspace.section !== "settings" ? (
               <MasterPane
                 copy={copy}
@@ -337,6 +403,10 @@ export function App() {
                 folder={workspace.folder}
                 contactBook={workspace.contactBook}
                 setContactBook={workspace.setContactBook}
+                contactBooks={workspace.contactBooks}
+                calendarCollectionId={workspace.calendarCollectionId}
+                setCalendarCollectionId={workspace.setCalendarCollectionId}
+                calendarCollections={workspace.calendarCollections}
                 mode={workspace.mode}
                 filteredMessages={workspace.filtered}
                 events={workspace.filteredEvents}
@@ -352,18 +422,19 @@ export function App() {
                 noteId={workspace.noteId}
                 journalEntryId={workspace.journalEntryId}
                 reminderId={workspace.reminderId}
-                onSelectMessage={workspace.setMessageId}
-                onSelectEvent={workspace.setEventId}
-                onSelectContact={workspace.setContactId}
-                onSelectTask={workspace.setTaskId}
-                onSelectNote={workspace.setNoteId}
-                onSelectJournalEntry={workspace.setJournalEntryId}
-                onSelectReminder={workspace.setReminderId}
+                onSelectMessage={(id) => { workspace.setMessageId(id); setMobileDetailOpen(true); }}
+                onSelectEvent={(id) => { workspace.setEventId(id); setMobileDetailOpen(true); }}
+                onSelectContact={(id) => { workspace.setContactId(id); setMobileDetailOpen(true); }}
+                onSelectTask={(id) => { workspace.setTaskId(id); setMobileDetailOpen(true); }}
+                onSelectNote={(id) => { workspace.setNoteId(id); setMobileDetailOpen(true); }}
+                onSelectJournalEntry={(id) => { workspace.setJournalEntryId(id); setMobileDetailOpen(true); }}
+                onSelectReminder={(id) => { workspace.setReminderId(id); setMobileDetailOpen(true); }}
               />
             ) : null}
 
             {showMailPane ? (
               <section className="detail-pane">
+                <Button className="mobile-detail-back" variant="ghost" size="sm" type="button" onClick={() => setMobileDetailOpen(false)}>{copy.navigation.backToList}</Button>
                 <MailDetail
                   copy={copy}
                   current={workspace.current}
@@ -383,12 +454,16 @@ export function App() {
                   onSaveDraft={() => void workspace.saveMessage(true)}
                   onSend={() => void workspace.saveMessage(false)}
                   onDeleteDraft={() => void workspace.deleteDraft()}
+                  draftMessageId={workspace.draftMessageId}
+                  onUploadAttachment={workspace.uploadDraftAttachment}
+                  onOpenAttachment={workspace.openAttachment}
                 />
               </section>
             ) : null}
 
             {workspace.section === "calendar" ? (
             <section className="detail-pane">
+              <Button className="mobile-detail-back" variant="ghost" size="sm" type="button" onClick={() => setMobileDetailOpen(false)}>{copy.navigation.backToList}</Button>
               <EventEditor
                 copy={copy}
                 currentEvent={workspace.currentEvent}
@@ -404,6 +479,7 @@ export function App() {
 
             {workspace.section === "contacts" ? (
             <section className="detail-pane">
+              <Button className="mobile-detail-back" variant="ghost" size="sm" type="button" onClick={() => setMobileDetailOpen(false)}>{copy.navigation.backToList}</Button>
               <ContactEditor
                 copy={copy}
                 currentContact={workspace.currentContact}
@@ -446,6 +522,7 @@ export function App() {
 
             {["tasks", "notes", "journal", "reminders"].includes(workspace.section) ? (
             <section className="detail-pane">
+              <Button className="mobile-detail-back" variant="ghost" size="sm" type="button" onClick={() => setMobileDetailOpen(false)}>{copy.navigation.backToList}</Button>
               <CanonicalItemEditor
                 copy={copy}
                 section={workspace.section}

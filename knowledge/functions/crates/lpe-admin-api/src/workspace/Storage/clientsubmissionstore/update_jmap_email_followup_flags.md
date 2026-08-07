@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_jmap_email_followup_flags
-resource: crates/lpe-admin-api/src/workspace.rs#L158-L166
+resource: crates/lpe-admin-api/src/workspace.rs#L163-L171
 visibility: private
 generated:
   by: okf-rs/0.3.0

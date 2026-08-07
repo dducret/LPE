@@ -3,6 +3,7 @@ mod account_oidc;
 mod admin_auth;
 mod app;
 mod bootstrap;
+mod client_attachments;
 mod client_auth;
 mod client_config;
 mod console;

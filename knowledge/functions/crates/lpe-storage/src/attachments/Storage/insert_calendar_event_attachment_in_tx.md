@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: insert_calendar_event_attachment_in_tx
-resource: crates/lpe-storage/src/attachments.rs#L50-L108
+resource: crates/lpe-storage/src/attachments.rs#L77-L135
 generated:
   by: okf-rs/0.3.0
 relationships:

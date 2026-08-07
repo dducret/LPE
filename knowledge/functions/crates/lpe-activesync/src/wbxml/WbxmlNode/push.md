@@ -1271,6 +1271,7 @@ relationships:
   - functions/crates/lpe-storage/src/storage_visibility/Storage/fetch_storage_cleanup
   - functions/crates/lpe-storage/src/storage_visibility/Storage/pool_health_summaries
   - functions/crates/lpe-storage/src/storage_visibility/cleanup_blocker_labels
+  - functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx
   - functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_sender_identities
   - functions/crates/lpe-storage/src/submission/types/canonical_submission_phases
   - functions/crates/lpe-storage/src/submission/types/push_recipients
@@ -2560,6 +2561,7 @@ relationships:
 - [fetch_storage_cleanup](../../../../../../functions/crates/lpe-storage/src/storage_visibility/Storage/fetch_storage_cleanup.md)
 - [pool_health_summaries](../../../../../../functions/crates/lpe-storage/src/storage_visibility/Storage/pool_health_summaries.md)
 - [cleanup_blocker_labels](../../../../../../functions/crates/lpe-storage/src/storage_visibility/cleanup_blocker_labels.md)
+- [fetch_draft_attachment_inputs_in_tx](../../../../../../functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx.md)
 - [fetch_sender_identities](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_sender_identities.md)
 - [canonical_submission_phases](../../../../../../functions/crates/lpe-storage/src/submission/types/canonical_submission_phases.md)
 - [push_recipients](../../../../../../functions/crates/lpe-storage/src/submission/types/push_recipients.md)

@@ -1,7 +1,7 @@
 ---
 type: TypeScript Module
 title: MasterPane
-resource: web/client/src/components/MasterPane.tsx#L1-L116
+resource: web/client/src/components/MasterPane.tsx#L1-L138
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -9,6 +9,7 @@ relationships:
   - external/react
   - external/i18n
   - external/client-types
+  - external/ui-src-components-primitives
   member_of:
   - packages/web/client
 ---
@@ -16,12 +17,15 @@ relationships:
 # Contains
 
 - [MasterPane](../../../../../functions/web/client/src/components/MasterPane/MasterPane.md)
+- [taskStatusLabel](../../../../../functions/web/client/src/components/MasterPane/taskStatusLabel.md)
+- [enumLabel](../../../../../functions/web/client/src/components/MasterPane/enumLabel.md)
 
 # Imports
 
 - `react`
 - `../i18n`
 - `../client-types`
+- `../../../ui/src/components/primitives`
 
 # Member of
 

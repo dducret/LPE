@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: list_client_notes_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1159-L1168
+resource: crates/lpe-admin-api/src/workspace.rs#L1178-L1187
 visibility: private
 generated:
   by: okf-rs/0.3.0

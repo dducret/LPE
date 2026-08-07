@@ -48,7 +48,7 @@ export const blankNote = (note?: NoteItem): NoteDraft => ({
 export const blankJournalEntry = (entry?: JournalEntryItem): JournalEntryDraft => ({
   subject: entry?.subject ?? "",
   bodyText: entry?.bodyText ?? "",
-  entryType: entry?.entryType ?? "Phone call",
+  entryType: entry?.entryType ?? "phone-call",
   messageClass: entry?.messageClass ?? "IPM.Activity",
   startsAt: entry?.startsAt ?? null,
   endsAt: entry?.endsAt ?? null,

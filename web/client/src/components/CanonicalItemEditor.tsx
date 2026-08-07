@@ -33,7 +33,7 @@ export function CanonicalItemEditor(props: {
         <Header title={props.currentTask ? props.copy.objectEditor.tasks.edit : props.copy.objectEditor.tasks.create} onNew={props.onNewTask} newLabel={props.copy.objectEditor.tasks.new} />
         <label className="field"><span>{props.copy.objectFields.taskList}</span><Select value={props.taskForm.taskListId ?? ""} onChange={(event) => props.setTaskForm((current) => ({ ...current, taskListId: event.target.value || null }))}>{props.taskLists.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</Select></label>
         <label className="field"><span>{props.copy.objectFields.title}</span><Input value={props.taskForm.title} onChange={(event) => props.setTaskForm((current) => ({ ...current, title: event.target.value }))} /></label>
-        <label className="field"><span>{props.copy.objectFields.status}</span><Select value={props.taskForm.status} onChange={(event) => props.setTaskForm((current) => ({ ...current, status: event.target.value }))}><option value="needs-action">needs-action</option><option value="in-process">in-process</option><option value="completed">completed</option><option value="cancelled">cancelled</option></Select></label>
+        <label className="field"><span>{props.copy.objectFields.status}</span><Select value={props.taskForm.status} onChange={(event) => props.setTaskForm((current) => ({ ...current, status: event.target.value }))}><option value="needs-action">{props.copy.taskStatuses.needsAction}</option><option value="in-process">{props.copy.taskStatuses.inProcess}</option><option value="completed">{props.copy.taskStatuses.completed}</option><option value="cancelled">{props.copy.taskStatuses.cancelled}</option></Select></label>
         <label className="field"><span>{props.copy.objectFields.dueAt}</span><Input type="datetime-local" value={toLocalInput(props.taskForm.dueAt)} onChange={(event) => props.setTaskForm((current) => ({ ...current, dueAt: fromLocalInput(event.target.value) }))} /></label>
         <label className="field"><span>{props.copy.objectFields.body}</span><Textarea rows={8} value={props.taskForm.description} onChange={(event) => props.setTaskForm((current) => ({ ...current, description: event.target.value }))} /></label>
         <Actions saveLabel={props.copy.objectEditor.save} deleteLabel={props.copy.objectEditor.delete} onSave={props.onSaveTask} onDelete={props.currentTask ? props.onDeleteTask : undefined} />
@@ -45,7 +45,7 @@ export function CanonicalItemEditor(props: {
       <section className="editor-panel">
         <Header title={props.currentNote ? props.copy.objectEditor.notes.edit : props.copy.objectEditor.notes.create} onNew={props.onNewNote} newLabel={props.copy.objectEditor.notes.new} />
         <label className="field"><span>{props.copy.objectFields.title}</span><Input value={props.noteForm.title} onChange={(event) => props.setNoteForm((current) => ({ ...current, title: event.target.value }))} /></label>
-        <label className="field"><span>{props.copy.objectFields.color}</span><Select value={props.noteForm.color} onChange={(event) => props.setNoteForm((current) => ({ ...current, color: event.target.value }))}><option value="yellow">yellow</option><option value="blue">blue</option><option value="green">green</option><option value="pink">pink</option><option value="white">white</option></Select></label>
+        <label className="field"><span>{props.copy.objectFields.color}</span><Select value={props.noteForm.color} onChange={(event) => props.setNoteForm((current) => ({ ...current, color: event.target.value }))}><option value="yellow">{props.copy.noteColors.yellow}</option><option value="blue">{props.copy.noteColors.blue}</option><option value="green">{props.copy.noteColors.green}</option><option value="pink">{props.copy.noteColors.pink}</option><option value="white">{props.copy.noteColors.white}</option></Select></label>
         <label className="field"><span>{props.copy.objectFields.categories}</span><Input value={props.noteForm.categoriesJson} onChange={(event) => props.setNoteForm((current) => ({ ...current, categoriesJson: event.target.value }))} /></label>
         <label className="field"><span>{props.copy.objectFields.body}</span><Textarea rows={10} value={props.noteForm.bodyText} onChange={(event) => props.setNoteForm((current) => ({ ...current, bodyText: event.target.value }))} /></label>
         <Actions saveLabel={props.copy.objectEditor.save} deleteLabel={props.copy.objectEditor.delete} onSave={props.onSaveNote} onDelete={props.currentNote ? props.onDeleteNote : undefined} />
@@ -68,7 +68,7 @@ export function CanonicalItemEditor(props: {
   return (
     <section className="editor-panel">
       <div className="editor-header"><div><p className="pane-kicker">{props.copy.sections.reminders}</p><h3>{props.currentReminder?.title ?? props.copy.emptyObjects.reminders}</h3></div></div>
-      {props.currentReminder ? <div className="list"><div className="row"><strong>{props.copy.objectFields.type}</strong><span>{props.currentReminder.sourceType}</span></div><div className="row"><strong>{props.copy.objectFields.status}</strong><span>{props.currentReminder.status}</span></div><div className="row"><strong>{props.copy.objectFields.reminderAt}</strong><span>{props.currentReminder.reminderAt}</span></div><div className="row"><strong>{props.copy.objectFields.dueAt}</strong><span>{props.currentReminder.dueAt ?? props.copy.noDate}</span></div></div> : null}
+      {props.currentReminder ? <div className="list"><div className="row"><strong>{props.copy.objectFields.type}</strong><span>{enumLabel(props.currentReminder.sourceType, props.copy)}</span></div><div className="row"><strong>{props.copy.objectFields.status}</strong><span>{enumLabel(props.currentReminder.status, props.copy)}</span></div><div className="row"><strong>{props.copy.objectFields.reminderAt}</strong><span>{props.currentReminder.reminderAt}</span></div><div className="row"><strong>{props.copy.objectFields.dueAt}</strong><span>{props.currentReminder.dueAt ?? props.copy.noDate}</span></div></div> : null}
     </section>
   );
 }
@@ -79,6 +79,15 @@ function Header(props: { title: string; newLabel: string; onNew: () => void }) {
 
 function Actions(props: { saveLabel: string; deleteLabel: string; onSave: () => void; onDelete?: () => void }) {
   return <div className="editor-actions"><Button variant="primary" type="button" onClick={props.onSave}>{props.saveLabel}</Button>{props.onDelete ? <Button variant="ghost" type="button" onClick={props.onDelete}>{props.deleteLabel}</Button> : null}</div>;
+}
+
+function enumLabel(value: string, copy: ClientCopy) {
+  if (value === "active") return copy.enumValues.active;
+  if (value === "dismissed") return copy.enumValues.dismissed;
+  if (value === "mail") return copy.enumValues.mail;
+  if (value === "task") return copy.enumValues.task;
+  if (value === "calendar") return copy.enumValues.calendar;
+  return value;
 }
 
 function toLocalInput(value: string | null) {

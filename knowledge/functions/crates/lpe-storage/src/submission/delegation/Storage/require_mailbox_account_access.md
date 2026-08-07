@@ -6,6 +6,8 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
+  - functions/crates/lpe-admin-api/src/workspace/client_workspace
+  - functions/crates/lpe-admin-api/src/workspace/delete_draft_message
   - functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_sender_identities
 ---
 
@@ -15,4 +17,6 @@ relationships:
 
 # Called by
 
+- [client_workspace](../../../../../../../functions/crates/lpe-admin-api/src/workspace/client_workspace.md)
+- [delete_draft_message](../../../../../../../functions/crates/lpe-admin-api/src/workspace/delete_draft_message.md)
 - [fetch_sender_identities](../../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_sender_identities.md)

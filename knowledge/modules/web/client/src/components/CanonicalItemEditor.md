@@ -1,7 +1,7 @@
 ---
 type: TypeScript Module
 title: CanonicalItemEditor
-resource: web/client/src/components/CanonicalItemEditor.tsx#L1-L90
+resource: web/client/src/components/CanonicalItemEditor.tsx#L1-L99
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -19,6 +19,7 @@ relationships:
 - [CanonicalItemEditor](../../../../../functions/web/client/src/components/CanonicalItemEditor/CanonicalItemEditor.md)
 - [Header](../../../../../functions/web/client/src/components/CanonicalItemEditor/Header.md)
 - [Actions](../../../../../functions/web/client/src/components/CanonicalItemEditor/Actions.md)
+- [enumLabel](../../../../../functions/web/client/src/components/CanonicalItemEditor/enumLabel.md)
 - [toLocalInput](../../../../../functions/web/client/src/components/CanonicalItemEditor/toLocalInput.md)
 - [fromLocalInput](../../../../../functions/web/client/src/components/CanonicalItemEditor/fromLocalInput.md)
 

@@ -1,6 +1,6 @@
 import React from "react";
 import type { ClientCopy } from "../i18n";
-import type { MailboxAccountAccess, Message, MessageDraft, Mode } from "../client-types";
+import type { Attachment, MailboxAccountAccess, Message, MessageDraft, Mode } from "../client-types";
 import { Badge, Button, Input, Select, Textarea } from "../../../ui/src/components/primitives";
 
 export function MailDetail(props: {
@@ -22,7 +22,30 @@ export function MailDetail(props: {
   onSaveDraft: () => void;
   onSend: () => void;
   onDeleteDraft: () => void;
+  draftMessageId: string | null;
+  onUploadAttachment: (file: File) => Promise<void>;
+  onOpenAttachment: (message: Message, attachment: Attachment) => Promise<void>;
 }) {
+  const attachmentInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [attachmentBusy, setAttachmentBusy] = React.useState(false);
+  const attachmentTag = (tag: string) => tag === "Draft"
+    ? props.copy.tags.draft
+    : tag === "Outgoing"
+      ? props.copy.tags.outgoing
+      : tag;
+
+  async function uploadAttachment(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setAttachmentBusy(true);
+    try {
+      await props.onUploadAttachment(file);
+    } finally {
+      setAttachmentBusy(false);
+    }
+  }
+
   if (props.mode !== "closed") {
     const selectedMailbox =
       props.composerMailboxes.find((entry) => entry.accountId === props.draft.mailboxAccountId)
@@ -40,7 +63,7 @@ export function MailDetail(props: {
       <section className="editor-shell">
         <div className="editor-shell-header">
           <div>
-            <p className="detail-label">Compose drawer</p>
+            <p className="detail-label">{props.copy.drawerTitle}</p>
             <h3>{props.copy.editorTitles[props.mode]}</h3>
           </div>
           <Button variant="ghost" type="button" onClick={props.onCancel}>{props.copy.editorActions.cancel}</Button>
@@ -88,7 +111,7 @@ export function MailDetail(props: {
             <Input value={props.draft.cc} onChange={(event) => props.setDraft((value) => ({ ...value, cc: event.target.value }))} />
           </label>
           <label className="field field-wide">
-            <span>Bcc</span>
+            <span>{props.copy.fields.bcc}</span>
             <Input value={props.draft.bcc} onChange={(event) => props.setDraft((value) => ({ ...value, bcc: event.target.value }))} />
           </label>
           <label className="field field-wide">
@@ -102,6 +125,8 @@ export function MailDetail(props: {
         </div>
 
         <div className="editor-shell-actions">
+          <input ref={attachmentInputRef} className="visually-hidden" type="file" onChange={(event) => void uploadAttachment(event)} />
+          <Button variant="ghost" type="button" disabled={attachmentBusy} onClick={() => attachmentInputRef.current?.click()}>{props.copy.attachmentActions.add}</Button>
           {props.mode === "draft" ? <Button variant="danger" type="button" onClick={props.onDeleteDraft}>{props.copy.editorActions.deleteDraft}</Button> : null}
           {props.notice ? <p className="editor-feedback" role="status">{props.notice}</p> : null}
           <Button variant="ghost" type="button" disabled={props.messageBusy} onClick={props.onSaveDraft}>{props.copy.editorActions.saveDraft}</Button>
@@ -115,8 +140,8 @@ export function MailDetail(props: {
     return (
       <section className="reading-empty-state">
         <p className="detail-label">{props.copy.readingPane}</p>
-        <h3>Select a message</h3>
-        <p>The detailed reading pane stays hidden until a message is selected from the list.</p>
+        <h3>{props.copy.readerEmptyTitle}</h3>
+        <p>{props.copy.readerEmptyHelp}</p>
       </section>
     );
   }
@@ -152,11 +177,11 @@ export function MailDetail(props: {
       </div>
 
       <div className="sender-card"><div className="sender-avatar">{current.from.slice(0, 2).toUpperCase()}</div><div><strong>{current.from}</strong><p>{current.fromAddress}</p><span>{props.copy.fields.to}: {current.to}</span></div><span>{current.receivedAt}</span></div>
-      <div className="tag-row">{current.tags.map((tag) => <Badge variant="info" key={tag}>{tag}</Badge>)}</div>
+      <div className="tag-row">{current.tags.map((tag) => <Badge variant="info" key={tag}>{attachmentTag(tag)}</Badge>)}</div>
       <article className="message-body">
         {current.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
       </article>
-      <section className="attachment-panel"><div className="pane-header compact"><div><p className="pane-kicker">{props.copy.attachmentsTitle}</p><h4>{props.copy.attachmentsSubtitle}</h4></div></div><div className="attachment-list">{current.attachments.length > 0 ? current.attachments.map((item) => <article className="attachment-card" key={item.id}><Badge className="attachment-kind" variant="info">{item.kind}</Badge><div><strong>{item.name}</strong><p>{item.size}</p></div></article>) : <div className="empty-state compact">{props.copy.noAttachments}</div>}</div></section>
+      <section className="attachment-panel"><div className="pane-header compact"><div><p className="pane-kicker">{props.copy.attachmentsTitle}</p><h4>{props.copy.attachmentsSubtitle}</h4></div></div><div className="attachment-list">{current.attachments.length > 0 ? current.attachments.map((item) => <article className="attachment-card" key={item.id}><Badge className="attachment-kind" variant="info">{item.kind}</Badge><div><strong>{item.name}</strong><p>{item.size}</p></div><Button variant="ghost" size="sm" type="button" onClick={() => void props.onOpenAttachment(current, item)}>{props.copy.attachmentActions.download}</Button></article>) : <div className="empty-state compact">{props.copy.noAttachments}</div>}</div></section>
     </article>
   );
 }

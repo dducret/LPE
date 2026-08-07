@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: cancel_queued_submission
-resource: crates/lpe-storage/src/submission.rs#L1043-L1150
+resource: crates/lpe-storage/src/submission.rs#L1119-L1226
 generated:
   by: okf-rs/0.3.0
 relationships:

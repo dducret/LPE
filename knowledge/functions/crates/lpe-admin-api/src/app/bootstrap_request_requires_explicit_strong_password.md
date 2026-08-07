@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bootstrap_request_requires_explicit_strong_password
-resource: crates/lpe-admin-api/src/app.rs#L692-L712
+resource: crates/lpe-admin-api/src/app.rs#L701-L721
 visibility: private
 generated:
   by: okf-rs/0.3.0

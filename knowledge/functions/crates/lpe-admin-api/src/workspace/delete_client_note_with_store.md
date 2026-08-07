@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_client_note_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1204-L1214
+resource: crates/lpe-admin-api/src/workspace.rs#L1223-L1233
 visibility: private
 generated:
   by: okf-rs/0.3.0

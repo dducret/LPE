@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: recoverable_items_api_helpers_use_canonical_store_path
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L1069-L1117
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L1120-L1168
 visibility: private
 generated:
   by: okf-rs/0.3.0

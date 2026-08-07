@@ -1,18 +1,19 @@
 ---
 type: Rust Module
 title: workspace
-resource: crates/lpe-storage/src/workspace.rs#L1-L1590
+resource: crates/lpe-storage/src/workspace.rs#L1-L1392
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
-  - external/anyhow-bail-result
+  - external/anyhow-result-bail
   - external/serde-deserialize-serialize
   - external/serde-json-value
   - external/sqlx-row
+  - external/std-collections-btreemap
   - external/uuid-uuid
-  - external/crate-attachments-normalize-email-canonicalchangecategory-clientattachment-clientattachmentrow-clientcontactrow-clienteventrow-clientmessagerow-clienttask-contactnamefields-contactsourcefields-storage
-  - external/super-client-folder-json-text-matches-merge-contact-update-input-clientcontact-clientevent-contactsourcefields-upsertclientcontactinput-value
+  - external/crate-canonicalchangecategory-clientattachment-clientcontactrow-clienteventrow-clienttask-collaborationcollection-contactnamefields-contactsourcefields-storage-normalize-email
+  - external/super-clientcontact-clientevent-contactsourcefields-upsertclientcontactinput-value-client-folder-json-text-matches-merge-contact-update-input
   - external/serde-json-json
   member_of:
   - packages/crates/lpe-storage
@@ -31,7 +32,6 @@ relationships:
 - [UpsertClientContactInput](../../../../classes/crates/lpe-storage/src/workspace/UpsertClientContactInput.md)
 - [RecipientSuggestion](../../../../classes/crates/lpe-storage/src/workspace/RecipientSuggestion.md)
 - [UpsertClientEventInput](../../../../classes/crates/lpe-storage/src/workspace/UpsertClientEventInput.md)
-- [fetch_client_workspace](../../../../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_workspace.md)
 - [upsert_client_contact](../../../../functions/crates/lpe-storage/src/workspace/Storage/upsert_client_contact.md)
 - [upsert_client_contact_in_book_role](../../../../functions/crates/lpe-storage/src/workspace/Storage/upsert_client_contact_in_book_role.md)
 - [upsert_client_event](../../../../functions/crates/lpe-storage/src/workspace/Storage/upsert_client_event.md)
@@ -52,10 +52,7 @@ relationships:
 - [json_text_matches](../../../../functions/crates/lpe-storage/src/workspace/json_text_matches.md)
 - [merge_contact_update_input](../../../../functions/crates/lpe-storage/src/workspace/merge_contact_update_input.md)
 - [contact_json_with_primary_value](../../../../functions/crates/lpe-storage/src/workspace/contact_json_with_primary_value.md)
-- [body_paragraphs](../../../../functions/crates/lpe-storage/src/workspace/body_paragraphs.md)
 - [client_folder](../../../../functions/crates/lpe-storage/src/workspace/client_folder.md)
-- [client_message_tags](../../../../functions/crates/lpe-storage/src/workspace/client_message_tags.md)
-- [format_size](../../../../functions/crates/lpe-storage/src/workspace/format_size.md)
 - [map_event](../../../../functions/crates/lpe-storage/src/workspace/map_event.md)
 - [map_contact](../../../../functions/crates/lpe-storage/src/workspace/map_contact.md)
 - [client_address_book_id_for_role](../../../../functions/crates/lpe-storage/src/workspace/client_address_book_id_for_role.md)
@@ -67,19 +64,19 @@ relationships:
 
 # Imports
 
-- `anyhow::{bail, Result}`
+- `anyhow::{Result, bail}`
 - `serde::{Deserialize, Serialize}`
 - `serde_json::Value`
 - `sqlx::Row`
+- `std::collections::BTreeMap`
 - `uuid::Uuid`
 - `crate::{
-    attachments, normalize_email, CanonicalChangeCategory, ClientAttachment, ClientAttachmentRow,
-    ClientContactRow, ClientEventRow, ClientMessageRow, ClientTask, ContactNameFields,
-    ContactSourceFields, Storage,
+    CanonicalChangeCategory, ClientAttachment, ClientContactRow, ClientEventRow, ClientTask,
+    CollaborationCollection, ContactNameFields, ContactSourceFields, Storage, normalize_email,
 }`
 - `super::{
-        client_folder, json_text_matches, merge_contact_update_input, ClientContact, ClientEvent,
-        ContactSourceFields, UpsertClientContactInput, Value,
+        ClientContact, ClientEvent, ContactSourceFields, UpsertClientContactInput, Value,
+        client_folder, json_text_matches, merge_contact_update_input,
     }`
 - `serde_json::json`
 

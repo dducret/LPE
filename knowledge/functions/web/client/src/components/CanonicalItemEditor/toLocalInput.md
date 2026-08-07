@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: toLocalInput
-resource: web/client/src/components/CanonicalItemEditor.tsx#L84-L86
+resource: web/client/src/components/CanonicalItemEditor.tsx#L93-L95
 generated:
   by: okf-rs/0.3.0
 relationships:

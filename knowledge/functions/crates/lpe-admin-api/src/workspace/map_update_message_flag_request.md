@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: map_update_message_flag_request
-resource: crates/lpe-admin-api/src/workspace.rs#L425-L489
+resource: crates/lpe-admin-api/src/workspace.rs#L437-L501
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: ClientMessage
-resource: crates/lpe-storage/src/workspace.rs#L24-L47
+resource: crates/lpe-storage/src/workspace.rs#L29-L52
 generated:
   by: okf-rs/0.3.0
 ---

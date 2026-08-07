@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: list_recoverable_items
-resource: crates/lpe-admin-api/src/workspace.rs#L516-L522
+resource: crates/lpe-admin-api/src/workspace.rs#L535-L541
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: restore_recoverable_item_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L547-L569
+resource: crates/lpe-admin-api/src/workspace.rs#L566-L588
 visibility: private
 generated:
   by: okf-rs/0.3.0

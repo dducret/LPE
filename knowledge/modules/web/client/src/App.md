@@ -1,7 +1,7 @@
 ---
 type: TypeScript Module
 title: App
-resource: web/client/src/App.tsx#L1-L480
+resource: web/client/src/App.tsx#L1-L557
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -28,6 +28,7 @@ relationships:
 - [apiJson](../../../../functions/web/client/src/App/apiJson.md)
 - [App](../../../../functions/web/client/src/App/App.md)
 - [handlePointerDown](../../../../functions/web/client/src/App/handlePointerDown.md)
+- [handleEscape](../../../../functions/web/client/src/App/handleEscape.md)
 - [loginClient](../../../../functions/web/client/src/App/loginClient.md)
 - [loginWithOidc](../../../../functions/web/client/src/App/loginWithOidc.md)
 - [logoutClient](../../../../functions/web/client/src/App/logoutClient.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: require_account_from_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1366-L1380
+resource: crates/lpe-admin-api/src/workspace.rs#L1385-L1399
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normalize_attachment_content_id
-resource: crates/lpe-storage/src/attachments.rs#L1161-L1167
+resource: crates/lpe-storage/src/attachments.rs#L1188-L1194
 visibility: private
 generated:
   by: okf-rs/0.3.0

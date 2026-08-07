@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_client_contact
-resource: crates/lpe-admin-api/src/workspace.rs#L720-L735
+resource: crates/lpe-admin-api/src/workspace.rs#L739-L754
 generated:
   by: okf-rs/0.3.0
 relationships:

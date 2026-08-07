@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exercise_mapi_delete_cross_protocol_path
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L5328-L5571
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L5349-L5592
 visibility: private
 generated:
   by: okf-rs/0.3.0

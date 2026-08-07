@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: supports_attachment_text_extraction
-resource: crates/lpe-storage/src/attachments.rs#L1141-L1152
+resource: crates/lpe-storage/src/attachments.rs#L1168-L1179
 generated:
   by: okf-rs/0.3.0
 relationships:

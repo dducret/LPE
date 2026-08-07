@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: account_identity_for_id
-resource: crates/lpe-storage/src/submission.rs#L1168-L1190
+resource: crates/lpe-storage/src/submission.rs#L1244-L1266
 generated:
   by: okf-rs/0.3.0
 relationships:

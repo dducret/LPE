@@ -3,9 +3,10 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::{
-    mapi_message_identity::rotate_active_mapi_message_identity_in_tx, normalize_email,
-    normalize_subject, sha256_hex, trim_optional_text, AuditEntryInput, JmapEmailRecipientRow,
-    Storage,
+    blob_store::{DurableBlobKind, PostgresBlobStore},
+    mapi_message_identity::rotate_active_mapi_message_identity_in_tx,
+    normalize_email, normalize_subject, sha256_hex, trim_optional_text, AuditEntryInput,
+    JmapEmailRecipientRow, Storage,
 };
 
 mod delegation;
@@ -56,6 +57,62 @@ async fn insert_visible_recipient(
 }
 
 impl Storage {
+    async fn fetch_draft_attachment_inputs_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        account_id: Uuid,
+        draft_message_id: Uuid,
+    ) -> Result<Vec<AttachmentUploadInput>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT a.file_name, a.disposition, a.content_id, a.domain_id, a.blob_id
+            FROM attachments a
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = a.tenant_id
+             AND mm.account_id = a.account_id
+             AND mm.message_id = a.message_id
+             AND mm.visibility = 'visible'
+             AND mm.is_draft = TRUE
+            WHERE a.tenant_id = $1
+              AND a.account_id = $2
+              AND a.message_id = $3
+            ORDER BY a.ordinal ASC, a.id ASC
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(draft_message_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        let blob_store = PostgresBlobStore;
+        let mut attachments = Vec::with_capacity(rows.len());
+        for row in rows {
+            let file_name: String = row.try_get("file_name")?;
+            let domain_id: Uuid = row.try_get("domain_id")?;
+            let blob_id: Uuid = row.try_get("blob_id")?;
+            let blob = blob_store
+                .read_durable_blob(
+                    &self.pool,
+                    tenant_id,
+                    domain_id,
+                    DurableBlobKind::Attachment,
+                    blob_id,
+                )
+                .await?
+                .ok_or_else(|| anyhow!("draft attachment blob is unavailable"))?;
+            attachments.push(AttachmentUploadInput {
+                file_name,
+                media_type: blob.media_type,
+                disposition: row.try_get("disposition")?,
+                content_id: row.try_get("content_id")?,
+                blob_bytes: blob.bytes,
+            });
+        }
+        Ok(attachments)
+    }
+
     pub async fn replace_message_recipients(
         &self,
         account_id: Uuid,
@@ -258,7 +315,7 @@ impl Storage {
                     received_at = NOW(),
                     sent_at = NULL,
                     size_octets = $9,
-                    has_attachments = FALSE
+                    has_attachments = CASE WHEN $10 THEN has_attachments ELSE FALSE END
                 WHERE tenant_id = $1
                   AND id = $3
                   AND EXISTS (
@@ -286,6 +343,7 @@ impl Storage {
             .bind(sha256_hex(raw_message.as_bytes()))
             .bind(&subject)
             .bind(input.size_octets.max(0))
+            .bind(input.attachments.is_empty())
             .execute(&mut *tx)
             .await?;
 
@@ -312,11 +370,13 @@ impl Storage {
             .bind(message_id)
             .execute(&mut *tx)
             .await?;
-            sqlx::query("DELETE FROM attachments WHERE tenant_id = $1 AND message_id = $2")
-                .bind(&tenant_id)
-                .bind(message_id)
-                .execute(&mut *tx)
-                .await?;
+            if !input.attachments.is_empty() {
+                sqlx::query("DELETE FROM attachments WHERE tenant_id = $1 AND message_id = $2")
+                    .bind(&tenant_id)
+                    .bind(message_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
             sqlx::query(
                 r#"
                 UPDATE mailbox_messages
@@ -620,6 +680,22 @@ impl Storage {
         let authorization = self
             .resolve_submission_authorization_in_tx(&mut tx, &tenant_id, &input)
             .await?;
+        let submission_attachments = if input.attachments.is_empty() {
+            match input.draft_message_id {
+                Some(draft_message_id) => {
+                    self.fetch_draft_attachment_inputs_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        input.account_id,
+                        draft_message_id,
+                    )
+                    .await?
+                }
+                None => Vec::new(),
+            }
+        } else {
+            input.attachments.clone()
+        };
 
         let message_id = Uuid::new_v4();
         let thread_id = Uuid::new_v4();
@@ -783,7 +859,7 @@ impl Storage {
                         &tenant_id,
                         input.account_id,
                         message_id,
-                        &input.attachments,
+                        &submission_attachments,
                     )
                     .await?;
                     let mailbox_message_id = self

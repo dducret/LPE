@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_search_folder_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1343-L1353
+resource: crates/lpe-admin-api/src/workspace.rs#L1362-L1372
 visibility: private
 generated:
   by: okf-rs/0.3.0

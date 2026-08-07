@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_calendar_event_attachment_in_tx
-resource: crates/lpe-storage/src/attachments.rs#L110-L137
+resource: crates/lpe-storage/src/attachments.rs#L137-L164
 generated:
   by: okf-rs/0.3.0
 relationships:

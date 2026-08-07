@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: observe_outbound_worker_poll
-resource: crates/lpe-admin-api/src/app.rs#L398-L400
+resource: crates/lpe-admin-api/src/app.rs#L407-L409
 generated:
   by: okf-rs/0.3.0
 relationships:

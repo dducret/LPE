@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-core/src/sieve/Parser/consume
   called_by:
   - functions/LPE-CT/src/smtp/tests/smtp_starttls_upgrades_to_tls_after_ready_reply
+  - functions/crates/lpe-admin-api/src/client_attachments/attachment_content_response
   - functions/crates/lpe-admin-api/src/client_auth/mail_session_headers
   - functions/crates/lpe-admin-api/src/client_auth/cleared_mail_session_headers
   - functions/crates/lpe-admin-api/src/client_config/tests/parse_xml
@@ -452,6 +453,7 @@ relationships:
 # Called by
 
 - [smtp_starttls_upgrades_to_tls_after_ready_reply](../../../../../../functions/LPE-CT/src/smtp/tests/smtp_starttls_upgrades_to_tls_after_ready_reply.md)
+- [attachment_content_response](../../../../../../functions/crates/lpe-admin-api/src/client_attachments/attachment_content_response.md)
 - [mail_session_headers](../../../../../../functions/crates/lpe-admin-api/src/client_auth/mail_session_headers.md)
 - [cleared_mail_session_headers](../../../../../../functions/crates/lpe-admin-api/src/client_auth/cleared_mail_session_headers.md)
 - [parse_xml](../../../../../../functions/crates/lpe-admin-api/src/client_config/tests/parse_xml.md)

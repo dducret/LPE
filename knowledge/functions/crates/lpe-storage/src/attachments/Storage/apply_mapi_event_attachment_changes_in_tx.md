@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: apply_mapi_event_attachment_changes_in_tx
-resource: crates/lpe-storage/src/attachments.rs#L175-L231
+resource: crates/lpe-storage/src/attachments.rs#L202-L258
 generated:
   by: okf-rs/0.3.0
 relationships:

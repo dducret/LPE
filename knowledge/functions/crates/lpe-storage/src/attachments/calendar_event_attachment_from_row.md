@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_attachment_from_row
-resource: crates/lpe-storage/src/attachments.rs#L1045-L1058
+resource: crates/lpe-storage/src/attachments.rs#L1072-L1085
 visibility: private
 generated:
   by: okf-rs/0.3.0

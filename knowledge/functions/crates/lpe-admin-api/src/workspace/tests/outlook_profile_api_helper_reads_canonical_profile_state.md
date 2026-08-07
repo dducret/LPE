@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_profile_api_helper_reads_canonical_profile_state
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L1120-L1135
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L1171-L1188
 visibility: private
 generated:
   by: okf-rs/0.3.0

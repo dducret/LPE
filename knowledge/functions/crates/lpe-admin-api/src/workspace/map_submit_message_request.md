@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: map_submit_message_request
-resource: crates/lpe-admin-api/src/workspace.rs#L1436-L1465
+resource: crates/lpe-admin-api/src/workspace.rs#L1424-L1453
 visibility: private
 generated:
   by: okf-rs/0.3.0

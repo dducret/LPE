@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_message_flag
-resource: crates/lpe-admin-api/src/workspace.rs#L389-L400
+resource: crates/lpe-admin-api/src/workspace.rs#L401-L412
 generated:
   by: okf-rs/0.3.0
 relationships:

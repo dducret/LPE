@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: runtime_schema_drift
-resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1-L6213
+resource: crates/lpe-storage/tests/runtime_schema_drift.rs#L1-L6234
 generated:
   by: okf-rs/0.3.0
 relationships:

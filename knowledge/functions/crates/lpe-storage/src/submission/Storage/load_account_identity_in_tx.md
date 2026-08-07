@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: load_account_identity_in_tx
-resource: crates/lpe-storage/src/submission.rs#L1192-L1217
+resource: crates/lpe-storage/src/submission.rs#L1268-L1293
 generated:
   by: okf-rs/0.3.0
 relationships:

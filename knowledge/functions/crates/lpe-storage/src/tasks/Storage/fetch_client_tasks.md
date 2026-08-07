@@ -11,7 +11,7 @@ relationships:
   called_by:
   - functions/crates/lpe-admin-api/src/workspace/list_client_tasks
   - functions/crates/lpe-jmap/src/store/Storage/jmapstore/fetch_jmap_tasks
-  - functions/crates/lpe-storage/src/workspace/Storage/fetch_client_workspace
+  - functions/crates/lpe-storage/src/workspace/client_workspace/Storage/fetch_client_workspace
 ---
 
 # Signature
@@ -27,4 +27,4 @@ relationships:
 
 - [list_client_tasks](../../../../../../functions/crates/lpe-admin-api/src/workspace/list_client_tasks.md)
 - [fetch_jmap_tasks](../../../../../../functions/crates/lpe-jmap/src/store/Storage/jmapstore/fetch_jmap_tasks.md)
-- [fetch_client_workspace](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_workspace.md)
+- [fetch_client_workspace](../../../../../../functions/crates/lpe-storage/src/workspace/client_workspace/Storage/fetch_client_workspace.md)

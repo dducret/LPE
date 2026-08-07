@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_message_attachment
-resource: crates/lpe-storage/src/attachments.rs#L885-L995
+resource: crates/lpe-storage/src/attachments.rs#L912-L1022
 generated:
   by: okf-rs/0.3.0
 relationships:

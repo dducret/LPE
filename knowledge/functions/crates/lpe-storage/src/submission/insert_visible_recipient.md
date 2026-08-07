@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: insert_visible_recipient
-resource: crates/lpe-storage/src/submission.rs#L30-L56
+resource: crates/lpe-storage/src/submission.rs#L31-L57
 visibility: private
 generated:
   by: okf-rs/0.3.0

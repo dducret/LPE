@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: init_observability
-resource: crates/lpe-admin-api/src/app.rs#L394-L396
+resource: crates/lpe-admin-api/src/app.rs#L403-L405
 generated:
   by: okf-rs/0.3.0
 relationships:

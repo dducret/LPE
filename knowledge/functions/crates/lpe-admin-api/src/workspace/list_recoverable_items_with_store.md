@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: list_recoverable_items_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L524-L536
+resource: crates/lpe-admin-api/src/workspace.rs#L543-L555
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: loginWithOidc
-resource: web/client/src/App.tsx#L123-L133
+resource: web/client/src/App.tsx#L172-L182
 generated:
   by: okf-rs/0.3.0
 ---

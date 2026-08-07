@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: logoutClient
-resource: web/client/src/App.tsx#L135-L140
+resource: web/client/src/App.tsx#L184-L189
 generated:
   by: okf-rs/0.3.0
 relationships:

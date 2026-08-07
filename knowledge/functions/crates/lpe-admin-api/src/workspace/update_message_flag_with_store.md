@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_message_flag_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L402-L423
+resource: crates/lpe-admin-api/src/workspace.rs#L414-L435
 visibility: private
 generated:
   by: okf-rs/0.3.0

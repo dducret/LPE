@@ -35,6 +35,7 @@ relationships:
   - functions/crates/lpe-storage/src/admin/Storage/fetch_active_sieve_script
   - functions/crates/lpe-storage/src/admin/provisioning/Storage/update_account
   - functions/crates/lpe-storage/src/admin/provisioning/Storage/create_mailbox
+  - functions/crates/lpe-storage/src/attachments/Storage/message_is_visible_draft
   - functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_event_attachments
   - functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_attachments_for_events
   - functions/crates/lpe-storage/src/attachments/Storage/add_calendar_event_attachment
@@ -173,7 +174,6 @@ relationships:
   - functions/crates/lpe-storage/src/tasks/Storage/fetch_dav_tasks_by_ids
   - functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks
   - functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks_by_ids
-  - functions/crates/lpe-storage/src/workspace/Storage/fetch_client_workspace
   - functions/crates/lpe-storage/src/workspace/Storage/upsert_client_contact_in_book_role
   - functions/crates/lpe-storage/src/workspace/Storage/upsert_client_event_in_calendar
   - functions/crates/lpe-storage/src/workspace/Storage/fetch_client_events
@@ -182,6 +182,7 @@ relationships:
   - functions/crates/lpe-storage/src/workspace/Storage/fetch_client_contacts_by_ids
   - functions/crates/lpe-storage/src/workspace/Storage/query_recipient_suggestions
   - functions/crates/lpe-storage/src/workspace/Storage/dismiss_recipient_suggestion
+  - functions/crates/lpe-storage/src/workspace/client_workspace/Storage/fetch_client_workspace
 ---
 
 # Signature
@@ -219,6 +220,7 @@ relationships:
 - [fetch_active_sieve_script](../../../../../../functions/crates/lpe-storage/src/admin/Storage/fetch_active_sieve_script.md)
 - [update_account](../../../../../../functions/crates/lpe-storage/src/admin/provisioning/Storage/update_account.md)
 - [create_mailbox](../../../../../../functions/crates/lpe-storage/src/admin/provisioning/Storage/create_mailbox.md)
+- [message_is_visible_draft](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/message_is_visible_draft.md)
 - [fetch_calendar_event_attachments](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_event_attachments.md)
 - [fetch_calendar_attachments_for_events](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/fetch_calendar_attachments_for_events.md)
 - [add_calendar_event_attachment](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/add_calendar_event_attachment.md)
@@ -357,7 +359,6 @@ relationships:
 - [fetch_dav_tasks_by_ids](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_dav_tasks_by_ids.md)
 - [fetch_client_tasks](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks.md)
 - [fetch_client_tasks_by_ids](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/fetch_client_tasks_by_ids.md)
-- [fetch_client_workspace](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_workspace.md)
 - [upsert_client_contact_in_book_role](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/upsert_client_contact_in_book_role.md)
 - [upsert_client_event_in_calendar](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/upsert_client_event_in_calendar.md)
 - [fetch_client_events](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_events.md)
@@ -366,3 +367,4 @@ relationships:
 - [fetch_client_contacts_by_ids](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_contacts_by_ids.md)
 - [query_recipient_suggestions](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/query_recipient_suggestions.md)
 - [dismiss_recipient_suggestion](../../../../../../functions/crates/lpe-storage/src/workspace/Storage/dismiss_recipient_suggestion.md)
+- [fetch_client_workspace](../../../../../../functions/crates/lpe-storage/src/workspace/client_workspace/Storage/fetch_client_workspace.md)

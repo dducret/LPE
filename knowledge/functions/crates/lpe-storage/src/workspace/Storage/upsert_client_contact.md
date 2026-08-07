@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_client_contact
-resource: crates/lpe-storage/src/workspace.rs#L373-L379
+resource: crates/lpe-storage/src/workspace.rs#L210-L216
 generated:
   by: okf-rs/0.3.0
 relationships:

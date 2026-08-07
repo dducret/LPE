@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upsert_journal_entry
-resource: crates/lpe-admin-api/src/workspace.rs#L1075-L1083
+resource: crates/lpe-admin-api/src/workspace.rs#L1094-L1102
 generated:
   by: okf-rs/0.3.0
 relationships:

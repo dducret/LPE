@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: fromLocalInput
-resource: web/client/src/components/CanonicalItemEditor.tsx#L88-L90
+resource: web/client/src/components/CanonicalItemEditor.tsx#L97-L99
 generated:
   by: okf-rs/0.3.0
 relationships:

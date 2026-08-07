@@ -17,6 +17,7 @@ use crate::{
         admin_auth_factors, enroll_totp, login, logout, me, oidc_callback, oidc_metadata,
         oidc_start, revoke_admin_factor, verify_totp_factor,
     },
+    client_attachments::{download_message_attachment, upload_draft_attachment},
     client_auth::{
         account_auth_factors, client_login, client_logout, client_me, client_oidc_callback,
         client_oidc_metadata, client_oidc_start, create_account_app_password,
@@ -183,6 +184,14 @@ pub fn router(storage: Storage) -> Router {
         )
         .route("/mail/messages/submit", post(submit_message))
         .route("/mail/messages/draft", post(save_draft_message))
+        .route(
+            "/mail/messages/{message_id}/attachments",
+            post(upload_draft_attachment),
+        )
+        .route(
+            "/mail/messages/{message_id}/attachments/{attachment_id}",
+            get(download_message_attachment),
+        )
         .route("/mail/messages/{message_id}/flag", put(update_message_flag))
         .route("/mail/recoverable-items", get(list_recoverable_items))
         .route(

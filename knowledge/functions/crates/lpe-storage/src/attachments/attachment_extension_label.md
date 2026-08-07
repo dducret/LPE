@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: attachment_extension_label
-resource: crates/lpe-storage/src/attachments.rs#L1188-L1202
+resource: crates/lpe-storage/src/attachments.rs#L1215-L1229
 visibility: private
 generated:
   by: okf-rs/0.3.0

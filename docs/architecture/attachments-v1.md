@@ -17,6 +17,14 @@ Attachments are validated before processing and indexed only for the documented 
 - Keep `Bcc` out of user search and AI-facing pipelines.
 - Use asynchronous extraction for attachment text.
 - Do not extend indexed file types without updating architecture documentation.
+- The authenticated web client uploads one attachment to an existing canonical draft through
+  `POST /api/mail/messages/{messageId}/attachments?accountId={mailboxAccountId}` as multipart
+  field `file`. The target mailbox must be owned by the principal or have canonical delegated
+  write access; the upload is validated with Magika before it is attached to the draft.
+- The authenticated web client retrieves message attachments through
+  `GET /api/mail/messages/{messageId}/attachments/{attachmentId}?accountId={mailboxAccountId}`.
+  The target mailbox must be owned by the principal or be canonically readable, and the response
+  is read from the existing durable attachment blob path.
 
 ## Reference Table/List
 

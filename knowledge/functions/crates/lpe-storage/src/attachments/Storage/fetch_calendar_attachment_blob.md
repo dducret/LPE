@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_calendar_attachment_blob
-resource: crates/lpe-storage/src/attachments.rs#L568-L623
+resource: crates/lpe-storage/src/attachments.rs#L595-L650
 generated:
   by: okf-rs/0.3.0
 relationships:
