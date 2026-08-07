@@ -4958,6 +4958,7 @@ async fn mapi_over_http_calendar_whole_start_end_update_canonical_event() {
         assert_eq!(stored[0].duration_minutes, 30);
     }
 
+    let metrics_before = crate::mapi::mapi_calendar_event_save_metrics();
     let save_response_rops =
         save_staged_calendar_event(&service, &mut execute_headers, &handle_slots).await;
     assert!(contains_bytes(
@@ -4968,6 +4969,10 @@ async fn mapi_over_http_calendar_whole_start_end_update_canonical_event() {
     assert_eq!(stored[0].date, "2026-06-01");
     assert_eq!(stored[0].time, "13:15");
     assert_eq!(stored[0].duration_minutes, 90);
+    let metrics_after = crate::mapi::mapi_calendar_event_save_metrics();
+    assert!(
+        metrics_after.direct_committed_total >= metrics_before.direct_committed_total + 1
+    );
 }
 
 #[tokio::test]

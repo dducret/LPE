@@ -13654,6 +13654,7 @@ async fn mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subje
     );
     let events = store.events.clone();
     let versions = store.mapi_event_identity_versions.clone();
+    let metrics_before = crate::mapi::mapi_calendar_event_save_metrics();
 
     let response = execute_existing_calendar_sync_import(
         store,
@@ -13673,6 +13674,8 @@ async fn mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subje
     let version = versions.lock().unwrap()[&event_id].clone();
     assert_eq!(version.change_key, client_change_key);
     assert_eq!(version.predecessor_change_list, client_pcl);
+    let metrics_after = crate::mapi::mapi_calendar_event_save_metrics();
+    assert!(metrics_after.ics_applied_total >= metrics_before.ics_applied_total + 1);
 }
 
 #[tokio::test]
@@ -13695,6 +13698,7 @@ async fn mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_
     );
     let events = store.events.clone();
     let versions = store.mapi_event_identity_versions.clone();
+    let metrics_before = crate::mapi::mapi_calendar_event_save_metrics();
 
     let response = execute_existing_calendar_sync_import(
         store,
@@ -13714,6 +13718,11 @@ async fn mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_
     let version = versions.lock().unwrap()[&event_id].clone();
     assert_eq!(version.change_key, server_change_key);
     assert_eq!(version.predecessor_change_list, server_pcl);
+    let metrics_after = crate::mapi::mapi_calendar_event_save_metrics();
+    assert!(
+        metrics_after.ics_ignored_older_or_same_total
+            >= metrics_before.ics_ignored_older_or_same_total + 1
+    );
 }
 
 #[tokio::test]
@@ -13824,6 +13833,7 @@ async fn mapi_over_http_calendar_sync_import_conflict_keeps_the_newer_server_con
     let events = store.events.clone();
     let versions = store.mapi_event_identity_versions.clone();
     let previous_change_number = versions.lock().unwrap()[&event_id].change_number;
+    let metrics_before = crate::mapi::mapi_calendar_event_save_metrics();
 
     let response = execute_existing_calendar_sync_import(
         store,
@@ -13844,6 +13854,11 @@ async fn mapi_over_http_calendar_sync_import_conflict_keeps_the_newer_server_con
     assert!(version.change_number > previous_change_number);
     assert_eq!(version.change_key, server_change_key);
     assert_eq!(version.predecessor_change_list, merged_pcl);
+    let metrics_after = crate::mapi::mapi_calendar_event_save_metrics();
+    assert!(
+        metrics_after.ics_kept_server_content_total
+            >= metrics_before.ics_kept_server_content_total + 1
+    );
 }
 
 #[tokio::test]
