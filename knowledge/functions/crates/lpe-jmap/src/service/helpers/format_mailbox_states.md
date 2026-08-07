@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_mailbox_states
-resource: crates/lpe-jmap/src/service/helpers.rs#L850-L862
+resource: crates/lpe-jmap/src/service/helpers.rs#L881-L893
 generated:
   by: okf-rs/0.3.0
 ---

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_startup_calendar_folder_chain_uses_advertised_default_calendar
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L9935-L10006
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L9964-L10035
 visibility: private
 generated:
   by: okf-rs/0.3.0

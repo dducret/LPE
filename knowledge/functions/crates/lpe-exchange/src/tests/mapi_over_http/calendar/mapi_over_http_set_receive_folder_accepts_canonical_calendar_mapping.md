@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_receive_folder_accepts_canonical_calendar_mapping
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10707-L10754
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10736-L10783
 visibility: private
 generated:
   by: okf-rs/0.3.0

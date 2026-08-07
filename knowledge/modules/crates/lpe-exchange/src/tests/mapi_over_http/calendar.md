@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: calendar
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1-L11089
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1-L11118
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_register_notification_from_empty_change_log_observes_later_new_mail_with_exchange_zero_message_flags
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3664-L3767
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3689-L3792
 visibility: private
 generated:
   by: okf-rs/0.3.0

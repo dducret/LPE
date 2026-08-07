@@ -648,6 +648,18 @@ pub(super) fn authorization_header(headers: &HeaderMap) -> Option<String> {
         .get("authorization")
         .and_then(|value| value.to_str().ok())
         .map(ToString::to_string)
+        .or_else(|| {
+            headers
+                .get("cookie")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| {
+                    value.split(';').find_map(|item| {
+                        let (name, token) = item.trim().split_once('=')?;
+                        (name == "lpe_mail_session" && !token.is_empty())
+                            .then(|| format!("Bearer {token}"))
+                    })
+                })
+        })
 }
 
 pub(super) fn bearer_token(authorization: Option<&str>) -> Option<&str> {
@@ -655,6 +667,25 @@ pub(super) fn bearer_token(authorization: Option<&str>) -> Option<&str> {
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod authorization_tests {
+    use super::authorization_header;
+    use axum::http::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn websocket_authentication_accepts_the_same_origin_mail_session_cookie() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "cookie",
+            HeaderValue::from_static("lpe_mail_session=session-token"),
+        );
+        assert_eq!(
+            authorization_header(&headers).as_deref(),
+            Some("Bearer session-token")
+        );
+    }
 }
 
 pub(crate) fn collection_state_fingerprint(collection: &CollaborationCollection) -> String {

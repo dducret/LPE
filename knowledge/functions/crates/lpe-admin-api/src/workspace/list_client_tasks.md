@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: list_client_tasks
-resource: crates/lpe-admin-api/src/workspace.rs#L911-L922
+resource: crates/lpe-admin-api/src/workspace.rs#L915-L926
 generated:
   by: okf-rs/0.3.0
 relationships:

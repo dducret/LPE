@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: list_account_app_passwords
-resource: crates/lpe-admin-api/src/client_auth.rs#L277-L287
+resource: crates/lpe-admin-api/src/client_auth.rs#L280-L290
 generated:
   by: okf-rs/0.3.0
 relationships:

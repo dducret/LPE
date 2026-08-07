@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: mapClientError
-resource: web/client/src/useClientWorkspace.ts#L47-L53
+resource: web/client/src/useClientWorkspace.ts#L46-L52
 generated:
   by: okf-rs/0.3.0
 relationships:

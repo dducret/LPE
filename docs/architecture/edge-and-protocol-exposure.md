@@ -52,6 +52,7 @@
   - `/internal/lpe-ct/submission-auth`
   - `/internal/lpe-ct/submissions`
 - Edge publication is separate from protocol implementation.
+- The web client uses an HttpOnly, `Secure`, `SameSite=Strict` same-origin mailbox-session cookie. The public WSS route must forward the browser upgrade and cookie; clients must not put bearer credentials in a native WebSocket header.
 - Autodiscovery must publish only implemented and exposed endpoints.
 - IMAP autodiscovery/autoconfiguration must publish the public `LPE-CT` IMAPS hostname only after the `LPE-CT` IMAPS proxy is configured and verified. It must not publish the private core `LPE` IMAP listener.
 - Autodiscovery/autoconfiguration must not publish client `SMTP` unless `LPE-CT` exposes real authenticated client submission; the internal `LPE -> LPE-CT` handoff is not client submission.

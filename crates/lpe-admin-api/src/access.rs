@@ -1,7 +1,7 @@
 use axum::http::{HeaderMap, StatusCode};
 use lpe_storage::{AuthenticatedAccount, AuthenticatedAdmin, Storage};
 
-use crate::http::{bearer_token, internal_error};
+use crate::http::{account_session_token, bearer_token, internal_error};
 
 pub(crate) async fn require_admin(
     storage: &Storage,
@@ -33,7 +33,7 @@ pub(crate) async fn require_account(
     storage: &Storage,
     headers: &HeaderMap,
 ) -> std::result::Result<AuthenticatedAccount, (StatusCode, String)> {
-    let token = bearer_token(headers)
+    let token = account_session_token(headers)
         .ok_or((StatusCode::UNAUTHORIZED, "missing bearer token".to_string()))?;
     storage
         .fetch_account_session(&token)

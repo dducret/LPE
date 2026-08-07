@@ -100,7 +100,7 @@ export function MasterPane(props: {
                 type="button"
                 onClick={() => props.setContactBook(item)}
               >
-                {props.copy.contactBooks[item]}
+                {props.copy.contactBooks[item as keyof typeof props.copy.contactBooks]}
               </button>
             ))}
           </div>

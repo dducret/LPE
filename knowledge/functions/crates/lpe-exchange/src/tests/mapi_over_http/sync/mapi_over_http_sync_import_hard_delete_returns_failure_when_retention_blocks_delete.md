@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_hard_delete_returns_failure_when_retention_blocks_delete
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15124-L15182
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15186-L15244
 visibility: private
 generated:
   by: okf-rs/0.3.0

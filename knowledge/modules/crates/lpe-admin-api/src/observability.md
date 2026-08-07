@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: observability
-resource: crates/lpe-admin-api/src/observability.rs#L1-L541
+resource: crates/lpe-admin-api/src/observability.rs#L1-L570
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -38,7 +38,7 @@ relationships:
 - [metrics_enabled](../../../../functions/crates/lpe-admin-api/src/observability/metrics_enabled.md)
 - [escape_label](../../../../functions/crates/lpe-admin-api/src/observability/escape_label.md)
 - [unix_timestamp_seconds](../../../../functions/crates/lpe-admin-api/src/observability/unix_timestamp_seconds.md)
-- [metrics_include_mapi_notification_delivery_counters](../../../../functions/crates/lpe-admin-api/src/observability/metrics_include_mapi_notification_delivery_counters.md)
+- [metrics_include_mapi_calendar_event_save_and_notification_counters](../../../../functions/crates/lpe-admin-api/src/observability/metrics_include_mapi_calendar_event_save_and_notification_counters.md)
 - [outlook_http_route_gap_logs_unmatched_exchange_paths](../../../../functions/crates/lpe-admin-api/src/observability/outlook_http_route_gap_logs_unmatched_exchange_paths.md)
 - [outlook_http_route_gap_does_not_duplicate_successful_protocol_routes](../../../../functions/crates/lpe-admin-api/src/observability/outlook_http_route_gap_does_not_duplicate_successful_protocol_routes.md)
 

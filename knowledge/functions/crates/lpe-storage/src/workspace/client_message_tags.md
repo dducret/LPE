@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: client_message_tags
-resource: crates/lpe-storage/src/workspace.rs#L1360-L1368
+resource: crates/lpe-storage/src/workspace.rs#L1362-L1370
 visibility: private
 generated:
   by: okf-rs/0.3.0

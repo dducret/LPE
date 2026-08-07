@@ -1,11 +1,13 @@
 ---
 type: Rust Function
 title: require_account_from_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1350-L1364
+resource: crates/lpe-admin-api/src/workspace.rs#L1366-L1380
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
+  calls:
+  - functions/crates/lpe-admin-api/src/http/account_session_token
   called_by:
   - functions/crates/lpe-admin-api/src/workspace/submit_message_with_store
   - functions/crates/lpe-admin-api/src/workspace/update_message_flag_with_store
@@ -31,6 +33,10 @@ relationships:
 # Signature
 
 `async fn require_account_from_store<S: ClientSessionStore>( storage: &S, headers: &HeaderMap, ) -> std::result::Result<AuthenticatedAccount, (StatusCode, String)>`
+
+# Calls
+
+- [account_session_token](../../../../../functions/crates/lpe-admin-api/src/http/account_session_token.md)
 
 # Called by
 

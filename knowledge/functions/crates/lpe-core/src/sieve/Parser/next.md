@@ -44,6 +44,8 @@ relationships:
   - functions/crates/lpe-admin-api/src/oidc/generated_state_is_accepted_for_matching_origin
   - functions/crates/lpe-admin-api/src/workspace/get_client_contact
   - functions/crates/lpe-admin-api/src/workspace/patch_client_contact
+  - functions/crates/lpe-admin-api/src/workspace/upsert_client_event
+  - functions/crates/lpe-admin-api/src/workspace/upsert_client_task
   - functions/crates/lpe-attachments/src/extraction/local_name
   - functions/crates/lpe-core/src/sieve/tokenize
   - functions/crates/lpe-core/src/sieve/Parser/expect_string
@@ -403,6 +405,8 @@ relationships:
 - [generated_state_is_accepted_for_matching_origin](../../../../../../functions/crates/lpe-admin-api/src/oidc/generated_state_is_accepted_for_matching_origin.md)
 - [get_client_contact](../../../../../../functions/crates/lpe-admin-api/src/workspace/get_client_contact.md)
 - [patch_client_contact](../../../../../../functions/crates/lpe-admin-api/src/workspace/patch_client_contact.md)
+- [upsert_client_event](../../../../../../functions/crates/lpe-admin-api/src/workspace/upsert_client_event.md)
+- [upsert_client_task](../../../../../../functions/crates/lpe-admin-api/src/workspace/upsert_client_task.md)
 - [local_name](../../../../../../functions/crates/lpe-attachments/src/extraction/local_name.md)
 - [tokenize](../../../../../../functions/crates/lpe-core/src/sieve/tokenize.md)
 - [expect_string](../../../../../../functions/crates/lpe-core/src/sieve/Parser/expect_string.md)

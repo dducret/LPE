@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: client_oidc_start
-resource: crates/lpe-admin-api/src/client_auth.rs#L415-L429
+resource: crates/lpe-admin-api/src/client_auth.rs#L418-L432
 generated:
   by: okf-rs/0.3.0
 relationships:

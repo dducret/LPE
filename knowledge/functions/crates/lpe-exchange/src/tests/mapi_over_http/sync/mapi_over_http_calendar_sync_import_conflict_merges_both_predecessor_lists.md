@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_lists
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L13712-L13756
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L13768-L13812
 visibility: private
 generated:
   by: okf-rs/0.3.0

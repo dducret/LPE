@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_primary_email
-resource: crates/lpe-storage/src/workspace.rs#L1158-L1170
+resource: crates/lpe-storage/src/workspace.rs#L1160-L1172
 generated:
   by: okf-rs/0.3.0
 relationships:

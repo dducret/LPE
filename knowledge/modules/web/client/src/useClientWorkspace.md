@@ -1,7 +1,7 @@
 ---
 type: TypeScript Module
 title: useClientWorkspace
-resource: web/client/src/useClientWorkspace.ts#L1-L1088
+resource: web/client/src/useClientWorkspace.ts#L1-L1107
 generated:
   by: okf-rs/0.3.0
 relationships:

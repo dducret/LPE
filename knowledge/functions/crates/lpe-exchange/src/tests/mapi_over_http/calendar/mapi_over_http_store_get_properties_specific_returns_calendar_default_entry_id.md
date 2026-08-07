@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_store_get_properties_specific_returns_calendar_default_entry_id
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10918-L10942
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10947-L10971
 visibility: private
 generated:
   by: okf-rs/0.3.0

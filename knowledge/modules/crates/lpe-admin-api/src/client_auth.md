@@ -1,17 +1,17 @@
 ---
 type: Rust Module
 title: client_auth
-resource: crates/lpe-admin-api/src/client_auth.rs#L1-L517
+resource: crates/lpe-admin-api/src/client_auth.rs#L1-L543
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
-  - external/axum-extract-path-as-axumpath-query-state-http-headermap-statuscode-response-redirect-json
+  - external/axum-extract-path-as-axumpath-query-state-http-headermap-headervalue-statuscode-response-redirect-json
   - external/std-collections-hashmap
   - external/uuid-uuid
   - external/lpe-mail-auth-issue-oauth-access-token-normalize-scope-default-oauth-access-scope
   - external/lpe-storage-auditentryinput-authenticatedaccount-healthresponse-storage
-  - external/crate-account-oidc-http-bad-request-error-internal-error-public-origin-require-account-security-client-oauth-access-token-seconds-client-session-minutes-generate-app-password-secret-hash-password-verify-password-totp-types-accountapppasswordsresponse-accountauthfactorsresponse-apiresult-clientloginresponse-clientoauthaccesstokenresponse-clientoidcmetadataresponse-clientoidcstartresponse-createaccountapppasswordrequest-createaccountapppasswordresponse-createclientoauthaccesstokenrequest-enrolltotprequest-enrolltotpresponse-loginrequest-verifytotprequest
+  - external/crate-account-oidc-http-account-session-token-bad-request-error-internal-error-public-origin-require-account-security-client-oauth-access-token-seconds-client-session-minutes-generate-app-password-secret-hash-password-verify-password-totp-types-accountapppasswordsresponse-accountauthfactorsresponse-apiresult-clientloginresponse-clientoauthaccesstokenresponse-clientoidcmetadataresponse-clientoidcstartresponse-createaccountapppasswordrequest-createaccountapppasswordresponse-createclientoauthaccesstokenrequest-enrolltotprequest-enrolltotpresponse-loginrequest-verifytotprequest
   member_of:
   - packages/crates/lpe-admin-api
 ---
@@ -32,12 +32,14 @@ relationships:
 - [client_oidc_metadata](../../../../functions/crates/lpe-admin-api/src/client_auth/client_oidc_metadata.md)
 - [client_oidc_start](../../../../functions/crates/lpe-admin-api/src/client_auth/client_oidc_start.md)
 - [client_oidc_callback](../../../../functions/crates/lpe-admin-api/src/client_auth/client_oidc_callback.md)
+- [mail_session_headers](../../../../functions/crates/lpe-admin-api/src/client_auth/mail_session_headers.md)
+- [cleared_mail_session_headers](../../../../functions/crates/lpe-admin-api/src/client_auth/cleared_mail_session_headers.md)
 
 # Imports
 
 - `axum::{
     extract::{Path as AxumPath, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::Redirect,
     Json,
 }`
@@ -47,7 +49,7 @@ relationships:
 - `lpe_storage::{AuditEntryInput, AuthenticatedAccount, HealthResponse, Storage}`
 - `crate::{
     account_oidc,
-    http::{bad_request_error, internal_error, public_origin},
+    http::{account_session_token, bad_request_error, internal_error, public_origin},
     require_account,
     security::{
         client_oauth_access_token_seconds, client_session_minutes, generate_app_password_secret,

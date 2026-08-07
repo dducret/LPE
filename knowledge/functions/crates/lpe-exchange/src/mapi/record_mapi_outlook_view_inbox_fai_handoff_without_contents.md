@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_mapi_outlook_view_inbox_fai_handoff_without_contents
-resource: crates/lpe-exchange/src/mapi.rs#L177-L180
+resource: crates/lpe-exchange/src/mapi.rs#L182-L185
 generated:
   by: okf-rs/0.3.0
 relationships:

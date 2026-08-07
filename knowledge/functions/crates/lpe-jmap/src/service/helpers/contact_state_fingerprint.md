@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_state_fingerprint
-resource: crates/lpe-jmap/src/service/helpers.rs#L741-L757
+resource: crates/lpe-jmap/src/service/helpers.rs#L772-L788
 generated:
   by: okf-rs/0.3.0
 relationships:

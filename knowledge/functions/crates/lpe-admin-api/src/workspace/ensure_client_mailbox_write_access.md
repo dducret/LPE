@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ensure_client_mailbox_write_access
-resource: crates/lpe-admin-api/src/workspace.rs#L1384-L1395
+resource: crates/lpe-admin-api/src/workspace.rs#L1400-L1411
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: loginClient
-resource: web/client/src/App.tsx#L114-L133
+resource: web/client/src/App.tsx#L102-L121
 generated:
   by: okf-rs/0.3.0
 ---

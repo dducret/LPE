@@ -8,7 +8,7 @@ relationships:
   imports:
   - external/axum-http-headermap-statuscode
   - external/lpe-storage-authenticatedaccount-authenticatedadmin-storage
-  - external/crate-http-bearer-token-internal-error
+  - external/crate-http-account-session-token-bearer-token-internal-error
   member_of:
   - packages/crates/lpe-admin-api
 ---
@@ -23,7 +23,7 @@ relationships:
 
 - `axum::http::{HeaderMap, StatusCode}`
 - `lpe_storage::{AuthenticatedAccount, AuthenticatedAdmin, Storage}`
-- `crate::http::{bearer_token, internal_error}`
+- `crate::http::{account_session_token, bearer_token, internal_error}`
 
 # Member of
 

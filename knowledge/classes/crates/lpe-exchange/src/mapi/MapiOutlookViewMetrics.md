@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: MapiOutlookViewMetrics
-resource: crates/lpe-exchange/src/mapi.rs#L127-L152
+resource: crates/lpe-exchange/src/mapi.rs#L132-L157
 generated:
   by: okf-rs/0.3.0
 ---

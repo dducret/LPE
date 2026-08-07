@@ -27,12 +27,11 @@ import type {
   TaskItem
 } from "./client-types";
 
-async function apiJson<T>(path: string, token: string, options: RequestInit = {}): Promise<T> {
+async function apiJson<T>(path: string, _token: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api/${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
       ...(options.headers ?? {})
     },
     credentials: "same-origin"
@@ -95,7 +94,7 @@ function buildMessagePayload(
     sender_address: sendOnBehalf ? identity.email : null,
     to: splitRecipients(draft.to),
     cc: splitRecipients(draft.cc),
-    bcc: [],
+    bcc: splitRecipients(draft.bcc),
     subject: draft.subject,
     body_text: draft.body,
     body_html_sanitized: null,
@@ -111,6 +110,7 @@ function draftFromMessage(message: Message, mailboxAccountId: string): MessageDr
     senderMode: "send_as",
     to: message.to,
     cc: message.cc,
+    bcc: "",
     subject: message.subject,
     body: message.body.join("\n")
   };
@@ -309,31 +309,44 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       return;
     }
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${protocol}://${window.location.host}/api/jmap/ws`, "jmap");
-
-    socket.addEventListener("open", () => {
-      setPushConnected(true);
-      socket.send(JSON.stringify({
-        "@type": "WebSocketPushEnable",
-        dataTypes: ["Mailbox", "Email", "CalendarEvent", "ContactCard", "Task", "Note", "JournalEntry"]
-      }));
-    });
-    socket.addEventListener("message", (event) => {
-      try {
-        const payload = JSON.parse(event.data as string) as { "@type"?: string };
-        if (payload["@type"] === "StateChange") {
-          void loadWorkspace();
-          void loadSettings();
-          pushNotice("Workspace updated from the canonical server state.");
+    let socket: WebSocket | null = null;
+    let retryTimer: number | null = null;
+    let retries = 0;
+    let stopped = false;
+    const connect = () => {
+      socket = new WebSocket(`${protocol}://${window.location.host}/api/jmap/ws`, "jmap");
+      socket.addEventListener("open", () => {
+        retries = 0;
+        setPushConnected(true);
+        socket?.send(JSON.stringify({
+          "@type": "WebSocketPushEnable",
+          dataTypes: ["Mailbox", "Email", "CalendarEvent", "ContactCard", "Task", "Note", "JournalEntry"]
+        }));
+      });
+      socket.addEventListener("message", (event) => {
+        try {
+          const payload = JSON.parse(event.data as string) as { "@type"?: string };
+          if (payload["@type"] === "StateChange") {
+            void loadWorkspace();
+            void loadSettings();
+          }
+        } catch {
+          // Ignore malformed push payloads.
         }
-      } catch {
-        // Ignore malformed push payloads.
-      }
-    });
-    socket.addEventListener("error", () => setPushConnected(false));
-    socket.addEventListener("close", () => setPushConnected(false));
+      });
+      socket.addEventListener("close", () => {
+        setPushConnected(false);
+        if (stopped || retries >= 5) return;
+        retryTimer = window.setTimeout(connect, Math.min(1000 * 2 ** retries++, 16000));
+      });
+    };
+    connect();
 
-    return () => socket.close();
+    return () => {
+      stopped = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      socket?.close();
+    };
   }, [authToken, loadSettings, loadWorkspace]);
 
   const counts = React.useMemo(() => countFolders(mail), [mail]);
@@ -435,6 +448,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
         senderMode: "send_as",
         to: item.fromAddress,
         cc: "",
+        bcc: "",
         subject: item.subject.toLowerCase().startsWith("re:") ? item.subject : `Re: ${item.subject}`,
         body: quoteMessage(item)
       });
@@ -444,6 +458,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       senderMode: "send_as",
       to: "",
       cc: "",
+      bcc: "",
       subject: item.subject.toLowerCase().startsWith("fwd:") ? item.subject : `Fwd: ${item.subject}`,
       body: quoteMessage(item)
     });
@@ -649,10 +664,14 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     if (!authToken) return;
     if (!contactForm.name.trim() || !contactForm.email.trim()) return pushNotice(copy.validationContact);
     try {
-      const item = await apiJson<ContactItem>("mail/contacts", authToken, {
-        method: "POST",
-        body: JSON.stringify({ id: currentContact?.id ?? null, collectionId: currentContact?.addressBookId ?? contactBook, ...contactForm })
-      });
+      const item = await apiJson<ContactItem>(
+        currentContact ? `mail/contacts/${currentContact.id}` : "mail/contacts",
+        authToken,
+        {
+          method: currentContact ? "PATCH" : "POST",
+          body: JSON.stringify(currentContact ? contactForm : { collectionId: contactBook, ...contactForm })
+        }
+      );
       await loadWorkspace();
       setContactId(item.id);
       pushNotice(currentContact ? copy.noticeContactUpdated : copy.noticeContactCreated);

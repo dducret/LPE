@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: primary_phone
-resource: crates/lpe-storage/src/workspace.rs#L122-L124
+resource: crates/lpe-storage/src/workspace.rs#L124-L126
 generated:
   by: okf-rs/0.3.0
 ---

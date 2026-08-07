@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_emails_json
-resource: crates/lpe-storage/src/workspace.rs#L1119-L1128
+resource: crates/lpe-storage/src/workspace.rs#L1121-L1130
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: trim_snippet
-resource: crates/lpe-jmap/src/service/helpers.rs#L872-L879
+resource: crates/lpe-jmap/src/service/helpers.rs#L903-L910
 generated:
   by: okf-rs/0.3.0
 relationships:

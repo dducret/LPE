@@ -1,7 +1,7 @@
 ---
 type: TypeScript Module
 title: MailDetail
-resource: web/client/src/components/MailDetail.tsx#L1-L158
+resource: web/client/src/components/MailDetail.tsx#L1-L162
 generated:
   by: okf-rs/0.3.0
 relationships:

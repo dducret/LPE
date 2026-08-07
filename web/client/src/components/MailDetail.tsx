@@ -88,6 +88,10 @@ export function MailDetail(props: {
             <Input value={props.draft.cc} onChange={(event) => props.setDraft((value) => ({ ...value, cc: event.target.value }))} />
           </label>
           <label className="field field-wide">
+            <span>Bcc</span>
+            <Input value={props.draft.bcc} onChange={(event) => props.setDraft((value) => ({ ...value, bcc: event.target.value }))} />
+          </label>
+          <label className="field field-wide">
             <span>{props.copy.fields.subject}</span>
             <Input value={props.draft.subject} onChange={(event) => props.setDraft((value) => ({ ...value, subject: event.target.value }))} />
           </label>

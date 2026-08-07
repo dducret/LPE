@@ -20,6 +20,7 @@ relationships:
   - functions/LPE-CT/web/app/loginAdmin
   - functions/crates/lpe-exchange/src/mapi/mapi_folder_purge_metrics
   - functions/crates/lpe-exchange/src/mapi/mapi_outlook_view_metrics
+  - functions/crates/lpe-exchange/src/mapi/event_metrics/mapi_calendar_event_save_metrics
   - functions/crates/lpe-exchange/src/mapi/notification_metrics/mapi_notification_metrics
   - functions/web/admin/src/App
   - functions/web/admin/src/runPstJobs
@@ -48,6 +49,7 @@ relationships:
 - [loginAdmin](../../../../functions/LPE-CT/web/app/loginAdmin.md)
 - [mapi_folder_purge_metrics](../../../../functions/crates/lpe-exchange/src/mapi/mapi_folder_purge_metrics.md)
 - [mapi_outlook_view_metrics](../../../../functions/crates/lpe-exchange/src/mapi/mapi_outlook_view_metrics.md)
+- [mapi_calendar_event_save_metrics](../../../../functions/crates/lpe-exchange/src/mapi/event_metrics/mapi_calendar_event_save_metrics.md)
 - [mapi_notification_metrics](../../../../functions/crates/lpe-exchange/src/mapi/notification_metrics/mapi_notification_metrics.md)
 - [App](../../../../functions/web/admin/src/App.md)
 - [runPstJobs](../../../../functions/web/admin/src/runPstJobs.md)

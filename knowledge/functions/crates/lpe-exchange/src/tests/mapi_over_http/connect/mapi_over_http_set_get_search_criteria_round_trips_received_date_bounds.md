@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_get_search_criteria_round_trips_received_date_bounds
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5367-L5478
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5392-L5503
 visibility: private
 generated:
   by: okf-rs/0.3.0

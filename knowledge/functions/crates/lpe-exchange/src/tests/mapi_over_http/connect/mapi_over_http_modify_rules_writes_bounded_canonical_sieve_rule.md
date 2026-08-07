@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_modify_rules_writes_bounded_canonical_sieve_rule
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3332-L3390
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3357-L3415
 visibility: private
 generated:
   by: okf-rs/0.3.0

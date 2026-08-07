@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: verify_account_totp_factor
-resource: crates/lpe-admin-api/src/client_auth.rs#L209-L245
+resource: crates/lpe-admin-api/src/client_auth.rs#L212-L248
 generated:
   by: okf-rs/0.3.0
 relationships:

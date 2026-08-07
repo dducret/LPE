@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_mailbox_ids
-resource: crates/lpe-jmap/src/service/helpers.rs#L844-L848
+resource: crates/lpe-jmap/src/service/helpers.rs#L875-L879
 generated:
   by: okf-rs/0.3.0
 ---

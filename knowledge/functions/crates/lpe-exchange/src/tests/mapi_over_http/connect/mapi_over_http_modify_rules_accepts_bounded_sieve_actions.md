@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_modify_rules_accepts_bounded_sieve_actions
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3393-L3457
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3418-L3482
 visibility: private
 generated:
   by: okf-rs/0.3.0

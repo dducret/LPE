@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_search_criteria_accepts_builtin_reminders_refresh
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L9753-L9814
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L9782-L9843
 visibility: private
 generated:
   by: okf-rs/0.3.0

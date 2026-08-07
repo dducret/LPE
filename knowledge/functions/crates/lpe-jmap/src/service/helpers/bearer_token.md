@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bearer_token
-resource: crates/lpe-jmap/src/service/helpers.rs#L653-L658
+resource: crates/lpe-jmap/src/service/helpers.rs#L665-L670
 generated:
   by: okf-rs/0.3.0
 ---

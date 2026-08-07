@@ -1,12 +1,14 @@
 ---
 type: Rust Module
 title: helpers
-resource: crates/lpe-jmap/src/service/helpers.rs#L1-L879
+resource: crates/lpe-jmap/src/service/helpers.rs#L1-L910
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/super
+  - external/super-authorization-header
+  - external/axum-http-headermap-headervalue
   member_of:
   - packages/crates/lpe-jmap
 ---
@@ -41,6 +43,7 @@ relationships:
 - [set_object_count](../../../../../functions/crates/lpe-jmap/src/service/helpers/set_object_count.md)
 - [authorization_header](../../../../../functions/crates/lpe-jmap/src/service/helpers/authorization_header.md)
 - [bearer_token](../../../../../functions/crates/lpe-jmap/src/service/helpers/bearer_token.md)
+- [websocket_authentication_accepts_the_same_origin_mail_session_cookie](../../../../../functions/crates/lpe-jmap/src/service/helpers/websocket_authentication_accepts_the_same_origin_mail_session_cookie.md)
 - [collection_state_fingerprint](../../../../../functions/crates/lpe-jmap/src/service/helpers/collection_state_fingerprint.md)
 - [email_submission_state_fingerprint](../../../../../functions/crates/lpe-jmap/src/service/helpers/email_submission_state_fingerprint.md)
 - [identity_state_fingerprint](../../../../../functions/crates/lpe-jmap/src/service/helpers/identity_state_fingerprint.md)
@@ -58,6 +61,8 @@ relationships:
 # Imports
 
 - `super::*`
+- `super::authorization_header`
+- `axum::http::{HeaderMap, HeaderValue}`
 
 # Member of
 

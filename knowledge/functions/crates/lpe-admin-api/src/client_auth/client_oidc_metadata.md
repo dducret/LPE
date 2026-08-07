@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: client_oidc_metadata
-resource: crates/lpe-admin-api/src/client_auth.rs#L401-L413
+resource: crates/lpe-admin-api/src/client_auth.rs#L404-L416
 generated:
   by: okf-rs/0.3.0
 relationships:

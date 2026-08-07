@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_profile_state_with_store
-resource: crates/lpe-admin-api/src/workspace.rs#L1339-L1348
+resource: crates/lpe-admin-api/src/workspace.rs#L1355-L1364
 visibility: private
 generated:
   by: okf-rs/0.3.0

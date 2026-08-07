@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: event_state_fingerprint
-resource: crates/lpe-jmap/src/service/helpers.rs#L759-L778
+resource: crates/lpe-jmap/src/service/helpers.rs#L790-L809
 generated:
   by: okf-rs/0.3.0
 relationships:

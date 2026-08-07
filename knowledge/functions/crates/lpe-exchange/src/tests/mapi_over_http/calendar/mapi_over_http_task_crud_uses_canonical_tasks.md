@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_task_crud_uses_canonical_tasks
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L5995-L6101
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6000-L6106
 visibility: private
 generated:
   by: okf-rs/0.3.0

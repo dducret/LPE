@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_mapi_outlook_view_post_fai_hierarchy_without_contents
-resource: crates/lpe-exchange/src/mapi.rs#L197-L200
+resource: crates/lpe-exchange/src/mapi.rs#L202-L205
 generated:
   by: okf-rs/0.3.0
 relationships:

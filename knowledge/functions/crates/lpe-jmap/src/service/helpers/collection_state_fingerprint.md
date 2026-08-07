@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collection_state_fingerprint
-resource: crates/lpe-jmap/src/service/helpers.rs#L660-L674
+resource: crates/lpe-jmap/src/service/helpers.rs#L691-L705
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -11,11 +11,12 @@ relationships:
   - functions/crates/lpe-admin-api/src/totp/verify_code
   - functions/crates/lpe-storage/src/auth/Storage/create_account_session
   - functions/crates/lpe-admin-api/src/security/client_session_minutes
+  - functions/crates/lpe-admin-api/src/client_auth/mail_session_headers
 ---
 
 # Signature
 
-`pub(crate) async fn client_login( State(storage): State<Storage>, Json(request): Json<LoginRequest>, ) -> ApiResult<ClientLoginResponse>`
+`pub(crate) async fn client_login( State(storage): State<Storage>, Json(request): Json<LoginRequest>, ) -> Result<(HeaderMap, Json<ClientLoginResponse>), (StatusCode, String)>`
 
 # Calls
 
@@ -24,3 +25,4 @@ relationships:
 - [verify_code](../../../../../functions/crates/lpe-admin-api/src/totp/verify_code.md)
 - [create_account_session](../../../../../functions/crates/lpe-storage/src/auth/Storage/create_account_session.md)
 - [client_session_minutes](../../../../../functions/crates/lpe-admin-api/src/security/client_session_minutes.md)
+- [mail_session_headers](../../../../../functions/crates/lpe-admin-api/src/client_auth/mail_session_headers.md)

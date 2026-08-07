@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_message_resolves_virtual_local_freebusy_without_folder_id
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6299-L6366
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6304-L6371
 visibility: private
 generated:
   by: okf-rs/0.3.0

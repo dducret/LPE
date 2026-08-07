@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8731-L9750
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8760-L9779
 visibility: private
 generated:
   by: okf-rs/0.3.0

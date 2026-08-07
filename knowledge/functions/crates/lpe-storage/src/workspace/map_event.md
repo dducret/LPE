@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: map_event
-resource: crates/lpe-storage/src/workspace.rs#L1381-L1403
+resource: crates/lpe-storage/src/workspace.rs#L1383-L1405
 visibility: private
 generated:
   by: okf-rs/0.3.0

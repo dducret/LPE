@@ -68,6 +68,7 @@ relationships:
   - functions/crates/lpe-storage/src/pst/test_storage
   - functions/crates/lpe-storage/src/storage_policy/test_storage
   - functions/crates/lpe-storage/src/storage_visibility/tests/test_storage
+  - functions/web/client/src/useClientWorkspace/useClientWorkspace
 ---
 
 # Signature
@@ -138,3 +139,4 @@ relationships:
 - [test_storage](../../../../../../functions/crates/lpe-storage/src/pst/test_storage.md)
 - [test_storage](../../../../../../functions/crates/lpe-storage/src/storage_policy/test_storage.md)
 - [test_storage](../../../../../../functions/crates/lpe-storage/src/storage_visibility/tests/test_storage.md)
+- [useClientWorkspace](../../../../../../functions/web/client/src/useClientWorkspace/useClientWorkspace.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_state_fingerprint
-resource: crates/lpe-jmap/src/service/helpers.rs#L812-L842
+resource: crates/lpe-jmap/src/service/helpers.rs#L843-L873
 generated:
   by: okf-rs/0.3.0
 relationships:

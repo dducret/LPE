@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6697-L6766
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6702-L6771
 visibility: private
 generated:
   by: okf-rs/0.3.0

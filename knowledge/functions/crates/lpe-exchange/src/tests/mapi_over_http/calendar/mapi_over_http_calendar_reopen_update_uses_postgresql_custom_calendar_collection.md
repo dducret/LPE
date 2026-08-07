@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7738-L7862
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7743-L7891
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -24,6 +24,8 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/append_rop_save_changes_message
   - functions/crates/lpe-exchange/src/tests/execute_body
   - functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response
+  - functions/crates/lpe-exchange/src/tests/append_rop_open_message
+  - functions/crates/lpe-exchange/src/tests/append_rop_get_properties_specific
 ---
 
 # Signature
@@ -49,3 +51,5 @@ relationships:
 - [append_rop_save_changes_message](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_save_changes_message.md)
 - [execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/execute_body.md)
 - [response_rops_from_execute_response](../../../../../../../functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response.md)
+- [append_rop_open_message](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_open_message.md)
+- [append_rop_get_properties_specific](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_get_properties_specific.md)

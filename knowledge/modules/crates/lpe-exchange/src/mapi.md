@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mapi
-resource: crates/lpe-exchange/src/mapi.rs#L1-L339
+resource: crates/lpe-exchange/src/mapi.rs#L1-L344
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -16,6 +16,8 @@ relationships:
   - external/uuid-uuid
   - external/crate-mapi-mailstore-mapi-store-mapiattachment-mapicollaborationfolder-mapicollaborationfolderkind-mapimailstoresnapshot-mapistore-store-exchangeaddressbookdirectorykind-exchangeaddressbookentry-exchangeaddressbookentrykind-exchangestore-mapicheckpointkind-mapiidentityobjectkind-mapiidentityrequest
   - external/pub-crate-use-crate-mapi-session-create-rpc-emsmdb-context-execute-rpc-emsmdb-rops-transport-client-flow-key-debug-payload-preview-hex-guid-counter-debug-handle-mapi-mapi-error-response-mapi-response-payload-bytes-request-cookie-transport-debug-safe-header-mapiendpoint
+  - external/pub-use-event-metrics-mapi-calendar-event-save-metrics-mapicalendareventsavemetrics
+  - external/pub-crate-use-event-metrics-record-mapi-calendar-event-save-mapicalendareventsaveflow-mapicalendareventsaveoutcome
   - external/pub-use-notification-metrics-mapi-notification-metrics-mapinotificationmetrics
   - external/pub-crate-use-notification-metrics-record-mapi-new-mail-notification-deliveries-record-mapi-notification-wait-completion-mapinotificationwaitoutcome
   - external/pub-crate-use-crate-mapi-session-begin-active-session-request-for-test
@@ -93,6 +95,10 @@ relationships:
         mapi_error_response, mapi_response_payload_bytes, request_cookie_transport_debug,
         safe_header, MapiEndpoint,
     },
+}`
+- `pub use event_metrics::{mapi_calendar_event_save_metrics, MapiCalendarEventSaveMetrics}`
+- `pub(crate) use event_metrics::{
+    record_mapi_calendar_event_save, MapiCalendarEventSaveFlow, MapiCalendarEventSaveOutcome,
 }`
 - `pub use notification_metrics::{mapi_notification_metrics, MapiNotificationMetrics}`
 - `pub(crate) use notification_metrics::{

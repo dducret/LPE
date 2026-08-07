@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: workspace
-resource: crates/lpe-storage/src/workspace.rs#L1-L1551
+resource: crates/lpe-storage/src/workspace.rs#L1-L1590
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,7 +12,7 @@ relationships:
   - external/sqlx-row
   - external/uuid-uuid
   - external/crate-attachments-normalize-email-canonicalchangecategory-clientattachment-clientattachmentrow-clientcontactrow-clienteventrow-clientmessagerow-clienttask-contactnamefields-contactsourcefields-storage
-  - external/super-client-folder-json-text-matches-merge-contact-update-input-clientcontact-contactsourcefields-upsertclientcontactinput-value
+  - external/super-client-folder-json-text-matches-merge-contact-update-input-clientcontact-clientevent-contactsourcefields-upsertclientcontactinput-value
   - external/serde-json-json
   member_of:
   - packages/crates/lpe-storage
@@ -60,6 +60,7 @@ relationships:
 - [map_contact](../../../../functions/crates/lpe-storage/src/workspace/map_contact.md)
 - [client_address_book_id_for_role](../../../../functions/crates/lpe-storage/src/workspace/client_address_book_id_for_role.md)
 - [client_folder_preserves_trash_role](../../../../functions/crates/lpe-storage/src/workspace/client_folder_preserves_trash_role.md)
+- [workspace_contact_and_event_json_use_client_camel_case_contracts](../../../../functions/crates/lpe-storage/src/workspace/workspace_contact_and_event_json_use_client_camel_case_contracts.md)
 - [canonical_event_json_comparison_ignores_whitespace](../../../../functions/crates/lpe-storage/src/workspace/canonical_event_json_comparison_ignores_whitespace.md)
 - [contact_update_merges_missing_rich_fields](../../../../functions/crates/lpe-storage/src/workspace/contact_update_merges_missing_rich_fields.md)
 - [contact_update_can_clear_explicit_rich_fields](../../../../functions/crates/lpe-storage/src/workspace/contact_update_can_clear_explicit_rich_fields.md)
@@ -77,7 +78,7 @@ relationships:
     ContactSourceFields, Storage,
 }`
 - `super::{
-        client_folder, json_text_matches, merge_contact_update_input, ClientContact,
+        client_folder, json_text_matches, merge_contact_update_input, ClientContact, ClientEvent,
         ContactSourceFields, UpsertClientContactInput, Value,
     }`
 - `serde_json::json`

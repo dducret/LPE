@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_fast_transfer_destination_put_buffer_extended_is_parseable
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3284-L3309
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3309-L3334
 visibility: private
 generated:
   by: okf-rs/0.3.0

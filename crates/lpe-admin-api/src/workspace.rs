@@ -819,43 +819,39 @@ pub(crate) async fn upsert_client_event(
     Json(request): Json<UpsertClientEventRequest>,
 ) -> ApiResult<ClientEvent> {
     let account = require_account(&storage, &headers).await?;
+    let existing: Option<lpe_storage::AccessibleEvent> = if let Some(event_id) = request.id {
+        storage
+            .fetch_accessible_events_by_ids(account.account_id, &[event_id])
+            .await
+            .map_err(bad_request_error)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "event not found".to_string()))?
+            .into()
+    } else {
+        None
+    };
     let input = UpsertClientEventInput {
         id: request.id,
         account_id: account.account_id,
-        uid: request.uid,
+        uid: preserve_empty(request.uid, existing.as_ref().map(|event: &lpe_storage::AccessibleEvent| event.uid.clone())),
         date: request.date,
         time: request.time,
-        time_zone: request.time_zone,
-        duration_minutes: request.duration_minutes,
-        all_day: request.all_day,
-        status: if request.status.trim().is_empty() {
-            "confirmed".to_string()
-        } else {
-            request.status
-        },
-        sequence: request.sequence,
-        recurrence_rule: request.recurrence_rule,
-        recurrence_json: if request.recurrence_json.trim().is_empty() {
-            "{}".to_string()
-        } else {
-            request.recurrence_json
-        },
-        recurrence_exceptions_json: if request.recurrence_exceptions_json.trim().is_empty() {
-            "[]".to_string()
-        } else {
-            request.recurrence_exceptions_json
-        },
+        time_zone: preserve_empty(request.time_zone, existing.as_ref().map(|event| event.time_zone.clone())),
+        duration_minutes: if request.duration_minutes == 0 { existing.as_ref().map(|event| event.duration_minutes).unwrap_or(60) } else { request.duration_minutes },
+        all_day: existing.as_ref().map(|event| event.all_day).unwrap_or(request.all_day),
+        status: preserve_empty(request.status, existing.as_ref().map(|event| event.status.clone()).or_else(|| Some("confirmed".to_string()))),
+        sequence: if request.sequence == 0 { existing.as_ref().map(|event| event.sequence).unwrap_or(0) } else { request.sequence },
+        recurrence_rule: preserve_empty(request.recurrence_rule, existing.as_ref().map(|event| event.recurrence_rule.clone())),
+        recurrence_json: preserve_empty(request.recurrence_json, existing.as_ref().map(|event| event.recurrence_json.clone()).or_else(|| Some("{}".to_string()))),
+        recurrence_exceptions_json: preserve_empty(request.recurrence_exceptions_json, existing.as_ref().map(|event| event.recurrence_exceptions_json.clone()).or_else(|| Some("[]".to_string()))),
         title: request.title,
         location: request.location,
-        organizer_json: if request.organizer_json.trim().is_empty() {
-            "{}".to_string()
-        } else {
-            request.organizer_json
-        },
+        organizer_json: preserve_empty(request.organizer_json, existing.as_ref().map(|event| event.organizer_json.clone()).or_else(|| Some("{}".to_string()))),
         attendees: request.attendees,
-        attendees_json: request.attendees_json,
+        attendees_json: preserve_empty(request.attendees_json, existing.as_ref().map(|event| event.attendees_json.clone())),
         notes: request.notes,
-        body_html: request.body_html,
+        body_html: preserve_empty(request.body_html, existing.as_ref().map(|event| event.body_html.clone())),
     };
     let event = if let Some(event_id) = request.id {
         storage
@@ -889,6 +885,14 @@ pub(crate) async fn upsert_client_event(
         notes: event.notes,
         body_html: event.body_html,
     }))
+}
+
+fn preserve_empty(value: String, existing: Option<String>) -> String {
+    if value.trim().is_empty() {
+        existing.unwrap_or_default()
+    } else {
+        value
+    }
 }
 
 pub(crate) async fn delete_client_event(
@@ -956,6 +960,18 @@ pub(crate) async fn upsert_client_task(
     Json(request): Json<UpsertClientTaskRequest>,
 ) -> ApiResult<ClientTask> {
     let account = require_account(&storage, &headers).await?;
+    let existing: Option<ClientTask> = if let Some(task_id) = request.id {
+        storage
+            .fetch_client_tasks_by_ids(account.account_id, &[task_id])
+            .await
+            .map_err(internal_error)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "task not found".to_string()))?
+            .into()
+    } else {
+        None
+    };
     Ok(Json(
         storage
             .upsert_client_task(UpsertClientTaskInput {
@@ -966,11 +982,11 @@ pub(crate) async fn upsert_client_task(
                 title: request.title,
                 description: request.description,
                 status: request.status,
-                starts_at: request.starts_at,
+                starts_at: request.starts_at.or_else(|| existing.as_ref().and_then(|task: &ClientTask| task.starts_at.clone())),
                 due_at: request.due_at,
                 completed_at: request.completed_at,
-                priority: request.priority.unwrap_or(0),
-                recurrence_rule: request.recurrence_rule.unwrap_or_default(),
+                priority: request.priority.unwrap_or_else(|| existing.as_ref().map(|task| task.priority).unwrap_or(0)),
+                recurrence_rule: request.recurrence_rule.unwrap_or_else(|| existing.as_ref().map(|task| task.recurrence_rule.clone()).unwrap_or_default()),
                 sort_order: request.sort_order.unwrap_or(0),
             })
             .await
@@ -1351,7 +1367,7 @@ async fn require_account_from_store<S: ClientSessionStore>(
     storage: &S,
     headers: &HeaderMap,
 ) -> std::result::Result<AuthenticatedAccount, (StatusCode, String)> {
-    let token = crate::http::bearer_token(headers)
+    let token = crate::http::account_session_token(headers)
         .ok_or((StatusCode::UNAUTHORIZED, "missing bearer token".to_string()))?;
     storage
         .fetch_account_session(&token)

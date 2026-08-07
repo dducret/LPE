@@ -13,7 +13,6 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_sync_projects_default_collection_event
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_empty_virtual_calendar_sync_has_no_placeholder_rows
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_first_baseline_exports_all_current_messages
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_first_folder_decodes_outlook_message_changes
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_ics_final_and_transfer_state_use_replguid_state_encoding
@@ -33,7 +32,6 @@ relationships:
 - [mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint.md)
 - [mapi_over_http_advertised_calendar_sync_projects_default_collection_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_sync_projects_default_collection_event.md)
 - [mapi_over_http_empty_virtual_calendar_sync_has_no_placeholder_rows](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_empty_virtual_calendar_sync_has_no_placeholder_rows.md)
-- [mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection.md)
 - [mapi_over_http_content_sync_first_baseline_exports_all_current_messages](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_first_baseline_exports_all_current_messages.md)
 - [mapi_over_http_content_sync_first_folder_decodes_outlook_message_changes](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_content_sync_first_folder_decodes_outlook_message_changes.md)
 - [mapi_over_http_ics_final_and_transfer_state_use_replguid_state_encoding](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_ics_final_and_transfer_state_use_replguid_state_encoding.md)

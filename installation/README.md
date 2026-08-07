@@ -658,6 +658,11 @@ and `JMAP` HTTPS/WSS paths. `/mail/`, `/admin/`, and `/assets/` proxy to
 `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`,
 and `/api/jmap/ws`.
 
+The generated core nginx configuration gives `/api/jmap/ws` its own WebSocket
+upgrade route. It forwards the same-origin mailbox session cookie, disables
+buffering, and keeps the connection open for push notifications; do not replace
+this with a browser-side `Authorization` header.
+
 `LPE-CT` must also publish the public client configuration, `ActiveSync`, EWS,
 authenticated MAPI paths, and the bounded RCA RPC proxy auth shim:
 `/Microsoft-Server-ActiveSync`, `/mapi/`, `/rpc/rpcproxy.dll`,

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_client_event
-resource: crates/lpe-admin-api/src/workspace.rs#L894-L909
+resource: crates/lpe-admin-api/src/workspace.rs#L898-L913
 generated:
   by: okf-rs/0.3.0
 relationships:

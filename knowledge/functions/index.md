@@ -1546,6 +1546,7 @@
 - [validate_bootstrap_admin_request](../functions/crates/lpe-admin-api/src/bootstrap/validate_bootstrap_admin_request.md) — Rust Function
 - [validate_shared_secret](../functions/crates/lpe-admin-api/src/bootstrap/validate_shared_secret.md) — Rust Function
 - [account_auth_factors](../functions/crates/lpe-admin-api/src/client_auth/account_auth_factors.md) — Rust Function
+- [cleared_mail_session_headers](../functions/crates/lpe-admin-api/src/client_auth/cleared_mail_session_headers.md) — Rust Function
 - [client_login](../functions/crates/lpe-admin-api/src/client_auth/client_login.md) — Rust Function
 - [client_logout](../functions/crates/lpe-admin-api/src/client_auth/client_logout.md) — Rust Function
 - [client_me](../functions/crates/lpe-admin-api/src/client_auth/client_me.md) — Rust Function
@@ -1556,6 +1557,7 @@
 - [create_client_oauth_access_token](../functions/crates/lpe-admin-api/src/client_auth/create_client_oauth_access_token.md) — Rust Function
 - [enroll_account_totp](../functions/crates/lpe-admin-api/src/client_auth/enroll_account_totp.md) — Rust Function
 - [list_account_app_passwords](../functions/crates/lpe-admin-api/src/client_auth/list_account_app_passwords.md) — Rust Function
+- [mail_session_headers](../functions/crates/lpe-admin-api/src/client_auth/mail_session_headers.md) — Rust Function
 - [revoke_account_app_password](../functions/crates/lpe-admin-api/src/client_auth/revoke_account_app_password.md) — Rust Function
 - [revoke_account_factor](../functions/crates/lpe-admin-api/src/client_auth/revoke_account_factor.md) — Rust Function
 - [verify_account_totp_factor](../functions/crates/lpe-admin-api/src/client_auth/verify_account_totp_factor.md) — Rust Function
@@ -1707,6 +1709,8 @@
 - [storage_metadata_readiness_fails_critical_degradation](../functions/crates/lpe-admin-api/src/health/storage_metadata_readiness_fails_critical_degradation.md) — Rust Function
 - [storage_metadata_readiness_passes_consistent_metadata](../functions/crates/lpe-admin-api/src/health/storage_metadata_readiness_passes_consistent_metadata.md) — Rust Function
 - [storage_metadata_readiness_warns_noncritical_degradation](../functions/crates/lpe-admin-api/src/health/storage_metadata_readiness_warns_noncritical_degradation.md) — Rust Function
+- [account_session_cookie_authenticates_without_a_browser_set_authorization_header](../functions/crates/lpe-admin-api/src/http/account_session_cookie_authenticates_without_a_browser_set_authorization_header.md) — Rust Function
+- [account_session_token](../functions/crates/lpe-admin-api/src/http/account_session_token.md) — Rust Function
 - [bad_request_error](../functions/crates/lpe-admin-api/src/http/bad_request_error.md) — Rust Function
 - [bearer_token](../functions/crates/lpe-admin-api/src/http/bearer_token.md) — Rust Function
 - [forwarded_header](../functions/crates/lpe-admin-api/src/http/forwarded_header.md) — Rust Function
@@ -1743,7 +1747,7 @@
 - [metrics](../functions/crates/lpe-admin-api/src/observability/metrics.md) — Rust Function
 - [metrics_enabled](../functions/crates/lpe-admin-api/src/observability/metrics_enabled.md) — Rust Function
 - [metrics_endpoint](../functions/crates/lpe-admin-api/src/observability/metrics_endpoint.md) — Rust Function
-- [metrics_include_mapi_notification_delivery_counters](../functions/crates/lpe-admin-api/src/observability/metrics_include_mapi_notification_delivery_counters.md) — Rust Function
+- [metrics_include_mapi_calendar_event_save_and_notification_counters](../functions/crates/lpe-admin-api/src/observability/metrics_include_mapi_calendar_event_save_and_notification_counters.md) — Rust Function
 - [observe_http](../functions/crates/lpe-admin-api/src/observability/observe_http.md) — Rust Function
 - [outlook_http_route_gap_does_not_duplicate_successful_protocol_routes](../functions/crates/lpe-admin-api/src/observability/outlook_http_route_gap_does_not_duplicate_successful_protocol_routes.md) — Rust Function
 - [outlook_http_route_gap_logs_unmatched_exchange_paths](../functions/crates/lpe-admin-api/src/observability/outlook_http_route_gap_logs_unmatched_exchange_paths.md) — Rust Function
@@ -1935,6 +1939,7 @@
 - [outlook_profile_state](../functions/crates/lpe-admin-api/src/workspace/outlook_profile_state.md) — Rust Function
 - [outlook_profile_state_with_store](../functions/crates/lpe-admin-api/src/workspace/outlook_profile_state_with_store.md) — Rust Function
 - [patch_client_contact](../functions/crates/lpe-admin-api/src/workspace/patch_client_contact.md) — Rust Function
+- [preserve_empty](../functions/crates/lpe-admin-api/src/workspace/preserve_empty.md) — Rust Function
 - [create_public_folder_child](../functions/crates/lpe-admin-api/src/workspace/public_folders/create_public_folder_child.md) — Rust Function
 - [create_public_folder_tree](../functions/crates/lpe-admin-api/src/workspace/public_folders/create_public_folder_tree.md) — Rust Function
 - [delete_public_folder](../functions/crates/lpe-admin-api/src/workspace/public_folders/delete_public_folder.md) — Rust Function
@@ -3616,6 +3621,9 @@
 - [append_unsupported_unknown_dispatch_response](../functions/crates/lpe-exchange/src/mapi/dispatch/unsupported/append_unsupported_unknown_dispatch_response.md) — Rust Function
 - [unsupported_known_rop_response](../functions/crates/lpe-exchange/src/mapi/dispatch/unsupported/unsupported_known_rop_response.md) — Rust Function
 - [unsupported_unknown_rop_response](../functions/crates/lpe-exchange/src/mapi/dispatch/unsupported/unsupported_unknown_rop_response.md) — Rust Function
+- [calendar_event_save_metrics_preserve_direct_and_ics_outcomes](../functions/crates/lpe-exchange/src/mapi/event_metrics/calendar_event_save_metrics_preserve_direct_and_ics_outcomes.md) — Rust Function
+- [mapi_calendar_event_save_metrics](../functions/crates/lpe-exchange/src/mapi/event_metrics/mapi_calendar_event_save_metrics.md) — Rust Function
+- [record_mapi_calendar_event_save](../functions/crates/lpe-exchange/src/mapi/event_metrics/record_mapi_calendar_event_save.md) — Rust Function
 - [actual_object_id](../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/actual_object_id.md) — Rust Method
 - [change_key_for_change_number](../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/change_key_for_change_number.md) — Rust Method
 - [folder_entry_id_from_object_id](../functions/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec/folder_entry_id_from_object_id.md) — Rust Method
@@ -8203,7 +8211,7 @@
 - [mapi_over_http_get_search_criteria_rejects_exchange_only_blob_definition](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_search_criteria_rejects_exchange_only_blob_definition.md) — Rust Function
 - [mapi_over_http_get_valid_attachments_lists_canonical_attachment_numbers](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_get_valid_attachments_lists_canonical_attachment_numbers.md) — Rust Function
 - [mapi_over_http_hard_delete_messages_reports_partial_when_retention_blocks_delete](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_hard_delete_messages_reports_partial_when_retention_blocks_delete.md) — Rust Function
-- [mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection.md) — Rust Function
+- [mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection.md) — Rust Function
 - [mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets.md) — Rust Function
 - [mapi_over_http_long_term_id_round_trips_canonical_replica_ids](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_long_term_id_round_trips_canonical_replica_ids.md) — Rust Function
 - [mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end](../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end.md) — Rust Function
@@ -8612,6 +8620,7 @@
 - [mapi_over_http_associated_config_content_sync_exports_deletes](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_associated_config_content_sync_exports_deletes.md) — Rust Function
 - [mapi_over_http_associated_config_delete_does_not_allocate_identity](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_associated_config_delete_does_not_allocate_identity.md) — Rust Function
 - [mapi_over_http_associated_message_uploads_do_not_create_visible_items](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_associated_message_uploads_do_not_create_visible_items.md) — Rust Function
+- [mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subject](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subject.md) — Rust Function
 - [mapi_over_http_calendar_sync_import_conflict_keeps_the_newer_server_content](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_conflict_keeps_the_newer_server_content.md) — Rust Function
 - [mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_lists](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_lists.md) — Rust Function
 - [mapi_over_http_calendar_sync_import_fail_on_conflict_returns_sync_conflict](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_fail_on_conflict_returns_sync_conflict.md) — Rust Function
@@ -9640,6 +9649,7 @@
 - [task_state_fingerprint](../functions/crates/lpe-jmap/src/service/helpers/task_state_fingerprint.md) — Rust Function
 - [trim_snippet](../functions/crates/lpe-jmap/src/service/helpers/trim_snippet.md) — Rust Function
 - [validate_declared_capabilities](../functions/crates/lpe-jmap/src/service/helpers/validate_declared_capabilities.md) — Rust Function
+- [websocket_authentication_accepts_the_same_origin_mail_session_cookie](../functions/crates/lpe-jmap/src/service/helpers/websocket_authentication_accepts_the_same_origin_mail_session_cookie.md) — Rust Function
 - [email_delivery_object_state](../functions/crates/lpe-jmap/src/service/object_state/JmapService/email_delivery_object_state.md) — Rust Method
 - [email_submission_object_state](../functions/crates/lpe-jmap/src/service/object_state/JmapService/email_submission_object_state.md) — Rust Method
 - [email_submission_object_state_entries](../functions/crates/lpe-jmap/src/service/object_state/JmapService/email_submission_object_state_entries.md) — Rust Method
@@ -11396,6 +11406,7 @@
 - [map_contact](../functions/crates/lpe-storage/src/workspace/map_contact.md) — Rust Function
 - [map_event](../functions/crates/lpe-storage/src/workspace/map_event.md) — Rust Function
 - [merge_contact_update_input](../functions/crates/lpe-storage/src/workspace/merge_contact_update_input.md) — Rust Function
+- [workspace_contact_and_event_json_use_client_camel_case_contracts](../functions/crates/lpe-storage/src/workspace/workspace_contact_and_event_json_use_client_camel_case_contracts.md) — Rust Function
 - [cleanup](../functions/crates/lpe-storage/tests/mapi_contact_create/ContactFixture/cleanup.md) — Rust Method
 - [armed](../functions/crates/lpe-storage/tests/mapi_contact_create/TestSchemaCleanup/armed.md) — Rust Method
 - [disarm](../functions/crates/lpe-storage/tests/mapi_contact_create/TestSchemaCleanup/disarm.md) — Rust Method

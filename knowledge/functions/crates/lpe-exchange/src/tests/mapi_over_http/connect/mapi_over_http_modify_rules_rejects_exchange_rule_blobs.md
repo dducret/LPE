@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_modify_rules_rejects_exchange_rule_blobs
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3460-L3497
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3485-L3522
 visibility: private
 generated:
   by: okf-rs/0.3.0

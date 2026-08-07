@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_fai_only_sync_does_not_project_synthetic_configuration
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7117-L7222
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7122-L7227
 visibility: private
 generated:
   by: okf-rs/0.3.0

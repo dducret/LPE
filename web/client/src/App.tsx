@@ -38,7 +38,7 @@ async function apiJson<T>(path: string, options: RequestInit = {}): Promise<T> {
 export function App() {
   const [locale, setLocale] = React.useState<Locale>(getInitialLocale);
   const copy = messages[locale];
-  const [authToken, setAuthToken] = React.useState<string | null>(() => window.localStorage.getItem("lpe.client.token"));
+  const [authToken, setAuthToken] = React.useState<string | null>("session");
   const [identity, setIdentity] = React.useState<ClientIdentity | null>(null);
   const workspace = useClientWorkspace(copy, authToken, identity);
   const [loginForm, setLoginForm] = React.useState({ email: "", password: "", totp_code: "" });
@@ -56,25 +56,13 @@ export function App() {
   }, [locale]);
 
   React.useEffect(() => {
-    authToken ? window.localStorage.setItem("lpe.client.token", authToken) : window.localStorage.removeItem("lpe.client.token");
-  }, [authToken]);
-
-  React.useEffect(() => {
-    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-    const clientToken = hash.get("client_token");
-    if (!clientToken) return;
-    setAuthToken(clientToken);
-    window.history.replaceState(null, "", window.location.pathname + window.location.search);
-  }, []);
-
-  React.useEffect(() => {
     if (!authToken) {
       setIdentity(null);
       return;
     }
 
     let cancelled = false;
-    apiJson<ClientIdentity>("mail/auth/me", { headers: { Authorization: `Bearer ${authToken}` } })
+    apiJson<ClientIdentity>("mail/auth/me")
       .then((account) => {
         if (!cancelled) setIdentity(account);
       })
@@ -120,7 +108,7 @@ export function App() {
         method: "POST",
         body: JSON.stringify(loginForm)
       });
-      setAuthToken(response.token);
+      setAuthToken("session");
       setIdentity(response.account);
       setLoginForm((current) => ({ ...current, password: "", totp_code: "" }));
     } catch {
@@ -145,9 +133,7 @@ export function App() {
   }
 
   async function logoutClient() {
-    if (authToken) {
-      await apiJson("mail/auth/logout", { method: "POST", headers: { Authorization: `Bearer ${authToken}` } }).catch(() => undefined);
-    }
+    if (authToken) await apiJson("mail/auth/logout", { method: "POST" }).catch(() => undefined);
     setAuthToken(null);
     setIdentity(null);
     setAccountMenuOpen(false);
@@ -300,8 +286,8 @@ export function App() {
               <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => workspace.openComposer("new")}>{copy.compose}</Button>
             </div>
             <div className="workspace-toolbar-summary">
-              {isMailWorkspace ? <span className="workspace-chip">{`Unread ${unreadCount}`}</span> : null}
-              {isMailWorkspace ? <span className="workspace-chip">{`Attachments ${attachmentCount}`}</span> : null}
+              {isMailWorkspace ? <span className="workspace-chip">{copy.summaryUnread.replace("{count}", String(unreadCount))}</span> : null}
+              {isMailWorkspace ? <span className="workspace-chip">{copy.attachmentCount.replace("{count}", String(attachmentCount))}</span> : null}
               <Button variant="ghost" type="button" onClick={() => void workspace.refreshWorkspace()}>{copy.topActions.sync}</Button>
               <label className="locale-picker compact">
                 <span>{copy.languageLabel}</span>
@@ -318,7 +304,7 @@ export function App() {
               <h1>{workspaceTitle}</h1>
             </div>
             <div className="workspace-hero-meta">
-              <span className="workspace-stat-pill">{`${visibleCount} visible`}</span>
+              <span className="workspace-stat-pill">{copy.messageCount.replace("{count}", String(visibleCount))}</span>
               <span className="workspace-stat-pill">{`${copy.syncStatus.push}: ${pushState}`}</span>
               <span className="workspace-stat-pill is-soft">{copy.productSubtitle}</span>
             </div>

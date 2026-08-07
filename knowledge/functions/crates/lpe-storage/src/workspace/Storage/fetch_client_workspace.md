@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_client_workspace
-resource: crates/lpe-storage/src/workspace.rs#L203-L369
+resource: crates/lpe-storage/src/workspace.rs#L205-L371
 generated:
   by: okf-rs/0.3.0
 relationships:

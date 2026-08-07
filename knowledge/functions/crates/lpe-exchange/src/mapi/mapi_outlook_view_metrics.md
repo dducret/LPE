@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_outlook_view_metrics
-resource: crates/lpe-exchange/src/mapi.rs#L277-L339
+resource: crates/lpe-exchange/src/mapi.rs#L282-L344
 generated:
   by: okf-rs/0.3.0
 relationships:

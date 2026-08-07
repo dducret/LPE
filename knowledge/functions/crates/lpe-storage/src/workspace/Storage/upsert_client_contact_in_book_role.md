@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_client_contact_in_book_role
-resource: crates/lpe-storage/src/workspace.rs#L379-L626
+resource: crates/lpe-storage/src/workspace.rs#L381-L628
 generated:
   by: okf-rs/0.3.0
 relationships:

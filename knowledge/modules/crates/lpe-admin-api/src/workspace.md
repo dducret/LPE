@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: workspace
-resource: crates/lpe-admin-api/src/workspace.rs#L1-L1487
+resource: crates/lpe-admin-api/src/workspace.rs#L1-L1503
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -68,6 +68,7 @@ relationships:
 - [contact_input_from_request](../../../../functions/crates/lpe-admin-api/src/workspace/contact_input_from_request.md)
 - [client_contact_from_accessible](../../../../functions/crates/lpe-admin-api/src/workspace/client_contact_from_accessible.md)
 - [upsert_client_event](../../../../functions/crates/lpe-admin-api/src/workspace/upsert_client_event.md)
+- [preserve_empty](../../../../functions/crates/lpe-admin-api/src/workspace/preserve_empty.md)
 - [delete_client_event](../../../../functions/crates/lpe-admin-api/src/workspace/delete_client_event.md)
 - [list_client_tasks](../../../../functions/crates/lpe-admin-api/src/workspace/list_client_tasks.md)
 - [list_client_task_lists](../../../../functions/crates/lpe-admin-api/src/workspace/list_client_task_lists.md)

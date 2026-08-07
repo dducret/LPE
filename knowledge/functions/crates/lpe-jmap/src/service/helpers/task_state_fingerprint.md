@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_state_fingerprint
-resource: crates/lpe-jmap/src/service/helpers.rs#L780-L792
+resource: crates/lpe-jmap/src/service/helpers.rs#L811-L823
 generated:
   by: okf-rs/0.3.0
 relationships:

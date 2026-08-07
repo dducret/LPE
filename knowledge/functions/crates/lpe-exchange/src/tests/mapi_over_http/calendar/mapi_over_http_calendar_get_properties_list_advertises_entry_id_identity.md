@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_get_properties_list_advertises_entry_id_identity
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10684-L10704
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10713-L10733
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_notification_wait_reports_content_event_after_registered_save
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3823-L3873
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3848-L3898
 visibility: private
 generated:
   by: okf-rs/0.3.0

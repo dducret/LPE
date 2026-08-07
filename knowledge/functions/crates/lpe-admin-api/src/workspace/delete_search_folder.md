@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_search_folder
-resource: crates/lpe-admin-api/src/workspace.rs#L1121-L1132
+resource: crates/lpe-admin-api/src/workspace.rs#L1137-L1148
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_receive_folder_maps_appointments_to_calendar
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10852-L10864
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10881-L10893
 visibility: private
 generated:
   by: okf-rs/0.3.0

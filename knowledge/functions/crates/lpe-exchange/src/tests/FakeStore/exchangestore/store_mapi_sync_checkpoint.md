@@ -14,7 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_fai_only_sync_does_not_project_synthetic_configuration
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contacts_sync_exports_associated_config_deletes
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_content_sync_exports_deletes
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql
@@ -56,7 +56,7 @@ relationships:
 - [mapi_over_http_calendar_fai_only_sync_does_not_project_synthetic_configuration](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_fai_only_sync_does_not_project_synthetic_configuration.md)
 - [mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts.md)
 - [mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets.md)
-- [mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection.md)
+- [mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection.md)
 - [mapi_over_http_contacts_sync_exports_associated_config_deletes](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contacts_sync_exports_associated_config_deletes.md)
 - [mapi_over_http_contact_content_sync_exports_deletes](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_content_sync_exports_deletes.md)
 - [mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql.md)

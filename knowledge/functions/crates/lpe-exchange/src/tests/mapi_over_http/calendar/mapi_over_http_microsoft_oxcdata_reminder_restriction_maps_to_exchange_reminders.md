@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxcdata_reminder_restriction_maps_to_exchange_reminders
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L9817-L9932
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L9846-L9961
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_receive_folder_calendar_fid_opens_default_calendar_with_custom_only_collections
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8673-L8728
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8702-L8757
 visibility: private
 generated:
   by: okf-rs/0.3.0

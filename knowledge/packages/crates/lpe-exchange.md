@@ -98,6 +98,7 @@ generated:
 - [execute](../../modules/crates/lpe-exchange/src/mapi/dispatch/tests/execute.md)
 - [folders](../../modules/crates/lpe-exchange/src/mapi/dispatch/tests/folders.md)
 - [unsupported](../../modules/crates/lpe-exchange/src/mapi/dispatch/unsupported.md)
+- [event_metrics](../../modules/crates/lpe-exchange/src/mapi/event_metrics.md)
 - [identity](../../modules/crates/lpe-exchange/src/mapi/identity.md)
 - [notification_metrics](../../modules/crates/lpe-exchange/src/mapi/notification_metrics.md)
 - [notifications](../../modules/crates/lpe-exchange/src/mapi/notifications.md)

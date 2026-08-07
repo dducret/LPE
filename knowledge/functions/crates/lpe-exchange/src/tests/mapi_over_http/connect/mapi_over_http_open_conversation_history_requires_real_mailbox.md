@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_conversation_history_requires_real_mailbox
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3080-L3119
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3105-L3144
 visibility: private
 generated:
   by: okf-rs/0.3.0

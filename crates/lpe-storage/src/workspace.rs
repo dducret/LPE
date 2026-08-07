@@ -47,6 +47,7 @@ pub struct ClientMessage {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientEvent {
     pub id: Uuid,
     pub uid: String,
@@ -70,6 +71,7 @@ pub struct ClientEvent {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientContact {
     pub id: Uuid,
     pub address_book_id: String,
@@ -1450,7 +1452,7 @@ fn client_address_book_id_for_role(role: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        client_folder, json_text_matches, merge_contact_update_input, ClientContact,
+        client_folder, json_text_matches, merge_contact_update_input, ClientContact, ClientEvent,
         ContactSourceFields, UpsertClientContactInput, Value,
     };
     use serde_json::json;
@@ -1460,6 +1462,43 @@ mod tests {
     fn client_folder_preserves_trash_role() {
         assert_eq!(client_folder("trash"), "trash");
         assert_eq!(client_folder("unknown"), "inbox");
+    }
+
+    #[test]
+    fn workspace_contact_and_event_json_use_client_camel_case_contracts() {
+        let contact = ClientContact {
+            id: Uuid::from_u128(1),
+            address_book_id: "default".to_string(),
+            ..ClientContact::default()
+        };
+        let event = ClientEvent {
+            id: Uuid::from_u128(2),
+            uid: "event-1".to_string(),
+            date: "2026-08-07".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 60,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 1,
+            recurrence_rule: "".to_string(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Planning".to_string(),
+            location: "Room 1".to_string(),
+            organizer_json: "{}".to_string(),
+            attendees: "".to_string(),
+            attendees_json: "[]".to_string(),
+            notes: "".to_string(),
+            body_html: "".to_string(),
+        };
+
+        let contact = serde_json::to_value(contact).unwrap();
+        let event = serde_json::to_value(event).unwrap();
+        assert_eq!(contact["addressBookId"], "default");
+        assert!(contact.get("address_book_id").is_none());
+        assert_eq!(event["timeZone"], "Europe/Berlin");
+        assert!(event.get("time_zone").is_none());
     }
 
     #[test]

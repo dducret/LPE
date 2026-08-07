@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: authorization_header
-resource: crates/lpe-jmap/src/service/helpers.rs#L646-L651
+resource: crates/lpe-jmap/src/service/helpers.rs#L646-L663
 generated:
   by: okf-rs/0.3.0
 relationships:

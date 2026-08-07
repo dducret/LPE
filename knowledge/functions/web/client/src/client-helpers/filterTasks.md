@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: filterTasks
-resource: web/client/src/client-helpers.ts#L102-L107
+resource: web/client/src/client-helpers.ts#L103-L108
 generated:
   by: okf-rs/0.3.0
 relationships:

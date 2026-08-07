@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: metrics_enabled
-resource: crates/lpe-admin-api/src/observability.rs#L478-L488
+resource: crates/lpe-admin-api/src/observability.rs#L506-L516
 visibility: private
 generated:
   by: okf-rs/0.3.0

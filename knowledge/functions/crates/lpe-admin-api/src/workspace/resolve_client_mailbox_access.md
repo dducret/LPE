@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: resolve_client_mailbox_access
-resource: crates/lpe-admin-api/src/workspace.rs#L1366-L1382
+resource: crates/lpe-admin-api/src/workspace.rs#L1382-L1398
 visibility: private
 generated:
   by: okf-rs/0.3.0

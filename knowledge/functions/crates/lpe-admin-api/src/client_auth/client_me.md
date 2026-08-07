@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: client_me
-resource: crates/lpe-admin-api/src/client_auth.rs#L144-L149
+resource: crates/lpe-admin-api/src/client_auth.rs#L147-L152
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: MapiFolderPurgeMetrics
-resource: crates/lpe-exchange/src/mapi.rs#L119-L124
+resource: crates/lpe-exchange/src/mapi.rs#L124-L129
 generated:
   by: okf-rs/0.3.0
 ---

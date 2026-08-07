@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_ms_oxosfld_calendar_lookup_chain_opens_calendar_from_inbox
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10009-L10081
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10038-L10110
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: forwarded_header
-resource: crates/lpe-admin-api/src/http.rs#L32-L40
+resource: crates/lpe-admin-api/src/http.rs#L46-L54
 generated:
   by: okf-rs/0.3.0
 relationships:

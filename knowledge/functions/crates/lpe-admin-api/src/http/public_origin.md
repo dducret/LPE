@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: public_origin
-resource: crates/lpe-admin-api/src/http.rs#L21-L30
+resource: crates/lpe-admin-api/src/http.rs#L35-L44
 generated:
   by: okf-rs/0.3.0
 relationships:

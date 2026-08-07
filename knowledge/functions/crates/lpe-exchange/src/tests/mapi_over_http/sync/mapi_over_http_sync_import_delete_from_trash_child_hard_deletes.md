@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_delete_from_trash_child_hard_deletes
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15297-L15358
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15359-L15420
 visibility: private
 generated:
   by: okf-rs/0.3.0

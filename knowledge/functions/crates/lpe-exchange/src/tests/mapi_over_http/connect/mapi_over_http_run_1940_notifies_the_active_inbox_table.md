@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_run_1940_notifies_the_active_inbox_table
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4033-L4202
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4058-L4227
 visibility: private
 generated:
   by: okf-rs/0.3.0

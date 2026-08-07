@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: filterContacts
-resource: web/client/src/client-helpers.ts#L94-L100
+resource: web/client/src/client-helpers.ts#L95-L101
 generated:
   by: okf-rs/0.3.0
 relationships:

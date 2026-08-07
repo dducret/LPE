@@ -1,6 +1,6 @@
 export type Section = "mail" | "calendar" | "contacts" | "tasks" | "notes" | "journal" | "reminders" | "settings";
 export type Folder = "focused" | "inbox" | "drafts" | "sent" | "archive" | "trash" | "junk" | "outbox" | "rss_feeds" | "conversation_history" | "sync_issues" | "conflicts" | "local_failures" | "server_failures";
-export type ContactBookId = "default" | "suggested_contacts" | "quick_contacts" | "im_contact_list";
+export type ContactBookId = string;
 export type Mode = "closed" | "new" | "draft" | "reply" | "forward";
 
 export type Attachment = {
@@ -65,6 +65,7 @@ export type MessageDraft = {
   senderMode: "send_as" | "send_on_behalf";
   to: string;
   cc: string;
+  bcc: string;
   subject: string;
   body: string;
 };

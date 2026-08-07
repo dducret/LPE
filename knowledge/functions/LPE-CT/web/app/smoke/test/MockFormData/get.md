@@ -72,6 +72,7 @@ relationships:
   - functions/crates/lpe-admin-api/src/client_config/header_value
   - functions/crates/lpe-admin-api/src/client_config/safe_header
   - functions/crates/lpe-admin-api/src/http/bearer_token
+  - functions/crates/lpe-admin-api/src/http/account_session_token
   - functions/crates/lpe-admin-api/src/http/forwarded_header
   - functions/crates/lpe-admin-api/src/integration/require_integration
   - functions/crates/lpe-admin-api/src/integration/required_header
@@ -987,7 +988,6 @@ relationships:
   - functions/tools/rca_outlook_trace_summary/visible_release_associated_prefix_issue_buckets
   - functions/tools/rca_outlook_trace_summary/visible_release_needs_action
   - functions/web/admin/src/App
-  - functions/web/client/src/App/App
 ---
 
 # Signature
@@ -1062,6 +1062,7 @@ relationships:
 - [header_value](../../../../../../../functions/crates/lpe-admin-api/src/client_config/header_value.md)
 - [safe_header](../../../../../../../functions/crates/lpe-admin-api/src/client_config/safe_header.md)
 - [bearer_token](../../../../../../../functions/crates/lpe-admin-api/src/http/bearer_token.md)
+- [account_session_token](../../../../../../../functions/crates/lpe-admin-api/src/http/account_session_token.md)
 - [forwarded_header](../../../../../../../functions/crates/lpe-admin-api/src/http/forwarded_header.md)
 - [require_integration](../../../../../../../functions/crates/lpe-admin-api/src/integration/require_integration.md)
 - [required_header](../../../../../../../functions/crates/lpe-admin-api/src/integration/required_header.md)
@@ -1977,4 +1978,3 @@ relationships:
 - [visible_release_associated_prefix_issue_buckets](../../../../../../../functions/tools/rca_outlook_trace_summary/visible_release_associated_prefix_issue_buckets.md)
 - [visible_release_needs_action](../../../../../../../functions/tools/rca_outlook_trace_summary/visible_release_needs_action.md)
 - [App](../../../../../../../functions/web/admin/src/App.md)
-- [App](../../../../../../../functions/web/client/src/App/App.md)

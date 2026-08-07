@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_abandons
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L5834-L5992
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L5839-L5997
 visibility: private
 generated:
   by: okf-rs/0.3.0

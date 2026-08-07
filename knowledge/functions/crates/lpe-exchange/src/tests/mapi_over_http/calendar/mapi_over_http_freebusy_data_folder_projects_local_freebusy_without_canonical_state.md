@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_freebusy_data_folder_projects_local_freebusy_without_canonical_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6228-L6296
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6233-L6301
 visibility: private
 generated:
   by: okf-rs/0.3.0

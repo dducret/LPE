@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_mapi_outlook_view_bootstrap_stall
-resource: crates/lpe-exchange/src/mapi.rs#L252-L270
+resource: crates/lpe-exchange/src/mapi.rs#L257-L275
 generated:
   by: okf-rs/0.3.0
 relationships:

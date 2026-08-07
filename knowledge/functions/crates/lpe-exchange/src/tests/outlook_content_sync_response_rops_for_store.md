@@ -13,7 +13,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_download_uses_uploaded_ics_state_without_server_checkpoint
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets
-  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contacts_sync_exports_associated_config_deletes
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_content_sync_exports_deletes
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_sync_orders_special_messages_by_last_modification
@@ -46,7 +46,7 @@ relationships:
 - [mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event.md)
 - [mapi_over_http_calendar_download_uses_uploaded_ics_state_without_server_checkpoint](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_download_uses_uploaded_ics_state_without_server_checkpoint.md)
 - [mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets.md)
-- [mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection.md)
+- [mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection.md)
 - [mapi_over_http_contacts_sync_exports_associated_config_deletes](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contacts_sync_exports_associated_config_deletes.md)
 - [mapi_over_http_contact_content_sync_exports_deletes](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_contact_content_sync_exports_deletes.md)
 - [mapi_over_http_outlook_contact_sync_orders_special_messages_by_last_modification](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/contacts/mapi_over_http_outlook_contact_sync_orders_special_messages_by_last_modification.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: RecipientSuggestion
-resource: crates/lpe-storage/src/workspace.rs#L168-L176
+resource: crates/lpe-storage/src/workspace.rs#L170-L178
 generated:
   by: okf-rs/0.3.0
 ---

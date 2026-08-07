@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: revoke_account_app_password
-resource: crates/lpe-admin-api/src/client_auth.rs#L325-L353
+resource: crates/lpe-admin-api/src/client_auth.rs#L328-L356
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: connect
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1-L6021
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1-L6046
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -44,7 +44,7 @@ relationships:
 - [mapi_over_http_common_views_create_group_header_and_link_persists_and_reloads](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_common_views_create_group_header_and_link_persists_and_reloads.md)
 - [mapi_over_http_microsoft_oxocfg_same_target_wlinks_round_trip_distinctly](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_microsoft_oxocfg_same_target_wlinks_round_trip_distinctly.md)
 - [mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthetic_read_sets.md)
-- [mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_client_state_controls_baseline_versus_delta_selection.md)
+- [mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection.md)
 - [mapi_over_http_open_conversation_history_requires_real_mailbox](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_open_conversation_history_requires_real_mailbox.md)
 - [mapi_over_http_real_conversation_history_open_props_contents_and_notifications_succeed](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_real_conversation_history_open_props_contents_and_notifications_succeed.md)
 - [mapi_over_http_fast_transfer_copy_messages_filters_to_requested_canonical_messages](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_fast_transfer_copy_messages_filters_to_requested_canonical_messages.md)

@@ -6,6 +6,7 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
+  - functions/crates/lpe-admin-api/src/http/account_session_token
   - functions/crates/lpe-storage/src/auth/Storage/fetch_admin_session
   - functions/crates/lpe-admin-api/src/access/admin_has_right
   called_by:
@@ -55,6 +56,7 @@ relationships:
 
 # Calls
 
+- [account_session_token](../../../../../functions/crates/lpe-admin-api/src/http/account_session_token.md)
 - [fetch_admin_session](../../../../../functions/crates/lpe-storage/src/auth/Storage/fetch_admin_session.md)
 - [admin_has_right](../../../../../functions/crates/lpe-admin-api/src/access/admin_has_right.md)
 

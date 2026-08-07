@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_whole_start_end_update_canonical_event
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4860-L4971
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4860-L4976
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -20,6 +20,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/execute_body
   - functions/crates/lpe-exchange/src/tests/response_bytes
   - functions/crates/lpe-exchange/src/tests/response_rops_and_handles_from_execute_body
+  - functions/crates/lpe-exchange/src/mapi/event_metrics/mapi_calendar_event_save_metrics
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/save_staged_calendar_event
 ---
 
@@ -42,4 +43,5 @@ relationships:
 - [execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/execute_body.md)
 - [response_bytes](../../../../../../../functions/crates/lpe-exchange/src/tests/response_bytes.md)
 - [response_rops_and_handles_from_execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/response_rops_and_handles_from_execute_body.md)
+- [mapi_calendar_event_save_metrics](../../../../../../../functions/crates/lpe-exchange/src/mapi/event_metrics/mapi_calendar_event_save_metrics.md)
 - [save_staged_calendar_event](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/save_staged_calendar_event.md)

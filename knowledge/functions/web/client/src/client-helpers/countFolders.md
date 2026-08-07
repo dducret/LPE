@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: countFolders
-resource: web/client/src/client-helpers.ts#L61-L81
+resource: web/client/src/client-helpers.ts#L62-L82
 generated:
   by: okf-rs/0.3.0
 relationships:

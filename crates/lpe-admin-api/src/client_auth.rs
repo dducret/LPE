@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path as AxumPath, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::Redirect,
     Json,
 };
@@ -12,7 +12,7 @@ use lpe_storage::{AuditEntryInput, AuthenticatedAccount, HealthResponse, Storage
 
 use crate::{
     account_oidc,
-    http::{bad_request_error, internal_error, public_origin},
+    http::{account_session_token, bad_request_error, internal_error, public_origin},
     require_account,
     security::{
         client_oauth_access_token_seconds, client_session_minutes, generate_app_password_secret,
@@ -31,7 +31,7 @@ use crate::{
 pub(crate) async fn client_login(
     State(storage): State<Storage>,
     Json(request): Json<LoginRequest>,
-) -> ApiResult<ClientLoginResponse> {
+) -> Result<(HeaderMap, Json<ClientLoginResponse>), (StatusCode, String)> {
     let security = storage
         .fetch_admin_dashboard()
         .await
@@ -122,23 +122,26 @@ pub(crate) async fn client_login(
             "session creation failed".to_string(),
         ))?;
 
-    Ok(Json(ClientLoginResponse { token, account }))
+    Ok((mail_session_headers(&token), Json(ClientLoginResponse { token, account })))
 }
 
 pub(crate) async fn client_logout(
     State(storage): State<Storage>,
     headers: HeaderMap,
-) -> ApiResult<HealthResponse> {
-    if let Some(token) = crate::http::bearer_token(&headers) {
+) -> Result<(HeaderMap, Json<HealthResponse>), (StatusCode, String)> {
+    if let Some(token) = account_session_token(&headers) {
         storage
             .delete_account_session(&token)
             .await
             .map_err(internal_error)?;
     }
-    Ok(Json(HealthResponse {
-        service: "lpe-admin-api",
-        status: "ok",
-    }))
+    Ok((
+        cleared_mail_session_headers(),
+        Json(HealthResponse {
+            service: "lpe-admin-api",
+            status: "ok",
+        }),
+    ))
 }
 
 pub(crate) async fn client_me(
@@ -432,7 +435,7 @@ pub(crate) async fn client_oidc_callback(
     State(storage): State<Storage>,
     headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<Redirect, (StatusCode, String)> {
+) -> Result<(HeaderMap, Redirect), (StatusCode, String)> {
     let code = params
         .get("code")
         .cloned()
@@ -513,5 +516,28 @@ pub(crate) async fn client_oidc_callback(
             },
         )
         .await;
-    Ok(Redirect::to(&format!("/mail/#client_token={token}")))
+    Ok((mail_session_headers(&token), Redirect::to("/mail/")))
+}
+
+fn mail_session_headers(token: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "set-cookie",
+        HeaderValue::from_str(&format!(
+            "lpe_mail_session={token}; Path=/; HttpOnly; Secure; SameSite=Strict"
+        ))
+        .expect("session tokens are UUIDs"),
+    );
+    headers
+}
+
+fn cleared_mail_session_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "set-cookie",
+        HeaderValue::from_static(
+            "lpe_mail_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0",
+        ),
+    );
+    headers
 }

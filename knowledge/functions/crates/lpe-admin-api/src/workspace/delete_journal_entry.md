@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_journal_entry
-resource: crates/lpe-admin-api/src/workspace.rs#L1069-L1080
+resource: crates/lpe-admin-api/src/workspace.rs#L1085-L1096
 generated:
   by: okf-rs/0.3.0
 relationships:

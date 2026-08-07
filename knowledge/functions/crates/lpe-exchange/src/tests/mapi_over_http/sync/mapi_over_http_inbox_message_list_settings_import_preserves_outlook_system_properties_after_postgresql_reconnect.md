@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L17456-L17714
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L17518-L17776
 visibility: private
 generated:
   by: okf-rs/0.3.0

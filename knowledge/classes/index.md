@@ -383,6 +383,9 @@
 - [HierarchyResponseMetricSummary](../classes/crates/lpe-exchange/src/mapi/dispatch/table_diagnostics/hierarchy_response/HierarchyResponseMetricSummary.md) — Rust Struct
 - [VisibleInboxProjectionAudit](../classes/crates/lpe-exchange/src/mapi/dispatch/table_lifecycle/VisibleInboxProjectionAudit.md) — Rust Struct
 - [SaveDisposition](../classes/crates/lpe-exchange/src/mapi/dispatch/table_validation/SaveDisposition.md) — Rust Enum
+- [MapiCalendarEventSaveFlow](../classes/crates/lpe-exchange/src/mapi/event_metrics/MapiCalendarEventSaveFlow.md) — Rust Enum
+- [MapiCalendarEventSaveMetrics](../classes/crates/lpe-exchange/src/mapi/event_metrics/MapiCalendarEventSaveMetrics.md) — Rust Struct
+- [MapiCalendarEventSaveOutcome](../classes/crates/lpe-exchange/src/mapi/event_metrics/MapiCalendarEventSaveOutcome.md) — Rust Enum
 - [MapiIdentityCodec](../classes/crates/lpe-exchange/src/mapi/identity/MapiIdentityCodec.md) — Rust Struct
 - [MapiIdentityMaterial](../classes/crates/lpe-exchange/src/mapi/identity/MapiIdentityMaterial.md) — Rust Struct
 - [MapiRequestIdentityScope](../classes/crates/lpe-exchange/src/mapi/identity/MapiRequestIdentityScope.md) — Rust Struct

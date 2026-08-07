@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_local
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L5274-L5488
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L5279-L5493
 visibility: private
 generated:
   by: okf-rs/0.3.0

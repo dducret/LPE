@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-storage/src/tasks/Storage/ensure_default_task_list
   called_by:
   - functions/crates/lpe-admin-api/src/workspace/get_client_task
+  - functions/crates/lpe-admin-api/src/workspace/upsert_client_task
   - functions/crates/lpe-jmap/src/store/Storage/jmapstore/fetch_jmap_tasks_by_ids
   - functions/crates/lpe-storage/src/tasks/Storage/upsert_client_task
   - functions/crates/lpe-storage/src/tasks/Storage/update_accessible_task_reminder
@@ -28,6 +29,7 @@ relationships:
 # Called by
 
 - [get_client_task](../../../../../../functions/crates/lpe-admin-api/src/workspace/get_client_task.md)
+- [upsert_client_task](../../../../../../functions/crates/lpe-admin-api/src/workspace/upsert_client_task.md)
 - [fetch_jmap_tasks_by_ids](../../../../../../functions/crates/lpe-jmap/src/store/Storage/jmapstore/fetch_jmap_tasks_by_ids.md)
 - [upsert_client_task](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/upsert_client_task.md)
 - [update_accessible_task_reminder](../../../../../../functions/crates/lpe-storage/src/tasks/Storage/update_accessible_task_reminder.md)

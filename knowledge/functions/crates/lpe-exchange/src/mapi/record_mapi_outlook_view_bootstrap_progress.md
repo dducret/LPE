@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_mapi_outlook_view_bootstrap_progress
-resource: crates/lpe-exchange/src/mapi.rs#L235-L250
+resource: crates/lpe-exchange/src/mapi.rs#L240-L255
 generated:
   by: okf-rs/0.3.0
 relationships:

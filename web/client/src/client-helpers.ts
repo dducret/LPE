@@ -5,6 +5,7 @@ export const blankDraft = (mailboxAccountId = ""): MessageDraft => ({
   senderMode: "send_as",
   to: "",
   cc: "",
+  bcc: "",
   subject: "",
   body: ""
 });

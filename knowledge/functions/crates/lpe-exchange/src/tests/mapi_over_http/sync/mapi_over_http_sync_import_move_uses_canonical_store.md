@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_move_uses_canonical_store
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15361-L15454
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15423-L15516
 visibility: private
 generated:
   by: okf-rs/0.3.0

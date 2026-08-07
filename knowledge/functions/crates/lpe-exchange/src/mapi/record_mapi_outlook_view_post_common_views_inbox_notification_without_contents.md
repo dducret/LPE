@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_mapi_outlook_view_post_common_views_inbox_notification_without_contents
-resource: crates/lpe-exchange/src/mapi.rs#L187-L190
+resource: crates/lpe-exchange/src/mapi.rs#L192-L195
 generated:
   by: okf-rs/0.3.0
 relationships:

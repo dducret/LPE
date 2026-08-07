@@ -18,6 +18,20 @@ pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<String> {
         .map(ToString::to_string)
 }
 
+pub(crate) fn account_session_token(headers: &HeaderMap) -> Option<String> {
+    bearer_token(headers).or_else(|| {
+        headers
+            .get("cookie")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| {
+                value.split(';').find_map(|item| {
+                    let (name, token) = item.trim().split_once('=')?;
+                    (name == "lpe_mail_session" && !token.is_empty()).then(|| token.to_string())
+                })
+            })
+    })
+}
+
 pub(crate) fn public_origin(headers: &HeaderMap) -> String {
     let scheme = forwarded_header(headers, "x-forwarded-proto")
         .or_else(|| env::var("LPE_PUBLIC_SCHEME").ok())
@@ -37,4 +51,20 @@ pub(crate) fn forwarded_header(headers: &HeaderMap, name: &str) -> Option<String
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::account_session_token;
+    use axum::http::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn account_session_cookie_authenticates_without_a_browser_set_authorization_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "cookie",
+            HeaderValue::from_static("theme=dark; lpe_mail_session=session-token"),
+        );
+        assert_eq!(account_session_token(&headers).as_deref(), Some("session-token"));
+    }
 }

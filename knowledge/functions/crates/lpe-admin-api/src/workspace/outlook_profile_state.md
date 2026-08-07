@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_profile_state
-resource: crates/lpe-admin-api/src/workspace.rs#L1134-L1141
+resource: crates/lpe-admin-api/src/workspace.rs#L1150-L1157
 generated:
   by: okf-rs/0.3.0
 relationships:

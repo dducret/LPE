@@ -1,13 +1,14 @@
 ---
 type: Rust Function
 title: save_existing_event
-resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L146-L291
+resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L146-L332
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id
+  - functions/crates/lpe-exchange/src/mapi/event_metrics/record_mapi_calendar_event_save
   - functions/crates/lpe-exchange/src/mapi/rop/errors/rop_error_response
   - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/response_handle_index
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/event_handle_is_writable
@@ -36,6 +37,7 @@ relationships:
 
 - [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
 - [event_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id.md)
+- [record_mapi_calendar_event_save](../../../../../../../functions/crates/lpe-exchange/src/mapi/event_metrics/record_mapi_calendar_event_save.md)
 - [rop_error_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/errors/rop_error_response.md)
 - [response_handle_index](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/response_handle_index.md)
 - [event_handle_is_writable](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/event_handle_is_writable.md)

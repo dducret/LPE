@@ -24,6 +24,7 @@ relationships:
   - functions/crates/lpe-activesync/src/service/sync_helpers/decode_sync_state
   - functions/crates/lpe-activesync/src/tests/bearer_headers_with_protocol_version
   - functions/crates/lpe-activesync/src/tests/enforced_mode_validates_later_command_policy_key
+  - functions/crates/lpe-admin-api/src/client_auth/mail_session_headers
   - functions/crates/lpe-admin-api/src/client_config/tests/parse_xml
   - functions/crates/lpe-admin-api/src/observability/observe_http
   - functions/crates/lpe-admin-api/src/types/patch_contact_raw_vcard_distinguishes_omitted_null_and_value
@@ -703,6 +704,7 @@ relationships:
 - [decode_sync_state](../../../../../../functions/crates/lpe-activesync/src/service/sync_helpers/decode_sync_state.md)
 - [bearer_headers_with_protocol_version](../../../../../../functions/crates/lpe-activesync/src/tests/bearer_headers_with_protocol_version.md)
 - [enforced_mode_validates_later_command_policy_key](../../../../../../functions/crates/lpe-activesync/src/tests/enforced_mode_validates_later_command_policy_key.md)
+- [mail_session_headers](../../../../../../functions/crates/lpe-admin-api/src/client_auth/mail_session_headers.md)
 - [parse_xml](../../../../../../functions/crates/lpe-admin-api/src/client_config/tests/parse_xml.md)
 - [observe_http](../../../../../../functions/crates/lpe-admin-api/src/observability/observe_http.md)
 - [patch_contact_raw_vcard_distinguishes_omitted_null_and_value](../../../../../../functions/crates/lpe-admin-api/src/types/patch_contact_raw_vcard_distinguishes_omitted_null_and_value.md)

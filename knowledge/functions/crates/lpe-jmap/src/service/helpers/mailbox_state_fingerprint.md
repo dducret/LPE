@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_state_fingerprint
-resource: crates/lpe-jmap/src/service/helpers.rs#L703-L739
+resource: crates/lpe-jmap/src/service/helpers.rs#L734-L770
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: identity_state_fingerprint
-resource: crates/lpe-jmap/src/service/helpers.rs#L691-L701
+resource: crates/lpe-jmap/src/service/helpers.rs#L722-L732
 generated:
   by: okf-rs/0.3.0
 relationships:

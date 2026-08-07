@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_fast_transfer_destination_rejects_wrong_target_handle
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3312-L3329
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3337-L3354
 visibility: private
 generated:
   by: okf-rs/0.3.0

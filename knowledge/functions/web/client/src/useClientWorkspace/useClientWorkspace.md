@@ -1,12 +1,13 @@
 ---
 type: TypeScript Function
 title: useClientWorkspace
-resource: web/client/src/useClientWorkspace.ts#L130-L1088
+resource: web/client/src/useClientWorkspace.ts#L130-L1107
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/LPE-CT/web/app/smoke/test/MockElement/addEventListener
+  - functions/crates/lpe-storage/src/core/Storage/connect
   - functions/web/client/src/client-helpers/countFolders
   - functions/web/client/src/client-helpers/filterMessages
   - functions/crates/lpe-exchange/src/mapi_mailstore/FastTransferDirectPropertyFilter/includes
@@ -31,6 +32,7 @@ relationships:
 # Calls
 
 - [addEventListener](../../../../../functions/LPE-CT/web/app/smoke/test/MockElement/addEventListener.md)
+- [connect](../../../../../functions/crates/lpe-storage/src/core/Storage/connect.md)
 - [countFolders](../../../../../functions/web/client/src/client-helpers/countFolders.md)
 - [filterMessages](../../../../../functions/web/client/src/client-helpers/filterMessages.md)
 - [includes](../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/FastTransferDirectPropertyFilter/includes.md)

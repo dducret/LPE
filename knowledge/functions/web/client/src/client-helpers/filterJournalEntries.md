@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: filterJournalEntries
-resource: web/client/src/client-helpers.ts#L116-L121
+resource: web/client/src/client-helpers.ts#L117-L122
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3921-L4030
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3946-L4055
 visibility: private
 generated:
   by: okf-rs/0.3.0

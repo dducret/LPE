@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_delete_ignores_transient_trash_artifact
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L14106-L14151
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L14168-L14213
 visibility: private
 generated:
   by: okf-rs/0.3.0

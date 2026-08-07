@@ -29,6 +29,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_open_message_resolves_virtual_local_freebusy_without_folder_id
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_open_message_projects_default_collection_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_custom_collection_attachment_is_hidden_for_existing_guarded_event
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_custom_only_calendar_collections_keep_default_calendar_openable
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_get_receive_folder_calendar_fid_opens_default_calendar_with_custom_only_collections
@@ -122,6 +123,7 @@ relationships:
 - [mapi_over_http_open_message_resolves_virtual_local_freebusy_without_folder_id](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_open_message_resolves_virtual_local_freebusy_without_folder_id.md)
 - [mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id.md)
 - [mapi_over_http_advertised_calendar_open_message_projects_default_collection_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_open_message_projects_default_collection_event.md)
+- [mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection.md)
 - [mapi_over_http_calendar_custom_collection_attachment_is_hidden_for_existing_guarded_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_custom_collection_attachment_is_hidden_for_existing_guarded_event.md)
 - [mapi_over_http_custom_only_calendar_collections_keep_default_calendar_openable](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_custom_only_calendar_collections_keep_default_calendar_openable.md)
 - [mapi_over_http_get_receive_folder_calendar_fid_opens_default_calendar_with_custom_only_collections](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_get_receive_folder_calendar_fid_opens_default_calendar_with_custom_only_collections.md)

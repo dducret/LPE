@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_register_notification_returns_protocol_success_handles
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3603-L3661
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3628-L3686
 visibility: private
 generated:
   by: okf-rs/0.3.0
