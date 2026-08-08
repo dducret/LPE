@@ -6549,6 +6549,9 @@ async fn mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -6559,22 +6562,31 @@ async fn mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id
         "cookie",
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
-    let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-    )
-    .unwrap();
-    let embedded_long_term_id = &calendar_entry_id[22..46];
+    let (calendar_entry_id, rops) =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec.clone(), async {
+            let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+                account.account_id,
+                crate::mapi::identity::CALENDAR_FOLDER_ID,
+            )
+            .unwrap();
+            let embedded_long_term_id = &calendar_entry_id[22..46];
 
-    let mut rops = vec![0xFE, 0x00, 0x01, 0x01]; // RopLogon, private mailbox.
-    rops.extend_from_slice(&0u32.to_le_bytes());
-    rops.extend_from_slice(&0u32.to_le_bytes());
-    rops.extend_from_slice(&0u16.to_le_bytes());
-    append_rop_get_properties_specific(&mut rops, 1, &[0x36D0_0102]);
-    rops.extend_from_slice(&[0x44, 0x00, 0x01]); // RopIdFromLongTermId.
-    rops.extend_from_slice(embedded_long_term_id);
-    append_rop_open_folder(&mut rops, 1, 2, crate::mapi::identity::CALENDAR_FOLDER_ID);
-    append_rop_get_properties_specific(&mut rops, 2, &[0x3001_001F, 0x3613_001F, 0x36E5_001F]);
+            let mut rops = vec![0xFE, 0x00, 0x01, 0x01]; // RopLogon, private mailbox.
+            rops.extend_from_slice(&0u32.to_le_bytes());
+            rops.extend_from_slice(&0u32.to_le_bytes());
+            rops.extend_from_slice(&0u16.to_le_bytes());
+            append_rop_get_properties_specific(&mut rops, 1, &[0x36D0_0102]);
+            rops.extend_from_slice(&[0x44, 0x00, 0x01]); // RopIdFromLongTermId.
+            rops.extend_from_slice(embedded_long_term_id);
+            append_rop_open_folder(&mut rops, 1, 2, crate::mapi::identity::CALENDAR_FOLDER_ID);
+            append_rop_get_properties_specific(
+                &mut rops,
+                2,
+                &[0x3001_001F, 0x3613_001F, 0x36E5_001F],
+            );
+            (calendar_entry_id, rops)
+        })
+        .await;
 
     let response = service
         .handle_mapi(
@@ -6592,16 +6604,22 @@ async fn mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id
         .position(|window| window == calendar_entry_id.as_slice())
         .expect("PidTagIpmAppointmentEntryId value missing");
     assert_eq!(
-        crate::mapi::identity::object_id_from_folder_entry_id(
-            &response_rops
-                [calendar_entry_id_offset..calendar_entry_id_offset + calendar_entry_id.len()]
-        ),
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec.clone(), async {
+            crate::mapi::identity::object_id_from_folder_entry_id(
+                &response_rops
+                    [calendar_entry_id_offset..calendar_entry_id_offset + calendar_entry_id.len()],
+            )
+        })
+        .await,
         Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
     );
     let mut id_from_long_term_response = vec![0x44, 0x01, 0, 0, 0, 0];
-    id_from_long_term_response.extend_from_slice(&mapi_wire_id_bytes(
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-    ));
+    id_from_long_term_response.extend_from_slice(
+        &crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+            mapi_wire_id_bytes(crate::mapi::identity::CALENDAR_FOLDER_ID)
+        })
+        .await,
+    );
     assert!(contains_bytes(&response_rops, &id_from_long_term_response));
     assert!(contains_bytes(
         &response_rops,

@@ -369,15 +369,6 @@ pub(in crate::mapi) fn established_session_request(
             "missing MAPI session cookie",
         ));
     };
-    let Some(active_request) = begin_active_session_request(&session_id) else {
-        return Err(mapi_diagnostic_response_with_cookies(
-            request_type,
-            request_id,
-            15,
-            "MAPI session already has an active request",
-            session_context_cookies(endpoint, &session_id, false),
-        ));
-    };
     let Some(session) = get_session(&session_id) else {
         return Err(mapi_diagnostic_response(
             request_type,
@@ -394,6 +385,23 @@ pub(in crate::mapi) fn established_session_request(
             "MAPI authentication context changed",
         ));
     }
+    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
+        return Err(mapi_diagnostic_response(
+            request_type,
+            request_id,
+            6,
+            "invalid MAPI request sequence cookie",
+        ));
+    }
+    let Some(active_request) = begin_active_session_request(&session_id) else {
+        return Err(mapi_diagnostic_response_with_cookies(
+            request_type,
+            request_id,
+            15,
+            "MAPI session already has an active request",
+            session_context_cookies(endpoint, &session_id, false),
+        ));
+    };
     let mut session = session;
     session.record_transport_request(request_type, request_id);
     store_session(session_id, session);

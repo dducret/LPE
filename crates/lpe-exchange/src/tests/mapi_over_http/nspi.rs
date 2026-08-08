@@ -615,11 +615,11 @@ async fn mapi_over_http_bind_creates_nspi_session() {
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     assert!(response
         .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .starts_with("MapiContext="));
+        .get_all("set-cookie")
+        .iter()
+        .any(|cookie| cookie
+            .to_str()
+            .is_ok_and(|cookie| cookie.starts_with("MapiContext="))));
 
     let body = response_bytes(response).await;
     assert_eq!(body.len(), 28);
@@ -640,16 +640,7 @@ async fn mapi_over_http_bind_reestablishes_nspi_session_cookie() {
         .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
         .await
         .unwrap();
-    let first_cookie = bind
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let first_cookie = mapi_cookie_header(&bind);
 
     let mut rebind_headers = mapi_headers("Bind");
     rebind_headers.insert("cookie", HeaderValue::from_str(&first_cookie).unwrap());
@@ -661,16 +652,7 @@ async fn mapi_over_http_bind_reestablishes_nspi_session_cookie() {
     assert_eq!(rebind.status(), StatusCode::OK);
     assert_eq!(rebind.headers().get("x-requesttype").unwrap(), "Bind");
     assert_eq!(rebind.headers().get("x-responsecode").unwrap(), "0");
-    let reconnected_cookie = rebind
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let reconnected_cookie = mapi_cookie_header(&rebind);
     assert_ne!(reconnected_cookie, first_cookie);
 
     let mut old_unbind_headers = mapi_headers("Unbind");
@@ -753,6 +735,17 @@ async fn mapi_over_http_nspi_operation_rejects_mismatched_sequence_cookie() {
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "6");
     let body = String::from_utf8(response_bytes(response).await).unwrap();
     assert!(body.contains("invalid MAPI request sequence cookie"));
+
+    let mut valid_headers = mapi_headers("QueryRows");
+    valid_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&bind)).unwrap(),
+    );
+    let valid_response = service
+        .handle_mapi(MapiEndpoint::Nspi, &valid_headers, &[0; 32])
+        .await
+        .unwrap();
+    assert_eq!(valid_response.headers().get("x-responsecode").unwrap(), "0");
 }
 
 #[tokio::test]
@@ -872,6 +865,7 @@ async fn mapi_over_http_returns_nspi_and_mailbox_urls() {
         "GetAddressBookUrl"
     );
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let cookie = mapi_cookie_header(&response);
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
@@ -881,6 +875,7 @@ async fn mapi_over_http_returns_nspi_and_mailbox_urls() {
     );
     assert!(body.ends_with(&[0, 0, 0, 0]));
 
+    headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     headers.insert("x-requesttype", HeaderValue::from_static("GetMailboxUrl"));
     renew_mapi_request_id(&mut headers);
     let response = service
@@ -1481,6 +1476,7 @@ async fn mapi_over_http_microsoft_oxnspi_hierarchy_and_query_rows_example_round_
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let cookie = mapi_cookie_header(&response);
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
@@ -1704,11 +1700,15 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
     assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
 
     let request = resolve_names_request("alice@example.test", &[0x3003_001F, 0x3001_001F]);
-    let resolve_headers = nspi_bound_headers(&service, "ResolveNames").await;
+    let mut resolve_headers = nspi_bound_headers(&service, "ResolveNames").await;
     let response = service
         .handle_mapi(MapiEndpoint::Nspi, &resolve_headers, &request)
         .await
         .unwrap();
+    resolve_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&response)).unwrap(),
+    );
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
     assert!(contains_bytes(
@@ -1740,11 +1740,15 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
     props_request.extend_from_slice(&self_mid.to_le_bytes());
     props_request.extend_from_slice(&0x3003_001Fu32.to_le_bytes());
     props_request.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
-    let props_headers = nspi_bound_headers(&service, "GetProps").await;
+    let mut props_headers = nspi_bound_headers(&service, "GetProps").await;
     let response = service
         .handle_mapi(MapiEndpoint::Nspi, &props_headers, &props_request)
         .await
         .unwrap();
+    props_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&response)).unwrap(),
+    );
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
     assert!(contains_bytes(
@@ -1764,6 +1768,10 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         )
         .await
         .unwrap();
+    props_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&response)).unwrap(),
+    );
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
     assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
@@ -1787,6 +1795,10 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         .handle_mapi(MapiEndpoint::Nspi, &props_headers, &proxy_addresses_request)
         .await
         .unwrap();
+    props_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&response)).unwrap(),
+    );
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
     assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
@@ -1808,6 +1820,10 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         )
         .await
         .unwrap();
+    props_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&response)).unwrap(),
+    );
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
@@ -2545,16 +2561,7 @@ async fn mapi_over_http_unbind_consumes_nspi_session() {
         .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
         .await
         .unwrap();
-    let cookie = bind
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&bind);
 
     let mut unbind_headers = mapi_headers("Unbind");
     unbind_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
