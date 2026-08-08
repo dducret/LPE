@@ -171,7 +171,7 @@
 
 | Area | Current support |
 | --- | --- |
-| Commands | `OPTIONS`, `Provision`, `FolderSync`, `FolderCreate`, `FolderDelete`, `FolderUpdate`, `Sync`, `MoveItems`, `SendMail`, `SmartReply`, `SmartForward`, `ItemOperations Fetch`, `Search`, `Ping` |
+| Commands | `OPTIONS`, `Provision`, `FolderSync`, `FolderCreate`, `FolderDelete`, `FolderUpdate`, `Sync`, `GetItemEstimate`, `MoveItems`, `SendMail`, `SmartReply`, `SmartForward`, `ItemOperations Fetch`, `Search`, `Ping` |
 | Mail folders | canonical mailbox folders |
 | Contacts | canonical contacts projection; `Sync` create/update/delete for name, email, phone, organization, title, notes |
 | Calendar | canonical events projection; `Sync` create/update/delete for UID, title, start, duration, time-zone string, location, body, attendees, simple recurrence |
