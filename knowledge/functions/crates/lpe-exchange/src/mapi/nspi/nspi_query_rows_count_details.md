@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_query_rows_count_details
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L821-L829
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L824-L832
 visibility: private
 generated:
   by: okf-rs/0.3.0

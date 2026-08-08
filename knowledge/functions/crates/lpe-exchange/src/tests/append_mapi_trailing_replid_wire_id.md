@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_mapi_trailing_replid_wire_id
-resource: crates/lpe-exchange/src/tests/mod.rs#L15130-L15133
+resource: crates/lpe-exchange/src/tests/mod.rs#L15136-L15139
 visibility: private
 generated:
   by: okf-rs/0.3.0

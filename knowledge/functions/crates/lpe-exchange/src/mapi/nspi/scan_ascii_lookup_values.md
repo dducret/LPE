@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: scan_ascii_lookup_values
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1428-L1440
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1431-L1443
 generated:
   by: okf-rs/0.3.0
 relationships:

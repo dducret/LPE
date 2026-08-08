@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_lookup_matches_principal
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1143-L1153
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1146-L1156
 generated:
   by: okf-rs/0.3.0
 relationships:

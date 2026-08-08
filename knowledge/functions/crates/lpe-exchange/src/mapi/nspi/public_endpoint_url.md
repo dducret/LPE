@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: public_endpoint_url
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1551-L1566
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1554-L1569
 generated:
   by: okf-rs/0.3.0
 relationships:

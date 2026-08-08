@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hex_nibble
-resource: crates/lpe-exchange/src/tests/mod.rs#L15952-L15959
+resource: crates/lpe-exchange/src/tests/mod.rs#L15958-L15965
 visibility: private
 generated:
   by: okf-rs/0.3.0

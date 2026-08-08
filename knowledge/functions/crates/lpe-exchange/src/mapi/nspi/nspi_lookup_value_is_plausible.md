@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_lookup_value_is_plausible
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1501-L1549
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1504-L1552
 visibility: private
 generated:
   by: okf-rs/0.3.0

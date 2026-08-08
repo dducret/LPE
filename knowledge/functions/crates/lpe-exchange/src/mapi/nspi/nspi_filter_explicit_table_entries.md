@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_filter_explicit_table_entries
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1219-L1233
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1222-L1236
 visibility: private
 generated:
   by: okf-rs/0.3.0

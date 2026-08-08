@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_entry_legacy_dn_with_prefix
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1077-L1107
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1080-L1110
 generated:
   by: okf-rs/0.3.0
 relationships:

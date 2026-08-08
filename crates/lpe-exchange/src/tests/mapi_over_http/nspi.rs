@@ -1045,6 +1045,59 @@ async fn mapi_over_http_resolve_names_resolves_canonical_contact() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_resolve_names_projects_each_requested_recipient() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact(
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "Bob Contact",
+            "bob@example.test",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = resolve_names_request_for_values(
+        &[
+            "alice@example.test",
+            "nobody@example.test",
+            "bob@example.test",
+        ],
+        &[0x3003_001F, 0x3001_001F],
+    );
+    let headers = nspi_bound_headers(&service, "ResolveNames").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 3);
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
+    assert_eq!(u32::from_le_bytes(body[21..25].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[25..29].try_into().unwrap()), 2);
+    assert_eq!(body[29], 1);
+    assert_eq!(u32::from_le_bytes(body[42..46].try_into().unwrap()), 2);
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_account_legacy_dn("alice@example.test"))
+    ));
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_contact_legacy_dn(
+            "bob@example.test",
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        ))
+    ));
+    assert!(!contains_bytes(&body, &utf16z("nobody@example.test")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
     let mut visible_contact = FakeStore::contact(
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",

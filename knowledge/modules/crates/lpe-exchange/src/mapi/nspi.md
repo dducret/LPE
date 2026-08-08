@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: nspi
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1-L1569
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1-L1572
 generated:
   by: okf-rs/0.3.0
 relationships:

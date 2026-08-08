@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_mapi_string8_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L15049-L15053
+resource: crates/lpe-exchange/src/tests/mod.rs#L15055-L15059
 visibility: private
 generated:
   by: okf-rs/0.3.0

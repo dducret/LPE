@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_mapi_fast_transfer_marker_sequence
-resource: crates/lpe-exchange/src/tests/mod.rs#L15023-L15033
+resource: crates/lpe-exchange/src/tests/mod.rs#L15029-L15039
 visibility: private
 generated:
   by: okf-rs/0.3.0

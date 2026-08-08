@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_ranked_matching_entries
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1263-L1297
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1266-L1300
 visibility: private
 generated:
   by: okf-rs/0.3.0

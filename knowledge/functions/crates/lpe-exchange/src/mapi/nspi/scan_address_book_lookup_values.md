@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: scan_address_book_lookup_values
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1419-L1426
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1422-L1429
 generated:
   by: okf-rs/0.3.0
 relationships:

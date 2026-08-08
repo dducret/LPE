@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_resolve_names_returns_no_match_for_unknown_name
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2035-L2058
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2088-L2111
 visibility: private
 generated:
   by: okf-rs/0.3.0

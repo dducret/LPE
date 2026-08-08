@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_word_looks_like_property_tag
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1399-L1417
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1402-L1420
 visibility: private
 generated:
   by: okf-rs/0.3.0

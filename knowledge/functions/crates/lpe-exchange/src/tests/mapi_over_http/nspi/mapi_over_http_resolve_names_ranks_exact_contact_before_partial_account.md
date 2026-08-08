@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_resolve_names_ranks_exact_contact_before_partial_account
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1353-L1392
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1406-L1445
 visibility: private
 generated:
   by: okf-rs/0.3.0

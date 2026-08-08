@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_request_has_entry_selector
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1201-L1205
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1204-L1208
 generated:
   by: okf-rs/0.3.0
 relationships:

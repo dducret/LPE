@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_nspi_requested_string8_columns_stay_tenant_scoped
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1932-L1990
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1985-L2043
 visibility: private
 generated:
   by: okf-rs/0.3.0

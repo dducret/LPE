@@ -302,6 +302,7 @@ used_for = [
 ]
 sections = [
   "2.2.1.8 Positioning Minimal Entry IDs",
+  "2.2.1.9 Ambiguous Name Resolution Minimal Entry IDs",
   "2.2.7.1 StringsArray_r",
   "2.2.9.1 MinimalEntryID",
   "2.2.1.12 NspiGetSpecialTable Flags",
@@ -312,6 +313,7 @@ sections = [
   "3.1.4.1.7 NspiGetProps",
   "3.1.4.1.8 NspiQueryRows",
   "3.1.4.1.13 NspiDNToMId",
+  "3.1.4.1.16 NspiResolveNames",
   "4 Protocol Examples",
 ]
 
@@ -343,6 +345,7 @@ sections = [
   "2.2.3.2 PidTagEntryId",
   "2.2.3.12 PidTagDisplayTypeEx",
   "2.2.3.32 PidTagMappingSignature",
+  "3.1.4.4 ResolveNames Operations",
   "2.2.7.1 PidTagAddressBookRoomContainers",
 ]
 
@@ -394,6 +397,7 @@ sections = [
   "2.2.5.8.1 GetSpecialTable Request Type Request Body",
   "2.2.5.8.2 GetSpecialTable Request Type Success Response Body",
   "2.2.5.9.2 GetTemplateInfo Request Type Success Response Body",
+  "2.2.5.14 ResolveNames Request Type",
   "2.2.6 PING Request Type",
   "3.1.1 Abstract Data Model",
   "3.1.5.1 Creating a Session Context by Using the Connect or Bind Request Type",
@@ -1636,6 +1640,7 @@ used_for = [
 ]
 sections = [
   "2.2.2.1 X-MapiHttpCapability",
+  "3.2.5.1 Processing the X-MapiHttpCapability Header",
   "2.2.2.2 X-AnchorMailbox",
   "2.2.2.3 X-ClientCanHandle",
   "2.2.3.1.1.1 AcceptableResponseSchema",

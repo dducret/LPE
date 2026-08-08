@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: principal_legacy_dn_aliases
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1155-L1168
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1158-L1171
 generated:
   by: okf-rs/0.3.0
 relationships:

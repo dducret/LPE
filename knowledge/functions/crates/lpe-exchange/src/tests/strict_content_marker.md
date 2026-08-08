@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_content_marker
-resource: crates/lpe-exchange/src/tests/mod.rs#L14339-L14358
+resource: crates/lpe-exchange/src/tests/mod.rs#L14345-L14364
 visibility: private
 generated:
   by: okf-rs/0.3.0

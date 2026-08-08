@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_matches_response
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L890-L967
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L893-L970
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_save_changes_message
-resource: crates/lpe-exchange/src/tests/mod.rs#L15347-L15349
+resource: crates/lpe-exchange/src/tests/mod.rs#L15353-L15355
 visibility: private
 generated:
   by: okf-rs/0.3.0

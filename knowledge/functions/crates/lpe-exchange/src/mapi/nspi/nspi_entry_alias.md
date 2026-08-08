@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_entry_alias
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1126-L1134
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1129-L1137
 visibility: private
 generated:
   by: okf-rs/0.3.0

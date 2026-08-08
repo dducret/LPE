@@ -12647,6 +12647,10 @@ fn rpc_proxy_wrapped_rop_buffer(rops: &[u8], handles: &[u32]) -> Vec<u8> {
 }
 
 fn resolve_names_request(search_address: &str, columns: &[u32]) -> Vec<u8> {
+    resolve_names_request_for_values(&[search_address], columns)
+}
+
+fn resolve_names_request_for_values(search_addresses: &[&str], columns: &[u32]) -> Vec<u8> {
     let mut request = Vec::new();
     request.extend_from_slice(&0u32.to_le_bytes());
     request.push(0xFF);
@@ -12660,10 +12664,12 @@ fn resolve_names_request(search_address: &str, columns: &[u32]) -> Vec<u8> {
         request.extend_from_slice(&column.to_le_bytes());
     }
     request.push(0xFF);
-    request.extend_from_slice(&1u32.to_le_bytes());
-    let unresolved_name = utf16z(&format!("=SMTP:{search_address}"));
-    request.extend_from_slice(&(unresolved_name.len() as u16).to_le_bytes());
-    request.extend_from_slice(&unresolved_name);
+    request.extend_from_slice(&(search_addresses.len() as u32).to_le_bytes());
+    for search_address in search_addresses {
+        let unresolved_name = utf16z(&format!("=SMTP:{search_address}"));
+        request.extend_from_slice(&(unresolved_name.len() as u16).to_le_bytes());
+        request.extend_from_slice(&unresolved_name);
+    }
     request.extend_from_slice(&0u32.to_le_bytes());
     request
 }

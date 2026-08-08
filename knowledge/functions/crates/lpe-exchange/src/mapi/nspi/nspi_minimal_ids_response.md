@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_minimal_ids_response
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L969-L995
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L972-L998
 generated:
   by: okf-rs/0.3.0
 relationships:

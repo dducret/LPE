@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_query_rows_layout_at_offset
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L852-L888
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L855-L891
 visibility: private
 generated:
   by: okf-rs/0.3.0

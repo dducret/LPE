@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_legacy_cn_from_source
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1109-L1120
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1112-L1123
 visibility: private
 generated:
   by: okf-rs/0.3.0

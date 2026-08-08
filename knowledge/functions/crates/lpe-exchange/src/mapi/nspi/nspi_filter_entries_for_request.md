@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_filter_entries_for_request
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1207-L1217
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1210-L1220
 generated:
   by: okf-rs/0.3.0
 relationships:

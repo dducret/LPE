@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_u32_result_response
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L362-L373
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L365-L376
 generated:
   by: okf-rs/0.3.0
 relationships:

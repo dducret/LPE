@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_match_entry
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1235-L1261
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1238-L1264
 generated:
   by: okf-rs/0.3.0
 relationships:

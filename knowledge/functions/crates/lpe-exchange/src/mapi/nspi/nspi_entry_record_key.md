@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_entry_record_key
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1046-L1048
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1049-L1051
 visibility: private
 generated:
   by: okf-rs/0.3.0

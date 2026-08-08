@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_entry_kind_rank
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1299-L1305
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1302-L1308
 visibility: private
 generated:
   by: okf-rs/0.3.0

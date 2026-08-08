@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_principal_legacy_dn_alias
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1170-L1180
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1173-L1183
 visibility: private
 generated:
   by: okf-rs/0.3.0

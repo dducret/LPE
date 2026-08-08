@@ -1093,7 +1093,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/submit_message
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/cancel_queued_submission
   - functions/crates/lpe-exchange/src/tests/rca_wrapped_private_logon_execute_body
-  - functions/crates/lpe-exchange/src/tests/resolve_names_request
+  - functions/crates/lpe-exchange/src/tests/resolve_names_request_for_values
   - functions/crates/lpe-exchange/src/tests/additional_ren_entry_ids_ex_entries
   - functions/crates/lpe-exchange/src/tests/strict_record_folder_property
   - functions/crates/lpe-exchange/src/tests/strict_finish_folder_change
@@ -2383,7 +2383,7 @@ relationships:
 - [submit_message](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/submit_message.md)
 - [cancel_queued_submission](../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/cancel_queued_submission.md)
 - [rca_wrapped_private_logon_execute_body](../../../../../../functions/crates/lpe-exchange/src/tests/rca_wrapped_private_logon_execute_body.md)
-- [resolve_names_request](../../../../../../functions/crates/lpe-exchange/src/tests/resolve_names_request.md)
+- [resolve_names_request_for_values](../../../../../../functions/crates/lpe-exchange/src/tests/resolve_names_request_for_values.md)
 - [additional_ren_entry_ids_ex_entries](../../../../../../functions/crates/lpe-exchange/src/tests/additional_ren_entry_ids_ex_entries.md)
 - [strict_record_folder_property](../../../../../../functions/crates/lpe-exchange/src/tests/strict_record_folder_property.md)
 - [strict_finish_folder_change](../../../../../../functions/crates/lpe-exchange/src/tests/strict_finish_folder_change.md)

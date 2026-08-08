@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_unbind_consumes_nspi_session
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2485-L2523
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2538-L2576
 visibility: private
 generated:
   by: okf-rs/0.3.0

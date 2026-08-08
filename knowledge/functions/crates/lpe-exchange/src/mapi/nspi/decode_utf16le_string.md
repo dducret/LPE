@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: decode_utf16le_string
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1485-L1495
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1488-L1498
 generated:
   by: okf-rs/0.3.0
 relationships:

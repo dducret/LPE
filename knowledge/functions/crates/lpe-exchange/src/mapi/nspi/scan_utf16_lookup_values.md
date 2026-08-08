@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: scan_utf16_lookup_values
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1442-L1475
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1445-L1478
 generated:
   by: okf-rs/0.3.0
 relationships:

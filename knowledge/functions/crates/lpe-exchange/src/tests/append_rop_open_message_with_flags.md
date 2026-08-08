@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_open_message_with_flags
-resource: crates/lpe-exchange/src/tests/mod.rs#L15719-L15732
+resource: crates/lpe-exchange/src/tests/mod.rs#L15725-L15738
 visibility: private
 generated:
   by: okf-rs/0.3.0

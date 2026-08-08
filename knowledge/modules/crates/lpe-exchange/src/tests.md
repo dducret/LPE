@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/tests/mod.rs#L1-L16033
+resource: crates/lpe-exchange/src/tests/mod.rs#L1-L16039
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -315,6 +315,7 @@ relationships:
 - [rpc_proxy_bootstrap_logon_execute_rop](../../../../functions/crates/lpe-exchange/src/tests/rpc_proxy_bootstrap_logon_execute_rop.md)
 - [rpc_proxy_wrapped_rop_buffer](../../../../functions/crates/lpe-exchange/src/tests/rpc_proxy_wrapped_rop_buffer.md)
 - [resolve_names_request](../../../../functions/crates/lpe-exchange/src/tests/resolve_names_request.md)
+- [resolve_names_request_for_values](../../../../functions/crates/lpe-exchange/src/tests/resolve_names_request_for_values.md)
 - [response_text](../../../../functions/crates/lpe-exchange/src/tests/response_text.md)
 - [decoded_mime_content](../../../../functions/crates/lpe-exchange/src/tests/decoded_mime_content.md)
 - [response_bytes](../../../../functions/crates/lpe-exchange/src/tests/response_bytes.md)

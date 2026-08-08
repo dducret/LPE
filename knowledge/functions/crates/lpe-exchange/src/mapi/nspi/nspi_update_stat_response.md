@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_update_stat_response
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1029-L1037
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1032-L1040
 generated:
   by: okf-rs/0.3.0
 relationships:

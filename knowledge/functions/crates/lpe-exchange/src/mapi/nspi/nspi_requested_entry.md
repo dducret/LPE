@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_requested_entry
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1182-L1199
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1185-L1202
 generated:
   by: okf-rs/0.3.0
 relationships:

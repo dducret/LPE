@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_query_rows_layout_from_body
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L841-L850
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L844-L853
 visibility: private
 generated:
   by: okf-rs/0.3.0

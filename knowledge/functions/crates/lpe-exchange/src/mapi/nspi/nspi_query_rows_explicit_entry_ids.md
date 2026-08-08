@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_query_rows_explicit_entry_ids
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L797-L812
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L800-L815
 generated:
   by: okf-rs/0.3.0
 relationships:

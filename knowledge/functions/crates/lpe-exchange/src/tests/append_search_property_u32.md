@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_search_property_u32
-resource: crates/lpe-exchange/src/tests/mod.rs#L15204-L15209
+resource: crates/lpe-exchange/src/tests/mod.rs#L15210-L15215
 visibility: private
 generated:
   by: okf-rs/0.3.0

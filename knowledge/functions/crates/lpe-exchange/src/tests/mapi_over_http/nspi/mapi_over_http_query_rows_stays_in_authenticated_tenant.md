@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_query_rows_stays_in_authenticated_tenant
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1815-L1885
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1868-L1938
 visibility: private
 generated:
   by: okf-rs/0.3.0

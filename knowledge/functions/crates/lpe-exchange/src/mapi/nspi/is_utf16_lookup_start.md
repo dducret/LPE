@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_utf16_lookup_start
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1477-L1483
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1480-L1486
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_body_looks_like_query_rows
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L837-L839
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L840-L842
 visibility: private
 generated:
   by: okf-rs/0.3.0

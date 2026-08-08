@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1048-L1198
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1101-L1251
 visibility: private
 generated:
   by: okf-rs/0.3.0

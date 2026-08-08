@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves_self
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1629-L1812
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1682-L1865
 visibility: private
 generated:
   by: okf-rs/0.3.0

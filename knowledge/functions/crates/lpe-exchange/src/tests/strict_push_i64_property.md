@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_push_i64_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L14665-L14668
+resource: crates/lpe-exchange/src/tests/mod.rs#L14671-L14674
 visibility: private
 generated:
   by: okf-rs/0.3.0

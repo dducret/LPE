@@ -8431,6 +8431,7 @@
 - [mapi_over_http_query_rows_stays_in_authenticated_tenant](../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_query_rows_stays_in_authenticated_tenant.md) — Rust Function
 - [mapi_over_http_resolve_names_falls_back_to_authenticated_mailbox_for_rca](../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_falls_back_to_authenticated_mailbox_for_rca.md) — Rust Function
 - [mapi_over_http_resolve_names_honors_requested_rca_columns](../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_honors_requested_rca_columns.md) — Rust Function
+- [mapi_over_http_resolve_names_projects_each_requested_recipient](../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_projects_each_requested_recipient.md) — Rust Function
 - [mapi_over_http_resolve_names_ranks_exact_contact_before_partial_account](../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_ranks_exact_contact_before_partial_account.md) — Rust Function
 - [mapi_over_http_resolve_names_resolves_authenticated_mailbox](../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_resolves_authenticated_mailbox.md) — Rust Function
 - [mapi_over_http_resolve_names_resolves_canonical_contact](../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_resolves_canonical_contact.md) — Rust Function
@@ -8920,6 +8921,7 @@
 - [read_strict_u32](../functions/crates/lpe-exchange/src/tests/read_strict_u32.md) — Rust Function
 - [renew_mapi_request_id](../functions/crates/lpe-exchange/src/tests/renew_mapi_request_id.md) — Rust Function
 - [resolve_names_request](../functions/crates/lpe-exchange/src/tests/resolve_names_request.md) — Rust Function
+- [resolve_names_request_for_values](../functions/crates/lpe-exchange/src/tests/resolve_names_request_for_values.md) — Rust Function
 - [response_bytes](../functions/crates/lpe-exchange/src/tests/response_bytes.md) — Rust Function
 - [response_rops_and_handles_from_execute_body](../functions/crates/lpe-exchange/src/tests/response_rops_and_handles_from_execute_body.md) — Rust Function
 - [response_rops_from_execute_response](../functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response.md) — Rust Function

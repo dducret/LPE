@@ -4358,7 +4358,7 @@ async fn send_item_submits_existing_draft_through_canonical_submission() {
         .handle(
             &bearer_headers(),
             format!(
-                r#"<s:Envelope><s:Body><m:SendItem><m:ItemIds><t:ItemId Id="message:{draft_id}"/></m:ItemIds></m:SendItem></s:Body></s:Envelope>"#
+                r#"<s:Envelope><s:Body><m:SendItem SaveItemToFolder="true"><m:ItemIds><t:ItemId Id="message:{draft_id}"/></m:ItemIds></m:SendItem></s:Body></s:Envelope>"#
             )
             .as_bytes(),
         )

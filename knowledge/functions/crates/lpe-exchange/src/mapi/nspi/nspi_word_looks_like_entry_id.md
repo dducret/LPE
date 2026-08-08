@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_word_looks_like_entry_id
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1394-L1397
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1397-L1400
 visibility: private
 generated:
   by: okf-rs/0.3.0

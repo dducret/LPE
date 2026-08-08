@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_entry_permanent_entry_id
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1050-L1060
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1053-L1063
 generated:
   by: okf-rs/0.3.0
 relationships:

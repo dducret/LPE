@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_resolve_names_values
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L328-L360
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L331-L363
 generated:
   by: okf-rs/0.3.0
 relationships:

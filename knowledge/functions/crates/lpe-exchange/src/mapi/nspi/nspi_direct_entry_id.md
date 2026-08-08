@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_direct_entry_id
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1380-L1392
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1383-L1395
 visibility: private
 generated:
   by: okf-rs/0.3.0

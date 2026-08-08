@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_dn_to_mid_response
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L375-L446
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L378-L449
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_get_prop_list_response
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L463-L524
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L466-L527
 visibility: private
 generated:
   by: okf-rs/0.3.0

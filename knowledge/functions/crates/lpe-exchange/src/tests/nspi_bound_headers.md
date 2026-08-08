@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_bound_headers
-resource: crates/lpe-exchange/src/tests/mod.rs#L12725-L12736
+resource: crates/lpe-exchange/src/tests/mod.rs#L12731-L12742
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -28,6 +28,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_honors_requested_rca_columns
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_falls_back_to_authenticated_mailbox_for_rca
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_resolves_canonical_contact
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_projects_each_requested_recipient
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_get_props_returns_microsoft_contact_detail_columns
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_ids_ignore_generic_mapi_identity_cache_collisions
@@ -76,6 +77,7 @@ relationships:
 - [mapi_over_http_resolve_names_honors_requested_rca_columns](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_honors_requested_rca_columns.md)
 - [mapi_over_http_resolve_names_falls_back_to_authenticated_mailbox_for_rca](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_falls_back_to_authenticated_mailbox_for_rca.md)
 - [mapi_over_http_resolve_names_resolves_canonical_contact](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_resolves_canonical_contact.md)
+- [mapi_over_http_resolve_names_projects_each_requested_recipient](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_resolve_names_projects_each_requested_recipient.md)
 - [mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts.md)
 - [mapi_over_http_nspi_get_props_returns_microsoft_contact_detail_columns](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_get_props_returns_microsoft_contact_detail_columns.md)
 - [mapi_over_http_nspi_ids_ignore_generic_mapi_identity_cache_collisions](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_ids_ignore_generic_mapi_identity_cache_collisions.md)

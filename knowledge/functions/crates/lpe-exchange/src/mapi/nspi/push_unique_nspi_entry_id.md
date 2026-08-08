@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_unique_nspi_entry_id
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1359-L1363
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1362-L1366
 visibility: private
 generated:
   by: okf-rs/0.3.0

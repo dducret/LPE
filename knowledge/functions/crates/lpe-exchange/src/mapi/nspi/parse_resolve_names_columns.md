@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_resolve_names_columns
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L300-L320
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L303-L323
 generated:
   by: okf-rs/0.3.0
 relationships:

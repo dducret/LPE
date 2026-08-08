@@ -240,50 +240,53 @@ where
         );
     }
     let principal_entry = principal_address_book_entry(principal);
-    let matched = requested_names
-        .first()
-        .and_then(|name| nspi_match_entry(principal.account_id, &entries, name))
-        .or_else(|| {
-            requested_names
+    let matched: Vec<Option<&ExchangeAddressBookEntry>> = if requested_names.is_empty() {
+        vec![Some(
+            entries
                 .iter()
-                .any(|name| nspi_lookup_matches_principal(name, principal))
-                .then_some(&principal_entry)
-        })
-        .or_else(|| {
-            requested_names
-                .is_empty()
-                .then(|| {
-                    entries
-                        .iter()
-                        .find(|entry| nspi_entry_is_principal(entry, principal))
+                .find(|entry| nspi_entry_is_principal(entry, principal))
+                .unwrap_or(&principal_entry),
+        )]
+    } else {
+        requested_names
+            .iter()
+            .map(|name| {
+                nspi_match_entry(principal.account_id, &entries, name).or_else(|| {
+                    nspi_lookup_matches_principal(name, principal).then_some(&principal_entry)
                 })
-                .flatten()
-        });
+            })
+            .collect()
+    };
 
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
     body.push(1);
-    write_u32(&mut body, 1);
-    write_u32(
-        &mut body,
-        if matched.is_some() {
-            NSPI_MID_RESOLVED
-        } else {
-            0
-        },
-    );
-    if let Some(entry) = matched {
+    write_u32(&mut body, matched.len() as u32);
+    for entry in &matched {
+        write_u32(
+            &mut body,
+            if entry.is_some() {
+                NSPI_MID_RESOLVED
+            } else {
+                0
+            },
+        );
+    }
+    let resolved = matched.into_iter().flatten().collect::<Vec<_>>();
+    if !resolved.is_empty() {
         body.push(1);
         write_large_property_tag_array(&mut body, &columns);
-        write_u32(&mut body, 1);
-        body.extend_from_slice(&nspi_resolved_entry_row(
-            principal.account_id,
-            entry,
-            &columns,
-            &entries,
-        ));
+        write_u32(&mut body, resolved.len() as u32);
+        for entry in resolved {
+            body.extend_from_slice(&nspi_resolved_entry_row(
+                principal.account_id,
+                entry,
+                &columns,
+                &entries,
+            ));
+        }
     } else {
         body.push(0);
     }

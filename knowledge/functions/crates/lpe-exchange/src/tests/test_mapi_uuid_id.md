@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_mapi_uuid_id
-resource: crates/lpe-exchange/src/tests/mod.rs#L15867-L15873
+resource: crates/lpe-exchange/src/tests/mod.rs#L15873-L15879
 visibility: private
 generated:
   by: okf-rs/0.3.0

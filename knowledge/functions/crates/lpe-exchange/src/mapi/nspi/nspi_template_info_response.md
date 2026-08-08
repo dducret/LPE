@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_template_info_response
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L997-L1027
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1000-L1030
 generated:
   by: okf-rs/0.3.0
 relationships:

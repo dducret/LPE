@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_content_sync_state_properties
-resource: crates/lpe-exchange/src/tests/mod.rs#L13865-L13889
+resource: crates/lpe-exchange/src/tests/mod.rs#L13871-L13895
 visibility: private
 generated:
   by: okf-rs/0.3.0

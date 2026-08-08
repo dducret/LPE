@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_dn_to_eph_resolves_outlook_legacy_dn_to_principal
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2431-L2457
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2484-L2510
 visibility: private
 generated:
   by: okf-rs/0.3.0

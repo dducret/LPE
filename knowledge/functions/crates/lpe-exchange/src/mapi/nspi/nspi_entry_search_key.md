@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_entry_search_key
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1062-L1067
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1065-L1070
 visibility: private
 generated:
   by: okf-rs/0.3.0

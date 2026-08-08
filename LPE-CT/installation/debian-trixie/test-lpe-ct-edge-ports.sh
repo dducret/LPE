@@ -654,6 +654,22 @@ probe_client_publication() {
         [[ "${soap_body}" != *"<a:Name>MapiHttpEnabled</a:Name>"* ]] \
           || fail "Outlook SOAP Autodiscover publishes MAPI settings in the default IMAP setup path"
       fi
+    else
+      body="$(curl --silent --show-error --fail --insecure \
+        --header "Host: ${host_header}" \
+        --header 'Content-Type: application/xml' \
+        --header 'X-MapiHttpCapability: 1' \
+        --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${autodiscover_email}</EMailAddress></Request></Autodiscover>" \
+        "${base_url}/autodiscover/autodiscover.xml")" \
+        || fail "MAPI-capable Autodiscover POST is not reachable through LPE-CT HTTPS publication"
+      [[ "$body" == *"<Protocol Type=\"mapiHttp\" Version=\"1\">"* ]] \
+        || fail "MAPI-capable Autodiscover POST did not publish mapiHttp version 1"
+      [[ "$body" == *"<MailStore>"* && "$body" == *"/mapi/emsmdb/?MailboxId=${autodiscover_email}"* ]] \
+        || fail "MAPI-capable Autodiscover POST did not publish the EMSMDB mailbox URL"
+      [[ "$body" == *"<AddressBook>"* && "$body" == *"/mapi/nspi/?MailboxId=${autodiscover_email}"* ]] \
+        || fail "MAPI-capable Autodiscover POST did not publish the NSPI address-book URL"
+      [[ "$body" != *"<Type>EXCH</Type>"* && "$body" != *"<Type>EXPR</Type>"* ]] \
+        || fail "MAPI-capable Autodiscover POST must not publish legacy EXCH or EXPR metadata"
     fi
   fi
   pass "Autodiscover POST publishes IMAP through LPE-CT"

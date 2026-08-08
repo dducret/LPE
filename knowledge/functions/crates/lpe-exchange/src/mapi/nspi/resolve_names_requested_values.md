@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: resolve_names_requested_values
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L322-L326
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L325-L329
 generated:
   by: okf-rs/0.3.0
 relationships:

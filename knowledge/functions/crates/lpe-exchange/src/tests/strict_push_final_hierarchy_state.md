@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_push_final_hierarchy_state
-resource: crates/lpe-exchange/src/tests/mod.rs#L14705-L14719
+resource: crates/lpe-exchange/src/tests/mod.rs#L14711-L14725
 visibility: private
 generated:
   by: okf-rs/0.3.0

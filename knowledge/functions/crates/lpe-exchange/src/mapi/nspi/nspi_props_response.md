@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_props_response
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L573-L705
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L576-L708
 generated:
   by: okf-rs/0.3.0
 relationships:

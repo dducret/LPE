@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_stat_current_rec
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1365-L1378
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1368-L1381
 visibility: private
 generated:
   by: okf-rs/0.3.0

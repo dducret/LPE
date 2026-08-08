@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_request_type_is_query_rows
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L831-L835
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L834-L838
 visibility: private
 generated:
   by: okf-rs/0.3.0

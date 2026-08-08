@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_sync_transfer_from_response
-resource: crates/lpe-exchange/src/tests/mod.rs#L13068-L13085
+resource: crates/lpe-exchange/src/tests/mod.rs#L13074-L13091
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_rowset_response
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L707-L791
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L710-L794
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,13 +1,13 @@
 ---
 type: Rust Function
 title: resolve_names_request
-resource: crates/lpe-exchange/src/tests/mod.rs#L12649-L12669
+resource: crates/lpe-exchange/src/tests/mod.rs#L12649-L12651
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
-  - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
+  - functions/crates/lpe-exchange/src/tests/resolve_names_request_for_values
 ---
 
 # Signature
@@ -16,4 +16,4 @@ relationships:
 
 # Calls
 
-- [push](../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
+- [resolve_names_request_for_values](../../../../../functions/crates/lpe-exchange/src/tests/resolve_names_request_for_values.md)

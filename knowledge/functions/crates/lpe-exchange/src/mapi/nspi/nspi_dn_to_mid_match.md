@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: nspi_dn_to_mid_match
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L544-L571
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L547-L574
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: resolve_names_response
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L204-L292
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L204-L295
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -14,7 +14,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/nspi/property_values/allocate_principal_nspi_identity
   - functions/crates/lpe-exchange/src/mapi/nspi/nspi_match_entry
   - functions/crates/lpe-exchange/src/mapi/nspi/nspi_lookup_matches_principal
-  - functions/crates/lpe-exchange/src/mapi/nspi/nspi_entry_is_principal
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   - functions/crates/lpe-exchange/src/mapi/nspi/property_values/write_large_property_tag_array
   - functions/crates/lpe-exchange/src/mapi/nspi/property_values/nspi_resolved_entry_row
@@ -35,7 +34,6 @@ relationships:
 - [allocate_principal_nspi_identity](../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/property_values/allocate_principal_nspi_identity.md)
 - [nspi_match_entry](../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/nspi_match_entry.md)
 - [nspi_lookup_matches_principal](../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/nspi_lookup_matches_principal.md)
-- [nspi_entry_is_principal](../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/nspi_entry_is_principal.md)
 - [push](../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
 - [write_large_property_tag_array](../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/property_values/write_large_property_tag_array.md)
 - [nspi_resolved_entry_row](../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/property_values/nspi_resolved_entry_row.md)

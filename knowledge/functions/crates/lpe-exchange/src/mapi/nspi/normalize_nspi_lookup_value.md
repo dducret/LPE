@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normalize_nspi_lookup_value
-resource: crates/lpe-exchange/src/mapi/nspi.rs#L1497-L1499
+resource: crates/lpe-exchange/src/mapi/nspi.rs#L1500-L1502
 generated:
   by: okf-rs/0.3.0
 relationships:
