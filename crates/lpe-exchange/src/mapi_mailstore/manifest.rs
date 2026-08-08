@@ -1331,6 +1331,15 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 &special_message_search_key(object),
             );
         }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_LAST_MODIFICATION_TIME,
+        ) {
+            write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
+            write_i64(&mut buffer, object.last_modified_filetime as i64);
+        }
         // [MS-OXCMSG] section 2.2.1.1 requires these server-owned
         // properties on every Message object. [MS-OXCFXICS] section 4.5
         // includes PidTagAccessLevel in a content synchronization download.

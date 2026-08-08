@@ -6720,6 +6720,15 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
     search_key_property.extend_from_slice(&(search_key.len() as u32).to_le_bytes());
     search_key_property.extend_from_slice(&search_key);
     assert!(contains_bytes(&response_rops, &search_key_property));
+    let last_modification_time_tag = 0x3008_0040u32.to_le_bytes();
+    assert_eq!(
+        response_rops
+            .windows(last_modification_time_tag.len())
+            .filter(|window| *window == last_modification_time_tag)
+            .count(),
+        2,
+        "the incremental-change metadata and the Calendar message content each carry PidTagLastModificationTime"
+    );
     assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
     assert!(contains_bytes(&response_rops, &utf16z("Conference room")));
     let checkpoint = store
