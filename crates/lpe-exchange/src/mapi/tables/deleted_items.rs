@@ -11,6 +11,7 @@ pub(super) fn deleted_items_content_rows<'a>(
     emails: &'a [JmapEmail],
     snapshot: &'a MapiMailStoreSnapshot,
     restriction: Option<&MapiRestriction>,
+    mailbox_guid: Uuid,
 ) -> Vec<DeletedItemsContentRow<'a>> {
     let mut rows = emails_for_folder(TRASH_FOLDER_ID, mailboxes, emails)
         .into_iter()
@@ -23,7 +24,9 @@ pub(super) fn deleted_items_content_rows<'a>(
         snapshot
             .events_for_folder(TRASH_FOLDER_ID)
             .into_iter()
-            .filter(|event| restriction_matches_event(restriction, event))
+            .filter(|event| {
+                restriction_matches_event_with_mailbox_guid(restriction, event, mailbox_guid)
+            })
             .map(DeletedItemsContentRow::Event),
     );
     rows
@@ -33,12 +36,15 @@ pub(super) fn deleted_items_content_row_matches(
     row: &DeletedItemsContentRow<'_>,
     restriction: Option<&MapiRestriction>,
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> bool {
     match row {
         DeletedItemsContentRow::Message(email) => {
             restriction_matches_email_in_snapshot(restriction, email, TRASH_FOLDER_ID, snapshot)
         }
-        DeletedItemsContentRow::Event(event) => restriction_matches_event(restriction, event),
+        DeletedItemsContentRow::Event(event) => {
+            restriction_matches_event_with_mailbox_guid(restriction, event, mailbox_guid)
+        }
     }
 }
 
@@ -105,7 +111,9 @@ pub(super) fn serialize_deleted_items_content_row(
             .unwrap_or_else(|| {
                 serialize_message_row_with_mailbox_guid(email, mailbox_guid, columns)
             }),
-        DeletedItemsContentRow::Event(event) => serialize_versioned_event_row(event, columns),
+        DeletedItemsContentRow::Event(event) => {
+            serialize_versioned_event_row(event, mailbox_guid, columns)
+        }
     }
 }
 
@@ -125,7 +133,7 @@ pub(super) fn serialize_deleted_items_content_property_row(
             )
         }
         DeletedItemsContentRow::Event(event) => {
-            let values = serialize_versioned_event_row(event, columns);
+            let values = serialize_versioned_event_row(event, mailbox_guid, columns);
             let mut property_row = Vec::new();
             write_query_rows_property_row(&mut property_row, columns, &values);
             property_row

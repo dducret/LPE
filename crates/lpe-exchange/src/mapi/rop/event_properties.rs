@@ -15,6 +15,7 @@ pub(in crate::mapi) fn event_object_property_is_deleted(
 
 pub(in crate::mapi) fn serialize_event_object_property(
     object: &MapiObject,
+    mailbox_guid: Uuid,
     snapshot: &MapiMailStoreSnapshot,
     property_tag: u32,
 ) -> Vec<u8> {
@@ -44,6 +45,7 @@ pub(in crate::mapi) fn serialize_event_object_property(
                 event,
                 snapshot.reminder_for_source("calendar", event.canonical_id),
                 !event.attachments.is_empty(),
+                mailbox_guid,
                 &[property_tag],
             )
         })

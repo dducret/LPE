@@ -154,11 +154,24 @@ pub(in crate::mapi) fn serialize_versioned_event_row_with_reminder_and_attachmen
     event: &crate::mapi_store::MapiEvent,
     reminder: Option<&lpe_storage::ClientReminder>,
     has_attachments: bool,
+    mailbox_guid: Uuid,
     columns: &[u32],
 ) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
-        match if canonical_property_storage_tag(*column) == PID_TAG_HAS_ATTACHMENTS {
+        match if canonical_property_storage_tag(*column) == PID_TAG_ENTRY_ID {
+            crate::mapi::identity::message_entry_id_from_object_ids(
+                mailbox_guid,
+                event.folder_id,
+                event.id,
+            )
+            .map(MapiValue::Binary)
+        } else if canonical_property_storage_tag(*column) == PID_TAG_PARENT_ENTRY_ID {
+            crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, event.folder_id)
+                .map(MapiValue::Binary)
+        } else if canonical_property_storage_tag(*column) == PID_TAG_RECORD_KEY {
+            Some(MapiValue::Binary(event.source_key.clone()))
+        } else if canonical_property_storage_tag(*column) == PID_TAG_HAS_ATTACHMENTS {
             Some(MapiValue::Bool(has_attachments))
         } else {
             versioned_event_property_value_with_reminder(event, *column, reminder)
@@ -172,12 +185,14 @@ pub(in crate::mapi) fn serialize_versioned_event_row_with_reminder_and_attachmen
 
 pub(in crate::mapi) fn serialize_versioned_event_row(
     event: &crate::mapi_store::MapiEvent,
+    mailbox_guid: Uuid,
     columns: &[u32],
 ) -> Vec<u8> {
     serialize_versioned_event_row_with_reminder_and_attachments(
         event,
         None,
         !event.attachments.is_empty(),
+        mailbox_guid,
         columns,
     )
 }

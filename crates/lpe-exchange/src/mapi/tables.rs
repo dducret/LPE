@@ -351,12 +351,18 @@ pub(in crate::mapi) fn rop_find_row_response(
                     emails,
                     snapshot,
                     table_restriction.as_ref(),
+                    mailbox_guid,
                 );
                 sort_deleted_items_content_rows(&mut rows, sort_orders);
                 let row_refs = rows.iter().collect::<Vec<_>>();
                 if let Some((index, row)) =
                     find_row(row_refs.as_slice(), *position, request, |row| {
-                        deleted_items_content_row_matches(row, Some(&restriction), snapshot)
+                        deleted_items_content_row_matches(
+                            row,
+                            Some(&restriction),
+                            snapshot,
+                            mailbox_guid,
+                        )
                     })
                 {
                     *position = index;
@@ -375,18 +381,27 @@ pub(in crate::mapi) fn rop_find_row_response(
                 }
             } else if *folder_id == CALENDAR_FOLDER_ID {
                 let mut rows =
-                    calendar_content_rows(snapshot, *folder_id, table_restriction.as_ref());
+                    calendar_content_rows_with_mailbox_guid(
+                        snapshot,
+                        *folder_id,
+                        table_restriction.as_ref(),
+                        mailbox_guid,
+                    );
                 sort_events(&mut rows, sort_orders);
                 if let Some((index, event)) =
                     find_row(rows.as_slice(), *position, request, |event| {
-                        restriction_matches_event(Some(&restriction), event)
+                        restriction_matches_event_with_mailbox_guid(
+                            Some(&restriction),
+                            event,
+                            mailbox_guid,
+                        )
                     })
                 {
                     *position = index;
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_versioned_event_row(event, &columns),
+                        &serialize_versioned_event_row(event, mailbox_guid, &columns),
                     );
                 } else {
                     return rop_find_row_no_match_response(request);
@@ -429,18 +444,27 @@ pub(in crate::mapi) fn rop_find_row_response(
                     }
                     MapiCollaborationFolderKind::Calendar => {
                         let mut rows =
-                            calendar_content_rows(snapshot, *folder_id, table_restriction.as_ref());
+                            calendar_content_rows_with_mailbox_guid(
+                                snapshot,
+                                *folder_id,
+                                table_restriction.as_ref(),
+                                mailbox_guid,
+                            );
                         sort_events(&mut rows, sort_orders);
                         if let Some((index, event)) =
                             find_row(rows.as_slice(), *position, request, |event| {
-                                restriction_matches_event(Some(&restriction), event)
+                                restriction_matches_event_with_mailbox_guid(
+                                    Some(&restriction),
+                                    event,
+                                    mailbox_guid,
+                                )
                             })
                         {
                             *position = index;
                             response.push(1);
                             write_standard_property_row(
                                 &mut response,
-                                &serialize_versioned_event_row(event, &columns),
+                                &serialize_versioned_event_row(event, mailbox_guid, &columns),
                             );
                         } else {
                             return rop_find_row_no_match_response(request);

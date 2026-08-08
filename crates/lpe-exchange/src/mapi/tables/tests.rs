@@ -2373,6 +2373,12 @@ fn captured_calendar_table_query_rows_projects_exact_requested_property_row() {
         Vec::new(),
         Vec::new(),
     );
+    let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        account_id,
+        CALENDAR_FOLDER_ID,
+        0x0000_0000_0044_0001,
+    )
+    .expect("calendar EntryID");
     let mut table = MapiObject::ContentsTable {
         folder_id: CALENDAR_FOLDER_ID,
         associated: false,
@@ -2387,6 +2393,10 @@ fn captured_calendar_table_query_rows_projects_exact_requested_property_row() {
             PID_TAG_MESSAGE_STATUS,
             PID_LID_OUTLOOK_COMMON_8578_TAG,
             PID_LID_SIDE_EFFECTS_TAG,
+            PID_TAG_ENTRY_ID,
+            PID_TAG_INSTANCE_KEY,
+            PID_TAG_PARENT_ENTRY_ID,
+            PID_TAG_RECORD_KEY,
         ],
         columns_set: true,
         sort_orders: vec![MapiSortOrder {
@@ -2396,7 +2406,11 @@ fn captured_calendar_table_query_rows_projects_exact_requested_property_row() {
         category_count: 0,
         expanded_count: 0,
         collapsed_categories: HashSet::new(),
-        restriction: None,
+        restriction: Some(MapiRestriction::Property {
+            relop: 0x04,
+            property_tag: PID_TAG_ENTRY_ID,
+            value: MapiValue::Binary(entry_id.clone()),
+        }),
         bookmarks: HashMap::new(),
         next_bookmark: 1,
         position: 0,
@@ -2456,8 +2470,26 @@ fn captured_calendar_table_query_rows_projects_exact_requested_property_row() {
     write_u32(&mut expected_values, 0);
     write_u32(&mut expected_values, 0);
     write_u32(&mut expected_values, 369);
-    assert_eq!(expected_values.len(), 86);
+    write_u16_prefixed_bytes(&mut expected_values, &entry_id);
+    write_u16_prefixed_bytes(
+        &mut expected_values,
+        &crate::mapi::identity::instance_key_for_object_id(0x0000_0000_0044_0001),
+    );
+    let parent_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account_id,
+        CALENDAR_FOLDER_ID,
+    )
+    .expect("calendar parent EntryID");
+    write_u16_prefixed_bytes(&mut expected_values, &parent_entry_id);
+    write_u16_prefixed_bytes(
+        &mut expected_values,
+        &mapi_mailstore::source_key_for_store_id(0x0000_0000_0044_0001),
+    );
     assert_eq!(&rows_response[10..], expected_values);
+    assert_eq!(
+        crate::mapi::identity::object_ids_from_message_entry_id(account_id, &entry_id),
+        Some((CALENDAR_FOLDER_ID, 0x0000_0000_0044_0001))
+    );
 }
 
 #[test]

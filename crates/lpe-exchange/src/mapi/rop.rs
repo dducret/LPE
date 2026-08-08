@@ -1242,7 +1242,7 @@ pub(in crate::mapi) fn serialize_object_property(
             serialize_pending_contact_row(principal, properties, &[tag])
         }
         Some(object @ MapiObject::Event { .. }) => {
-            serialize_event_object_property(object, snapshot, tag)
+            serialize_event_object_property(object, principal.account_id, snapshot, tag)
         }
         Some(MapiObject::PendingEvent { properties, .. }) => {
             serialize_pending_event_row(principal, properties, &[tag])

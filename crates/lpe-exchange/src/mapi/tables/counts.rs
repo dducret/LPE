@@ -279,7 +279,13 @@ pub(in crate::mapi) fn table_position_and_count(
                 )
             } else if *folder_id == TRASH_FOLDER_ID {
                 let mut rows =
-                    deleted_items_content_rows(mailboxes, emails, snapshot, restriction.as_ref());
+                    deleted_items_content_rows(
+                        mailboxes,
+                        emails,
+                        snapshot,
+                        restriction.as_ref(),
+                        mailbox_guid,
+                    );
                 sort_deleted_items_content_rows(&mut rows, sort_orders);
                 if *category_count > 0 {
                     categorized_deleted_items_content_rows(
@@ -296,7 +302,13 @@ pub(in crate::mapi) fn table_position_and_count(
                     rows.len()
                 }
             } else if *folder_id == CALENDAR_FOLDER_ID {
-                calendar_content_rows(snapshot, *folder_id, restriction.as_ref()).len()
+                calendar_content_rows_with_mailbox_guid(
+                    snapshot,
+                    *folder_id,
+                    restriction.as_ref(),
+                    mailbox_guid,
+                )
+                    .len()
             } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
                 match folder.kind {
                     MapiCollaborationFolderKind::Contacts => snapshot
@@ -311,7 +323,13 @@ pub(in crate::mapi) fn table_position_and_count(
                         })
                         .count(),
                     MapiCollaborationFolderKind::Calendar => {
-                        calendar_content_rows(snapshot, *folder_id, restriction.as_ref()).len()
+                        calendar_content_rows_with_mailbox_guid(
+                            snapshot,
+                            *folder_id,
+                            restriction.as_ref(),
+                            mailbox_guid,
+                        )
+                            .len()
                     }
                     MapiCollaborationFolderKind::Task => snapshot
                         .tasks_for_folder(*folder_id)

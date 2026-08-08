@@ -246,7 +246,8 @@ fn expanded_categorized_rows(
     sort_orders: &[MapiSortOrder],
 ) -> Vec<CategorizedTableRow> {
     if folder_id == TRASH_FOLDER_ID {
-        let mut rows = deleted_items_content_rows(mailboxes, emails, snapshot, restriction);
+        let mut rows =
+            deleted_items_content_rows(mailboxes, emails, snapshot, restriction, mailbox_guid);
         sort_deleted_items_content_rows(&mut rows, sort_orders);
         return categorized_deleted_items_content_rows(
             rows,
