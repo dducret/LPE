@@ -1299,6 +1299,19 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             sync_type,
             sync_flags,
             sync_property_tags,
+            PID_TAG_PARENT_ENTRY_ID,
+        ) {
+            if let Some(parent_entry_id) = crate::mapi::identity::folder_entry_id_from_object_id(
+                mailbox_guid,
+                object.folder_id,
+            ) {
+                write_binary_property(&mut buffer, PID_TAG_PARENT_ENTRY_ID, &parent_entry_id);
+            }
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
             PID_TAG_INSTANCE_KEY,
         ) {
             write_binary_property(
@@ -1311,14 +1324,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         // Exchange 2010 through Exchange 2019 do not expose
         // PidTagRecordKey on Message objects. Keep it omitted from FAI
         // messages just as the direct FastTransfer CopyTo projection does.
-        if object.associated
-            && content_property_in_scope(
-                sync_type,
-                sync_flags,
-                sync_property_tags,
-                PID_TAG_SEARCH_KEY,
-            )
-        {
+        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SEARCH_KEY) {
             write_binary_property(
                 &mut buffer,
                 PID_TAG_SEARCH_KEY,

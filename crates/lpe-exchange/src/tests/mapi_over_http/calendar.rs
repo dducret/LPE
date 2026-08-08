@@ -6686,6 +6686,9 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
         current_modseq: 41,
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
 
     let response_rops = content_sync_response_rops(store.clone(), 16, &[]).await;
 
@@ -6697,6 +6700,26 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
     instance_key_property.extend_from_slice(&(instance_key.len() as u32).to_le_bytes());
     instance_key_property.extend_from_slice(&instance_key);
     assert!(contains_bytes(&response_rops, &instance_key_property));
+    let parent_entry_id = crate::mapi::identity::with_current_mapi_identity_codec(
+        identity_codec,
+        async {
+            crate::mapi::identity::folder_entry_id_from_object_id(
+                account.account_id,
+                crate::mapi::identity::CALENDAR_FOLDER_ID,
+            )
+            .unwrap()
+        },
+    )
+    .await;
+    let mut parent_entry_id_property = 0x0E09_0102u32.to_le_bytes().to_vec();
+    parent_entry_id_property.extend_from_slice(&(parent_entry_id.len() as u32).to_le_bytes());
+    parent_entry_id_property.extend_from_slice(&parent_entry_id);
+    assert!(contains_bytes(&response_rops, &parent_entry_id_property));
+    let search_key = crate::mapi::identity::generated_message_search_key(&event_id);
+    let mut search_key_property = 0x300B_0102u32.to_le_bytes().to_vec();
+    search_key_property.extend_from_slice(&(search_key.len() as u32).to_le_bytes());
+    search_key_property.extend_from_slice(&search_key);
+    assert!(contains_bytes(&response_rops, &search_key_property));
     assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
     assert!(contains_bytes(&response_rops, &utf16z("Conference room")));
     let checkpoint = store
