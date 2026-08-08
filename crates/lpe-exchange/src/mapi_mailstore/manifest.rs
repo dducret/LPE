@@ -1295,6 +1295,18 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 write_binary_property(&mut buffer, PID_TAG_ENTRY_ID, &entry_id);
             }
         }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_INSTANCE_KEY,
+        ) {
+            write_binary_property(
+                &mut buffer,
+                PID_TAG_INSTANCE_KEY,
+                &crate::mapi::identity::instance_key_for_object_id(object.item_id),
+            );
+        }
         // [MS-OXCMSG] v20250520 section 2.2.1.1 product note <3>:
         // Exchange 2010 through Exchange 2019 do not expose
         // PidTagRecordKey on Message objects. Keep it omitted from FAI

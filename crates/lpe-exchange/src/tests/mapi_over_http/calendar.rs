@@ -6691,6 +6691,12 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 1);
+    let instance_key =
+        crate::mapi::identity::instance_key_for_object_id(test_mapi_uuid_id(&event_id));
+    let mut instance_key_property = 0x0FF6_0102u32.to_le_bytes().to_vec();
+    instance_key_property.extend_from_slice(&(instance_key.len() as u32).to_le_bytes());
+    instance_key_property.extend_from_slice(&instance_key);
+    assert!(contains_bytes(&response_rops, &instance_key_property));
     assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
     assert!(contains_bytes(&response_rops, &utf16z("Conference room")));
     let checkpoint = store
