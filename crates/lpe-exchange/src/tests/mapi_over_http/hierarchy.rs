@@ -226,8 +226,9 @@ async fn mapi_over_http_query_columns_all_folder_columns_omit_note_geometry() {
 
 #[tokio::test]
 async fn mapi_over_http_ipm_subtree_reports_distinct_folder_identity() {
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
             "55555555-5555-5555-5555-555555555555",
             "inbox",
@@ -235,6 +236,18 @@ async fn mapi_over_http_ipm_subtree_reports_distinct_folder_identity() {
         )])),
         ..Default::default()
     };
+    let ipm_subtree_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    )
+    .await;
+    let root_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::ROOT_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -293,21 +306,34 @@ async fn mapi_over_http_ipm_subtree_reports_distinct_folder_identity() {
     ));
     assert!(contains_bytes(
         properties,
-        &mapi_wire_id_bytes(test_mapi_folder_id(4))
+        &mapi_wire_id_bytes(ipm_subtree_id)
     ));
     assert!(contains_bytes(
         properties,
-        &mapi_wire_id_bytes(test_mapi_folder_id(1))
+        &mapi_wire_id_bytes(root_folder_id)
     ));
     assert!(contains_bytes(properties, &utf16z("IPF.Note")));
 }
 
 #[tokio::test]
 async fn mapi_over_http_advertised_special_folder_reports_own_identity() {
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         ..Default::default()
     };
+    let outbox_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::OUTBOX_FOLDER_ID,
+    )
+    .await;
+    let ipm_subtree_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    )
+    .await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -356,11 +382,11 @@ async fn mapi_over_http_advertised_special_folder_reports_own_identity() {
     assert!(contains_bytes(properties, &utf16z("Outbox")));
     assert!(contains_bytes(
         properties,
-        &mapi_wire_id_bytes(test_mapi_folder_id(6))
+        &mapi_wire_id_bytes(outbox_folder_id)
     ));
     assert!(contains_bytes(
         properties,
-        &mapi_wire_id_bytes(test_mapi_folder_id(4))
+        &mapi_wire_id_bytes(ipm_subtree_id)
     ));
     assert!(contains_bytes(properties, &utf16z("IPF.Note")));
 }
@@ -372,6 +398,9 @@ async fn mapi_over_http_empty_store_root_and_ipm_subtree_report_virtual_children
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -415,13 +444,24 @@ async fn mapi_over_http_empty_store_root_and_ipm_subtree_report_virtual_children
         crate::mapi::identity::ROOT_FOLDER_ID,
         crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
     ] {
-        let entry_id =
-            crate::mapi::identity::folder_entry_id_from_object_id(account.account_id, folder_id)
-                .unwrap();
+        let (entry_id, instance_key) = crate::mapi::identity::with_current_mapi_identity_codec(
+            identity_codec.clone(),
+            async {
+                (
+                    crate::mapi::identity::folder_entry_id_from_object_id(
+                        account.account_id,
+                        folder_id,
+                    )
+                    .unwrap(),
+                    crate::mapi::identity::instance_key_for_object_id(folder_id),
+                )
+            },
+        )
+        .await;
         assert!(contains_bytes(&response_rops, &entry_id));
         assert!(contains_bytes(
             &response_rops,
-            &crate::mapi::identity::instance_key_for_object_id(folder_id)
+            &instance_key
         ));
     }
 }
@@ -433,6 +473,9 @@ async fn mapi_over_http_root_hierarchy_findrow_finds_ipm_subtree_by_display_name
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -474,11 +517,17 @@ async fn mapi_over_http_root_hierarchy_findrow_finds_ipm_subtree_by_display_name
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    let ipm_subtree_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    let ipm_subtree_entry_id = crate::mapi::identity::with_current_mapi_identity_codec(
+        identity_codec,
+        async {
+            crate::mapi::identity::folder_entry_id_from_object_id(
+                account.account_id,
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            )
+            .unwrap()
+        },
     )
-    .unwrap();
+    .await;
     assert!(contains_bytes(
         &response_rops,
         &[0x4F, 0x02, 0, 0, 0, 0, 0, 1]
@@ -497,6 +546,9 @@ async fn mapi_over_http_root_hierarchy_findrow_finds_ipm_subtree_by_entry_id() {
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -507,11 +559,17 @@ async fn mapi_over_http_root_hierarchy_findrow_finds_ipm_subtree_by_entry_id() {
         "cookie",
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
-    let ipm_subtree_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    let ipm_subtree_entry_id = crate::mapi::identity::with_current_mapi_identity_codec(
+        identity_codec,
+        async {
+            crate::mapi::identity::folder_entry_id_from_object_id(
+                account.account_id,
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            )
+            .unwrap()
+        },
     )
-    .unwrap();
+    .await;
     let mut restriction = Vec::new();
     append_search_property_binary(&mut restriction, 0x0FFF_0102, 0x04, &ipm_subtree_entry_id);
 

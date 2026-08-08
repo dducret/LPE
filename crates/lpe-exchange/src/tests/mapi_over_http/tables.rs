@@ -88,7 +88,7 @@ async fn mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_tab
     );
     assert_eq!(
         u32::from_le_bytes(response_rops[14..18].try_into().unwrap()),
-        13
+        29
     );
     assert_eq!(
         u32::from_le_bytes(
@@ -294,7 +294,7 @@ async fn mapi_over_http_query_rows_lists_root_hierarchy_without_ipm_children() {
                 .try_into()
                 .unwrap()
         ),
-        13
+        29
     );
     assert!(contains_bytes(
         response_rops,
@@ -3048,8 +3048,9 @@ async fn mapi_over_http_ipm_subtree_returns_stable_ost_identity() {
 
 #[tokio::test]
 async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
             "55555555-5555-5555-5555-555555555555",
             "inbox",
@@ -3057,6 +3058,9 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
         )])),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -3160,9 +3164,14 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
     ] {
         assert!(contains_bytes(&response_rops, &utf16z(name)));
         assert!(contains_bytes(&response_rops, &utf16z(class)));
+        let source_key = crate::mapi::identity::with_current_mapi_identity_codec(
+            identity_codec.clone(),
+            async { crate::mapi::identity::source_key_for_object_id(folder_id) },
+        )
+        .await;
         assert!(contains_bytes(
             &response_rops,
-            &mapi_mailstore::source_key_for_store_id(folder_id)
+            &source_key
         ));
     }
     assert!(!contains_bytes(
@@ -3180,11 +3189,18 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
     ] {
         assert!(!contains_bytes(&response_rops, &utf16z(name)));
     }
+    let conversation_history_source_key = crate::mapi::identity::with_current_mapi_identity_codec(
+        identity_codec,
+        async {
+            crate::mapi::identity::source_key_for_object_id(
+                crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
+            )
+        },
+    )
+    .await;
     assert!(!contains_bytes(
         &response_rops,
-        &mapi_mailstore::source_key_for_store_id(
-            crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID
-        )
+        &conversation_history_source_key
     ));
 }
 
