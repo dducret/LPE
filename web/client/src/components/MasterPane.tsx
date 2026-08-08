@@ -7,6 +7,7 @@ export function MasterPane(props: {
   copy: ClientCopy;
   section: Section;
   folder: Folder;
+  folderLabel: string;
   contactBook: ContactBookId;
   setContactBook: (contactBook: ContactBookId) => void;
   contactBooks: CollaborationCollection[];
@@ -75,7 +76,7 @@ export function MasterPane(props: {
       <div className="pane-header">
         <div>
           <p className="pane-kicker">{props.copy.sections[props.section]}</p>
-          <h3>{props.section === "mail" ? props.copy.folders[props.folder] : props.copy.altViews[props.section]}</h3>
+          <h3>{props.section === "mail" ? props.folderLabel : props.copy.altViews[props.section]}</h3>
         </div>
         <span className="pane-count">{countLabel}</span>
       </div>

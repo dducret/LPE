@@ -1086,18 +1086,7 @@ async fn mapi_over_http_set_properties_rejects_unsupported_canonical_contact_pro
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = HeaderValue::from_str(
-        connect
-            .headers()
-            .get("set-cookie")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap(),
-    )
-    .unwrap();
+    let cookie = HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap();
 
     let mut property_values = Vec::new();
     append_mapi_utf16_property(&mut property_values, 0x3613_001F, "IPF.Note");

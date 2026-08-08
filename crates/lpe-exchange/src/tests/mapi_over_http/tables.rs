@@ -46,16 +46,7 @@ async fn mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_tab
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -136,16 +127,7 @@ async fn mapi_over_http_query_columns_all_reports_canonical_table_columns() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
@@ -267,16 +249,7 @@ async fn mapi_over_http_query_rows_lists_root_hierarchy_without_ipm_children() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -348,16 +321,7 @@ async fn mapi_over_http_query_rows_rejects_invalid_microsoft_forward_read_value(
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -408,16 +372,7 @@ async fn mapi_over_http_seek_row_rejects_invalid_microsoft_origin_value() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -597,16 +552,7 @@ async fn mapi_over_http_contents_table_lists_canonical_messages() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -710,16 +656,7 @@ async fn mapi_over_http_microsoft_reset_table_requires_new_set_columns() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -814,16 +751,7 @@ async fn mapi_over_http_microsoft_query_position_reports_table_cursor() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -910,16 +838,7 @@ async fn mapi_over_http_microsoft_seek_row_fractional_moves_table_cursor() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -973,16 +892,7 @@ async fn mapi_over_http_seek_row_fractional_rejects_zero_denominator_without_bat
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -1369,16 +1279,7 @@ async fn mapi_over_http_query_rows_no_advance_preserves_table_position() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -1445,16 +1346,7 @@ async fn mapi_over_http_sort_table_orders_contents_rows() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -1643,16 +1535,7 @@ async fn mapi_over_http_query_rows_reads_backward_from_table_position() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -1742,16 +1625,7 @@ async fn mapi_over_http_restrict_filters_contents_table_rows() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
     let restriction = mapi_content_restriction(0x0037_001F, "planning");
 
     let mut rops = vec![
@@ -1838,16 +1712,7 @@ async fn mapi_over_http_find_row_returns_matching_contents_row() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
     let restriction = mapi_content_restriction(0x0037_001F, "Needle target");
 
     let mut rops = vec![
@@ -2819,16 +2684,7 @@ async fn mapi_over_http_microsoft_seek_row_moves_contents_table_cursor() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -2919,16 +2775,7 @@ async fn mapi_over_http_microsoft_oxcmsg_get_attachment_table_lists_canonical_at
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -3001,16 +2848,7 @@ async fn mapi_over_http_get_attachment_table_rejects_invalid_microsoft_table_fla
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -3096,16 +2934,7 @@ async fn mapi_over_http_microsoft_saved_embedded_message_reopens_from_attachment
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -3187,16 +3016,7 @@ async fn mapi_over_http_ipm_subtree_returns_stable_ost_identity() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -3659,16 +3479,7 @@ async fn mapi_over_http_microsoft_table_control_rops_require_table_handles() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder

@@ -2,11 +2,11 @@ use anyhow::Result;
 use uuid::Uuid;
 
 use crate::{
-    AccessibleContact, AccessibleEvent, ClientAttachment, ClientAttachmentRow, ClientMessageRow,
-    Storage, attachments,
+    attachments, AccessibleContact, AccessibleEvent, ClientAttachment, ClientAttachmentRow,
+    ClientMessageRow, Storage,
 };
 
-use super::{ClientMessage, ClientWorkspace};
+use super::{ClientMailbox, ClientMessage, ClientWorkspace};
 
 impl Storage {
     pub async fn fetch_client_workspace(
@@ -19,6 +19,7 @@ impl Storage {
             r#"
             SELECT
                 m.id,
+                mb.id AS mailbox_id,
                 mb.role AS mailbox_role,
                 COALESCE(NULLIF(fr.display_name, ''), fr.address, '') AS from_name,
                 COALESCE(fr.address, '') AS from_address,
@@ -98,6 +99,13 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
+        let mailboxes = self
+            .fetch_jmap_mailboxes(account_id)
+            .await?
+            .into_iter()
+            .map(ClientMailbox::from)
+            .collect();
+
         let attachment_rows = sqlx::query_as::<_, ClientAttachmentRow>(
             r#"
             SELECT
@@ -167,7 +175,7 @@ impl Storage {
 
                 ClientMessage {
                     id: row.id,
-                    folder: client_folder(&row.mailbox_role),
+                    folder: client_folder(&row.mailbox_role, row.mailbox_id),
                     from: row.from_name,
                     from_address: row.from_address,
                     to: row.to_recipients,
@@ -194,6 +202,7 @@ impl Storage {
 
         Ok(ClientWorkspace {
             messages,
+            mailboxes,
             events,
             event_collection_ids,
             contacts,
@@ -219,7 +228,7 @@ fn body_paragraphs(body_text: &str) -> Vec<String> {
     }
 }
 
-fn client_folder(role: &str) -> String {
+fn client_folder(role: &str, mailbox_id: Uuid) -> String {
     match role {
         "drafts" => "drafts",
         "sent" => "sent",
@@ -233,7 +242,7 @@ fn client_folder(role: &str) -> String {
         "conflicts" => "conflicts",
         "local_failures" => "local_failures",
         "server_failures" => "server_failures",
-        _ => "inbox",
+        _ => return format!("mailbox:{mailbox_id}"),
     }
     .to_string()
 }
@@ -302,5 +311,21 @@ fn client_contact_from_accessible(contact: AccessibleContact) -> super::ClientCo
         job_title: contact.job_title,
         raw_vcard: contact.raw_vcard,
         source: contact.source,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::client_folder;
+    use uuid::Uuid;
+
+    #[test]
+    fn client_folder_keeps_custom_mailboxes_distinct() {
+        let mailbox_id = Uuid::from_u128(1);
+
+        assert_eq!(
+            client_folder("custom", mailbox_id),
+            "mailbox:00000000-0000-0000-0000-000000000001"
+        );
     }
 }

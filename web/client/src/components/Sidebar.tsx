@@ -1,6 +1,6 @@
 import React from "react";
 import type { ClientCopy } from "../i18n";
-import type { Folder, Section } from "../client-types";
+import type { ClientMailbox, Folder, Section, SystemFolder } from "../client-types";
 
 export function Sidebar(props: {
   copy: ClientCopy;
@@ -8,7 +8,8 @@ export function Sidebar(props: {
   setSection: (section: Section) => void;
   folder: Folder;
   setFolder: (folder: Folder) => void;
-  counts: Record<Folder, number>;
+  counts: Record<SystemFolder, number>;
+  customMailboxes: ClientMailbox[];
   unreadCount: number;
   eventCount: number;
   draftCount: number;
@@ -36,6 +37,7 @@ export function Sidebar(props: {
     { id: "local_failures", label: props.copy.folders.local_failures, count: props.counts.local_failures },
     { id: "server_failures", label: props.copy.folders.server_failures, count: props.counts.server_failures }
   ];
+  const customMailboxes = props.customMailboxes.filter((mailbox) => mailbox.isSubscribed && mailbox.role === "custom");
   const sectionLinks: Array<{ id: Section; label: string }> = [
     { id: "mail", label: props.copy.sections.mail },
     { id: "calendar", label: props.copy.sections.calendar },
@@ -135,6 +137,28 @@ export function Sidebar(props: {
                 <span className="tree-item-icon">{item.id === "inbox" ? "•" : item.id === "drafts" ? "◦" : item.id === "sent" ? "↗" : item.id === "trash" ? "⌫" : item.id === "junk" ? "!" : item.id === "outbox" ? "↥" : "▤"}</span>
                 <span className="sidebar-label">{item.label}</span>
                 <span className="sidebar-meta">{item.count ?? ""}</span>
+              </button>
+            );
+          })}
+          {customMailboxes.map((mailbox) => {
+            const id = `mailbox:${mailbox.id}` as Folder;
+            return (
+              <button
+                key={id}
+                className={props.folder === id ? "tree-item is-active" : "tree-item"}
+                type="button"
+                title={mailbox.name}
+                aria-label={mailbox.name}
+                onClick={() => {
+                  props.setSection("mail");
+                  props.setFolder(id);
+                  props.onCloseComposer();
+                  props.onCloseMobile();
+                }}
+              >
+                <span className="tree-item-icon">▤</span>
+                <span className="sidebar-label">{mailbox.name}</span>
+                <span className="sidebar-meta">{mailbox.totalEmails}</span>
               </button>
             );
           })}

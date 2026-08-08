@@ -267,7 +267,9 @@ export function App() {
     ? workspace.filtered.filter((item) => item.unread).length
     : 0;
   const workspaceTitle = workspace.section === "mail"
-    ? copy.folders[workspace.folder]
+    ? workspace.folder.startsWith("mailbox:")
+      ? workspace.mailboxes.find((mailbox) => `mailbox:${mailbox.id}` === workspace.folder)?.name ?? copy.folders.inbox
+      : copy.folders[workspace.folder as keyof typeof copy.folders]
     : copy.altViews[workspace.section];
   const syncCounts = workspace.syncStatus.counts;
   const lastRefreshed = workspace.syncStatus.lastRefreshedAt
@@ -325,6 +327,7 @@ export function App() {
           folder={workspace.folder}
           setFolder={workspace.setFolder}
           counts={workspace.counts}
+          customMailboxes={workspace.mailboxes}
           unreadCount={workspace.mail.filter((item) => item.unread).length}
           eventCount={workspace.events.length}
           draftCount={workspace.mail.filter((item) => item.folder === "drafts").length}
@@ -401,6 +404,7 @@ export function App() {
                 copy={copy}
                 section={workspace.section}
                 folder={workspace.folder}
+                folderLabel={workspaceTitle}
                 contactBook={workspace.contactBook}
                 setContactBook={workspace.setContactBook}
                 contactBooks={workspace.contactBooks}

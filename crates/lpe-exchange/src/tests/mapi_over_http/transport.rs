@@ -35,7 +35,7 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
         response.headers().get("x-expirationinfo").unwrap(),
         "1800000"
     );
-    assert_eq!(response.headers().get("x-pendingperiod").unwrap(), "15000");
+    assert_eq!(response.headers().get("x-pendingperiod").unwrap(), "30000");
     let content_length = response
         .headers()
         .get("content-length")
@@ -46,10 +46,10 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
         .unwrap();
     let set_cookie = response
         .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap();
+        .get_all("set-cookie")
+        .iter()
+        .find_map(|value| value.to_str().ok().filter(|cookie| cookie.starts_with("MapiContext=")))
+        .expect("Connect must return MapiContext");
     assert!(set_cookie.starts_with("MapiContext="));
     assert!(set_cookie.contains("Max-Age=1800"));
     assert!(set_cookie.contains("HttpOnly"));
@@ -60,7 +60,7 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
         .iter()
         .map(|value| value.to_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(set_cookies.len(), 2);
+    assert_eq!(set_cookies.len(), 4);
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiContext=")));
@@ -129,7 +129,7 @@ async fn mapi_over_http_microsoft_oxcmapihttp_connect_execute_reconnect_disconne
     );
     assert_eq!(connect.headers().get("x-clientinfo").unwrap(), client_info);
     assert_eq!(connect.headers().get("x-responsecode").unwrap(), "0");
-    assert_eq!(connect.headers().get("x-pendingperiod").unwrap(), "15000");
+    assert_eq!(connect.headers().get("x-pendingperiod").unwrap(), "30000");
     assert_eq!(
         connect.headers().get("x-expirationinfo").unwrap(),
         "1800000"
@@ -140,7 +140,7 @@ async fn mapi_over_http_microsoft_oxcmapihttp_connect_execute_reconnect_disconne
         .iter()
         .map(|value| value.to_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(set_cookies.len(), 2);
+    assert_eq!(set_cookies.len(), 4);
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiContext=")));
@@ -351,7 +351,7 @@ async fn mapi_over_http_store_load_failure_after_logon_is_unknown_failure_with_s
         .collect::<Vec<_>>();
     // [MS-OXCMAPIHTTP] sections 3.1.5.2 and 3.2.5.2 require the complete
     // Session Context cookie set on the next request and response.
-    assert_eq!(set_cookies.len(), 2);
+    assert_eq!(set_cookies.len(), 4);
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiContext=")));
@@ -396,7 +396,7 @@ async fn mapi_over_http_malformed_execute_body_is_invalid_body_with_session_cook
         .iter()
         .map(|value| value.to_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(set_cookies.len(), 2);
+    assert_eq!(set_cookies.len(), 4);
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiContext=")));
@@ -496,7 +496,7 @@ async fn mapi_over_http_connect_ignores_mismatched_sequence_cookie_on_reconnect(
         .iter()
         .map(|value| value.to_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(set_cookies.len(), 2);
+    assert_eq!(set_cookies.len(), 4);
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiContext=")));
@@ -961,16 +961,7 @@ async fn mapi_over_http_disconnect_consumes_emsmdb_session() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut disconnect_headers = mapi_headers("Disconnect");
     disconnect_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -1127,13 +1118,16 @@ async fn mapi_over_http_notification_wait_accepts_prior_sequence_and_does_not_bl
         .iter()
         .map(|value| value.to_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(set_cookies.len(), 1);
+    assert_eq!(set_cookies.len(), 2);
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiContext=") && cookie.contains("Max-Age=1800")));
     assert!(set_cookies
         .iter()
         .all(|cookie| !cookie.starts_with("MapiSequence=")));
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("X-BackEndCookie=")));
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&current_cookie).unwrap());
@@ -1186,7 +1180,7 @@ async fn mapi_over_http_notification_wait_streams_processing_and_pending_frames(
         "NotificationWait"
     );
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
-    assert_eq!(response.headers().get("x-pendingperiod").unwrap(), "15000");
+    assert_eq!(response.headers().get("x-pendingperiod").unwrap(), "30000");
     assert_eq!(
         response.headers().get("transfer-encoding").unwrap(),
         "chunked"
@@ -1199,8 +1193,8 @@ async fn mapi_over_http_notification_wait_streams_processing_and_pending_frames(
         b"PROCESSING\r\n"
     );
 
-    tokio::time::sleep(Duration::from_secs(15)).await;
-    let pending = tokio::time::timeout(Duration::from_secs(1), frames.next())
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    let pending = tokio::time::timeout(Duration::from_secs(2), frames.next())
         .await
         .expect("NotificationWait must emit PENDING after X-PendingPeriod")
         .unwrap()
@@ -1730,7 +1724,7 @@ async fn mapi_over_http_bind_ignores_mismatched_sequence_cookie_on_reconnect() {
         .iter()
         .map(|value| value.to_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(set_cookies.len(), 2);
+    assert_eq!(set_cookies.len(), 4);
     assert!(set_cookies
         .iter()
         .any(|cookie| cookie.starts_with("MapiContext=")));

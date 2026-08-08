@@ -1,4 +1,4 @@
-import type { ContactBookId, ContactDraft, ContactItem, EventDraft, EventItem, Folder, JournalEntryDraft, JournalEntryItem, Message, MessageDraft, NoteDraft, NoteItem, TaskDraft, TaskItem } from "./client-types";
+import type { ContactBookId, ContactDraft, ContactItem, EventDraft, EventItem, Folder, JournalEntryDraft, JournalEntryItem, Message, MessageDraft, NoteDraft, NoteItem, SystemFolder, TaskDraft, TaskItem } from "./client-types";
 
 export const blankDraft = (mailboxAccountId = ""): MessageDraft => ({
   mailboxAccountId,
@@ -59,8 +59,8 @@ export const blankJournalEntry = (entry?: JournalEntryItem): JournalEntryDraft =
 
 export const quoteMessage = (message: Message) => ["", "", `--- ${message.from} <${message.fromAddress}> ---`, ...message.body].join("\n");
 
-export function countFolders(messages: Message[]): Record<Folder, number> {
-  const value: Record<Folder, number> = {
+export function countFolders(messages: Message[]): Record<SystemFolder, number> {
+  const value: Record<SystemFolder, number> = {
     focused: 0,
     inbox: 0,
     drafts: 0,
@@ -76,7 +76,9 @@ export function countFolders(messages: Message[]): Record<Folder, number> {
     local_failures: 0,
     server_failures: 0
   };
-  for (const item of messages) value[item.folder] += 1;
+  for (const item of messages) {
+    if (item.folder in value) value[item.folder as SystemFolder] += 1;
+  }
   value.focused = value.inbox;
   return value;
 }

@@ -160,16 +160,7 @@ async fn mapi_over_http_microsoft_table_bookmarks_restore_contents_cursor_and_fr
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut first_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder

@@ -139,7 +139,7 @@ pub use crate::types::{
 };
 pub use crate::util::{normalize_mailbox_domain, normalize_mailbox_email};
 pub use crate::workspace::{
-    ClientContact, ClientEvent, ClientMessage, ClientWorkspace, RecipientSuggestion,
+    ClientContact, ClientEvent, ClientMailbox, ClientMessage, ClientWorkspace, RecipientSuggestion,
     UpsertClientContactInput, UpsertClientEventInput,
 };
 

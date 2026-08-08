@@ -1,5 +1,6 @@
 export type Section = "mail" | "calendar" | "contacts" | "tasks" | "notes" | "journal" | "reminders" | "settings";
-export type Folder = "focused" | "inbox" | "drafts" | "sent" | "archive" | "trash" | "junk" | "outbox" | "rss_feeds" | "conversation_history" | "sync_issues" | "conflicts" | "local_failures" | "server_failures";
+export type SystemFolder = "focused" | "inbox" | "drafts" | "sent" | "archive" | "trash" | "junk" | "outbox" | "rss_feeds" | "conversation_history" | "sync_issues" | "conflicts" | "local_failures" | "server_failures";
+export type Folder = SystemFolder | `mailbox:${string}`;
 export type ContactBookId = string;
 export type Mode = "closed" | "new" | "draft" | "reply" | "forward";
 
@@ -82,12 +83,24 @@ export type ClientIdentity = {
 
 export type ClientWorkspacePayload = {
   messages: Message[];
+  mailboxes: ClientMailbox[];
   events: EventItem[];
   eventCollectionIds: Record<string, string>;
   contacts: ContactItem[];
   contactBooks: CollaborationCollection[];
   calendarCollections: CollaborationCollection[];
   tasks: TaskItem[];
+};
+
+export type ClientMailbox = {
+  id: string;
+  parentId: string | null;
+  role: string;
+  name: string;
+  sortOrder: number;
+  totalEmails: number;
+  unreadEmails: number;
+  isSubscribed: boolean;
 };
 
 export type ClientSyncStatus = {

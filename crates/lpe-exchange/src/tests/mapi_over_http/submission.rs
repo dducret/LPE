@@ -359,16 +359,7 @@ async fn mapi_over_http_modify_recipients_string8_rows_save_canonically() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut to_row = Vec::new();
     to_row.extend_from_slice(b"Bob\0");
@@ -460,16 +451,7 @@ async fn mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonicall
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut property_values = Vec::new();
     append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Wrapped recipients");
@@ -519,16 +501,7 @@ async fn mapi_over_http_modify_recipients_x500_rows_save_canonically() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut property_values = Vec::new();
     append_mapi_utf16_property(&mut property_values, 0x0037_001F, "X500 recipients");
@@ -679,16 +652,7 @@ async fn mapi_over_http_remove_all_recipients_clears_pending_message_recipients(
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let row = mapi_recipient_row("Bob", "bob@example.test", 0x01);
     let mut rops = vec![
@@ -1857,16 +1821,7 @@ async fn mapi_over_http_replayed_execute_request_id_does_not_resubmit_message() 
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut property_values = Vec::new();
     append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Retry-safe submit");
@@ -2110,16 +2065,7 @@ async fn mapi_over_http_open_message_returns_visible_recipient_rows() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
@@ -2203,16 +2149,7 @@ async fn mapi_over_http_read_recipients_returns_canonical_message_recipients() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -2354,16 +2291,7 @@ async fn mapi_over_http_read_recipients_hides_sent_message_bcc_by_default() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder

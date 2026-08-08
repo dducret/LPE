@@ -6,8 +6,9 @@ use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use crate::{
-    CanonicalChangeCategory, ClientAttachment, ClientContactRow, ClientEventRow, ClientTask,
-    CollaborationCollection, ContactNameFields, ContactSourceFields, Storage, normalize_email,
+    normalize_email, CanonicalChangeCategory, ClientAttachment, ClientContactRow, ClientEventRow,
+    ClientTask, CollaborationCollection, ContactNameFields, ContactSourceFields, JmapMailbox,
+    Storage,
 };
 
 mod client_workspace;
@@ -16,12 +17,41 @@ mod client_workspace;
 #[serde(rename_all = "camelCase")]
 pub struct ClientWorkspace {
     pub messages: Vec<ClientMessage>,
+    pub mailboxes: Vec<ClientMailbox>,
     pub events: Vec<ClientEvent>,
     pub event_collection_ids: BTreeMap<String, String>,
     pub contacts: Vec<ClientContact>,
     pub contact_books: Vec<CollaborationCollection>,
     pub calendar_collections: Vec<CollaborationCollection>,
     pub tasks: Vec<ClientTask>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientMailbox {
+    pub id: Uuid,
+    pub parent_id: Option<Uuid>,
+    pub role: String,
+    pub name: String,
+    pub sort_order: i32,
+    pub total_emails: u32,
+    pub unread_emails: u32,
+    pub is_subscribed: bool,
+}
+
+impl From<JmapMailbox> for ClientMailbox {
+    fn from(mailbox: JmapMailbox) -> Self {
+        Self {
+            id: mailbox.id,
+            parent_id: mailbox.parent_id,
+            role: mailbox.role,
+            name: mailbox.name,
+            sort_order: mailbox.sort_order,
+            total_emails: mailbox.total_emails,
+            unread_emails: mailbox.unread_emails,
+            is_subscribed: mailbox.is_subscribed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -3,6 +3,7 @@ import { blankContact, blankDraft, blankEvent, blankJournalEntry, blankNote, bla
 import type { ClientCopy } from "./i18n";
 import type {
   ClientIdentity,
+  ClientMailbox,
   ClientSyncStatus,
   CollaborationCollection,
   CollaborationOverview,
@@ -164,6 +165,7 @@ export function useClientWorkspace(
   const [workspaceMailboxAccountId, setWorkspaceMailboxAccountId] = React.useState("");
   const [query, setQuery] = React.useState("");
   const [mail, setMail] = React.useState<Message[]>([]);
+  const [mailboxes, setMailboxes] = React.useState<ClientMailbox[]>([]);
   const [events, setEvents] = React.useState<EventItem[]>([]);
   const [contacts, setContacts] = React.useState<ContactItem[]>([]);
   const [contactBooks, setContactBooks] = React.useState<CollaborationCollection[]>([]);
@@ -223,6 +225,7 @@ export function useClientWorkspace(
     setCalendarCollectionId("");
     setQuery("");
     setMail([]);
+    setMailboxes([]);
     setEvents([]);
     setContacts([]);
     setContactBooks([]);
@@ -282,6 +285,7 @@ export function useClientWorkspace(
         apiJson<ReminderItem[]>("mail/reminders", authToken)
       ]);
       setMail(payload.messages);
+      setMailboxes(payload.mailboxes);
       setEvents(payload.events);
       setEventCollectionIds(payload.eventCollectionIds);
       setContacts(payload.contacts);
@@ -1176,6 +1180,7 @@ export function useClientWorkspace(
     query,
     setQuery,
     mail,
+    mailboxes,
     events,
     contacts,
     tasks,

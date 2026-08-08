@@ -400,6 +400,7 @@ pub(crate) struct ActiveSyncDeviceRow {
 #[derive(Debug, FromRow)]
 pub(crate) struct ClientMessageRow {
     pub(crate) id: Uuid,
+    pub(crate) mailbox_id: Uuid,
     pub(crate) mailbox_role: String,
     pub(crate) from_name: String,
     pub(crate) from_address: String,
