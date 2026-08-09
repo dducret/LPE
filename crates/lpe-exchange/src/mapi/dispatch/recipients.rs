@@ -241,6 +241,9 @@ pub(super) async fn append_modify_recipients_response<S>(
                 }
             }
         }
+        Some(MapiObject::PendingEvent { .. }) => {
+            responses.extend_from_slice(&rop_simple_success_response(request));
+        }
         Some(MapiObject::Message {
             folder_id,
             message_id,

@@ -3651,6 +3651,48 @@ async fn mapi_over_http_empty_advertised_calendar_create_uses_default_collection
 }
 
 #[tokio::test]
+async fn mapi_over_http_calendar_pending_event_modify_recipients_succeeds() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap();
+
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, calendar_folder_id);
+    append_rop_modify_recipients(&mut rops, 1, &[]);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(
+        response_rops
+            .windows(6)
+            .any(|response| response == [0x0E, 0x01, 0, 0, 0, 0]),
+        "PendingEvent ModifyRecipients response: {response_rops:02x?}"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccc0001").unwrap();
