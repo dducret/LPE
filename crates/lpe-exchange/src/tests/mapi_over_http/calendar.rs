@@ -6720,6 +6720,10 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
     search_key_property.extend_from_slice(&(search_key.len() as u32).to_le_bytes());
     search_key_property.extend_from_slice(&search_key);
     assert!(contains_bytes(&response_rops, &search_key_property));
+    let creation_time = mapi_mailstore::filetime_from_rfc3339_utc("2026-07-15T10:00:00Z");
+    let mut creation_time_property = 0x3007_0040u32.to_le_bytes().to_vec();
+    creation_time_property.extend_from_slice(&(creation_time as i64).to_le_bytes());
+    assert!(contains_bytes(&response_rops, &creation_time_property));
     let last_modification_time_tag = 0x3008_0040u32.to_le_bytes();
     assert_eq!(
         response_rops

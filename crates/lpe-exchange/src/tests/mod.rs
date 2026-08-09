@@ -7916,6 +7916,7 @@ impl ExchangeStore for FakeStore {
                     change_number,
                     change_key: mapi_mailstore::change_key_for_change_number(change_number),
                     predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+                    created_at: "2026-07-15T10:00:00Z".to_string(),
                     updated_at: "2026-07-15T10:00:00Z".to_string(),
                 };
                 stored_versions.insert(*event_id, version.clone());
@@ -8118,6 +8119,7 @@ impl ExchangeStore for FakeStore {
                 .as_ref()
                 .map(|identity| identity.predecessor_change_list.clone())
                 .unwrap_or_else(|| mapi_mailstore::predecessor_change_list(change_number)),
+            created_at: "2026-07-15T10:00:00Z".to_string(),
             updated_at: "2026-07-15T10:00:00Z".to_string(),
         };
         self.mapi_event_identity_versions
@@ -8842,6 +8844,7 @@ impl ExchangeStore for FakeStore {
                 .as_ref()
                 .map(|identity| identity.predecessor_change_list.clone())
                 .unwrap_or_else(|| mapi_mailstore::predecessor_change_list(change_number)),
+            created_at: "2026-07-15T10:00:00Z".to_string(),
             updated_at: "2026-07-15T10:15:00Z".to_string(),
         };
         self.mapi_event_identity_versions
@@ -9342,6 +9345,7 @@ impl ExchangeStore for FakeStore {
                 change_number: new_change_number,
                 change_key: new_change_key.clone(),
                 predecessor_change_list: new_predecessor_change_list,
+                created_at: "2026-07-15T10:00:00Z".to_string(),
                 updated_at: "2026-07-16T20:52:00Z".to_string(),
             },
         );

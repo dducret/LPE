@@ -84,6 +84,7 @@ pub struct MapiEventVersion {
     pub change_number: u64,
     pub change_key: Vec<u8>,
     pub predecessor_change_list: Vec<u8>,
+    pub created_at: String,
     pub updated_at: String,
 }
 
@@ -444,13 +445,15 @@ impl Storage {
         )
         .await?;
         let reminder = fetch_mapi_event_reminder_state_in_tx(&mut tx, &tenant_id, event_id).await?;
-        let updated_at = fetch_event_updated_at_in_tx(&mut tx, &tenant_id, event_id).await?;
+        let (created_at, updated_at) =
+            fetch_event_timestamps_in_tx(&mut tx, &tenant_id, event_id).await?;
         let version = MapiEventVersion {
             event_id,
             canonical_modseq: modseq,
             change_number: identity_version.change_number,
             change_key: identity_version.change_key,
             predecessor_change_list: identity_version.predecessor_change_list,
+            created_at,
             updated_at,
         };
         tx.commit().await?;
@@ -481,6 +484,10 @@ impl Storage {
                 identity.mapi_change_number,
                 identity.change_key,
                 identity.predecessor_change_list,
+                to_char(
+                    event.created_at AT TIME ZONE 'UTC',
+                    'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+                ) AS created_at,
                 to_char(
                     event.updated_at AT TIME ZONE 'UTC',
                     'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
@@ -681,7 +688,8 @@ impl Storage {
         .await?;
         let reminder =
             fetch_mapi_event_reminder_state_in_tx(&mut tx, &tenant_id, input.event_id).await?;
-        let updated_at = fetch_event_updated_at_in_tx(&mut tx, &tenant_id, input.event_id).await?;
+        let (created_at, updated_at) =
+            fetch_event_timestamps_in_tx(&mut tx, &tenant_id, input.event_id).await?;
         tx.commit().await?;
 
         Ok(MapiEventCommitOutcome::Saved(MapiEventCommitSuccess {
@@ -691,6 +699,7 @@ impl Storage {
                 change_number: principal_version.change_number,
                 change_key: principal_version.change_key,
                 predecessor_change_list: principal_version.predecessor_change_list,
+                created_at,
                 updated_at,
             },
             reminder,
@@ -1371,17 +1380,22 @@ impl Storage {
     }
 }
 
-async fn fetch_event_updated_at_in_tx(
+async fn fetch_event_timestamps_in_tx(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     tenant_id: &Uuid,
     event_id: Uuid,
-) -> Result<String> {
-    sqlx::query_scalar::<_, String>(
+) -> Result<(String, String)> {
+    sqlx::query_as::<_, (String, String)>(
         r#"
-        SELECT to_char(
-            updated_at AT TIME ZONE 'UTC',
-            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
-        )
+        SELECT
+            to_char(
+                created_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+            ),
+            to_char(
+                updated_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+            )
         FROM calendar_events
         WHERE tenant_id = $1
           AND id = $2
@@ -1406,6 +1420,7 @@ fn mapi_event_version_from_row(row: sqlx::postgres::PgRow) -> Result<MapiEventVe
         change_number: change_number as u64,
         change_key: row.get("change_key"),
         predecessor_change_list: row.get("predecessor_change_list"),
+        created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })
 }

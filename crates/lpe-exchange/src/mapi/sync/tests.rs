@@ -970,6 +970,7 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
             change_number: 124,
             change_key: mapi_mailstore::change_key_for_change_number(124),
             predecessor_change_list: mapi_mailstore::predecessor_change_list(124),
+            created_at: "2026-05-25T14:00:00Z".to_string(),
             updated_at: "2026-05-25T14:00:00Z".to_string(),
         },
         attachments: vec![crate::mapi_store::MapiAttachment {

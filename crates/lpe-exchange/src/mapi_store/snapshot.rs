@@ -1606,12 +1606,14 @@ impl MapiMailStoreSnapshot {
 
 fn fallback_event_version(event: &AccessibleEvent, event_id: u64) -> MapiEventVersion {
     let change_number = mapi_mailstore::change_number_for_store_id(event_id);
+    let timestamp = format!("{}T{}:00Z", event.date, event.time);
     MapiEventVersion {
         event_id: event.id,
         canonical_modseq: 1,
         change_number,
         change_key: mapi_mailstore::change_key_for_change_number(change_number),
         predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
-        updated_at: format!("{}T{}:00Z", event.date, event.time),
+        created_at: timestamp.clone(),
+        updated_at: timestamp,
     }
 }

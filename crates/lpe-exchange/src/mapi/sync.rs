@@ -962,6 +962,7 @@ fn calendar_sync_object(
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     let mut properties = Vec::new();
     for property_tag in [
+        PID_TAG_CREATION_TIME,
         PID_TAG_START_DATE,
         PID_TAG_END_DATE,
         PID_TAG_MESSAGE_DELIVERY_TIME,
