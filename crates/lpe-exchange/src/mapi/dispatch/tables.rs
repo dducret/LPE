@@ -1076,6 +1076,7 @@ fn calendar_event_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_LID_APPOINTMENT_RECUR_TAG
             | PID_LID_GLOBAL_OBJECT_ID_TAG
             | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG
+            | PID_LID_IS_RECURRING_TAG
     )
 }
 

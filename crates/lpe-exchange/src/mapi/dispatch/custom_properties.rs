@@ -460,6 +460,7 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
             | PID_LID_TASK_F_RECURRING_TAG
             | PID_LID_GLOBAL_OBJECT_ID_TAG
             | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG
+            | PID_LID_IS_RECURRING_TAG
             | PID_LID_BUSY_STATUS_TAG
             | PID_LID_LOCATION_W_TAG
             | PID_LID_APPOINTMENT_START_WHOLE_TAG

@@ -141,10 +141,12 @@ pub(super) fn append_create_message_response(
             Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
                 folder_id,
                 properties: initial_message_properties(),
+                recipients: Vec::new(),
             },
             None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
                 folder_id,
                 properties: initial_message_properties(),
+                recipients: Vec::new(),
             },
             Some(MapiCollaborationFolderKind::Task) => MapiObject::PendingTask {
                 folder_id,

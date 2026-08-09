@@ -58,7 +58,13 @@ pub(super) async fn append_recipient_dispatch_response<S>(
 {
     match RopId::from_u8(request.rop_id) {
         Some(RopId::RemoveAllRecipients) => {
-            append_remove_all_recipients_response(session, handle_slots, request, responses);
+            append_remove_all_recipients_response(
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+            );
         }
         Some(RopId::ModifyRecipients) => {
             append_modify_recipients_response(
@@ -69,6 +75,7 @@ pub(super) async fn append_recipient_dispatch_response<S>(
                 request,
                 mailboxes,
                 emails,
+                snapshot,
                 responses,
             )
             .await;
@@ -120,7 +127,42 @@ pub(super) fn append_read_recipients_response(
         };
         Some(&pending_recipient_object)
     } else {
-        input_object(session, handle_slots, request)
+        match input_object(session, handle_slots, request) {
+            Some(MapiObject::PendingEvent {
+                folder_id,
+                recipients,
+                ..
+            }) => {
+                pending_recipient_object = MapiObject::PendingMessage {
+                    folder_id: *folder_id,
+                    properties: HashMap::new(),
+                    recipients: recipients.clone(),
+                };
+                Some(&pending_recipient_object)
+            }
+            Some(MapiObject::Event {
+                folder_id,
+                event_id,
+                transaction,
+            }) => {
+                let recipients = transaction.pending_recipients.clone().or_else(|| {
+                    snapshot
+                        .event_for_id(*folder_id, *event_id)
+                        .map(|event| calendar_pending_recipients(&event.event))
+                });
+                if let Some(recipients) = recipients {
+                    pending_recipient_object = MapiObject::PendingMessage {
+                        folder_id: *folder_id,
+                        properties: HashMap::new(),
+                        recipients,
+                    };
+                    Some(&pending_recipient_object)
+                } else {
+                    None
+                }
+            }
+            object => object,
+        }
     };
     responses.extend_from_slice(&rop_read_recipients_response(
         request, object, mailboxes, emails, snapshot,
@@ -131,10 +173,56 @@ pub(super) fn append_remove_all_recipients_response(
     session: &mut MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
     let input_handle_value = input_handle(handle_slots, request);
-    match input_object_mut(session, handle_slots, request) {
+    let object = input_object(session, handle_slots, request).cloned();
+    match object {
+        Some(MapiObject::Event {
+            folder_id,
+            event_id,
+            transaction,
+        }) => {
+            let Some(event) = snapshot.event_for_id(folder_id, event_id) else {
+                responses.extend_from_slice(&rop_error_response(
+                    0x0D,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                ));
+                return;
+            };
+            if !event_handle_is_writable(transaction.open_mode_flags, event.event.rights.may_write) {
+                responses.extend_from_slice(&rop_error_response(
+                    0x0D,
+                    request.response_handle_index(),
+                    0x8007_0005,
+                ));
+                return;
+            }
+            let Some(MapiObject::Event { transaction, .. }) =
+                input_object_mut(session, handle_slots, request)
+            else {
+                responses.extend_from_slice(&rop_error_response(
+                    0x0D,
+                    request.response_handle_index(),
+                    0x0000_04B9,
+                ));
+                return;
+            };
+            transaction.pending_recipients = Some(Vec::new());
+            responses.extend_from_slice(&rop_simple_success_response(request));
+        }
+        Some(MapiObject::PendingEvent { .. }) => {
+            let Some(MapiObject::PendingEvent { recipients, .. }) =
+                input_object_mut(session, handle_slots, request)
+            else {
+                unreachable!();
+            };
+            recipients.clear();
+            responses.extend_from_slice(&rop_simple_success_response(request));
+        }
+        _ => match input_object_mut(session, handle_slots, request) {
         Some(MapiObject::PendingMessage { recipients, .. }) => {
             recipients.clear();
             responses.extend_from_slice(&rop_simple_success_response(request));
@@ -158,6 +246,7 @@ pub(super) fn append_remove_all_recipients_response(
             request.response_handle_index(),
             0x0000_04B9,
         )),
+        },
     }
 }
 
@@ -169,6 +258,7 @@ pub(super) async fn append_modify_recipients_response<S>(
     request: &RopRequest,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) where
     S: ExchangeStore,
@@ -241,7 +331,83 @@ pub(super) async fn append_modify_recipients_response<S>(
                 }
             }
         }
-        Some(MapiObject::PendingEvent { .. }) => {
+        Some(MapiObject::PendingEvent {
+            recipients: _,
+            ..
+        }) => {
+            let address_book_entries = store
+                .fetch_address_book_entries(principal)
+                .await
+                .unwrap_or_default();
+            match request.modify_recipients(principal, &address_book_entries) {
+                Ok(changes) => {
+                    let Some(MapiObject::PendingEvent { recipients, .. }) =
+                        input_object_mut(session, handle_slots, request)
+                    else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x0E,
+                            request.response_handle_index(),
+                            0x0000_04B9,
+                        ));
+                        return;
+                    };
+                    apply_pending_recipient_changes(recipients, changes);
+                    responses.extend_from_slice(&rop_simple_success_response(request));
+                }
+                Err(_) => responses.extend_from_slice(&rop_error_response(
+                    0x0E,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                )),
+            }
+        }
+        Some(MapiObject::Event {
+            folder_id,
+            event_id,
+            transaction,
+        }) => {
+            let Some(event) = snapshot.event_for_id(folder_id, event_id) else {
+                responses.extend_from_slice(&rop_error_response(
+                    0x0E,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                ));
+                return;
+            };
+            if !event_handle_is_writable(transaction.open_mode_flags, event.event.rights.may_write) {
+                responses.extend_from_slice(&rop_error_response(
+                    0x0E,
+                    request.response_handle_index(),
+                    0x8007_0005,
+                ));
+                return;
+            }
+            let address_book_entries = store
+                .fetch_address_book_entries(principal)
+                .await
+                .unwrap_or_default();
+            let Ok(changes) = request.modify_recipients(principal, &address_book_entries) else {
+                responses.extend_from_slice(&rop_error_response(
+                    0x0E,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                ));
+                return;
+            };
+            let Some(MapiObject::Event { transaction, .. }) =
+                input_object_mut(session, handle_slots, request)
+            else {
+                responses.extend_from_slice(&rop_error_response(
+                    0x0E,
+                    request.response_handle_index(),
+                    0x0000_04B9,
+                ));
+                return;
+            };
+            let recipients = transaction
+                .pending_recipients
+                .get_or_insert_with(|| calendar_pending_recipients(&event.event));
+            apply_pending_recipient_changes(recipients, changes);
             responses.extend_from_slice(&rop_simple_success_response(request));
         }
         Some(MapiObject::Message {

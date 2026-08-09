@@ -341,6 +341,7 @@ pub(in crate::mapi) struct MapiEventTransaction {
     pub(in crate::mapi) imported_identity: Option<MapiEventImportedIdentity>,
     pub(in crate::mapi) pending_properties: HashMap<u32, MapiValue>,
     pub(in crate::mapi) deleted_properties: HashSet<u32>,
+    pub(in crate::mapi) pending_recipients: Option<Vec<PendingRecipient>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -371,6 +372,7 @@ impl MapiEventTransaction {
             imported_identity: None,
             pending_properties: HashMap::new(),
             deleted_properties: HashSet::new(),
+            pending_recipients: None,
         }
     }
 }
@@ -468,6 +470,7 @@ pub(in crate::mapi) enum MapiObject {
     PendingEvent {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
+        recipients: Vec<PendingRecipient>,
     },
     PendingTask {
         folder_id: u64,

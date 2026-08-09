@@ -545,7 +545,7 @@ pub(super) fn staged_event_commit_input(
     let (canonical_values, custom_values) =
         split_custom_property_values(property_values.into_iter().collect());
     let canonical_values = canonical_values.into_iter().collect::<HashMap<_, _>>();
-    let event_input = if canonical_values.is_empty() {
+    let mut event_input = if canonical_values.is_empty() {
         None
     } else {
         if bounded_meeting_cancellation_from_mapi(&canonical_values)? {
@@ -569,6 +569,20 @@ pub(super) fn staged_event_commit_input(
             },
         )
     };
+    if !keep_server_content {
+        if let Some(recipients) = transaction.pending_recipients.as_deref() {
+            let input = event_input.get_or_insert_with(|| {
+                event_input_from_mapi(
+                    event.event.owner_account_id,
+                    Some(event.canonical_id),
+                    &event.event,
+                    &HashMap::new(),
+                )
+                .expect("empty Calendar property projection is valid")
+            });
+            apply_calendar_pending_recipients(input, &event.event, recipients);
+        }
+    }
     let mut custom_property_upserts = custom_values
         .into_iter()
         .map(|(property_tag, value)| {

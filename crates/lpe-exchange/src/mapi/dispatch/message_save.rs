@@ -90,6 +90,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         Some(MapiObject::PendingEvent {
             folder_id,
             properties,
+            recipients,
         }) => {
             save_pending_event(
                 store,
@@ -102,6 +103,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 handle,
                 folder_id,
                 properties,
+                recipients,
             )
             .await;
             return;

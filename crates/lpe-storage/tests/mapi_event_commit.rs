@@ -425,7 +425,7 @@ fn attachment_upsert(attach_num: u32, file_name: &str) -> MapiEventAttachmentUps
             blob_bytes: b"%PDF-1.7\ncalendar attachment\n".to_vec(),
         },
         custom_property_upserts: vec![MapiEventCustomPropertyValue {
-            property_tag: 0x8003_001F,
+            property_tag: 0x9003_001F,
             property_type: 0x001F,
             property_value: b"attachment metadata".to_vec(),
         }],

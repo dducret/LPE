@@ -430,6 +430,8 @@ pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID: u32 = 0x0000_0003;
 pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID: u32 = 0x0000_0023;
 pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID_NAMED_ID: u16 = 0x8001;
 pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID_NAMED_ID: u16 = 0x8002;
+pub(in crate::mapi) const PID_LID_IS_RECURRING_NAMED_ID: u16 = 0x8003;
+pub(in crate::mapi) const PID_LID_IS_RECURRING: u32 = 0x0000_0005;
 pub(in crate::mapi) const PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG:
     u32 = 0x8010_0102;
 pub(in crate::mapi) const OUTLOOK_STALE_SHARING_LOCAL_FOLDER_ID_TAG: u32 = 0x8FFF_0102;
@@ -566,6 +568,7 @@ pub(in crate::mapi) const PID_LID_COMMON_START_TAG: u32 = 0x8516_0040;
 pub(in crate::mapi) const PID_LID_COMMON_END_TAG: u32 = 0x8517_0040;
 pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID_TAG: u32 = 0x8001_0102;
 pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG: u32 = 0x8002_0102;
+pub(in crate::mapi) const PID_LID_IS_RECURRING_TAG: u32 = 0x8003_000B;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_START_WHOLE_TAG: u32 = 0x820D_0040;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_END_WHOLE_TAG: u32 = 0x820E_0040;
 pub(in crate::mapi) const PID_LID_BUSY_STATUS_TAG: u32 = 0x8205_0003;

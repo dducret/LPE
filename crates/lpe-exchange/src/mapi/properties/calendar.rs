@@ -1,7 +1,7 @@
 mod meeting;
 
 use super::*;
-use meeting::{appointment_state_flags, organizer_json_from_mapi};
+use meeting::{appointment_state_flags, organizer_json_from_mapi, response_status};
 
 pub(in crate::mapi) fn event_property_value(
     event: &AccessibleEvent,
@@ -128,8 +128,11 @@ fn event_property_value_with_optional_version(
         PID_LID_OUTLOOK_COMMON_8578_TAG => Some(MapiValue::I32(0)),
         PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(event.all_day)),
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(appointment_state_flags(event))),
-        PID_LID_RESPONSE_STATUS_TAG => Some(MapiValue::I32(0)),
+        PID_LID_RESPONSE_STATUS_TAG => Some(MapiValue::I32(response_status(event))),
         PID_LID_RECURRING_TAG => Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty())),
+        PID_LID_IS_RECURRING_TAG => {
+            Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty()))
+        }
         PID_LID_TIME_ZONE_STRUCT_TAG => Some(MapiValue::Binary(calendar_time_zone_struct(event))),
         PID_LID_TIME_ZONE_DESCRIPTION_W_TAG => Some(MapiValue::String(
             calendar_time_zone_key(&event.time_zone).to_string(),
@@ -674,6 +677,65 @@ pub(in crate::mapi) fn event_input_from_mapi(
         notes: clearable_pending_text_property(properties, &[PID_TAG_BODY_W], &existing.notes),
         body_html: clearable_pending_html_property(properties, &existing.body_html),
     })
+}
+
+pub(in crate::mapi) fn calendar_pending_recipients(
+    event: &AccessibleEvent,
+) -> Vec<PendingRecipient> {
+    parse_calendar_participants_metadata(&event.attendees_json)
+        .attendees
+        .into_iter()
+        .enumerate()
+        .filter_map(|(row_id, attendee)| {
+            let recipient_type = match attendee.role.as_str() {
+                "OPT-PARTICIPANT" => 0x02,
+                "RESOURCE" => 0x03,
+                _ => 0x01,
+            };
+            (!attendee.email.is_empty() || !attendee.common_name.is_empty()).then_some(
+                PendingRecipient {
+                    row_id: row_id.min(u32::MAX as usize) as u32,
+                    recipient_type,
+                    address: attendee.email,
+                    display_name: (!attendee.common_name.is_empty()).then_some(attendee.common_name),
+                },
+            )
+        })
+        .collect()
+}
+
+pub(in crate::mapi) fn apply_calendar_pending_recipients(
+    input: &mut UpsertClientEventInput,
+    existing: &AccessibleEvent,
+    recipients: &[PendingRecipient],
+) {
+    let mut metadata = parse_calendar_participants_metadata(&existing.attendees_json);
+    metadata.attendees = recipients
+        .iter()
+        .map(|recipient| CalendarParticipantMetadata {
+            email: normalize_calendar_email(&recipient.address),
+            common_name: recipient
+                .display_name
+                .clone()
+                .unwrap_or_else(|| recipient.address.clone()),
+            role: match recipient.recipient_type & 0x0F {
+                0x02 => "OPT-PARTICIPANT",
+                0x03 => "RESOURCE",
+                _ => "REQ-PARTICIPANT",
+            }
+            .to_string(),
+            partstat: "needs-action".to_string(),
+            rsvp: false,
+        })
+        .collect();
+    input.attendees = calendar_attendee_labels(&metadata);
+    input.attendees_json = serialize_calendar_participants_metadata(&metadata);
+    input.organizer_json = organizer_json_from_mapi(
+        existing,
+        metadata.organizer.as_ref(),
+        !metadata.attendees.is_empty(),
+        &HashMap::new(),
+    );
 }
 
 fn clearable_pending_text_property(

@@ -133,6 +133,11 @@ pub(super) fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             PSETID_MEETING_GUID,
         ),
         (
+            PID_LID_IS_RECURRING_NAMED_ID,
+            PID_LID_IS_RECURRING,
+            PSETID_MEETING_GUID,
+        ),
+        (
             0x8017,
             PID_LID_OUTLOOK_APPOINTMENT_8F07,
             OUTLOOK_VIEW_8F07_GUID,

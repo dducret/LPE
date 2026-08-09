@@ -2672,6 +2672,10 @@ fn microsoft_oxcdata_reminder_restriction_matches_recurring_calendar_items() {
         event_property_value(&recurring, 1, CALENDAR_FOLDER_ID, PID_LID_RECURRING_TAG),
         Some(MapiValue::Bool(true))
     );
+    assert_eq!(
+        event_property_value(&recurring, 1, CALENDAR_FOLDER_ID, PID_LID_IS_RECURRING_TAG),
+        Some(MapiValue::Bool(true))
+    );
     assert!(restriction_matches(Some(&restriction), |property_tag| {
         event_property_value(&recurring, 1, CALENDAR_FOLDER_ID, property_tag)
     }));
@@ -2679,6 +2683,10 @@ fn microsoft_oxcdata_reminder_restriction_matches_recurring_calendar_items() {
     let one_off = default_event_for_mapping(Uuid::nil(), "default");
     assert_eq!(
         event_property_value(&one_off, 1, CALENDAR_FOLDER_ID, PID_LID_RECURRING_TAG),
+        Some(MapiValue::Bool(false))
+    );
+    assert_eq!(
+        event_property_value(&one_off, 1, CALENDAR_FOLDER_ID, PID_LID_IS_RECURRING_TAG),
         Some(MapiValue::Bool(false))
     );
     assert!(!restriction_matches(Some(&restriction), |property_tag| {
@@ -3786,7 +3794,11 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
             CALENDAR_FOLDER_ID,
             PID_LID_RESPONSE_STATUS_TAG
         ),
-        Some(MapiValue::I32(0))
+        Some(MapiValue::I32(1))
+    );
+    assert_eq!(
+        event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_IS_RECURRING_TAG),
+        Some(MapiValue::Bool(true))
     );
     assert_eq!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_COMMON_START_TAG),

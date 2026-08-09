@@ -12290,7 +12290,7 @@ async fn fake_store_all_custom_property_values_are_scoped_to_one_mapi_object() {
             MapiCustomPropertyObjectKind::Message,
             other_id,
             &[MapiCustomPropertyValue {
-                property_tag: 0x8003_001F,
+                property_tag: 0x9003_001F,
                 property_type: 0x001F,
                 property_value: utf16z("other opaque"),
             }],

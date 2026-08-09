@@ -608,10 +608,12 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
                 folder_id,
                 properties: property_values.into_iter().collect(),
+                recipients: Vec::new(),
             },
             None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
                 folder_id,
                 properties: property_values.into_iter().collect(),
+                recipients: Vec::new(),
             },
             _ if folder_id == NOTES_FOLDER_ID => MapiObject::PendingNote {
                 folder_id,

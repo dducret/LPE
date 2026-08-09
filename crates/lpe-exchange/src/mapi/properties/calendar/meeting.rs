@@ -13,6 +13,14 @@ pub(super) fn appointment_state_flags(event: &AccessibleEvent) -> i32 {
     flags
 }
 
+pub(super) fn response_status(event: &AccessibleEvent) -> i32 {
+    if appointment_state_flags(event) & 0x0000_0001 != 0 {
+        1
+    } else {
+        0
+    }
+}
+
 pub(super) fn organizer_json_from_mapi(
     existing: &AccessibleEvent,
     organizer: Option<&CalendarOrganizerMetadata>,
