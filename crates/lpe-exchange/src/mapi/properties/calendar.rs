@@ -110,8 +110,12 @@ fn event_property_value_with_optional_version(
         PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(calendar_organizer_email(event))),
         PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(calendar_display_to(event))),
         PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(calendar_optional_attendees(event))),
-        PID_TAG_BODY_HTML_W => Some(MapiValue::String(event.body_html.clone())),
-        PID_TAG_HTML_BINARY => Some(MapiValue::Binary(event.body_html.clone().into_bytes())),
+        PID_TAG_BODY_HTML_W => Some(MapiValue::String(calendar_body_html_for_mapi(
+            &event.body_html,
+        ))),
+        PID_TAG_HTML_BINARY => Some(MapiValue::Binary(
+            calendar_body_html_for_mapi(&event.body_html).into_bytes(),
+        )),
         PID_LID_ALL_ATTENDEES_STRING_W_TAG => {
             Some(MapiValue::String(calendar_all_attendees(event)))
         }
@@ -205,6 +209,29 @@ fn calendar_organizer_name(event: &AccessibleEvent) -> String {
 
 fn calendar_organizer_email(event: &AccessibleEvent) -> String {
     calendar_organizer(event).email
+}
+
+fn calendar_body_html_for_mapi(body_html: &str) -> String {
+    let mut projected = String::with_capacity(body_html.len());
+    let mut remaining = body_html;
+    while let Some(link_offset) = remaining.to_ascii_lowercase().find("<link") {
+        projected.push_str(&remaining[..link_offset]);
+        let link = &remaining[link_offset..];
+        let Some(end_offset) = link.find('>') else {
+            projected.push_str(link);
+            break;
+        };
+        let tag = &link[..=end_offset];
+        let normalized = tag.to_ascii_lowercase();
+        if !(normalized.contains("rel=file-list") || normalized.contains("rel=\"file-list\""))
+            || !normalized.contains("href=\"cid:filelist.xml@")
+        {
+            projected.push_str(tag);
+        }
+        remaining = &link[end_offset + 1..];
+    }
+    projected.push_str(remaining);
+    projected
 }
 
 fn calendar_display_to(event: &AccessibleEvent) -> String {
@@ -519,6 +546,24 @@ pub(in crate::mapi) fn default_event_for_mapping(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calendar_body_html_omits_dangling_outlook_file_list_link() {
+        let body = concat!(
+            "<html><head><link rel=File-List href=\"cid:filelist.xml@01DD27F4\">",
+            "<link rel=stylesheet href=\"calendar.css\"></head><body>Agenda</body></html>"
+        );
+        let expected = "<html><head><link rel=stylesheet href=\"calendar.css\"></head><body>Agenda</body></html>";
+
+        assert_eq!(calendar_body_html_for_mapi(body), expected);
+
+        let mut event = default_event_for_mapping(Uuid::nil(), "calendar");
+        event.body_html = body.to_string();
+        assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_BODY_HTML_W),
+            Some(MapiValue::String(expected.to_string()))
+        );
+    }
 
     #[test]
     fn calendar_item_access_follows_canonical_grant() {
