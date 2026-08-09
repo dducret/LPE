@@ -14,6 +14,7 @@ def parse_args() -> argparse.Namespace:
             Examples:
               LPE_RCA_PASSWORD='...' tools/rca_outlook_connectivity_check.py --ews-readiness --allow-mutating-fixtures
               LPE_RCA_PASSWORD='...' tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures
+              LPE_RCA_PASSWORD='...' tools/rca_outlook_connectivity_check.py --mapi-gate1-readiness --base-url https://mail.example.test --expected-service-host mail.example.test --email outlook-gate1@example.test
               tools/rca_outlook_connectivity_check.py --base-url https://l-p-e.ch --email test@l-p-e.ch --expected-service-host mail.l-p-e.ch --outlook-rca-readiness --allow-mutating-fixtures --insecure
             """
         ),
@@ -31,6 +32,11 @@ def parse_args() -> argparse.Namespace:
         "--outlook-rca-readiness",
         action="store_true",
         help="Require the full Outlook RCA gate: EWS, EXCH, EXPR, mapiHttp, RPC proxy, NSPI fixture, and EMSMDB canonical Sent proof.",
+    )
+    parser.add_argument(
+        "--mapi-gate1-readiness",
+        action="store_true",
+        help="Require the narrow MAPI/HTTP Gate 1: public-edge POX mapiHttp, EMSMDB Connect/private logon/root-IPM hierarchy, and NSPI Bind. It does not exercise EWS, EXCH, EXPR, RPC/HTTP, send, or cached-mode sync.",
     )
     parser.add_argument(
         "--allow-mutating-fixtures",

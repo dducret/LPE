@@ -47,11 +47,15 @@ from rca_outlook.mapi import (
     mapi_http_binary_payload,
     mapi_request_id,
     mapi_rop_buffer,
+    mapi_session_cookie_state,
     mapi_sent_content_sync_rops,
     mapi_sent_subject_table_rops,
+    mapi_wire_folder_id,
     nspi_first_minimal_id,
     nspi_get_props_request,
     resolve_names_request,
+    parse_pox_mapi_http_endpoints,
+    require_published_mapi_url,
     rpc_rts_conn_a1_body,
     rpc_rts_conn_b1_body,
     utf16z,
@@ -91,6 +95,251 @@ NSPI_BOOTSTRAP_PROPERTY_TAGS = [
     0x3004_001F,
     0x3002_001F,
 ]
+
+
+def gate1_diagnostic(event: str, **fields: object) -> None:
+    print(f"gate1 {json.dumps({'event': event, **fields}, sort_keys=True)}")
+
+
+def mapi_gate1_bootstrap_rops(folder_counter: int, hierarchy: bool) -> bytes:
+    rops = bytearray()
+    if not hierarchy:
+        rops.extend([0xFE, 0x00, 0x00, 0x01])  # RopLogon, private mailbox.
+        rops.extend((0).to_bytes(4, "little"))  # OpenFlags.
+        rops.extend((0).to_bytes(4, "little"))  # StoreState.
+        rops.extend((0).to_bytes(2, "little"))  # No legacy DN.
+        return bytes(rops)
+    rops.extend([0x02, 0x00, 0x00, 0x01])  # RopOpenFolder.
+    rops.extend(mapi_wire_folder_id(folder_counter))
+    rops.append(0)  # Read-only open.
+    rops.extend([0x04, 0x00, 0x01, 0x02, 0x04])  # RopGetHierarchyTable, convenient depth.
+    rops.extend([0x12, 0x00, 0x02, 0x00])  # RopSetColumns.
+    columns = [0x3001_001F, 0x3613_001F]  # DisplayName, ContainerClass.
+    rops.extend(len(columns).to_bytes(2, "little"))
+    for column in columns:
+        rops.extend(column.to_bytes(4, "little"))
+    rops.extend([0x15, 0x00, 0x02, 0x00, 0x01])  # RopQueryRows, forward.
+    rops.extend((64).to_bytes(2, "little"))
+    return bytes(rops)
+
+
+def mapi_gate1_execute_response_rops(response, label: str) -> bytes:
+    require(response.status == 200, f"{label} returned HTTP {response.status}: {response.text[:300]}")
+    require("application/mapi-http" in content_type(response.headers), f"{label} did not return MAPI content")
+    require(header_value(response.headers, "x-responsecode") == "0", f"{label} returned non-success X-ResponseCode")
+    return mapi_execute_response_rops(mapi_http_binary_payload(response.body), label)
+
+
+def mapi_gate1_hierarchy_rows(response_rops: bytes, label: str) -> list[tuple[str, str]]:
+    prefix = bytes([0x15, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00])
+    offsets = [offset for offset in range(len(response_rops)) if response_rops.startswith(prefix, offset)]
+    require(len(offsets) == 1, f"{label} did not return exactly one successful RopQueryRows response")
+    offset = offsets[0] + len(prefix)
+    require(len(response_rops) >= offset + 2, f"{label} returned a truncated RopQueryRows row count")
+    row_count = int.from_bytes(response_rops[offset : offset + 2], "little")
+    offset += 2
+
+    def read_utf16z() -> str:
+        nonlocal offset
+        end = offset
+        while end + 1 < len(response_rops) and response_rops[end : end + 2] != b"\x00\x00":
+            end += 2
+        require(end + 1 < len(response_rops), f"{label} hierarchy row has an unterminated UTF-16 value")
+        value = response_rops[offset:end].decode("utf-16le")
+        offset = end + 2
+        return value
+
+    def read_string_cell() -> str:
+        nonlocal offset
+        require(offset < len(response_rops), f"{label} hierarchy row is truncated")
+        flag = response_rops[offset]
+        offset += 1
+        if flag == 0:
+            return read_utf16z()
+        if flag == 1:
+            return ""
+        if flag == 0x0A:
+            require(len(response_rops) >= offset + 4, f"{label} hierarchy property error is truncated")
+            offset += 4
+            return ""
+        raise RuntimeError(f"{label} hierarchy row has invalid property flag {flag}")
+
+    rows: list[tuple[str, str]] = []
+    for _ in range(row_count):
+        require(offset < len(response_rops), f"{label} hierarchy row is truncated")
+        row_status = response_rops[offset]
+        offset += 1
+        if row_status == 0:
+            rows.append((read_utf16z(), read_utf16z()))
+        elif row_status == 1:
+            rows.append((read_string_cell(), read_string_cell()))
+        else:
+            raise RuntimeError(f"{label} hierarchy row has invalid status {row_status}")
+    return rows
+
+
+def check_mapi_gate1_readiness(
+    base_url: str,
+    email: str,
+    password: str,
+    expected_service_host: str,
+    insecure_tls: bool,
+    timeout: int,
+) -> None:
+    failure_step = "public-edge validation"
+    try:
+        parsed_base_url = urllib.parse.urlparse(base_url)
+        require(parsed_base_url.scheme == "https", "--mapi-gate1-readiness requires an HTTPS public LPE-CT base URL")
+        require((parsed_base_url.hostname or "").casefold() == expected_service_host.casefold(), "--base-url must name --expected-service-host, the public LPE-CT HTTPS host")
+        require(parsed_base_url.port in {None, 443}, "--mapi-gate1-readiness requires the public HTTPS port")
+
+        failure_step = "POX Autodiscover"
+        body = POX_BODY.format(email=xml_escape(email)).encode("utf-8")
+        autodiscover = request(
+            "POST",
+            join_url(base_url, "/autodiscover/autodiscover.xml"),
+            body,
+            {
+                "Content-Type": "text/xml; charset=utf-8",
+                "Accept": "text/xml",
+                "User-Agent": "lpe-mapi-gate1-readiness/0.1",
+                "X-MapiHttpCapability": "1",
+                "X-AnchorMailbox": email,
+            },
+            timeout,
+            insecure_tls=insecure_tls,
+        )
+        require(autodiscover.status == 200, f"POX MAPI probe returned HTTP {autodiscover.status}: {autodiscover.text[:300]}")
+        require("xml" in content_type(autodiscover.headers), "POX MAPI probe did not return XML")
+        endpoints = parse_pox_mapi_http_endpoints(autodiscover.text, email)
+        require_published_mapi_url(endpoints.emsmdb_url, expected_service_host, email, "emsmdb")
+        require_published_mapi_url(endpoints.nspi_url, expected_service_host, email, "nspi")
+        gate1_diagnostic(
+            "autodiscover",
+            mailbox=email,
+            status=autodiscover.status,
+            protocol_types=endpoints.protocol_types,
+            emsmdb_url=endpoints.emsmdb_url,
+            nspi_url=endpoints.nspi_url,
+        )
+
+        failure_step = "NSPI Bind"
+        nspi_request_id = mapi_request_id("Gate1NspiBind")
+        nspi_client_info = mapi_client_info()
+        nspi_bind = request(
+            "POST",
+            endpoints.nspi_url,
+            bytes(45),
+            {
+                "Authorization": basic_auth_header(email, password),
+                "Content-Type": "application/octet-stream",
+                "X-RequestType": "Bind",
+                "X-RequestId": nspi_request_id,
+                "X-ClientInfo": nspi_client_info,
+                "User-Agent": "lpe-mapi-gate1-readiness/0.1",
+            },
+            timeout,
+            insecure_tls=insecure_tls,
+        )
+        require(nspi_bind.status == 200, f"MAPI NSPI Bind returned HTTP {nspi_bind.status}: {nspi_bind.text[:300]}")
+        require("application/mapi-http" in content_type(nspi_bind.headers), "MAPI NSPI Bind did not return MAPI content")
+        require(header_value(nspi_bind.headers, "x-responsecode") == "0", "MAPI NSPI Bind did not return success")
+        expiration = header_value(nspi_bind.headers, "x-expirationinfo")
+        require(expiration.isdigit() and int(expiration) > 0, f"MAPI NSPI Bind returned invalid X-ExpirationInfo {expiration!r}")
+        require_guid_counter_header(header_value(nspi_bind.headers, "x-clientinfo"), "MAPI NSPI Bind X-ClientInfo")
+        nspi_cookie = mapi_session_cookie_state(cookie_header(nspi_bind))
+        gate1_diagnostic(
+            "nspi_bind",
+            request_id=nspi_request_id,
+            response_request_id=header_value(nspi_bind.headers, "x-requestid"),
+            client_info=header_value(nspi_bind.headers, "x-clientinfo"),
+            cookies=nspi_cookie,
+        )
+
+        failure_step = "EMSMDB Connect"
+        connect_request_id = mapi_request_id("Gate1Connect")
+        connect_client_info = mapi_client_info()
+        connect = request(
+            "POST",
+            endpoints.emsmdb_url,
+            b"",
+            {
+                "Authorization": basic_auth_header(email, password),
+                "Content-Type": "application/mapi-http",
+                "X-RequestType": "Connect",
+                "X-RequestId": connect_request_id,
+                "X-ClientInfo": connect_client_info,
+                "User-Agent": "lpe-mapi-gate1-readiness/0.1",
+            },
+            timeout,
+            insecure_tls=insecure_tls,
+        )
+        require(connect.status == 200, f"MAPI EMSMDB Connect returned HTTP {connect.status}: {connect.text[:300]}")
+        require("application/mapi-http" in content_type(connect.headers), "MAPI EMSMDB Connect did not return MAPI content")
+        require(header_value(connect.headers, "x-responsecode") == "0", "MAPI EMSMDB Connect did not return success")
+        cookie = cookie_header(connect)
+        gate1_diagnostic(
+            "emsmdb_connect",
+            request_id=connect_request_id,
+            response_request_id=header_value(connect.headers, "x-requestid"),
+            client_info=header_value(connect.headers, "x-clientinfo"),
+            cookies=mapi_session_cookie_state(cookie),
+        )
+
+        def execute(label: str, rops: bytes, handles: list[int]) -> bytes:
+            nonlocal cookie, failure_step
+            failure_step = label
+            request_id = mapi_request_id(label)
+            client_info = mapi_client_info()
+            response = request(
+                "POST",
+                endpoints.emsmdb_url,
+                mapi_execute_body(mapi_rop_buffer(rops, handles)),
+                {
+                    "Authorization": basic_auth_header(email, password),
+                    "Content-Type": "application/mapi-http",
+                    "Cookie": cookie,
+                    "X-RequestType": "Execute",
+                    "X-RequestId": request_id,
+                    "X-ClientInfo": client_info,
+                    "User-Agent": "lpe-mapi-gate1-readiness/0.1",
+                },
+                timeout,
+                insecure_tls=insecure_tls,
+            )
+            response_rops = mapi_gate1_execute_response_rops(response, label)
+            cookie = update_cookie_header(cookie, response)
+            gate1_diagnostic(
+                "emsmdb_execute",
+                step=label,
+                request_id=request_id,
+                response_request_id=header_value(response.headers, "x-requestid"),
+                client_info=header_value(response.headers, "x-clientinfo"),
+                cookies=mapi_session_cookie_state(cookie),
+                response_rop_bytes=len(response_rops),
+            )
+            return response_rops
+
+        logon_rops = execute("private mailbox logon", mapi_gate1_bootstrap_rops(0, False), [0xFFFF_FFFF])
+        require(contains_bytes(logon_rops, bytes([0xFE, 0x00, 0x00, 0x00, 0x00, 0x00])), "private mailbox RopLogon did not return success")
+
+        root_rops = execute("mailbox root hierarchy", mapi_gate1_bootstrap_rops(1, True), [1, 0xFFFF_FFFF, 0xFFFF_FFFF])
+        root_rows = mapi_gate1_hierarchy_rows(root_rops, "mailbox root hierarchy")
+        require(any(name == "Top of Information Store" for name, _ in root_rows), "mailbox root hierarchy did not expose Top of Information Store")
+        gate1_diagnostic("hierarchy_rows", scope="mailbox_root", rows=[{"display_name": name, "container_class": folder_class} for name, folder_class in root_rows])
+
+        ipm_rops = execute("IPM subtree hierarchy", mapi_gate1_bootstrap_rops(4, True), [1, 0xFFFF_FFFF, 0xFFFF_FFFF])
+        ipm_rows = mapi_gate1_hierarchy_rows(ipm_rops, "IPM subtree hierarchy")
+        folder_names = {name for name, _ in ipm_rows}
+        expected = {"Inbox", "Sent", "Drafts", "Calendar", "Contacts", "Tasks", "Notes", "Journal"}
+        missing = sorted(expected - folder_names)
+        require(not missing, f"IPM subtree hierarchy is missing expected folders: {', '.join(missing)}")
+        require({"Deleted Items", "Trash"}.intersection(folder_names), "IPM subtree hierarchy is missing Deleted Items/Trash")
+        gate1_diagnostic("hierarchy_rows", scope="ipm_subtree", rows=[{"display_name": name, "container_class": folder_class} for name, folder_class in ipm_rows])
+        gate1_diagnostic("result", result="pass", scope="MAPI/HTTP Gate 1 only")
+    except Exception as error:
+        gate1_diagnostic("result", result="fail", failure_step=failure_step, error=str(error))
+        raise
 
 
 
@@ -1332,6 +1581,22 @@ def main() -> int:
 
     require(args.base_url, "provide --base-url or set LPE_RCA_BASE_URL")
     require(args.email, "provide --email or set LPE_RCA_EMAIL")
+    if args.mapi_gate1_readiness:
+        require(args.password, "--mapi-gate1-readiness requires --password or LPE_RCA_PASSWORD")
+        require(
+            args.expected_service_host,
+            "--mapi-gate1-readiness requires --expected-service-host for the public LPE-CT HTTPS host",
+        )
+        check_mapi_gate1_readiness(
+            args.base_url.rstrip("/"),
+            args.email,
+            args.password,
+            args.expected_service_host,
+            args.insecure,
+            args.timeout,
+        )
+        return 0
+
     expect_ews = args.expect_ews or args.ews_readiness or args.outlook_rca_readiness
     expect_exch_provider = (
         args.expect_exchange_providers or args.expect_exch_provider or args.outlook_rca_readiness

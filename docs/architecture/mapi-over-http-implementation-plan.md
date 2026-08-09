@@ -16,8 +16,11 @@ before it is advertised.
 ### Publication and Protocol Scope
 
 - MAPI over HTTP endpoints remain authenticated and opt-in. Autodiscover may
-  publish the MAPI endpoint only when the MAPI gate is enabled and the documented
-  interop gate has passed for the deployment.
+  publish the MAPI endpoint only when `LPE_AUTOCONFIG_MAPI_ENABLED` is enabled
+  and the client capability negotiation succeeds. Recorded MAPI/HTTP evidence
+  is a release-quality requirement, while
+  `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` remains reserved for legacy
+  `EXPR`/RPC over HTTP publication and does not control MAPI/HTTP publication.
 - MAPI over HTTP startup and publication require both the exact
   `0.5.2-sql` schema label and every required physical MAPI table and
   column. A tagged but incomplete schema is a fatal storage-startup and
@@ -2409,11 +2412,12 @@ and real-Outlook evidence gates.
 
 ### Publication Gate
 
-- MAPI endpoint publication requires the local harness gate, RCA gate, and both
-  Outlook 2016 and Outlook 2019 cached-mode evidence to pass for the deployment
-  class being advertised.
+- MAPI/HTTP readiness evidence includes the bounded Gate 1 harness, separate
+  Microsoft RCA evidence, and separate Outlook 2016 and Outlook 2019
+  cached-mode evidence for the deployment class being advertised. The Gate 1
+  harness does not substitute for the other evidence.
 - `LPE_AUTOCONFIG_MAPI_ENABLED` controls whether MAPI endpoints are advertised.
-- `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` records that the documented local,
-  RCA, and real-Outlook evidence exists for the deployment.
+- `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` remains the legacy
+  `EXPR`/RPC over HTTP evidence flag; it does not control MAPI/HTTP publication.
 - RPC/HTTP `EXPR` publication requires separate Outlook Anywhere evidence and
   must not be enabled by the MAPI gate alone.

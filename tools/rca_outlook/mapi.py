@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import struct
 import uuid
+import urllib.parse
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from itertools import count
 
 from .http import require
@@ -10,6 +13,91 @@ from .http import require
 MAPI_RCA_REQUEST_GUID = uuid.uuid4()
 MAPI_RCA_CLIENT_GUID = uuid.uuid4()
 MAPI_RCA_COUNTER = count(1)
+
+
+@dataclass(frozen=True)
+class MapiHttpEndpoints:
+    emsmdb_url: str
+    nspi_url: str
+    protocol_types: tuple[str, ...]
+
+
+def xml_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def xml_child_text(element: ET.Element, name: str) -> str:
+    for child in element:
+        if xml_local_name(child.tag) == name:
+            return (child.text or "").strip()
+    return ""
+
+
+def parse_pox_mapi_http_endpoints(xml: str, email: str) -> MapiHttpEndpoints:
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as error:
+        raise RuntimeError(f"POX MAPI probe returned invalid XML: {error}") from error
+
+    advertised_email = next(
+        (
+            (element.text or "").strip()
+            for element in root.iter()
+            if xml_local_name(element.tag) == "AutoDiscoverSMTPAddress"
+        ),
+        "",
+    )
+    require(
+        advertised_email.casefold() == email.casefold(),
+        f"POX MAPI probe returned mailbox {advertised_email!r}, expected {email!r}",
+    )
+    protocols = [element for element in root.iter() if xml_local_name(element.tag) == "Protocol"]
+    protocol_types = tuple(xml_child_text(protocol, "Type") for protocol in protocols)
+    mapi_protocols = [protocol for protocol in protocols if xml_child_text(protocol, "Type") == "mapiHttp"]
+    require(len(mapi_protocols) == 1, f"POX MAPI probe published {len(mapi_protocols)} mapiHttp protocols, expected exactly one")
+    require(
+        not {"EXCH", "EXPR"}.intersection(protocol_types),
+        "POX MAPI probe unexpectedly published legacy EXCH or EXPR metadata",
+    )
+
+    mapi_protocol = mapi_protocols[0]
+    require(xml_child_text(mapi_protocol, "Version") == "1", "POX MAPI probe did not publish mapiHttp Version 1")
+    mailstore = next((child for child in mapi_protocol if xml_local_name(child.tag) == "MailStore"), None)
+    address_book = next((child for child in mapi_protocol if xml_local_name(child.tag) == "AddressBook"), None)
+    require(mailstore is not None, "POX MAPI probe mapiHttp protocol omitted MailStore")
+    require(address_book is not None, "POX MAPI probe mapiHttp protocol omitted AddressBook")
+    emsmdb_url = xml_child_text(mailstore, "ExternalUrl")
+    nspi_url = xml_child_text(address_book, "ExternalUrl")
+    require(emsmdb_url, "POX MAPI probe MailStore omitted ExternalUrl")
+    require(nspi_url, "POX MAPI probe AddressBook omitted ExternalUrl")
+    return MapiHttpEndpoints(emsmdb_url, nspi_url, protocol_types)
+
+
+def require_published_mapi_url(url: str, expected_host: str, email: str, endpoint: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    require(parsed.scheme == "https", f"published {endpoint} URL is not HTTPS: {url!r}")
+    require(
+        (parsed.hostname or "").casefold() == expected_host.casefold(),
+        f"published {endpoint} URL host {parsed.hostname!r} is not public edge host {expected_host!r}",
+    )
+    require(parsed.port in {None, 443}, f"published {endpoint} URL must use the public HTTPS port: {url!r}")
+    require(parsed.path.rstrip("/").casefold().endswith(f"/mapi/{endpoint}"), f"published {endpoint} URL has an unexpected path: {url!r}")
+    mailbox_ids = [
+        value
+        for key, values in urllib.parse.parse_qs(parsed.query, keep_blank_values=True).items()
+        if key.casefold() == "mailboxid"
+        for value in values
+    ]
+    require(mailbox_ids == [email], f"published {endpoint} URL is not scoped to requested mailbox {email!r}")
+
+
+def mapi_session_cookie_state(cookie: str) -> str:
+    pairs = [value.strip().partition("=") for value in cookie.split(";") if value.strip()]
+    require(all(separator and value for _, separator, value in pairs), "MAPI session contains an empty or malformed cookie")
+    names = [name for name, _, _ in pairs]
+    require(names.count("MapiContext") == 1, "MAPI session does not contain exactly one MapiContext cookie")
+    require(names.count("MapiSequence") == 1, "MAPI session does not contain exactly one MapiSequence cookie")
+    return "; ".join(f"{name}=<redacted>" for name in names)
 
 def mapi_request_id(sequence: str | int | None = None) -> str:
     value = next(MAPI_RCA_COUNTER) if sequence is None else sequence
@@ -28,6 +116,10 @@ def contains_bytes(haystack: bytes, needle: bytes) -> bool:
 
 def mapi_folder_id(global_counter: int) -> int:
     return ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | 1
+
+
+def mapi_wire_folder_id(global_counter: int) -> bytes:
+    return struct.pack("<H", 1) + global_counter.to_bytes(6, "big")
 
 def mapi_execute_body(rop_buffer: bytes) -> bytes:
     body = bytearray()

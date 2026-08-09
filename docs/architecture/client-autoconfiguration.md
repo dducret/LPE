@@ -92,6 +92,7 @@ Microsoft Autodiscover v2 JSON does not advertise `JMAP`. Use `/.well-known/jmap
 
 | Readiness command | Scope |
 | --- | --- |
+| `LPE_RCA_PASSWORD='...' python tools/rca_outlook_connectivity_check.py --mapi-gate1-readiness --base-url https://<public-lpe-ct-host> --expected-service-host <public-lpe-ct-host> --email <disposable-mailbox>` | MAPI/HTTP Gate 1 only: requires the public `LPE-CT` HTTPS host, POX Autodiscover with `X-MapiHttpCapability: 1`, exactly one `mapiHttp` response without `EXCH`/`EXPR`, the published EMSMDB/NSPI URLs, EMSMDB Connect/private logon/root and IPM hierarchy, and NSPI Bind. It does not call `EWS`, `IMAP`, Microsoft RCA, `/rpc/rpcproxy.dll`, send, or cached-mode synchronization. |
 | `python tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures` | Project-owned scripted readiness harness for `IMAP`, `EWS`, `EXCH`, `mapiHttp`, canonical `Sent`, `NSPI`, and RPC proxy checks when legacy `EXPR` / RPC publication is being validated; this is not Microsoft RCA or real Outlook profile evidence |
 | `python tools/rca_outlook_connectivity_check.py --check-mapi-empty-deleted-items --allow-mutating-fixtures --dangerously-empty-deleted-items` | Project-owned destructive fixture check that creates a message in `Deleted Items`, empties `Deleted Items` through MAPI `RopEmptyFolder`, and verifies disappearance through EWS and JMAP; IMAP absence is covered by local storage/runtime tests until this harness has an IMAP connection helper |
 | `python tools/rca_outlook_connectivity_check.py --ews-readiness --allow-mutating-fixtures` | EWS autodiscover, authentication, canonical send-to-`Sent`, contact/calendar create-read-delete |
@@ -102,7 +103,7 @@ Record these checks for the exact public host used for a 0.5.x release. The chec
 
 - Microsoft MAPI/HTTP and Autodiscover references have been checked for the release, including `MS-OXCMAPIHTTP` transport, `MS-OXDSCLI` `X-MapiHttpCapability` handling, and the MapiHttp response shape.
 - `cargo test -p lpe-admin-api` and `cargo test -p lpe-exchange` pass for the exact revision being deployed.
-- `tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures` passes against the public `LPE-CT` HTTPS edge.
+- `tools/rca_outlook_connectivity_check.py --mapi-gate1-readiness --base-url https://<public-lpe-ct-host> --expected-service-host <public-lpe-ct-host> --email <disposable-mailbox>` passes against the public `LPE-CT` HTTPS edge. This bounded harness is not proof of a clean real-Outlook profile or of the broader Outlook release gate.
 - Microsoft Remote Connectivity Analyzer Outlook Connectivity passes from the Internet against the same account and host.
 - Outlook 2016 and Outlook 2019 each create an Exchange account profile through Autodiscover, perform cached-mode mailbox synchronization, close and reopen without a full-cache wipe, resolve address-book entries through NSPI, send mail through canonical submission, and show the authoritative message in `Sent`.
 - RCA server logs for hierarchy sync include `rca debug mapi hierarchy row` entries with `folder_id`, `parent_folder_id`, `source_key_len`, `parent_source_key_len`, `display_name`, `container_class`, and `change_number` for the rows used as publication evidence.

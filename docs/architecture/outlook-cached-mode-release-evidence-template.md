@@ -44,6 +44,7 @@ reproduce the result.
 
 | Gate | Required evidence | Result | Evidence reference |
 | --- | --- | --- | --- |
+| MAPI/HTTP Gate 1 harness | `tools/rca_outlook_connectivity_check.py --mapi-gate1-readiness` against the public `LPE-CT` HTTPS host and a disposable mailbox: POX `mapiHttp`, EMSMDB Connect/private logon/root-IPM hierarchy, NSPI Bind | `<pass/fail/not run>` | `<command output, sanitized Autodiscover response, endpoints, request ids, hierarchy rows>` |
 | Local harness | `cargo test -p lpe-exchange` and `tools/rca_outlook_connectivity_check.py --outlook-rca-readiness` against the target deployment shape | `<pass/fail/not run>` | `<command output, CI run, trace ids>` |
 | Microsoft RCA | Microsoft Remote Connectivity Analyzer Outlook Connectivity against the same public host, account, tenant, TLS certificate, and endpoint flags | `<pass/fail/not run>` | `<RCA timestamp, test name, correlation id, exported report>` |
 | Outlook 2016 real profile | Clean Outlook 2016 Exchange profile creates, syncs cached mode, reopens twice, resolves NSPI, submits via canonical LPE submission, and shows canonical `Sent` | `<pass/fail/not run>` | `<client logs, screenshots, server trace ids>` |
@@ -91,6 +92,20 @@ and intentionally enabled for the gate being tested.
 | Output artifact | `<log path or CI run>` |
 | Fixture cleanup confirmed | `<yes/no/not applicable>` |
 
+### MAPI/HTTP Gate 1 Result
+
+| Field | Value |
+| --- | --- |
+| Command | `LPE_RCA_PASSWORD='...' python tools/rca_outlook_connectivity_check.py --mapi-gate1-readiness --base-url https://<public-lpe-ct-host> --expected-service-host <public-lpe-ct-host> --email <disposable-mailbox>` |
+| Run timestamp | `<timestamp and timezone>` |
+| Result | `<pass/fail/not run>` |
+| Sanitized POX result | `<mapiHttp Version 1, no EXCH/EXPR, published EMSMDB/NSPI URLs>` |
+| EMSMDB/NSPI evidence | `<request ids, redacted cookie state, private-logon and hierarchy ROP results>` |
+| Initial hierarchy rows | `<Inbox, Sent, Drafts, Deleted Items/Trash, Calendar, Contacts, Tasks, Notes, Journal>` |
+| First failing step and correlation ids, if any | `<step, request ids, server/edge trace ids>` |
+
+This harness is only bounded wire evidence. A pass does not prove a clean Outlook 2016 or Outlook 2019 profile reaches `Connected`, and does not prove the broader cached-mode, reconnect, NSPI-resolution, send/`Sent`, Microsoft RCA, or RPC/HTTP release gates.
+
 ### Real Outlook Checklist
 
 Complete this checklist separately for Outlook 2016 and Outlook 2019.
@@ -126,6 +141,7 @@ Complete this checklist separately for Outlook 2016 and Outlook 2019.
 | Decision | Rule |
 | --- | --- |
 | Local harness pass | Does not imply Microsoft RCA pass or real Outlook profile pass. |
+| MAPI/HTTP Gate 1 harness pass | Does not imply a real Outlook profile reaches `Connected`, or any broader release gate. |
 | Microsoft RCA pass | Does not imply Outlook 2016 or Outlook 2019 cached-mode profile pass. |
 | Outlook 2016 pass | Does not imply Outlook 2019 pass. |
 | Outlook 2019 pass | Does not imply Outlook 2016 pass. |
