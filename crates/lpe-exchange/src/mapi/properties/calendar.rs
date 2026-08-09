@@ -59,6 +59,9 @@ fn event_property_value_with_optional_version(
         return Some(value);
     }
     let property_tag = canonical_property_storage_tag(property_tag);
+    let global_object_id_creation_time = version.map(|version| {
+        mapi_mailstore::filetime_from_rfc3339_utc(&version.created_at)
+    });
     if let Some(version) = version {
         match property_tag {
             PID_TAG_CHANGE_KEY => return Some(MapiValue::Binary(version.change_key.clone())),
@@ -136,7 +139,10 @@ fn event_property_value_with_optional_version(
         }
         PID_LID_APPOINTMENT_RECUR_TAG => calendar_recurrence_blob(event).map(MapiValue::Binary),
         PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
-            Some(MapiValue::Binary(calendar_global_object_id(event)))
+            Some(MapiValue::Binary(calendar_global_object_id(
+                event,
+                global_object_id_creation_time,
+            )))
         }
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(item_id),
@@ -418,7 +424,10 @@ fn push_system_time(value: &mut Vec<u8>, system_time: CalendarSystemTime) {
     value.extend_from_slice(&0u16.to_le_bytes());
 }
 
-fn calendar_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
+pub(super) fn calendar_global_object_id(
+    event: &AccessibleEvent,
+    creation_time: Option<u64>,
+) -> Vec<u8> {
     if let Some(encoded) = event.uid.strip_prefix("mapi-goid:") {
         if let Some(value) = hex_to_bytes(encoded) {
             return value;
@@ -438,7 +447,7 @@ fn calendar_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
         0x08,
     ];
     value.extend_from_slice(&[0, 0, 0, 0]);
-    value.extend_from_slice(&0u64.to_le_bytes());
+    value.extend_from_slice(&creation_time.unwrap_or(0).to_le_bytes());
     value.extend_from_slice(&0u64.to_le_bytes());
     value.extend_from_slice(&(data.len().min(u32::MAX as usize) as u32).to_le_bytes());
     value.extend_from_slice(&data);

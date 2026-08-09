@@ -17,6 +17,7 @@ pub(in crate::mapi) fn event_size(event: &AccessibleEvent) -> i64 {
         .len()
         .saturating_add(event.location.len())
         .saturating_add(event.notes.len())
+        .saturating_add(event.body_html.len())
         .min(i64::MAX as usize) as i64
 }
 

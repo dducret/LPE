@@ -2252,9 +2252,10 @@ fn microsoft_oxprops_message_size_projects_integer32_property() {
 
     let mut event = default_event_for_mapping(account_id, "default");
     event.title = "Standup".to_string();
+    event.body_html = "<p>Calendar body</p>".repeat(100);
     assert!(matches!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_MESSAGE_SIZE),
-        Some(MapiValue::U32(_))
+        Some(MapiValue::U32(value)) if value >= event.body_html.len() as u32
     ));
     assert!(matches!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_MESSAGE_SIZE_EXTENDED),
@@ -3904,6 +3905,16 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_GLOBAL_OBJECT_ID_TAG),
         Some(MapiValue::Binary(global_object_id))
     );
+}
+
+#[test]
+fn calendar_fallback_global_object_id_uses_canonical_creation_time() {
+    let event = default_event_for_mapping(Uuid::nil(), "default");
+    let creation_time = 133_992_000_000_000_000u64;
+    let global_object_id =
+        super::calendar::calendar_global_object_id(&event, Some(creation_time));
+
+    assert_eq!(&global_object_id[20..28], &creation_time.to_le_bytes());
 }
 
 #[test]
