@@ -282,7 +282,7 @@ pub(in crate::service) fn xml_text(value: &str) -> String {
         .to_string()
 }
 
-pub(in crate::service) fn html_to_text(value: &str) -> String {
+pub(crate) fn html_to_text(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     let mut in_tag = false;
     for ch in value.chars() {

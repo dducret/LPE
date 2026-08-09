@@ -962,7 +962,7 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
             attendees: String::new(),
             attendees_json: String::new(),
             notes: String::new(),
-            body_html: String::new(),
+            body_html: "<p>Agenda</p>".to_string(),
         },
         version: lpe_storage::MapiEventVersion {
             event_id,
@@ -986,6 +986,21 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
     };
 
     let sync = calendar_sync_object(&event, None);
+
+    assert_eq!(sync.body_text.as_deref(), Some("Agenda"));
+
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_TAG_HTML_BINARY
+            && matches!(
+                value,
+                mapi_mailstore::SpecialMessagePropertyValue::Binary(bytes)
+                    if bytes == b"<p>Agenda</p>"
+            )
+    }));
+    assert!(!sync
+        .named_properties
+        .iter()
+        .any(|(tag, _)| *tag == PID_TAG_BODY_HTML_W));
 
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_TAG_HAS_ATTACHMENTS

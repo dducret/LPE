@@ -90,7 +90,7 @@ fn event_property_value_with_optional_version(
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
             Some(MapiValue::String(event.title.clone()))
         }
-        PID_TAG_BODY_W => Some(MapiValue::String(event.notes.clone())),
+        PID_TAG_BODY_W => Some(MapiValue::String(calendar_body_text_for_mapi(event))),
         PID_TAG_START_DATE
         | PID_LID_COMMON_START_TAG
         | PID_LID_APPOINTMENT_START_WHOLE_TAG
@@ -232,6 +232,14 @@ fn calendar_body_html_for_mapi(body_html: &str) -> String {
     }
     projected.push_str(remaining);
     projected
+}
+
+pub(in crate::mapi) fn calendar_body_text_for_mapi(event: &AccessibleEvent) -> String {
+    if event.notes.trim().is_empty() && !event.body_html.trim().is_empty() {
+        crate::service::html_to_text(&event.body_html)
+    } else {
+        event.notes.clone()
+    }
 }
 
 fn calendar_display_to(event: &AccessibleEvent) -> String {
@@ -562,6 +570,18 @@ mod tests {
         assert_eq!(
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_BODY_HTML_W),
             Some(MapiValue::String(expected.to_string()))
+        );
+    }
+
+    #[test]
+    fn calendar_body_text_converts_html_when_plain_text_is_absent() {
+        let mut event = default_event_for_mapping(Uuid::nil(), "calendar");
+        event.body_html = "<p>Agenda <strong>details</strong></p>".to_string();
+
+        assert_eq!(calendar_body_text_for_mapi(&event), "Agenda details");
+        assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_BODY_W),
+            Some(MapiValue::String("Agenda details".to_string()))
         );
     }
 

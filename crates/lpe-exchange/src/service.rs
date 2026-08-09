@@ -93,6 +93,8 @@ mod ews {
     pub(super) mod xml;
 }
 
+pub(crate) use ews::xml::html_to_text;
+
 mod http_routes;
 mod http_utils;
 mod mapi_http;

@@ -7419,7 +7419,15 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
     ));
     assert!(contains_bytes(
         &response_rops,
-        &utf16z("<p>Canonical body text</p>")
+        &0x1013_0102u32.to_le_bytes()
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x1013_001Fu32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        b"<p>Canonical body text</p>"
     ));
     assert!(contains_bytes(&response_rops, &utf16z("Alice Calendar")));
     assert!(contains_bytes(

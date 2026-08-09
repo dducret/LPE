@@ -984,7 +984,7 @@ fn calendar_sync_object(
         PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG,
         PID_LID_GLOBAL_OBJECT_ID_TAG,
         PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
-        PID_TAG_BODY_HTML_W,
+        PID_TAG_HTML_BINARY,
         PID_TAG_SENDER_NAME_W,
         PID_TAG_SENDER_EMAIL_ADDRESS_W,
         PID_TAG_DISPLAY_TO_W,
@@ -1026,7 +1026,7 @@ fn calendar_sync_object(
         canonical_id: event.canonical_id,
         associated: false,
         subject: event.event.title.clone(),
-        body_text: Some(event.event.notes.clone()),
+        body_text: Some(crate::mapi::properties::calendar_body_text_for_mapi(&event.event)),
         message_class: "IPM.Appointment".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(
             &event.version.updated_at,
