@@ -267,6 +267,32 @@ pub(in crate::mapi::dispatch) fn log_calendar_special_sync_objects(
         })
         .collect::<Vec<_>>()
         .join(",");
+    let global_object_id_contracts = appointment_objects
+        .iter()
+        .map(|object| calendar_global_object_id_contract(object, PID_LID_GLOBAL_OBJECT_ID_TAG))
+        .collect::<Vec<_>>();
+    let clean_global_object_id_contracts = appointment_objects
+        .iter()
+        .map(|object| {
+            calendar_global_object_id_contract(object, PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG)
+        })
+        .collect::<Vec<_>>();
+    let global_object_id_contracts_ok = global_object_id_contracts
+        .iter()
+        .all(|(_, contract_ok)| *contract_ok);
+    let clean_global_object_id_contracts_ok = clean_global_object_id_contracts
+        .iter()
+        .all(|(_, contract_ok)| *contract_ok);
+    let global_object_id_contracts = global_object_id_contracts
+        .iter()
+        .map(|(contract, _)| *contract)
+        .collect::<Vec<_>>()
+        .join(",");
+    let clean_global_object_id_contracts = clean_global_object_id_contracts
+        .iter()
+        .map(|(contract, _)| *contract)
+        .collect::<Vec<_>>()
+        .join(",");
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -307,6 +333,10 @@ pub(in crate::mapi::dispatch) fn log_calendar_special_sync_objects(
         calendar_start_end_order_ok = start_end_order_ok,
         calendar_global_object_id_lengths = %global_object_id_lengths,
         calendar_clean_global_object_id_lengths = %clean_global_object_id_lengths,
+        calendar_global_object_id_third_party_contracts = %global_object_id_contracts,
+        calendar_clean_global_object_id_third_party_contracts = %clean_global_object_id_contracts,
+        calendar_global_object_id_third_party_contracts_ok = global_object_id_contracts_ok,
+        calendar_clean_global_object_id_third_party_contracts_ok = clean_global_object_id_contracts_ok,
         message = "rca debug mapi calendar special sync objects"
     );
 }
@@ -502,6 +532,85 @@ fn special_binary_property_len(
             (true, mapi_mailstore::SpecialMessagePropertyValue::Binary(value)) => Some(value.len()),
             _ => None,
         })
+}
+
+fn calendar_global_object_id_contract(
+    object: &mapi_mailstore::SpecialMessageSyncFact,
+    property_tag: u32,
+) -> (&'static str, bool) {
+    let Some(value) = object.named_properties.iter().find_map(|(tag, value)| {
+        match (*tag == property_tag, value) {
+            (true, mapi_mailstore::SpecialMessagePropertyValue::Binary(value)) => Some(value),
+            _ => None,
+        }
+    }) else {
+        return ("missing", false);
+    };
+    third_party_global_object_id_contract(value)
+}
+
+fn third_party_global_object_id_contract(value: &[u8]) -> (&'static str, bool) {
+    const GLOBAL_OBJECT_ID_HEADER: [u8; 16] = [
+        0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82, 0xE0,
+        0x08,
+    ];
+    const VCAL_UID_PREFIX: &[u8] = b"vCal-Uid\x01\x00\x00\x00";
+
+    if value.len() < 40 || value[..16] != GLOBAL_OBJECT_ID_HEADER {
+        return ("non_third_party", true);
+    }
+    let data = &value[40..];
+    if !data.starts_with(b"vCal-Uid") {
+        return ("non_third_party", true);
+    }
+    if data.len() < VCAL_UID_PREFIX.len() {
+        return ("third_party_invalid_prefix", false);
+    }
+    if &data[..VCAL_UID_PREFIX.len()] != VCAL_UID_PREFIX {
+        return ("third_party_invalid_prefix", false);
+    }
+    if value[16..20].iter().any(|byte| *byte != 0) {
+        return ("third_party_invalid_date", false);
+    }
+    if value[20..28].iter().any(|byte| *byte != 0) {
+        return ("third_party_invalid_creation_time", false);
+    }
+    if value[28..36].iter().any(|byte| *byte != 0) {
+        return ("third_party_invalid_reserved", false);
+    }
+    let declared_size = u32::from_le_bytes([value[36], value[37], value[38], value[39]]) as usize;
+    if declared_size != data.len() {
+        return ("third_party_invalid_size", false);
+    }
+    ("third_party_valid", true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn third_party_global_object_id_contract_flags_nonzero_creation_time() {
+        let mut value = vec![
+            0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82,
+            0xE0, 0x08,
+        ];
+        value.extend_from_slice(&[0; 20]);
+        let data = b"vCal-Uid\x01\x00\x00\x00calendar-probe";
+        value.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        value.extend_from_slice(data);
+
+        assert_eq!(
+            third_party_global_object_id_contract(&value),
+            ("third_party_valid", true)
+        );
+
+        value[20] = 1;
+        assert_eq!(
+            third_party_global_object_id_contract(&value),
+            ("third_party_invalid_creation_time", false)
+        );
+    }
 }
 
 fn special_property_shape(value: &mapi_mailstore::SpecialMessagePropertyValue) -> String {

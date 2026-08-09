@@ -59,9 +59,6 @@ fn event_property_value_with_optional_version(
         return Some(value);
     }
     let property_tag = canonical_property_storage_tag(property_tag);
-    let global_object_id_creation_time = version.map(|version| {
-        mapi_mailstore::filetime_from_rfc3339_utc(&version.created_at)
-    });
     if let Some(version) = version {
         match property_tag {
             PID_TAG_CHANGE_KEY => return Some(MapiValue::Binary(version.change_key.clone())),
@@ -134,9 +131,7 @@ fn event_property_value_with_optional_version(
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(appointment_state_flags(event))),
         PID_LID_RESPONSE_STATUS_TAG => Some(MapiValue::I32(response_status(event))),
         PID_LID_RECURRING_TAG => Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty())),
-        PID_LID_IS_RECURRING_TAG => {
-            Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty()))
-        }
+        PID_LID_IS_RECURRING_TAG => Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty())),
         PID_LID_TIME_ZONE_STRUCT_TAG => Some(MapiValue::Binary(calendar_time_zone_struct(event))),
         PID_LID_TIME_ZONE_DESCRIPTION_W_TAG => Some(MapiValue::String(
             calendar_time_zone_key(&event.time_zone).to_string(),
@@ -147,10 +142,7 @@ fn event_property_value_with_optional_version(
         }
         PID_LID_APPOINTMENT_RECUR_TAG => calendar_recurrence_blob(event).map(MapiValue::Binary),
         PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
-            Some(MapiValue::Binary(calendar_global_object_id(
-                event,
-                global_object_id_creation_time,
-            )))
+            Some(MapiValue::Binary(calendar_global_object_id(event)))
         }
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(item_id),
@@ -463,10 +455,7 @@ fn push_system_time(value: &mut Vec<u8>, system_time: CalendarSystemTime) {
     value.extend_from_slice(&0u16.to_le_bytes());
 }
 
-pub(super) fn calendar_global_object_id(
-    event: &AccessibleEvent,
-    creation_time: Option<u64>,
-) -> Vec<u8> {
+pub(super) fn calendar_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
     if let Some(encoded) = event.uid.strip_prefix("mapi-goid:") {
         if let Some(value) = hex_to_bytes(encoded) {
             return value;
@@ -486,7 +475,9 @@ pub(super) fn calendar_global_object_id(
         0x08,
     ];
     value.extend_from_slice(&[0, 0, 0, 0]);
-    value.extend_from_slice(&creation_time.unwrap_or(0).to_le_bytes());
+    // [MS-OXCICAL] section 2.1.3.1.1.20.26 requires a zero Creation Time
+    // for a ThirdPartyGlobalId encoded with the vCal-Uid prefix.
+    value.extend_from_slice(&0u64.to_le_bytes());
     value.extend_from_slice(&0u64.to_le_bytes());
     value.extend_from_slice(&(data.len().min(u32::MAX as usize) as u32).to_le_bytes());
     value.extend_from_slice(&data);
@@ -762,7 +753,8 @@ pub(in crate::mapi) fn calendar_pending_recipients(
                     row_id: row_id.min(u32::MAX as usize) as u32,
                     recipient_type,
                     address: attendee.email,
-                    display_name: (!attendee.common_name.is_empty()).then_some(attendee.common_name),
+                    display_name: (!attendee.common_name.is_empty())
+                        .then_some(attendee.common_name),
                 },
             )
         })

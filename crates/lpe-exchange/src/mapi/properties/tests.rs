@@ -157,15 +157,11 @@ fn meeting_request_submit_includes_calendar_request_attachment() {
     );
     properties.insert(
         PID_LID_APPOINTMENT_START_WHOLE_TAG,
-        MapiValue::I64(
-            mapi_mailstore::filetime_from_rfc3339_utc("2026-06-01T08:00:00Z") as i64,
-        ),
+        MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc("2026-06-01T08:00:00Z") as i64),
     );
     properties.insert(
         PID_LID_APPOINTMENT_END_WHOLE_TAG,
-        MapiValue::I64(
-            mapi_mailstore::filetime_from_rfc3339_utc("2026-06-01T08:30:00Z") as i64,
-        ),
+        MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc("2026-06-01T08:30:00Z") as i64),
     );
     properties.insert(
         PID_LID_GLOBAL_OBJECT_ID_TAG,
@@ -3848,12 +3844,7 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
         Some(MapiValue::I32(0x0000_0005))
     );
     assert_eq!(
-        event_property_value(
-            &event,
-            1,
-            CALENDAR_FOLDER_ID,
-            PID_LID_RESPONSE_STATUS_TAG
-        ),
+        event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_RESPONSE_STATUS_TAG),
         Some(MapiValue::I32(1))
     );
     assert_eq!(
@@ -3989,13 +3980,11 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
 }
 
 #[test]
-fn calendar_fallback_global_object_id_uses_canonical_creation_time() {
+fn calendar_fallback_global_object_id_uses_zero_creation_time() {
     let event = default_event_for_mapping(Uuid::nil(), "default");
-    let creation_time = 133_992_000_000_000_000u64;
-    let global_object_id =
-        super::calendar::calendar_global_object_id(&event, Some(creation_time));
+    let global_object_id = super::calendar::calendar_global_object_id(&event);
 
-    assert_eq!(&global_object_id[20..28], &creation_time.to_le_bytes());
+    assert_eq!(&global_object_id[20..28], &[0; 8]);
 }
 
 #[test]
