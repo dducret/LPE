@@ -468,6 +468,7 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
             | PID_LID_APPOINTMENT_RECUR_TAG
             | PID_LID_APPOINTMENT_SUB_TYPE_TAG
             | PID_LID_APPOINTMENT_STATE_FLAGS_TAG
+            | PID_LID_RESPONSE_STATUS_TAG
             | PID_LID_RECURRING_TAG
             | PID_LID_ALL_ATTENDEES_STRING_W_TAG
             | PID_LID_TO_ATTENDEES_STRING_W_TAG

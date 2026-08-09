@@ -1067,6 +1067,7 @@ fn calendar_event_table_column_is_backed(storage_tag: u32) -> bool {
             | PID_LID_OUTLOOK_COMMON_8578_TAG
             | PID_LID_APPOINTMENT_SUB_TYPE_TAG
             | PID_LID_APPOINTMENT_STATE_FLAGS_TAG
+            | PID_LID_RESPONSE_STATUS_TAG
             | PID_LID_RECURRING_TAG
             | PID_LID_TIME_ZONE_STRUCT_TAG
             | PID_LID_TIME_ZONE_DESCRIPTION_W_TAG

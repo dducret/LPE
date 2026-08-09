@@ -3780,6 +3780,15 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
         Some(MapiValue::I32(0x0000_0005))
     );
     assert_eq!(
+        event_property_value(
+            &event,
+            1,
+            CALENDAR_FOLDER_ID,
+            PID_LID_RESPONSE_STATUS_TAG
+        ),
+        Some(MapiValue::I32(0))
+    );
+    assert_eq!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_COMMON_START_TAG),
         Some(MapiValue::I64(event_start_filetime(&event) as i64))
     );

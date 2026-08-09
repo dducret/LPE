@@ -1007,6 +1007,10 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
             && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::U64(124))
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_LID_RESPONSE_STATUS_TAG
+            && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::I32(0))
+    }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_TAG_CHANGE_KEY
             && matches!(
                 value,

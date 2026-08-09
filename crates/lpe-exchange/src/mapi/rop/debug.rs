@@ -292,6 +292,7 @@ pub(in crate::mapi) fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_LID_BUSY_STATUS_TAG => "PidLidBusyStatus",
         PID_LID_APPOINTMENT_SUB_TYPE_TAG => "PidLidAppointmentSubType",
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => "PidLidAppointmentStateFlags",
+        PID_LID_RESPONSE_STATUS_TAG => "PidLidResponseStatus",
         PID_LID_TIME_ZONE_STRUCT_TAG => "PidLidTimeZoneStruct",
         PID_LID_TIME_ZONE_DESCRIPTION_W_TAG => "PidLidTimeZoneDescription",
         PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG => {

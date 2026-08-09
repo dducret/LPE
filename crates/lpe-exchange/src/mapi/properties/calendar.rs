@@ -128,6 +128,7 @@ fn event_property_value_with_optional_version(
         PID_LID_OUTLOOK_COMMON_8578_TAG => Some(MapiValue::I32(0)),
         PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(event.all_day)),
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(appointment_state_flags(event))),
+        PID_LID_RESPONSE_STATUS_TAG => Some(MapiValue::I32(0)),
         PID_LID_RECURRING_TAG => Some(MapiValue::Bool(!event.recurrence_rule.trim().is_empty())),
         PID_LID_TIME_ZONE_STRUCT_TAG => Some(MapiValue::Binary(calendar_time_zone_struct(event))),
         PID_LID_TIME_ZONE_DESCRIPTION_W_TAG => Some(MapiValue::String(
