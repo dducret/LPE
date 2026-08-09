@@ -135,6 +135,65 @@ fn pending_html_only_message_derives_plain_body_for_save_and_submit() {
 }
 
 #[test]
+fn meeting_request_submit_includes_calendar_request_attachment() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "organizer@example.test".to_string(),
+        display_name: "Organizer".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let mut properties = HashMap::new();
+    properties.insert(
+        PID_TAG_MESSAGE_CLASS_W,
+        MapiValue::String("IPM.Schedule.Meeting.Request".to_string()),
+    );
+    properties.insert(PID_TAG_SUBJECT_W, MapiValue::String("Review".to_string()));
+    properties.insert(PID_TAG_BODY_W, MapiValue::String("Agenda".to_string()));
+    properties.insert(
+        PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
+        MapiValue::I32(0x0000_0005),
+    );
+    properties.insert(
+        PID_LID_APPOINTMENT_START_WHOLE_TAG,
+        MapiValue::I64(
+            mapi_mailstore::filetime_from_rfc3339_utc("2026-06-01T08:00:00Z") as i64,
+        ),
+    );
+    properties.insert(
+        PID_LID_APPOINTMENT_END_WHOLE_TAG,
+        MapiValue::I64(
+            mapi_mailstore::filetime_from_rfc3339_utc("2026-06-01T08:30:00Z") as i64,
+        ),
+    );
+    properties.insert(
+        PID_LID_GLOBAL_OBJECT_ID_TAG,
+        MapiValue::Binary(vec![0x04, 0x00, 0x00, 0x00]),
+    );
+    let recipients = vec![PendingRecipient {
+        row_id: 0,
+        address: "attendee@example.test".to_string(),
+        display_name: Some("Attendee".to_string()),
+        recipient_type: 0x01,
+    }];
+
+    let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients);
+
+    assert_eq!(submitted.attachments.len(), 1);
+    assert_eq!(
+        submitted.attachments[0].media_type,
+        "text/calendar; method=REQUEST; charset=UTF-8"
+    );
+    let calendar = String::from_utf8_lossy(&submitted.attachments[0].blob_bytes);
+    assert!(calendar.contains("METHOD:REQUEST"));
+    assert!(calendar.contains("DTSTART:20260601T080000Z"));
+    assert!(calendar.contains("DTEND:20260601T083000Z"));
+    assert!(calendar.contains("ORGANIZER;CN=Organizer:mailto:organizer@example.test"));
+    assert!(calendar.contains("ATTENDEE;CN=Attendee;ROLE=REQ-PARTICIPANT"));
+}
+
+#[test]
 fn microsoft_inline_image_html_body_preserves_cid_for_save_and_submit() {
     let principal = AccountPrincipal {
         tenant_id: Uuid::nil(),

@@ -10,6 +10,7 @@ use crate::{
 };
 
 mod delegation;
+mod mime;
 mod types;
 
 use types::{
@@ -705,9 +706,11 @@ impl Storage {
         let domain_id = self
             .load_account_domain_id_in_tx(&mut tx, &tenant_id, input.account_id)
             .await?;
-        let raw_message = format!(
-            "From: {}\r\nSubject: {}\r\n\r\n{}",
-            authorization.from_address, input.subject, body_text
+        let raw_message = mime::render_submission_raw_message(
+            &authorization.from_address,
+            &input,
+            &body_text,
+            &submission_attachments,
         );
         let blob_id = self
             .store_message_blob_in_tx(

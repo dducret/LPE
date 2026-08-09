@@ -572,6 +572,13 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
         optional_pending_text_property(properties, &[PID_TAG_INTERNET_MESSAGE_ID_W]);
     let (to, cc, bcc) = pending_recipients_for_import(recipients);
 
+    let attachments = meeting_request_attachment(
+        properties,
+        recipients,
+        &from_address,
+        from_display.as_deref(),
+    );
+
     SubmitMessageInput {
         draft_message_id: None,
         account_id: principal.account_id,
@@ -592,8 +599,131 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
         size_octets: pending_message_size(properties),
         unread: Some(false),
         flagged: Some(false),
-        attachments: Vec::new(),
+        attachments,
     }
+}
+
+fn meeting_request_attachment(
+    properties: &HashMap<u32, MapiValue>,
+    recipients: &[PendingRecipient],
+    organizer_address: &str,
+    organizer_name: Option<&str>,
+) -> Vec<AttachmentUploadInput> {
+    let message_class = optional_pending_text_property(properties, &[PID_TAG_MESSAGE_CLASS_W]);
+    let appointment_state = properties
+        .get(&PID_LID_APPOINTMENT_STATE_FLAGS_TAG)
+        .and_then(MapiValue::as_i64)
+        .unwrap_or_default();
+    if !message_class.is_some_and(|value| {
+        value
+            .trim()
+            .eq_ignore_ascii_case("IPM.Schedule.Meeting.Request")
+    }) && appointment_state & 0x0000_0001 == 0
+    {
+        return Vec::new();
+    }
+
+    let start = properties
+        .get(&PID_LID_APPOINTMENT_START_WHOLE_TAG)
+        .or_else(|| properties.get(&PID_LID_COMMON_START_TAG))
+        .or_else(|| properties.get(&PID_TAG_START_DATE))
+        .and_then(MapiValue::as_i64)
+        .and_then(ical_utc_filetime);
+    let end = properties
+        .get(&PID_LID_APPOINTMENT_END_WHOLE_TAG)
+        .or_else(|| properties.get(&PID_LID_COMMON_END_TAG))
+        .or_else(|| properties.get(&PID_TAG_END_DATE))
+        .and_then(MapiValue::as_i64)
+        .and_then(ical_utc_filetime);
+    let uid = properties
+        .get(&PID_LID_GLOBAL_OBJECT_ID_TAG)
+        .or_else(|| properties.get(&PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG))
+        .and_then(|value| match value {
+            MapiValue::Binary(value) => Some(format!(
+                "mapi-goid:{}",
+                lpe_domain::crypto::hex_lower(value)
+            )),
+            _ => None,
+        });
+    let (Some(start), Some(end), Some(uid)) = (start, end, uid) else {
+        return Vec::new();
+    };
+
+    let subject = pending_text_property(
+        properties,
+        &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
+    );
+    let body = pending_body_text_property(properties);
+    let location = optional_pending_text_property(properties, &[PID_LID_LOCATION_W_TAG]);
+    let mut lines = vec![
+        "BEGIN:VCALENDAR".to_string(),
+        "VERSION:2.0".to_string(),
+        "PRODID:-//LPE//MAPI//EN".to_string(),
+        "METHOD:REQUEST".to_string(),
+        "BEGIN:VEVENT".to_string(),
+        format!("UID:{uid}"),
+        format!("DTSTART:{start}"),
+        format!("DTEND:{end}"),
+        format!("SUMMARY:{}", ical_text_escape(&subject)),
+        format!(
+            "ORGANIZER;CN={}:mailto:{}",
+            ical_parameter_escape(organizer_name.unwrap_or(organizer_address)),
+            organizer_address
+        ),
+    ];
+    if let Some(location) = location.filter(|value| !value.trim().is_empty()) {
+        lines.push(format!("LOCATION:{}", ical_text_escape(&location)));
+    }
+    if !body.trim().is_empty() {
+        lines.push(format!("DESCRIPTION:{}", ical_text_escape(&body)));
+    }
+    for recipient in recipients {
+        if matches!(recipient.recipient_type & 0x0F, 0x03) || recipient.address.trim().is_empty() {
+            continue;
+        }
+        let role = if recipient.recipient_type & 0x0F == 0x02 {
+            "OPT-PARTICIPANT"
+        } else {
+            "REQ-PARTICIPANT"
+        };
+        let name = recipient
+            .display_name
+            .as_deref()
+            .unwrap_or(&recipient.address);
+        lines.push(format!(
+            "ATTENDEE;CN={};ROLE={role};PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{}",
+            ical_parameter_escape(name),
+            recipient.address.trim()
+        ));
+    }
+    lines.push("END:VEVENT".to_string());
+    lines.push("END:VCALENDAR".to_string());
+    vec![AttachmentUploadInput {
+        file_name: "invite.ics".to_string(),
+        media_type: "text/calendar; method=REQUEST; charset=UTF-8".to_string(),
+        disposition: Some("inline".to_string()),
+        content_id: None,
+        blob_bytes: lines.join("\r\n").into_bytes(),
+    }]
+}
+
+fn ical_utc_filetime(value: i64) -> Option<String> {
+    filetime_to_rfc3339_utc(value).map(|value| value.replace('-', "").replace(':', ""))
+}
+
+fn ical_text_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace(';', "\\;")
+        .replace(',', "\\,")
+}
+
+fn ical_parameter_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "'")
+        .replace(';', "\\;")
 }
 
 fn optional_pending_submit_address(
