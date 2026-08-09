@@ -609,11 +609,13 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                 folder_id,
                 properties: property_values.into_iter().collect(),
                 recipients: Vec::new(),
+                recipients_modified: false,
             },
             None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
                 folder_id,
                 properties: property_values.into_iter().collect(),
                 recipients: Vec::new(),
+                recipients_modified: false,
             },
             _ if folder_id == NOTES_FOLDER_ID => MapiObject::PendingNote {
                 folder_id,

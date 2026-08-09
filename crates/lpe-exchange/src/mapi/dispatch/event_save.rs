@@ -12,6 +12,7 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
     folder_id: u64,
     properties: HashMap<u32, MapiValue>,
     recipients: Vec<PendingRecipient>,
+    recipients_modified: bool,
 ) {
     let imported_identity = match imported_event_identity_from_properties(&properties) {
         Ok(identity) => identity,
@@ -69,11 +70,13 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
             return;
         }
     };
-    apply_calendar_pending_recipients(
-        &mut input,
-        &default_event_for_mapping(principal.account_id, &collection_id),
-        &recipients,
-    );
+    if recipients_modified {
+        apply_calendar_pending_recipients(
+            &mut input,
+            &default_event_for_mapping(principal.account_id, &collection_id),
+            &recipients,
+        );
+    }
     let create_input = MapiEventCreateInput {
         principal_account_id: principal.account_id,
         collection_id,

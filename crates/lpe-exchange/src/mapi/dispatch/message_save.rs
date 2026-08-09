@@ -91,6 +91,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             folder_id,
             properties,
             recipients,
+            recipients_modified,
         }) => {
             save_pending_event(
                 store,
@@ -104,6 +105,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 folder_id,
                 properties,
                 recipients,
+                recipients_modified,
             )
             .await;
             return;

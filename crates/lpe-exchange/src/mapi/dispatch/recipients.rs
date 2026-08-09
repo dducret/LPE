@@ -214,12 +214,17 @@ pub(super) fn append_remove_all_recipients_response(
             responses.extend_from_slice(&rop_simple_success_response(request));
         }
         Some(MapiObject::PendingEvent { .. }) => {
-            let Some(MapiObject::PendingEvent { recipients, .. }) =
+            let Some(MapiObject::PendingEvent {
+                recipients,
+                recipients_modified,
+                ..
+            }) =
                 input_object_mut(session, handle_slots, request)
             else {
                 unreachable!();
             };
             recipients.clear();
+            *recipients_modified = true;
             responses.extend_from_slice(&rop_simple_success_response(request));
         }
         _ => match input_object_mut(session, handle_slots, request) {
@@ -341,7 +346,11 @@ pub(super) async fn append_modify_recipients_response<S>(
                 .unwrap_or_default();
             match request.modify_recipients(principal, &address_book_entries) {
                 Ok(changes) => {
-                    let Some(MapiObject::PendingEvent { recipients, .. }) =
+                    let Some(MapiObject::PendingEvent {
+                        recipients,
+                        recipients_modified,
+                        ..
+                    }) =
                         input_object_mut(session, handle_slots, request)
                     else {
                         responses.extend_from_slice(&rop_error_response(
@@ -351,6 +360,7 @@ pub(super) async fn append_modify_recipients_response<S>(
                         ));
                         return;
                     };
+                    *recipients_modified |= !changes.is_empty();
                     apply_pending_recipient_changes(recipients, changes);
                     responses.extend_from_slice(&rop_simple_success_response(request));
                 }

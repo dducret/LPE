@@ -3656,6 +3656,7 @@ async fn mapi_over_http_calendar_pending_event_modify_recipients_succeeds() {
         session: Some(FakeStore::account()),
         ..Default::default()
     };
+    let events = store.events.clone();
     let calendar_folder_id = durable_special_folder_id_for_test(
         &store,
         FakeStore::account().account_id,
@@ -3671,7 +3672,26 @@ async fn mapi_over_http_calendar_pending_event_modify_recipients_succeeds() {
 
     let mut rops = Vec::new();
     append_rop_create_message(&mut rops, 0, 1, calendar_folder_id);
-    append_rop_modify_recipients(&mut rops, 1, &[]);
+    let mut properties = Vec::new();
+    append_mapi_utf16_property(&mut properties, 0x0037_001F, "Meeting recipients");
+    append_mapi_i64_property(
+        &mut properties,
+        0x0060_0040,
+        test_filetime("2026-06-01", "08:00"),
+    );
+    append_mapi_i64_property(
+        &mut properties,
+        0x0061_0040,
+        test_filetime("2026-06-01", "08:30"),
+    );
+    append_rop_set_properties(&mut rops, 1, 3, &properties);
+    let bob = mapi_recipient_row("Bob", "bob@example.test", 0x01);
+    let room = mapi_recipient_row("Room 1", "room@example.test", 0x03);
+    append_rop_modify_recipients(&mut rops, 1, &[(0, 0x01, &bob), (1, 0x03, &room)]);
+    rops.extend_from_slice(&[0x0F, 0x00, 0x01]);
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    append_rop_save_changes_message(&mut rops, 1, 1);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", cookie);
     let response = service
@@ -3690,6 +3710,17 @@ async fn mapi_over_http_calendar_pending_event_modify_recipients_succeeds() {
             .any(|response| response == [0x0E, 0x01, 0, 0, 0, 0]),
         "PendingEvent ModifyRecipients response: {response_rops:02x?}"
     );
+    assert!(contains_bytes(&response_rops, &utf16z("bob@example.test")));
+    assert!(contains_bytes(&response_rops, &utf16z("room@example.test")));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].attendees, "Bob, Room 1");
+    let attendees = lpe_storage::parse_calendar_participants_metadata(&stored[0].attendees_json);
+    assert_eq!(attendees.attendees.len(), 2);
+    assert_eq!(attendees.attendees[0].email, "bob@example.test");
+    assert_eq!(attendees.attendees[0].role, "REQ-PARTICIPANT");
+    assert_eq!(attendees.attendees[1].email, "room@example.test");
+    assert_eq!(attendees.attendees[1].role, "RESOURCE");
 }
 
 #[tokio::test]
