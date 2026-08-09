@@ -187,6 +187,7 @@ fn meeting_request_submit_includes_calendar_request_attachment() {
     );
     let calendar = String::from_utf8_lossy(&submitted.attachments[0].blob_bytes);
     assert!(calendar.contains("METHOD:REQUEST"));
+    assert!(calendar.contains("DTSTAMP:20260601T080000Z"));
     assert!(calendar.contains("DTSTART:20260601T080000Z"));
     assert!(calendar.contains("DTEND:20260601T083000Z"));
     assert!(calendar.contains("ORGANIZER;CN=Organizer:mailto:organizer@example.test"));

@@ -30,6 +30,7 @@ pub(super) fn render_submission_raw_message(
     headers.extend([
         format!("Subject: {}", input.subject),
         "MIME-Version: 1.0".to_string(),
+        "Content-Class: urn:content-classes:calendarmessage".to_string(),
         format!("Content-Type: multipart/alternative; boundary=\"{boundary}\""),
         String::new(),
         format!("--{boundary}"),
@@ -115,6 +116,7 @@ mod tests {
         );
 
         assert!(raw.contains("Content-Type: multipart/alternative"));
+        assert!(raw.contains("Content-Class: urn:content-classes:calendarmessage"));
         assert!(raw.contains("Content-Type: text/calendar; method=REQUEST; charset=UTF-8"));
         assert!(raw.contains("METHOD:REQUEST"));
         assert!(raw.contains("To: Attendee <attendee@example.test>"));

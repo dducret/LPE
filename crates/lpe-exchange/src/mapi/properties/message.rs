@@ -648,6 +648,13 @@ fn meeting_request_attachment(
     let (Some(start), Some(end), Some(uid)) = (start, end, uid) else {
         return Vec::new();
     };
+    let dtstamp = properties
+        .get(&PID_TAG_CLIENT_SUBMIT_TIME)
+        .or_else(|| properties.get(&PID_TAG_LAST_MODIFICATION_TIME))
+        .or_else(|| properties.get(&PID_TAG_CREATION_TIME))
+        .and_then(MapiValue::as_i64)
+        .and_then(ical_utc_filetime)
+        .unwrap_or_else(|| start.clone());
 
     let subject = pending_text_property(
         properties,
@@ -662,6 +669,7 @@ fn meeting_request_attachment(
         "METHOD:REQUEST".to_string(),
         "BEGIN:VEVENT".to_string(),
         format!("UID:{uid}"),
+        format!("DTSTAMP:{dtstamp}"),
         format!("DTSTART:{start}"),
         format!("DTEND:{end}"),
         format!("SUMMARY:{}", ical_text_escape(&subject)),
