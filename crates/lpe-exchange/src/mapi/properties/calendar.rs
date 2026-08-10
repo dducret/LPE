@@ -19,6 +19,24 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
     property_tag: u32,
     reminder: Option<&lpe_storage::ClientReminder>,
 ) -> Option<MapiValue> {
+    event_property_value_with_reminder_and_mailbox_guid(
+        event,
+        item_id,
+        folder_id,
+        property_tag,
+        reminder,
+        None,
+    )
+}
+
+pub(in crate::mapi) fn event_property_value_with_reminder_and_mailbox_guid(
+    event: &AccessibleEvent,
+    item_id: u64,
+    folder_id: u64,
+    property_tag: u32,
+    reminder: Option<&lpe_storage::ClientReminder>,
+    mailbox_guid: Option<Uuid>,
+) -> Option<MapiValue> {
     event_property_value_with_optional_version(
         event,
         item_id,
@@ -27,6 +45,7 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         reminder,
         None,
         None,
+        mailbox_guid,
     )
 }
 
@@ -43,6 +62,7 @@ pub(in crate::mapi) fn versioned_event_property_value_with_reminder(
         reminder,
         Some(&event.version),
         Some(&event.source_key),
+        None,
     )
 }
 
@@ -54,6 +74,7 @@ fn event_property_value_with_optional_version(
     reminder: Option<&lpe_storage::ClientReminder>,
     version: Option<&lpe_storage::MapiEventVersion>,
     source_key: Option<&[u8]>,
+    mailbox_guid: Option<Uuid>,
 ) -> Option<MapiValue> {
     if let Some(value) = event_reminder_property_value(event, reminder, property_tag) {
         return Some(value);
@@ -144,7 +165,18 @@ fn event_property_value_with_optional_version(
         PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
             Some(MapiValue::Binary(calendar_global_object_id(event)))
         }
-        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+        // [MS-OXCDATA] section 2.2.4.2: a message EntryID is a store
+        // provider EntryID, distinct from the eight-byte InstanceKey.
+        PID_TAG_ENTRY_ID => mailbox_guid
+            .and_then(|mailbox_guid| {
+                crate::mapi::identity::message_entry_id_from_object_ids(
+                    mailbox_guid,
+                    folder_id,
+                    item_id,
+                )
+            })
+            .map(MapiValue::Binary),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(item_id),
         )),
         PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(

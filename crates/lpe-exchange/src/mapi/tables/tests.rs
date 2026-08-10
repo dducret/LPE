@@ -4585,6 +4585,7 @@ fn contents_find_row_matches_message_search_key() {
         swapped_todo_data: None,
         categories: Vec::new(),
         has_attachments: false,
+        calendar_invitation: false,
         size_octets: 128,
         internet_message_id: Some("<search-key-probe@example.test>".to_string()),
         mime_blob_ref: None,
@@ -8918,11 +8919,39 @@ fn test_table_email(id: Uuid, mailbox_id: Uuid, subject: &str) -> JmapEmail {
         swapped_todo_data: None,
         categories: Vec::new(),
         has_attachments: false,
+        calendar_invitation: false,
         size_octets: 128,
         internet_message_id: Some(format!("<{}@example.test>", id)),
         mime_blob_ref: None,
         delivery_status: "stored".to_string(),
     }
+}
+
+#[test]
+fn calendar_invitation_contents_row_projects_meeting_request_class() {
+    let mut email = test_table_email(
+        Uuid::from_u128(0x7171_0003),
+        Uuid::from_u128(0x8181_0003),
+        "Calendar invite",
+    );
+    email.calendar_invitation = true;
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(0x7171_0003),
+    );
+    let columns = [PID_TAG_MESSAGE_CLASS_W, PID_NAME_CONTENT_CLASS_W_TAG];
+    let row = serialize_message_row(&email, &columns);
+    let mut cursor = Cursor::new(row.as_slice());
+
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_TAG_MESSAGE_CLASS_W).unwrap(),
+        MapiValue::String("IPM.Schedule.Meeting.Request".to_string())
+    );
+    assert_eq!(
+        parse_mapi_property_value(&mut cursor, PID_NAME_CONTENT_CLASS_W_TAG).unwrap(),
+        MapiValue::String("urn:content-classes:calendarmessage".to_string())
+    );
+    assert_eq!(cursor.remaining(), 0);
 }
 
 #[test]

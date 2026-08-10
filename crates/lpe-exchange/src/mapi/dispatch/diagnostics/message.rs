@@ -296,9 +296,9 @@ pub(in crate::mapi::dispatch) fn normal_message_debug_property_value(
         PID_TAG_INTERNET_MESSAGE_ID_W => Some(MapiValue::String(
             email.internet_message_id.clone().unwrap_or_default(),
         )),
-        PID_NAME_CONTENT_CLASS_W_TAG => {
-            Some(MapiValue::String("urn:content-classes:message".to_string()))
-        }
+        PID_NAME_CONTENT_CLASS_W_TAG => Some(MapiValue::String(
+            content_class_for_email(email).to_string(),
+        )),
         tag => email_property_value(email, tag),
     }
 }
@@ -363,6 +363,7 @@ mod tests {
             swapped_todo_data: None,
             categories: Vec::new(),
             has_attachments: false,
+            calendar_invitation: false,
             size_octets: 0,
             internet_message_id: None,
             mime_blob_ref: None,

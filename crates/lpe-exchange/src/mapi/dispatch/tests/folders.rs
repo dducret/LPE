@@ -746,6 +746,7 @@ fn advertised_special_folder_counts_snapshot_messages_when_mailbox_not_loaded() 
         swapped_todo_data: None,
         categories: Vec::new(),
         has_attachments: false,
+        calendar_invitation: false,
         size_octets: 5,
         internet_message_id: None,
         mime_blob_ref: None,

@@ -207,6 +207,7 @@ impl FakeStore {
             swapped_todo_data: None,
             categories: Vec::new(),
             has_attachments: false,
+            calendar_invitation: false,
             size_octets: 32,
             internet_message_id: None,
             mime_blob_ref: None,

@@ -60,6 +60,7 @@ pub struct JmapEmail {
     pub swapped_todo_data: Option<Vec<u8>>,
     pub categories: Vec<String>,
     pub has_attachments: bool,
+    pub calendar_invitation: bool,
     pub size_octets: i64,
     pub internet_message_id: Option<String>,
     pub mime_blob_ref: Option<String>,
@@ -833,6 +834,23 @@ impl Storage {
                 rollup.swapped_todo_data,
                 rollup.categories,
                 m.has_attachments,
+                EXISTS (
+                    SELECT 1
+                    FROM message_headers header
+                    WHERE header.tenant_id = m.tenant_id
+                      AND header.message_id = m.id
+                      AND lower(btrim(header.header_name)) = 'content-class'
+                      AND lower(btrim(header.header_value)) = 'urn:content-classes:calendarmessage'
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM mime_parts part
+                    WHERE part.tenant_id = m.tenant_id
+                      AND part.message_id = m.id
+                      AND lower(part.content_type) LIKE 'text/calendar%'
+                      AND lower(part.content_type) ~
+                          '(^|;)[[:space:]]*method[[:space:]]*=[[:space:]]*"?request"?([;]|$)'
+                ) AS calendar_invitation,
                 m.size_octets,
                 m.internet_message_id,
                 ('message:' || m.id::text) AS mime_blob_ref,
@@ -1052,6 +1070,7 @@ impl Storage {
                     swapped_todo_data: row.swapped_todo_data.clone(),
                     categories: row.categories.clone(),
                     has_attachments: row.has_attachments,
+                    calendar_invitation: row.calendar_invitation,
                     size_octets: row.size_octets,
                     internet_message_id: row.internet_message_id.clone(),
                     mime_blob_ref: row.mime_blob_ref.clone(),

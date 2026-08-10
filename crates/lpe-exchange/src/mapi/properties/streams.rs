@@ -228,12 +228,13 @@ pub(super) fn property_stream_data(
         } if open_mode == 0 => snapshot
             .event_for_id(*folder_id, *event_id)
             .and_then(|event| {
-                event_property_value_with_reminder(
+                event_property_value_with_reminder_and_mailbox_guid(
                     &event.event,
                     event.id,
                     event.folder_id,
                     property_tag,
                     snapshot.reminder_for_source("calendar", event.canonical_id),
+                    Some(mailbox_guid),
                 )
             }),
         _ => return None,

@@ -372,6 +372,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_message_attachments_preserves_calendar_request_media_type() {
+        let message = concat!(
+            "Content-Type: multipart/mixed; boundary=\"invite\"\r\n",
+            "\r\n",
+            "--invite\r\n",
+            "Content-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n",
+            "Content-Disposition: inline; filename=\"invite.ics\"\r\n",
+            "\r\n",
+            "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR\r\n",
+            "--invite--\r\n"
+        );
+
+        let attachments = parse_message_attachments(message.as_bytes()).unwrap();
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].file_name, "invite.ics");
+        assert_eq!(
+            attachments[0].media_type,
+            "text/calendar; method=REQUEST; charset=UTF-8"
+        );
+    }
+
+    #[test]
     fn parse_message_attachments_preserves_inline_content_id_metadata() {
         let message = concat!(
             "Content-Type: multipart/related; boundary=\"rel\"\r\n",

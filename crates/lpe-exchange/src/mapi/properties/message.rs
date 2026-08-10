@@ -197,9 +197,9 @@ pub(in crate::mapi) fn email_property_value(
             mapi_mailstore::canonical_message_change_number(email),
         )),
         PID_TAG_INTERNET_MESSAGE_ID_W => email.internet_message_id.clone().map(MapiValue::String),
-        PID_NAME_CONTENT_CLASS_W_TAG => {
-            Some(MapiValue::String("urn:content-classes:message".to_string()))
-        }
+        PID_NAME_CONTENT_CLASS_W_TAG => Some(MapiValue::String(
+            content_class_for_email(email).to_string(),
+        )),
         PID_TAG_TRANSPORT_MESSAGE_HEADERS_W => Some(MapiValue::String(transport_headers(email))),
         _ => None,
     }
@@ -269,10 +269,20 @@ pub(in crate::mapi) fn conversation_index_for_uuid(conversation_id: Uuid) -> Vec
 }
 
 pub(crate) fn message_class_for_email(email: &JmapEmail) -> &'static str {
-    if email.mailbox_role == "rss_feeds" {
+    if email.calendar_invitation {
+        "IPM.Schedule.Meeting.Request"
+    } else if email.mailbox_role == "rss_feeds" {
         "IPM.Post.RSS"
     } else {
         "IPM.Note"
+    }
+}
+
+pub(crate) fn content_class_for_email(email: &JmapEmail) -> &'static str {
+    if email.calendar_invitation {
+        "urn:content-classes:calendarmessage"
+    } else {
+        "urn:content-classes:message"
     }
 }
 

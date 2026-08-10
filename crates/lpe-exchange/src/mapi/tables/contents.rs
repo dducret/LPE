@@ -366,7 +366,9 @@ fn serialize_message_row_with_table_instance(
             PID_TAG_INTERNET_MESSAGE_ID_W => {
                 write_utf16z(&mut row, email.internet_message_id.as_deref().unwrap_or(""))
             }
-            PID_NAME_CONTENT_CLASS_W_TAG => write_utf16z(&mut row, "urn:content-classes:message"),
+            PID_NAME_CONTENT_CLASS_W_TAG => {
+                write_utf16z(&mut row, content_class_for_email(email))
+            }
             _ => match email_property_value_with_durable_identity(email, durable_identity, *column)
             {
                 Some(value) => write_mapi_value(&mut row, *column, &value),

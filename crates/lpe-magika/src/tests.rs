@@ -119,7 +119,7 @@ fn collect_mime_attachment_parts_extracts_attachment_payloads() {
     assert_eq!(attachments[0].filename.as_deref(), Some("report.pdf"));
     assert_eq!(
         attachments[0].declared_mime.as_deref(),
-        Some("application/pdf")
+        Some("application/pdf; name=\"report.pdf\"")
     );
     assert_eq!(attachments[0].bytes, b"PDF".to_vec());
 }

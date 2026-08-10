@@ -2885,7 +2885,7 @@ fn microsoft_oxcdata_reminder_restriction_example_parses_and_matches() {
 }
 
 #[test]
-fn rss_feed_messages_project_rss_message_class_and_named_properties() {
+fn email_message_class_and_content_class_follow_canonical_projection() {
     assert_eq!(
         well_known_named_property_id(&MapiNamedProperty {
             guid: PSETID_POST_RSS_GUID,
@@ -2965,6 +2965,7 @@ fn rss_feed_messages_project_rss_message_class_and_named_properties() {
         swapped_todo_data: None,
         categories: Vec::new(),
         has_attachments: false,
+        calendar_invitation: false,
         size_octets: 128,
         internet_message_id: Some("rss-guid".to_string()),
         mime_blob_ref: None,
@@ -2978,6 +2979,21 @@ fn rss_feed_messages_project_rss_message_class_and_named_properties() {
     assert_eq!(
         email_property_value(&email, PID_TAG_ORIGINAL_MESSAGE_CLASS_W),
         Some(MapiValue::String("IPM.Post.RSS".to_string()))
+    );
+    let mut invitation = email.clone();
+    invitation.mailbox_role = "inbox".to_string();
+    invitation.calendar_invitation = true;
+    assert_eq!(
+        email_property_value(&invitation, PID_TAG_MESSAGE_CLASS_W),
+        Some(MapiValue::String(
+            "IPM.Schedule.Meeting.Request".to_string()
+        ))
+    );
+    assert_eq!(
+        email_property_value(&invitation, PID_NAME_CONTENT_CLASS_W_TAG),
+        Some(MapiValue::String(
+            "urn:content-classes:calendarmessage".to_string()
+        ))
     );
     assert_eq!(
         email_property_value(&email, PID_TAG_ACCESS_LEVEL),
@@ -3336,6 +3352,7 @@ fn followup_mail_projects_outlook_flag_properties() {
         swapped_todo_data: Some(valid_swapped_todo_data()),
         categories: Vec::new(),
         has_attachments: false,
+        calendar_invitation: false,
         size_octets: 128,
         internet_message_id: None,
         mime_blob_ref: None,
@@ -4114,6 +4131,37 @@ fn calendar_projection_keeps_meeting_state_after_all_attendees_are_removed() {
 fn calendar_projection_backs_outlook_table_identity_and_status_columns() {
     let event = default_event_for_mapping(Uuid::nil(), "default");
     let item_id = 0x0000_0000_0044_0001;
+    let mailbox_guid = Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa);
+
+    let Some(MapiValue::Binary(entry_id)) = event_property_value_with_reminder_and_mailbox_guid(
+        &event,
+        item_id,
+        CALENDAR_FOLDER_ID,
+        PID_TAG_ENTRY_ID,
+        None,
+        Some(mailbox_guid),
+    )
+    else {
+        panic!("calendar EntryID must use the Message EntryID format")
+    };
+    assert_eq!(entry_id.len(), 70);
+    assert_eq!(
+        crate::mapi::identity::object_ids_from_message_entry_id(mailbox_guid, &entry_id),
+        Some((CALENDAR_FOLDER_ID, item_id))
+    );
+    assert_eq!(
+        event_property_value_with_reminder_and_mailbox_guid(
+            &event,
+            item_id,
+            CALENDAR_FOLDER_ID,
+            PID_TAG_INSTANCE_KEY,
+            None,
+            Some(mailbox_guid),
+        ),
+        Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(item_id)
+        ))
+    );
 
     assert_eq!(
         event_property_value(&event, item_id, CALENDAR_FOLDER_ID, PID_TAG_FOLDER_ID),
@@ -5891,6 +5939,7 @@ fn client_submit_time_falls_back_to_received_time_for_imported_mail() {
         swapped_todo_data: None,
         categories: Vec::new(),
         has_attachments: false,
+        calendar_invitation: false,
         size_octets: 128,
         internet_message_id: None,
         mime_blob_ref: None,

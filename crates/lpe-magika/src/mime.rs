@@ -99,7 +99,7 @@ fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPa
     if is_attachment || filename.is_some() {
         attachments.push(MimeAttachmentPart {
             filename,
-            declared_mime: Some(strip_content_type_parameters(&content_type)),
+            declared_mime: Some(content_type),
             content_disposition,
             content_id,
             bytes: decoded_body,
@@ -205,15 +205,6 @@ fn first_html_part(bytes: &[u8]) -> Result<Option<String>> {
     }
 
     Ok(None)
-}
-
-fn strip_content_type_parameters(value: &str) -> String {
-    value
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_string()
 }
 
 fn split_headers_and_body_bytes(raw: &[u8]) -> (&[u8], &[u8]) {

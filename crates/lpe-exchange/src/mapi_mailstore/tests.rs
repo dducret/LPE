@@ -4380,6 +4380,7 @@ fn test_email() -> JmapEmail {
         swapped_todo_data: None,
         categories: Vec::new(),
         has_attachments: false,
+        calendar_invitation: false,
         size_octets: 42,
         internet_message_id: Some("<message@example.test>".to_string()),
         mime_blob_ref: None,
