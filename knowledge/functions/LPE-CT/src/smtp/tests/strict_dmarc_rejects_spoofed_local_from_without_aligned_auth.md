@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_dmarc_rejects_spoofed_local_from_without_aligned_auth
-resource: LPE-CT/src/smtp/tests.rs#L3278-L3302
+resource: LPE-CT/src/smtp/tests.rs#L3254-L3278
 visibility: private
 generated:
   by: okf-rs/0.3.0

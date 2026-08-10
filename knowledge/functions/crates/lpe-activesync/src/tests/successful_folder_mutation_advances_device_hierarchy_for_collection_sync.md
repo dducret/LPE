@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: successful_folder_mutation_advances_device_hierarchy_for_collection_sync
-resource: crates/lpe-activesync/src/tests.rs#L3598-L3637
+resource: crates/lpe-activesync/src/tests.rs#L3599-L3638
 visibility: private
 generated:
   by: okf-rs/0.3.0

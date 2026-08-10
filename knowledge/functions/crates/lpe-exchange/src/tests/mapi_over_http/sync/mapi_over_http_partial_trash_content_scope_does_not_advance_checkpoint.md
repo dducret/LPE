@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_partial_trash_content_scope_does_not_advance_checkpoint
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8788-L8872
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8581-L8665
 visibility: private
 generated:
   by: okf-rs/0.3.0

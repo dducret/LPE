@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_state_stream_from_raw_properties
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L609-L628
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L612-L631
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bearer_headers_with_protocol_version
-resource: crates/lpe-activesync/src/tests.rs#L1323-L1330
+resource: crates/lpe-activesync/src/tests.rs#L1324-L1331
 visibility: private
 generated:
   by: okf-rs/0.3.0

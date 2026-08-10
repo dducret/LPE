@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_sync
-resource: crates/lpe-activesync/src/tests.rs#L2065-L2091
+resource: crates/lpe-activesync/src/tests.rs#L2066-L2092
 visibility: private
 generated:
   by: okf-rs/0.3.0

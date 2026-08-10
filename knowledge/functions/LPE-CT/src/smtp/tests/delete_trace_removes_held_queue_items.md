@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_trace_removes_held_queue_items
-resource: LPE-CT/src/smtp/tests.rs#L2982-L3028
+resource: LPE-CT/src/smtp/tests.rs#L2958-L3004
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_transport_send_uses_canonical_submission
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1099-L1186
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1063-L1150
 visibility: private
 generated:
   by: okf-rs/0.3.0

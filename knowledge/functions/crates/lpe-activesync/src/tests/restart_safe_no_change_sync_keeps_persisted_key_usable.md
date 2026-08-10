@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: restart_safe_no_change_sync_keeps_persisted_key_usable
-resource: crates/lpe-activesync/src/tests.rs#L4429-L4455
+resource: crates/lpe-activesync/src/tests.rs#L4430-L4456
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_outlook_logon_bootstrap_property_details
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L610-L668
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L611-L669
 generated:
   by: okf-rs/0.3.0
 relationships:

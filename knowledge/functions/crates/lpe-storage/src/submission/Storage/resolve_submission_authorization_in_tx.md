@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: resolve_submission_authorization_in_tx
-resource: crates/lpe-storage/src/submission.rs#L1363-L1462
+resource: crates/lpe-storage/src/submission.rs#L1366-L1465
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_size
-resource: crates/lpe-storage/src/workspace/client_workspace.rs#L251-L260
+resource: crates/lpe-storage/src/workspace/client_workspace.rs#L260-L269
 visibility: private
 generated:
   by: okf-rs/0.3.0

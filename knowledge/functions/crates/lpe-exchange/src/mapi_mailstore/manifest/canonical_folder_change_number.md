@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_folder_change_number
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L209-L211
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L210-L212
 generated:
   by: okf-rs/0.3.0
 relationships:

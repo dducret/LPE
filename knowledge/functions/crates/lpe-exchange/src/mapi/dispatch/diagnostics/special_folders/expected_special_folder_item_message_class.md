@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: expected_special_folder_item_message_class
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L430-L448
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L591-L609
 generated:
   by: okf-rs/0.3.0
 ---

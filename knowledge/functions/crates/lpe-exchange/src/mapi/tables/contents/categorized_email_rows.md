@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: categorized_email_rows
-resource: crates/lpe-exchange/src/mapi/tables/contents.rs#L380-L478
+resource: crates/lpe-exchange/src/mapi/tables/contents.rs#L382-L480
 generated:
   by: okf-rs/0.3.0
 relationships:

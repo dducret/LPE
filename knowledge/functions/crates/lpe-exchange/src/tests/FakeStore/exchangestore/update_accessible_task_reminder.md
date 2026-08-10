@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_accessible_task_reminder
-resource: crates/lpe-exchange/src/tests/mod.rs#L9609-L9643
+resource: crates/lpe-exchange/src/tests/mod.rs#L9614-L9648
 visibility: private
 generated:
   by: okf-rs/0.3.0

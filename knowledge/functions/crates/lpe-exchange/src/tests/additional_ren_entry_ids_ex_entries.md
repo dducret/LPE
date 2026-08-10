@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: additional_ren_entry_ids_ex_entries
-resource: crates/lpe-exchange/src/tests/mod.rs#L12910-L12942
+resource: crates/lpe-exchange/src/tests/mod.rs#L12915-L12947
 visibility: private
 generated:
   by: okf-rs/0.3.0

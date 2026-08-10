@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: replace_message_recipients
-resource: crates/lpe-storage/src/submission.rs#L116-L243
+resource: crates/lpe-storage/src/submission.rs#L117-L244
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id
   - functions/crates/lpe-storage/src/shared/Storage/ensure_account_exists
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/submission/insert_visible_recipient
   - functions/crates/lpe-storage/src/shared/Storage/allocate_mail_modseq_in_tx
   - functions/crates/lpe-storage/src/mapi_message_identity/rotate_active_mapi_message_identity_in_tx
@@ -27,6 +28,7 @@ relationships:
 - [tenant_id_for_account_id](../../../../../../functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id.md)
 - [ensure_account_exists](../../../../../../functions/crates/lpe-storage/src/shared/Storage/ensure_account_exists.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [insert_visible_recipient](../../../../../../functions/crates/lpe-storage/src/submission/insert_visible_recipient.md)
 - [allocate_mail_modseq_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_mail_modseq_in_tx.md)
 - [rotate_active_mapi_message_identity_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_message_identity/rotate_active_mapi_message_identity_in_tx.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_associated_find_row_does_not_invent_osc_contact_sync_config
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5744-L5750
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5779-L5785
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbound_mismatch_is_rejected_before_delivery
-resource: LPE-CT/src/smtp/tests.rs#L2295-L2322
+resource: LPE-CT/src/smtp/tests.rs#L2322-L2349
 visibility: private
 generated:
   by: okf-rs/0.3.0

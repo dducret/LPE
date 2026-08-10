@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_default_view_definitions_use_type_specific_columns
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5857-L6019
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5987-L6149
 visibility: private
 generated:
   by: okf-rs/0.3.0

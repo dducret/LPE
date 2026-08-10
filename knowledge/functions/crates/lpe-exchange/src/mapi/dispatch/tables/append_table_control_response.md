@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_table_control_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1406-L1901
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1408-L1908
 generated:
   by: okf-rs/0.3.0
 relationships:

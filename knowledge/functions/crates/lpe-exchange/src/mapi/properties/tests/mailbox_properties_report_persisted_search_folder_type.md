@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_properties_report_persisted_search_folder_type
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L672-L692
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L728-L748
 visibility: private
 generated:
   by: okf-rs/0.3.0

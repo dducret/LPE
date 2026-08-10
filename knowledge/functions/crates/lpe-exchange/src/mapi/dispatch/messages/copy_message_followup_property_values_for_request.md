@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: copy_message_followup_property_values_for_request
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L537-L594
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L541-L598
 generated:
   by: okf-rs/0.3.0
 relationships:

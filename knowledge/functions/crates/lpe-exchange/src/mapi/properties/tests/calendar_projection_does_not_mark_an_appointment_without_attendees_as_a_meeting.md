@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3910-L3943
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4008-L4041
 visibility: private
 generated:
   by: okf-rs/0.3.0

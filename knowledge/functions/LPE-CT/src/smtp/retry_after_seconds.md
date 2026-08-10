@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: retry_after_seconds
-resource: LPE-CT/src/smtp.rs#L1223-L1226
+resource: LPE-CT/src/smtp.rs#L1226-L1229
 visibility: private
 generated:
   by: okf-rs/0.3.0

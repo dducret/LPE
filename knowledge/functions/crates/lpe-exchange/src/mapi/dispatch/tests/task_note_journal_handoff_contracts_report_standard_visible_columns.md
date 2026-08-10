@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_note_journal_handoff_contracts_report_standard_visible_columns
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L713-L743
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L717-L747
 visibility: private
 generated:
   by: okf-rs/0.3.0

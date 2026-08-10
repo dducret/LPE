@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: current_mailboxes
-resource: crates/lpe-activesync/src/tests.rs#L250-L256
+resource: crates/lpe-activesync/src/tests.rs#L251-L257
 visibility: private
 generated:
   by: okf-rs/0.3.0

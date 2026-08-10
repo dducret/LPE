@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rpc_proxy_handler
-resource: crates/lpe-exchange/src/service.rs#L295-L351
+resource: crates/lpe-exchange/src/service.rs#L297-L353
 visibility: private
 generated:
   by: okf-rs/0.3.0

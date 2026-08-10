@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_message_table_column_is_backed
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1131-L1255
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1133-L1257
 visibility: private
 generated:
   by: okf-rs/0.3.0

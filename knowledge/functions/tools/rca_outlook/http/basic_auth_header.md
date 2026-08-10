@@ -7,6 +7,8 @@ generated:
 relationships:
   called_by:
   - functions/tools/rca_outlook/ews/ews_call
+  - functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/tools/rca_outlook_connectivity_check/check_ews_basic
   - functions/tools/rca_outlook_connectivity_check/check_mapi_ping
   - functions/tools/rca_outlook_connectivity_check/mapi_nspi_bind_cookie
@@ -26,6 +28,8 @@ relationships:
 # Called by
 
 - [ews_call](../../../../functions/tools/rca_outlook/ews/ews_call.md)
+- [check_mapi_gate1_readiness](../../../../functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness.md)
+- [execute](../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [check_ews_basic](../../../../functions/tools/rca_outlook_connectivity_check/check_ews_basic.md)
 - [check_mapi_ping](../../../../functions/tools/rca_outlook_connectivity_check/check_mapi_ping.md)
 - [mapi_nspi_bind_cookie](../../../../functions/tools/rca_outlook_connectivity_check/mapi_nspi_bind_cookie.md)

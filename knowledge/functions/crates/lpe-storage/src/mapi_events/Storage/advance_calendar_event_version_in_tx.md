@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: advance_calendar_event_version_in_tx
-resource: crates/lpe-storage/src/mapi_events.rs#L701-L720
+resource: crates/lpe-storage/src/mapi_events.rs#L710-L729
 generated:
   by: okf-rs/0.3.0
 relationships:

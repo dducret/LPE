@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stored_mailbox_query_changes_reloads_filtered_snapshot
-resource: crates/lpe-jmap/src/tests.rs#L4891-L4969
+resource: crates/lpe-jmap/src/tests.rs#L4894-L4972
 visibility: private
 generated:
   by: okf-rs/0.3.0

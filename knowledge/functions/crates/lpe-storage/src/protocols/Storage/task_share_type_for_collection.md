@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: task_share_type_for_collection
-resource: crates/lpe-storage/src/protocols.rs#L656-L679
+resource: crates/lpe-storage/src/protocols.rs#L657-L680
 visibility: private
 generated:
   by: okf-rs/0.3.0

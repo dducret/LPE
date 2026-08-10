@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: getprops_contract_response_summary_includes_access_value
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L956-L967
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L957-L968
 visibility: private
 generated:
   by: okf-rs/0.3.0

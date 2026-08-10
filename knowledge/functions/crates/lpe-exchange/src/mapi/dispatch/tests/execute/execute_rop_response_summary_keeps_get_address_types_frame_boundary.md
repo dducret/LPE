@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rop_response_summary_keeps_get_address_types_frame_boundary
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L812-L848
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L867-L909
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_deleted_items_mixed_categorized_sort_query_rows
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1117-L1246
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1027-L1156
 visibility: private
 generated:
   by: okf-rs/0.3.0

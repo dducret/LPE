@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_default_views_are_not_synthetic_fai_sync_objects
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1109-L1129
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1169-L1189
 visibility: private
 generated:
   by: okf-rs/0.3.0

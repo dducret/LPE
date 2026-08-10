@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: filetime_to_rfc3339_utc
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L914-L916
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L1062-L1064
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/time/filetime_to_date_time
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/bounded_search_property_clause
+  - functions/crates/lpe-exchange/src/mapi/properties/message/ical_utc_filetime
 ---
 
 # Signature
@@ -22,3 +23,4 @@ relationships:
 # Called by
 
 - [bounded_search_property_clause](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/bounded_search_property_clause.md)
+- [ical_utc_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/ical_utc_filetime.md)

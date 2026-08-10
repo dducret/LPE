@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
   - functions/crates/lpe-core/src/sieve/context
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/core/Storage/connect
   - functions/crates/lpe-storage/src/core/Storage/pool
   - functions/crates/lpe-activesync/src/tests/query
@@ -22,6 +23,7 @@ relationships:
 
 - [from_str](../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
 - [context](../../../../../functions/crates/lpe-core/src/sieve/context.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [connect](../../../../../functions/crates/lpe-storage/src/core/Storage/connect.md)
 - [pool](../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)

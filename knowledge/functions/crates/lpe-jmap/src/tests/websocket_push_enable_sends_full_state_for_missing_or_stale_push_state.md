@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: websocket_push_enable_sends_full_state_for_missing_or_stale_push_state
-resource: crates/lpe-jmap/src/tests.rs#L11479-L11542
+resource: crates/lpe-jmap/src/tests.rs#L11482-L11545
 visibility: private
 generated:
   by: okf-rs/0.3.0

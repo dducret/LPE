@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: event_transactions
-resource: crates/lpe-exchange/src/mapi/dispatch/event_transactions.rs#L1-L646
+resource: crates/lpe-exchange/src/mapi/dispatch/event_transactions.rs#L1-L660
 generated:
   by: okf-rs/0.3.0
 relationships:

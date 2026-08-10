@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: open_message_response_uses_reduced_unicode_for_exchange_configuration_subjects
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1351-L1378
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1353-L1380
 visibility: private
 generated:
   by: okf-rs/0.3.0

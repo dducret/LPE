@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: outlook_profile_state
-resource: crates/lpe-jmap/src/tests.rs#L688-L711
+resource: crates/lpe-jmap/src/tests.rs#L690-L713
 visibility: private
 generated:
   by: okf-rs/0.3.0

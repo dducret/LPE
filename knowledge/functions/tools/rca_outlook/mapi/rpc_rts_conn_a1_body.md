@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: rpc_rts_conn_a1_body
-resource: tools/rca_outlook/mapi.py#L105-L117
+resource: tools/rca_outlook/mapi.py#L197-L209
 generated:
   by: okf-rs/0.3.0
 relationships:

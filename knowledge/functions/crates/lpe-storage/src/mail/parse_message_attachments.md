@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-activesync/src/message/parse_mime_message
   - functions/crates/lpe-storage/src/mail/parse_rfc822_message
   - functions/crates/lpe-storage/src/mail/parse_message_attachments_trims_structural_boundary_crlf
+  - functions/crates/lpe-storage/src/mail/parse_message_attachments_preserves_calendar_request_media_type
   - functions/crates/lpe-storage/src/mail/parse_message_attachments_preserves_inline_content_id_metadata
 ---
 
@@ -31,4 +32,5 @@ relationships:
 - [parse_mime_message](../../../../../functions/crates/lpe-activesync/src/message/parse_mime_message.md)
 - [parse_rfc822_message](../../../../../functions/crates/lpe-storage/src/mail/parse_rfc822_message.md)
 - [parse_message_attachments_trims_structural_boundary_crlf](../../../../../functions/crates/lpe-storage/src/mail/parse_message_attachments_trims_structural_boundary_crlf.md)
+- [parse_message_attachments_preserves_calendar_request_media_type](../../../../../functions/crates/lpe-storage/src/mail/parse_message_attachments_preserves_calendar_request_media_type.md)
 - [parse_message_attachments_preserves_inline_content_id_metadata](../../../../../functions/crates/lpe-storage/src/mail/parse_message_attachments_preserves_inline_content_id_metadata.md)

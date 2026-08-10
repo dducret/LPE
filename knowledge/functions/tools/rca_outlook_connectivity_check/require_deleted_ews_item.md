@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: require_deleted_ews_item
-resource: tools/rca_outlook_connectivity_check.py#L707-L732
+resource: tools/rca_outlook_connectivity_check.py#L956-L981
 generated:
   by: okf-rs/0.3.0
 relationships:

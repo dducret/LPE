@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: QuarantineSummary
-resource: LPE-CT/src/smtp.rs#L235-L258
+resource: LPE-CT/src/smtp.rs#L231-L254
 generated:
   by: okf-rs/0.3.0
 ---

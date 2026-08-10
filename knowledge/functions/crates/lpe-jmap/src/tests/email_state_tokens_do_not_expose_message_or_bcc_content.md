@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_state_tokens_do_not_expose_message_or_bcc_content
-resource: crates/lpe-jmap/src/tests.rs#L3980-L4023
+resource: crates/lpe-jmap/src/tests.rs#L3983-L4026
 visibility: private
 generated:
   by: okf-rs/0.3.0

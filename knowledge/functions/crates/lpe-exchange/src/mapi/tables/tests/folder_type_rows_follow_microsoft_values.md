@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_type_rows_follow_microsoft_values
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3150-L3203
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3184-L3237
 visibility: private
 generated:
   by: okf-rs/0.3.0

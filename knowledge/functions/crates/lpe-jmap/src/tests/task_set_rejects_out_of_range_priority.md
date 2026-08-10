@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_set_rejects_out_of_range_priority
-resource: crates/lpe-jmap/src/tests.rs#L13530-L13566
+resource: crates/lpe-jmap/src/tests.rs#L13533-L13569
 visibility: private
 generated:
   by: okf-rs/0.3.0

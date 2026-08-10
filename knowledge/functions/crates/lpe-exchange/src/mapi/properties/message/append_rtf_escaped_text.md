@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rtf_escaped_text
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L322-L341
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L332-L351
 visibility: private
 generated:
   by: okf-rs/0.3.0

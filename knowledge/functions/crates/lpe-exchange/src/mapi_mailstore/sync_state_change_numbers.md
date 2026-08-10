@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_state_change_numbers
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L433-L465
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L436-L468
 visibility: private
 generated:
   by: okf-rs/0.3.0

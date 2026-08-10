@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxcmapihttp_ping_refreshes_idle_session_context
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1212-L1259
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1206-L1253
 visibility: private
 generated:
   by: okf-rs/0.3.0

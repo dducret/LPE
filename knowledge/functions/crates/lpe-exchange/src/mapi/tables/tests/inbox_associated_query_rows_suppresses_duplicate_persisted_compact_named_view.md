@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_query_rows_suppresses_duplicate_persisted_compact_named_view
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6893-L6964
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6928-L6999
 visibility: private
 generated:
   by: okf-rs/0.3.0

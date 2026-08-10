@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_compact_descriptor_is_missing_without_persisted_view
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L839-L856
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L843-L860
 visibility: private
 generated:
   by: okf-rs/0.3.0

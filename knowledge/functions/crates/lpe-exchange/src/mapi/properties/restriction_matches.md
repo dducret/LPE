@@ -27,7 +27,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_associated_config
   - functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/restriction_matches_common_views_message
-  - functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event_with_mailbox_guid
   - functions/crates/lpe-exchange/src/mapi/tables/counts/restricted_associated_folder_message_count
   - functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_hierarchy_row_matches
   - functions/crates/lpe-exchange/src/mapi/tables/public_folders/restriction_matches_public_folder_item
@@ -64,7 +64,7 @@ relationships:
 - [restriction_matches_associated_config](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_associated_config.md)
 - [rop_find_row_response](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response.md)
 - [restriction_matches_common_views_message](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/restriction_matches_common_views_message.md)
-- [restriction_matches_event](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event.md)
+- [restriction_matches_event_with_mailbox_guid](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event_with_mailbox_guid.md)
 - [restricted_associated_folder_message_count](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/restricted_associated_folder_message_count.md)
 - [special_hierarchy_row_matches](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/hierarchy/special_hierarchy_row_matches.md)
 - [restriction_matches_public_folder_item](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/public_folders/restriction_matches_public_folder_item.md)

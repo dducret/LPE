@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ping_detects_changes_across_multiple_monitored_collections
-resource: crates/lpe-activesync/src/tests.rs#L5403-L5445
+resource: crates/lpe-activesync/src/tests.rs#L5404-L5446
 visibility: private
 generated:
   by: okf-rs/0.3.0

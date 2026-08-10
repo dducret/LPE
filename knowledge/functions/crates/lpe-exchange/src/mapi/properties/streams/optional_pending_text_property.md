@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: optional_pending_text_property
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L902-L913
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L903-L914
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -25,6 +25,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/contact/contact_input_from_mapi
   - functions/crates/lpe-exchange/src/mapi/properties/message/jmap_import_from_pending_message
   - functions/crates/lpe-exchange/src/mapi/properties/message/mapi_submit_from_pending_message
+  - functions/crates/lpe-exchange/src/mapi/properties/message/meeting_request_attachment
   - functions/crates/lpe-exchange/src/mapi/properties/message/optional_pending_submit_address
   - functions/crates/lpe-exchange/src/mapi/properties/notes/note_input_from_mapi
   - functions/crates/lpe-exchange/src/mapi/properties/notes/journal_entry_input_from_mapi
@@ -61,6 +62,7 @@ relationships:
 - [contact_input_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/contact/contact_input_from_mapi.md)
 - [jmap_import_from_pending_message](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/jmap_import_from_pending_message.md)
 - [mapi_submit_from_pending_message](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_submit_from_pending_message.md)
+- [meeting_request_attachment](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/meeting_request_attachment.md)
 - [optional_pending_submit_address](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/optional_pending_submit_address.md)
 - [note_input_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/notes/note_input_from_mapi.md)
 - [journal_entry_input_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/notes/journal_entry_input_from_mapi.md)

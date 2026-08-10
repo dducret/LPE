@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_hard_delete_messages_and_subfolders_hard_deletes_trash_contents
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3217-L3266
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3122-L3171
 visibility: private
 generated:
   by: okf-rs/0.3.0

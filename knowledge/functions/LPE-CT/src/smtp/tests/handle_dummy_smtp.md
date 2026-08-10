@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: handle_dummy_smtp
-resource: LPE-CT/src/smtp/tests.rs#L3407-L3457
+resource: LPE-CT/src/smtp/tests.rs#L3383-L3433
 visibility: private
 generated:
   by: okf-rs/0.3.0

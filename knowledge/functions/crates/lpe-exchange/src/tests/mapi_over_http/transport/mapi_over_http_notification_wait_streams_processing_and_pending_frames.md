@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_notification_wait_streams_processing_and_pending_frames
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1157-L1209
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1151-L1203
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_sync_conflict_pcl
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L13468-L13475
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L13227-L13234
 visibility: private
 generated:
   by: okf-rs/0.3.0

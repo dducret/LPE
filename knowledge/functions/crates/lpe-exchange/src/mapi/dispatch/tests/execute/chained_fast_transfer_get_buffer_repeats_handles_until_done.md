@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: chained_fast_transfer_get_buffer_repeats_handles_until_done
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L216-L301
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L271-L356
 visibility: private
 generated:
   by: okf-rs/0.3.0

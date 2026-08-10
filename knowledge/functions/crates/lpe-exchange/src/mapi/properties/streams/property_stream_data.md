@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_stream_data
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L105-L296
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L105-L297
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -16,7 +16,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/common_view_named_view_property_value
   - functions/crates/lpe-exchange/src/mapi_store/associated_config/is_outlook_local_freebusy_message_id
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id
-  - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder_and_mailbox_guid
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/reminder_for_source
   - functions/crates/lpe-exchange/src/mapi/properties/streams/mapi_value_stream_bytes
   - functions/crates/lpe-exchange/src/mapi/properties/streams/empty_stream_bytes_for_property_tag
@@ -43,7 +43,7 @@ relationships:
 - [common_view_named_view_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/common_view_named_view_property_value.md)
 - [is_outlook_local_freebusy_message_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/associated_config/is_outlook_local_freebusy_message_id.md)
 - [event_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id.md)
-- [event_property_value_with_reminder](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder.md)
+- [event_property_value_with_reminder_and_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder_and_mailbox_guid.md)
 - [reminder_for_source](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/reminder_for_source.md)
 - [mapi_value_stream_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/mapi_value_stream_bytes.md)
 - [empty_stream_bytes_for_property_tag](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/empty_stream_bytes_for_property_tag.md)

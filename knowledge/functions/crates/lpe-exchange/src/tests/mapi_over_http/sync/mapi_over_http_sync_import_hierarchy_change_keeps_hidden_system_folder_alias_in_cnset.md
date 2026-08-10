@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_hierarchy_change_keeps_hidden_system_folder_alias_in_cnset
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L16363-L16536
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L16087-L16251
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,8 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/reserve_mapi_local_replica_ids
   - functions/crates/lpe-exchange/src/tests/mapi_headers
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_mapi_binary_property
   - functions/crates/lpe-exchange/src/tests/append_mapi_i64_property
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_change_number
@@ -39,8 +38,7 @@ relationships:
 
 - [reserve_mapi_local_replica_ids](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/reserve_mapi_local_replica_ids.md)
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_mapi_binary_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_binary_property.md)
 - [append_mapi_i64_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_i64_property.md)
 - [filetime_from_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_change_number.md)

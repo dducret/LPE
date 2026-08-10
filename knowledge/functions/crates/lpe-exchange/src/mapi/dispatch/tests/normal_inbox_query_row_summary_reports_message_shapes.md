@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_inbox_query_row_summary_reports_message_shapes
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1498-L1651
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1508-L1662
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: src
-resource: crates/lpe-cli/src/main.rs#L1-L571
+resource: crates/lpe-cli/src/main.rs#L1-L572
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_state_flags_reject_unsupported_bits_without_side_effect
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L5191-L5276
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L5238-L5323
 visibility: private
 generated:
   by: okf-rs/0.3.0

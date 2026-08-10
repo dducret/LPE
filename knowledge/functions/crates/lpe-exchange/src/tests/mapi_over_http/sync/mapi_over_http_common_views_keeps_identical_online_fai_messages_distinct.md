@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_common_views_keeps_identical_online_fai_messages_distinct
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L3206-L3282
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L3080-L3156
 visibility: private
 generated:
   by: okf-rs/0.3.0

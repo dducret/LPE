@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: ClientTaskListRow
-resource: crates/lpe-storage/src/models.rs#L604-L618
+resource: crates/lpe-storage/src/models.rs#L607-L621
 generated:
   by: okf-rs/0.3.0
 ---

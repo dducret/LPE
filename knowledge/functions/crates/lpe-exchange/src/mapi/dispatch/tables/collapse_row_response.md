@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collapse_row_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1925-L1934
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1932-L1941
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_manifest_rejects_associated_config_default_from_wrong_folder
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2191-L2212
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2251-L2272
 visibility: private
 generated:
   by: okf-rs/0.3.0

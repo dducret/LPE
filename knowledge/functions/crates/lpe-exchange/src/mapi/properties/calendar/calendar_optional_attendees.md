@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_optional_attendees
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L220-L228
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L295-L303
 visibility: private
 generated:
   by: okf-rs/0.3.0

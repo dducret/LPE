@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: additional_ren_entry_ids_advertises_documented_indexed_special_folders
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2086-L2109
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2142-L2165
 visibility: private
 generated:
   by: okf-rs/0.3.0

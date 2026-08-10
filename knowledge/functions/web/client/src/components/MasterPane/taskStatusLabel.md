@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: taskStatusLabel
-resource: web/client/src/components/MasterPane.tsx#L39-L45
+resource: web/client/src/components/MasterPane.tsx#L40-L46
 generated:
   by: okf-rs/0.3.0
 relationships:

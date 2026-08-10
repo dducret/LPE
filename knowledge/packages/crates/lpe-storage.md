@@ -59,6 +59,7 @@ generated:
 - [tests](../../modules/crates/lpe-storage/src/storage_visibility/tests.md)
 - [submission](../../modules/crates/lpe-storage/src/submission.md)
 - [delegation](../../modules/crates/lpe-storage/src/submission/delegation.md)
+- [mime](../../modules/crates/lpe-storage/src/submission/mime.md)
 - [types](../../modules/crates/lpe-storage/src/submission/types.md)
 - [tasks](../../modules/crates/lpe-storage/src/tasks.md)
 - [types](../../modules/crates/lpe-storage/src/tasks/types.md)

@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/ensure_account_exists
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-domain/src/crypto/sha256_hex
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -22,3 +23,4 @@ relationships:
 - [ensure_account_exists](../../../../../../functions/crates/lpe-storage/src/shared/Storage/ensure_account_exists.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [sha256_hex](../../../../../../functions/crates/lpe-domain/src/crypto/sha256_hex.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

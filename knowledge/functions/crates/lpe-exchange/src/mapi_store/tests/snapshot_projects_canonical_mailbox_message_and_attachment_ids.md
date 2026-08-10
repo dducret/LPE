@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_projects_canonical_mailbox_message_and_attachment_ids
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2155-L2281
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2157-L2284
 visibility: private
 generated:
   by: okf-rs/0.3.0

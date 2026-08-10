@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_execute_rejects_missing_and_malformed_session_cookies
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1003-L1045
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L994-L1036
 visibility: private
 generated:
   by: okf-rs/0.3.0

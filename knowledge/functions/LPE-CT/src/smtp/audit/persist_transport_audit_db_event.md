@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from
   - functions/LPE-CT/src/smtp/audit/transport_audit_search_text
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/LPE-CT/src/smtp/audit/append_transport_audit
 ---
@@ -25,6 +26,7 @@ relationships:
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [try_from](../../../../../functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from.md)
 - [transport_audit_search_text](../../../../../functions/LPE-CT/src/smtp/audit/transport_audit_search_text.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

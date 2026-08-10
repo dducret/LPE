@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_change_number
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1280-L1282
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1283-L1285
 visibility: private
 generated:
   by: okf-rs/0.3.0

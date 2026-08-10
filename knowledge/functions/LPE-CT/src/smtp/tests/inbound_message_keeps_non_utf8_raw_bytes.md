@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbound_message_keeps_non_utf8_raw_bytes
-resource: LPE-CT/src/smtp/tests.rs#L2424-L2469
+resource: LPE-CT/src/smtp/tests.rs#L2400-L2445
 visibility: private
 generated:
   by: okf-rs/0.3.0

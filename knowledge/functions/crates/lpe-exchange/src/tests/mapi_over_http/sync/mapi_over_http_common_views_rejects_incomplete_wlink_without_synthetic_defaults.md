@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_common_views_rejects_incomplete_wlink_without_synthetic_defaults
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L1935-L1988
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L1809-L1862
 visibility: private
 generated:
   by: okf-rs/0.3.0

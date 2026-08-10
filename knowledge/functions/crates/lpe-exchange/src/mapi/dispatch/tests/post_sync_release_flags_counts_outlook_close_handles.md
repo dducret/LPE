@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_sync_release_flags_counts_outlook_close_handles
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2678-L2725
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2699-L2746
 visibility: private
 generated:
   by: okf-rs/0.3.0

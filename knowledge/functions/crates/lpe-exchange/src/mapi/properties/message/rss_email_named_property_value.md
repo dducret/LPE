@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rss_email_named_property_value
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L416-L437
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L426-L447
 visibility: private
 generated:
   by: okf-rs/0.3.0

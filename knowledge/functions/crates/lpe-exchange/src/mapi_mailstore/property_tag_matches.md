@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_tag_matches
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L284-L292
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L287-L295
 generated:
   by: okf-rs/0.3.0
 relationships:

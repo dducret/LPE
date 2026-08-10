@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: html_to_text
-resource: crates/lpe-magika/src/mime.rs#L429-L444
+resource: crates/lpe-magika/src/mime.rs#L420-L435
 visibility: private
 generated:
   by: okf-rs/0.3.0

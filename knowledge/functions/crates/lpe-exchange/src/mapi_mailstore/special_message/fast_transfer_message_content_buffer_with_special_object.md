@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_message_content_buffer_with_special_object
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L233-L252
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L244-L263
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_handles_multiple_collections_and_common_optional_tokens
-resource: crates/lpe-activesync/src/tests.rs#L3697-L3761
+resource: crates/lpe-activesync/src/tests.rs#L3698-L3762
 visibility: private
 generated:
   by: okf-rs/0.3.0

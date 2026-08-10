@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_folder
-resource: crates/lpe-exchange/src/service.rs#L386-L438
+resource: crates/lpe-exchange/src/service.rs#L388-L440
 visibility: private
 generated:
   by: okf-rs/0.3.0

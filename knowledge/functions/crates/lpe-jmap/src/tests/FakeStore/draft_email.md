@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: draft_email
-resource: crates/lpe-jmap/src/tests.rs#L411-L464
+resource: crates/lpe-jmap/src/tests.rs#L411-L465
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: event_lookup_rejects_another_principals_cached_mid
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L164-L185
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L166-L187
 visibility: private
 generated:
   by: okf-rs/0.3.0

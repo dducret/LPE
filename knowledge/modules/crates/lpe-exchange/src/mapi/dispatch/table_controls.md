@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: table_controls
-resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L1-L1520
+resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L1-L1519
 generated:
   by: okf-rs/0.3.0
 relationships:

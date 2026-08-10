@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_mailbox_only_account_syncs_empty_contacts_and_calendar
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8474-L8584
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8559-L8669
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -16,6 +16,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response
   - functions/crates/lpe-exchange/src/tests/strict_hierarchy_sync_transfer_from_response
   - functions/crates/lpe-core/src/sieve/Parser/expect
+  - functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test
   - functions/crates/lpe-exchange/src/tests/content_sync_response_rops_for_store
   - functions/crates/lpe-exchange/src/tests/strict_content_sync_transfer_from_response
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/virtual_special_mailbox
@@ -36,6 +37,7 @@ relationships:
 - [response_rops_from_execute_response](../../../../../../../functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response.md)
 - [strict_hierarchy_sync_transfer_from_response](../../../../../../../functions/crates/lpe-exchange/src/tests/strict_hierarchy_sync_transfer_from_response.md)
 - [expect](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/expect.md)
+- [durable_special_folder_id_for_test](../../../../../../../functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test.md)
 - [content_sync_response_rops_for_store](../../../../../../../functions/crates/lpe-exchange/src/tests/content_sync_response_rops_for_store.md)
 - [strict_content_sync_transfer_from_response](../../../../../../../functions/crates/lpe-exchange/src/tests/strict_content_sync_transfer_from_response.md)
 - [virtual_special_mailbox](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/virtual_special_mailbox.md)

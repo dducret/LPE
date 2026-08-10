@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_empty_folder_reports_success_when_already_empty
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3402-L3443
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3307-L3348
 visibility: private
 generated:
   by: okf-rs/0.3.0

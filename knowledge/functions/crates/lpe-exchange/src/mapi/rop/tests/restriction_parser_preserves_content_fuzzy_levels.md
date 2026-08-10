@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: restriction_parser_preserves_content_fuzzy_levels
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4918-L4935
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4924-L4941
 generated:
   by: okf-rs/0.3.0
 relationships:

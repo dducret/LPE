@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_modify_recipients_response
-resource: crates/lpe-exchange/src/mapi/dispatch/recipients.rs#L164-L333
+resource: crates/lpe-exchange/src/mapi/dispatch/recipients.rs#L258-L509
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -15,6 +15,9 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/response_handle_index
   - functions/crates/lpe-exchange/src/mapi/properties/message/apply_pending_recipient_changes
   - functions/crates/lpe-exchange/src/mapi/rop/responses/rop_simple_success_response
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/event_handle_is_writable
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_pending_recipients
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/pending_recipients_from_email
   called_by:
@@ -23,7 +26,7 @@ relationships:
 
 # Signature
 
-`pub(super) async fn append_modify_recipients_response<S>( store: &S, principal: &AccountPrincipal, session: &mut MapiSession, handle_slots: &[u32], request: &RopRequest, mailboxes: &[JmapMailbox], emails: &[JmapEmail], responses: &mut Vec<u8>, ) where S: ExchangeStore,`
+`pub(super) async fn append_modify_recipients_response<S>( store: &S, principal: &AccountPrincipal, session: &mut MapiSession, handle_slots: &[u32], request: &RopRequest, mailboxes: &[JmapMailbox], emails: &[JmapEmail], snapshot: &MapiMailStoreSnapshot, responses: &mut Vec<u8>, ) where S: ExchangeStore,`
 
 # Calls
 
@@ -36,6 +39,9 @@ relationships:
 - [response_handle_index](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/parse/RopRequest/response_handle_index.md)
 - [apply_pending_recipient_changes](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/apply_pending_recipient_changes.md)
 - [rop_simple_success_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/responses/rop_simple_success_response.md)
+- [event_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id.md)
+- [event_handle_is_writable](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/event_handle_is_writable.md)
+- [calendar_pending_recipients](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_pending_recipients.md)
 - [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
 - [pending_recipients_from_email](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/pending_recipients_from_email.md)
 

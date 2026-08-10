@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: decode_string8_stream_value
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L820-L826
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L821-L827
 generated:
   by: okf-rs/0.3.0
 relationships:

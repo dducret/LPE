@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: storage_backed_calendar_event_lifecycle_updates_canonical_views
-resource: crates/lpe-jmap/src/tests.rs#L9313-L9775
+resource: crates/lpe-jmap/src/tests.rs#L9316-L9778
 visibility: private
 generated:
   by: okf-rs/0.3.0

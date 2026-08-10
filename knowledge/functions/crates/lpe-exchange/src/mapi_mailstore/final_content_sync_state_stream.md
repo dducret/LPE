@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: final_content_sync_state_stream
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L594-L607
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L597-L610
 visibility: private
 generated:
   by: okf-rs/0.3.0

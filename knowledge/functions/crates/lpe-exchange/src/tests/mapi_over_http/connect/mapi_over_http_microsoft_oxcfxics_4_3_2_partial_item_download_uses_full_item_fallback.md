@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxcfxics_4_3_2_partial_item_download_uses_full_item_fallback
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2134-L2227
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2017-L2110
 visibility: private
 generated:
   by: okf-rs/0.3.0

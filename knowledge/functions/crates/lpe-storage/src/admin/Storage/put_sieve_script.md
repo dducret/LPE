@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-storage/src/util/validate_sieve_script_content
   - functions/crates/lpe-storage/src/shared/Storage/ensure_account_exists
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
   - functions/crates/lpe-storage/src/change/Storage/emit_account_scoped_change
@@ -28,6 +29,7 @@ relationships:
 - [validate_sieve_script_content](../../../../../../functions/crates/lpe-storage/src/util/validate_sieve_script_content.md)
 - [ensure_account_exists](../../../../../../functions/crates/lpe-storage/src/shared/Storage/ensure_account_exists.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [allocate_account_modseq_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx.md)
 - [insert_mail_change_log_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx.md)
 - [emit_account_scoped_change](../../../../../../functions/crates/lpe-storage/src/change/Storage/emit_account_scoped_change.md)

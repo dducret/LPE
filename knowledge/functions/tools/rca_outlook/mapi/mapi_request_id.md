@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: mapi_request_id
-resource: tools/rca_outlook/mapi.py#L14-L18
+resource: tools/rca_outlook/mapi.py#L102-L106
 generated:
   by: okf-rs/0.3.0
 relationships:

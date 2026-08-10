@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_message_access
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L171-L173
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L182-L184
 generated:
   by: okf-rs/0.3.0
 relationships:

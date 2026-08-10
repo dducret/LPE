@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: optimized_not_found
-resource: crates/lpe-jmap/src/tests.rs#L15424-L15429
+resource: crates/lpe-jmap/src/tests.rs#L15427-L15432
 visibility: private
 generated:
   by: okf-rs/0.3.0

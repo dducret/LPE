@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: vacation_response_set_destroy_disables_active_sieve_script
-resource: crates/lpe-jmap/src/tests.rs#L11320-L11350
+resource: crates/lpe-jmap/src/tests.rs#L11323-L11353
 visibility: private
 generated:
   by: okf-rs/0.3.0

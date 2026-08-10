@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contents_table_open_row_count_keeps_empty_common_views_empty
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L1848-L1859
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L1861-L1872
 visibility: private
 generated:
   by: okf-rs/0.3.0

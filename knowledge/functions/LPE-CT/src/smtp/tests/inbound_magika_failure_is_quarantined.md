@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbound_magika_failure_is_quarantined
-resource: LPE-CT/src/smtp/tests.rs#L2325-L2369
+resource: LPE-CT/src/smtp/tests.rs#L2352-L2396
 visibility: private
 generated:
   by: okf-rs/0.3.0

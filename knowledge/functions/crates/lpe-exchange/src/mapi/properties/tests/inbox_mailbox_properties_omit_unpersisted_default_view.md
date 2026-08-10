@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_mailbox_properties_omit_unpersisted_default_view
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L695-L714
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L751-L770
 visibility: private
 generated:
   by: okf-rs/0.3.0

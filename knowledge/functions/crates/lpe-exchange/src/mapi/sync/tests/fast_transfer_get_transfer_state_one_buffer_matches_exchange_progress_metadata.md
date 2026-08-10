@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_get_transfer_state_one_buffer_matches_exchange_progress_metadata
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L822-L853
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L850-L881
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: public_folder_rights_for
-resource: crates/lpe-exchange/src/tests/mod.rs#L4489-L4512
+resource: crates/lpe-exchange/src/tests/mod.rs#L4490-L4513
 visibility: private
 generated:
   by: okf-rs/0.3.0

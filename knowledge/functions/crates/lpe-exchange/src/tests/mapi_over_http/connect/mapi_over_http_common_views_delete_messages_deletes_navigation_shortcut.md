@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_common_views_delete_messages_deletes_navigation_shortcut
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2474-L2536
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2357-L2419
 visibility: private
 generated:
   by: okf-rs/0.3.0

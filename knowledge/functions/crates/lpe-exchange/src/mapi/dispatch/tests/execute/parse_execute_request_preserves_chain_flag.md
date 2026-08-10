@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_execute_request_preserves_chain_flag
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L155-L168
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L210-L223
 visibility: private
 generated:
   by: okf-rs/0.3.0

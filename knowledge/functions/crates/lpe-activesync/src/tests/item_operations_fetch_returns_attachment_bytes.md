@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: item_operations_fetch_returns_attachment_bytes
-resource: crates/lpe-activesync/src/tests.rs#L4846-L4921
+resource: crates/lpe-activesync/src/tests.rs#L4847-L4922
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: ensure_public_folder_tree_owner
-resource: crates/lpe-exchange/src/tests/mod.rs#L4479-L4487
+resource: crates/lpe-exchange/src/tests/mod.rs#L4480-L4488
 visibility: private
 generated:
   by: okf-rs/0.3.0

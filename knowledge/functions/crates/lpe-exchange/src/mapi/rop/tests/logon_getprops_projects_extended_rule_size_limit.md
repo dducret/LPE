@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: logon_getprops_projects_extended_rule_size_limit
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1938-L1974
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1940-L1976
 visibility: private
 generated:
   by: okf-rs/0.3.0

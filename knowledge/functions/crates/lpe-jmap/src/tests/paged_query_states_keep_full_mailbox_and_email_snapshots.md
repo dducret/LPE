@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: paged_query_states_keep_full_mailbox_and_email_snapshots
-resource: crates/lpe-jmap/src/tests.rs#L4433-L4513
+resource: crates/lpe-jmap/src/tests.rs#L4436-L4516
 visibility: private
 generated:
   by: okf-rs/0.3.0

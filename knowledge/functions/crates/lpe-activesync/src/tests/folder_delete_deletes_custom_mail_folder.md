@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_delete_deletes_custom_mail_folder
-resource: crates/lpe-activesync/src/tests.rs#L3488-L3521
+resource: crates/lpe-activesync/src/tests.rs#L3489-L3522
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_json_autodiscover
-resource: tools/rca_outlook_connectivity_check.py#L262-L308
+resource: tools/rca_outlook_connectivity_check.py#L511-L557
 generated:
   by: okf-rs/0.3.0
 relationships:

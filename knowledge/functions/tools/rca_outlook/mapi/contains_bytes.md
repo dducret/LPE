@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: contains_bytes
-resource: tools/rca_outlook/mapi.py#L26-L27
+resource: tools/rca_outlook/mapi.py#L114-L115
 generated:
   by: okf-rs/0.3.0
 ---

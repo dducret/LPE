@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delegate_freebusy_getprops_rejects_message_from_wrong_folder
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2667-L2727
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2669-L2729
 visibility: private
 generated:
   by: okf-rs/0.3.0

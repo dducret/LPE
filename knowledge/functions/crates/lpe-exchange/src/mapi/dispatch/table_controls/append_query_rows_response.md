@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_query_rows_response
-resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L882-L1386
+resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L881-L1385
 generated:
   by: okf-rs/0.3.0
 relationships:

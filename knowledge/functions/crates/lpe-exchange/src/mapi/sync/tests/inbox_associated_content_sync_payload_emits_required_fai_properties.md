@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_content_sync_payload_emits_required_fai_properties
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1471-L1702
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1531-L1762
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: App
-resource: web/client/src/App.tsx#L38-L557
+resource: web/client/src/App.tsx#L38-L561
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: durable_special_folder_id_for_test
-resource: crates/lpe-exchange/src/tests/mod.rs#L15121-L15134
+resource: crates/lpe-exchange/src/tests/mod.rs#L15126-L15139
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -31,6 +31,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_ids
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_ids
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_empty_advertised_calendar_create_uses_default_collection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect
@@ -53,6 +54,13 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_open_attachment_projects_existing_event
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_abandons
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_open_message_projects_default_collection_event
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_mailbox_only_account_syncs_empty_contacts_and_calendar
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_startup_calendar_folder_chain_uses_advertised_default_calendar
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_ms_oxosfld_calendar_lookup_chain_opens_calendar_from_inbox
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_ipm_subtree_reports_distinct_folder_identity
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_advertised_special_folder_reports_own_identity
 ---
 
 # Signature
@@ -87,6 +95,7 @@ relationships:
 - [mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_ids](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_ids.md)
 - [mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_ids](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_ids.md)
 - [mapi_over_http_empty_advertised_calendar_create_uses_default_collection](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_empty_advertised_calendar_create_uses_default_collection.md)
+- [mapi_over_http_calendar_pending_event_modify_recipients_succeeds](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds.md)
 - [mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event.md)
 - [mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties.md)
 - [mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect.md)
@@ -109,3 +118,10 @@ relationships:
 - [mapi_over_http_advertised_calendar_open_attachment_projects_existing_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_open_attachment_projects_existing_event.md)
 - [mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_abandons](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_delete_attachment_is_handle_local_and_release_abandons.md)
 - [mapi_over_http_advertised_calendar_open_message_projects_default_collection_event](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_open_message_projects_default_collection_event.md)
+- [mapi_over_http_mailbox_only_account_syncs_empty_contacts_and_calendar](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_mailbox_only_account_syncs_empty_contacts_and_calendar.md)
+- [mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts.md)
+- [mapi_over_http_outlook_startup_calendar_folder_chain_uses_advertised_default_calendar](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_startup_calendar_folder_chain_uses_advertised_default_calendar.md)
+- [mapi_over_http_ms_oxosfld_calendar_lookup_chain_opens_calendar_from_inbox](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_ms_oxosfld_calendar_lookup_chain_opens_calendar_from_inbox.md)
+- [mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity.md)
+- [mapi_over_http_ipm_subtree_reports_distinct_folder_identity](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_ipm_subtree_reports_distinct_folder_identity.md)
+- [mapi_over_http_advertised_special_folder_reports_own_identity](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/hierarchy/mapi_over_http_advertised_special_folder_reports_own_identity.md)

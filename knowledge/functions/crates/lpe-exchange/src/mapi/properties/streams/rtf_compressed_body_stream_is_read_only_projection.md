@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rtf_compressed_body_stream_is_read_only_projection
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L1026-L1070
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L1027-L1071
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: filterNotes
-resource: web/client/src/client-helpers.ts#L110-L115
+resource: web/client/src/client-helpers.ts#L112-L117
 generated:
   by: okf-rs/0.3.0
 relationships:

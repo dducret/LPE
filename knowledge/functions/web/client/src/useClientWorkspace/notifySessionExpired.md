@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: notifySessionExpired
-resource: web/client/src/useClientWorkspace.ts#L33-L37
+resource: web/client/src/useClientWorkspace.ts#L34-L38
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_submission_get_hides_shared_account_without_submit_rights
-resource: crates/lpe-jmap/src/tests.rs#L2730-L2785
+resource: crates/lpe-jmap/src/tests.rs#L2733-L2788
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_notification_cursor
-resource: crates/lpe-exchange/src/tests/mod.rs#L7445-L7451
+resource: crates/lpe-exchange/src/tests/mod.rs#L7446-L7452
 visibility: private
 generated:
   by: okf-rs/0.3.0

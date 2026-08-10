@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_view_named_view_sync_projects_canonical_descriptor_properties
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2135-L2188
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2195-L2248
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_recoverable_delete_messages_is_bounded_rejection
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L649-L697
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L640-L688
 visibility: private
 generated:
   by: okf-rs/0.3.0

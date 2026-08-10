@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_jmap_session
-resource: tools/rca_outlook_connectivity_check.py#L350-L377
+resource: tools/rca_outlook_connectivity_check.py#L599-L626
 generated:
   by: okf-rs/0.3.0
 relationships:

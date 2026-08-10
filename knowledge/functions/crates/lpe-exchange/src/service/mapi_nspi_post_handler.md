@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_nspi_post_handler
-resource: crates/lpe-exchange/src/service.rs#L249-L256
+resource: crates/lpe-exchange/src/service.rs#L251-L258
 visibility: private
 generated:
   by: okf-rs/0.3.0

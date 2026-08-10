@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L4092-L4880
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L3966-L4754
 visibility: private
 generated:
   by: okf-rs/0.3.0

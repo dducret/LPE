@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: draftFromMessage
-resource: web/client/src/useClientWorkspace.ts#L131-L141
+resource: web/client/src/useClientWorkspace.ts#L132-L142
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_message_body_debug_tag
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1275-L1286
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1276-L1287
 visibility: private
 generated:
   by: okf-rs/0.3.0

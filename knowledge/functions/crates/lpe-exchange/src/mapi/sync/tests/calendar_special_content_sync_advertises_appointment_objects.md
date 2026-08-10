@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_special_content_sync_advertises_appointment_objects
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1046-L1106
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1106-L1166
 visibility: private
 generated:
   by: okf-rs/0.3.0

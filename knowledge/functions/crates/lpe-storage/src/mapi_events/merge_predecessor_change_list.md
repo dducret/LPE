@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: merge_predecessor_change_list
-resource: crates/lpe-storage/src/mapi_events.rs#L1420-L1435
+resource: crates/lpe-storage/src/mapi_events.rs#L1435-L1450
 generated:
   by: okf-rs/0.3.0
 relationships:

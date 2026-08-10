@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: source_key_for_store_id
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L277-L279
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L278-L280
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -40,6 +40,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/recoverable_items/recoverable_item_property_value
   - functions/crates/lpe-exchange/src/mapi/tables/tests/outlook_bootstrap_row_invariant_classifier_reports_consistency
   - functions/crates/lpe-exchange/src/mapi/tables/tests/outlook_bootstrap_row_invariant_classifier_flags_missing_record_key
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/captured_calendar_table_query_rows_projects_exact_requested_property_row
   - functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_sort_uses_only_backed_calendar_values
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_rows_project_folder_id_and_last_modification_time
   - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/download_change_facts_with_normal_message_sync_facts
@@ -52,6 +53,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_source_key
   - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_source_key
   - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_parent_source_key
+  - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_parent_source_key
   - functions/crates/lpe-exchange/src/mapi_mailstore/tests/hierarchy_download_keeps_imported_change_key_and_predecessor_lineage
   - functions/crates/lpe-exchange/src/mapi_mailstore/tests/sync_manifest_serializes_content_message_header_in_fixed_order
   - functions/crates/lpe-exchange/src/mapi_mailstore/tests/content_download_selection_emits_unseen_durable_inbox_change_after_completed_sync
@@ -117,6 +119,7 @@ relationships:
 - [recoverable_item_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/recoverable_items/recoverable_item_property_value.md)
 - [outlook_bootstrap_row_invariant_classifier_reports_consistency](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/outlook_bootstrap_row_invariant_classifier_reports_consistency.md)
 - [outlook_bootstrap_row_invariant_classifier_flags_missing_record_key](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/outlook_bootstrap_row_invariant_classifier_flags_missing_record_key.md)
+- [captured_calendar_table_query_rows_projects_exact_requested_property_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/captured_calendar_table_query_rows_projects_exact_requested_property_row.md)
 - [calendar_sort_uses_only_backed_calendar_values](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_sort_uses_only_backed_calendar_values.md)
 - [inbox_associated_rows_project_folder_id_and_last_modification_time](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_rows_project_folder_id_and_last_modification_time.md)
 - [download_change_facts_with_normal_message_sync_facts](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/download_change_facts_with_normal_message_sync_facts.md)
@@ -129,6 +132,7 @@ relationships:
 - [special_message_source_key](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_source_key.md)
 - [special_message_sync_source_key](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_source_key.md)
 - [special_message_parent_source_key](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_parent_source_key.md)
+- [special_message_sync_parent_source_key](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_parent_source_key.md)
 - [hierarchy_download_keeps_imported_change_key_and_predecessor_lineage](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/tests/hierarchy_download_keeps_imported_change_key_and_predecessor_lineage.md)
 - [sync_manifest_serializes_content_message_header_in_fixed_order](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/tests/sync_manifest_serializes_content_message_header_in_fixed_order.md)
 - [content_download_selection_emits_unseen_durable_inbox_change_after_completed_sync](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/tests/content_download_selection_emits_unseen_durable_inbox_change_after_completed_sync.md)

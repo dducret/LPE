@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5823-L5885
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5529-L5582
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,8 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/test_mapi_folder_id
   - functions/crates/lpe-exchange/src/tests/mapi_headers
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_mapi_multi_binary_property
   - functions/crates/lpe-exchange/src/tests/append_mapi_wire_id
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
@@ -27,8 +26,7 @@ relationships:
 
 - [test_mapi_folder_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_folder_id.md)
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_mapi_multi_binary_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_multi_binary_property.md)
 - [append_mapi_wire_id](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_wire_id.md)
 - [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)

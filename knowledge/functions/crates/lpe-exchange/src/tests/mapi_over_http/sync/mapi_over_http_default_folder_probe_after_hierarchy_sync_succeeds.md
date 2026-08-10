@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_default_folder_probe_after_hierarchy_sync_succeeds
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7193-L7269
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6986-L7062
 visibility: private
 generated:
   by: okf-rs/0.3.0

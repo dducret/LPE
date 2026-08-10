@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: message_save
-resource: crates/lpe-exchange/src/mapi/dispatch/message_save.rs#L1-L1310
+resource: crates/lpe-exchange/src/mapi/dispatch/message_save.rs#L1-L1314
 generated:
   by: okf-rs/0.3.0
 relationships:

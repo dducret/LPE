@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wbxml_roundtrip_preserves_get_item_estimate_tokens
-resource: crates/lpe-activesync/src/tests.rs#L2661-L2693
+resource: crates/lpe-activesync/src/tests.rs#L2662-L2694
 visibility: private
 generated:
   by: okf-rs/0.3.0

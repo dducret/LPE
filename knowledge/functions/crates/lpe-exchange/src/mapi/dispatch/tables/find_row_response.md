@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: find_row_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1983-L1992
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1990-L1999
 generated:
   by: okf-rs/0.3.0
 relationships:

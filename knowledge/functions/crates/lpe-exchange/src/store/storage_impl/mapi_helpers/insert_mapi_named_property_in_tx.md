@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_named_property_parts
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -19,3 +20,4 @@ relationships:
 
 - [mapi_named_property_parts](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_named_property_parts.md)
 - [query](../../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

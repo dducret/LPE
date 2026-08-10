@@ -1,13 +1,14 @@
 ---
 type: Python Function
 title: mapi_http_binary_payload
-resource: tools/rca_outlook/mapi.py#L129-L132
+resource: tools/rca_outlook/mapi.py#L221-L224
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/tools/rca_outlook/http/require
   called_by:
+  - functions/tools/rca_outlook_connectivity_check/mapi_gate1_execute_response_rops
   - functions/tools/rca_outlook_connectivity_check/check_mapi_nspi_address_book
   - functions/tools/rca_outlook_connectivity_check/check_mapi_nspi_resolve_authenticated_mailbox
   - functions/tools/rca_outlook_connectivity_check/check_mapi_emsmdb_sent_message
@@ -25,6 +26,7 @@ relationships:
 
 # Called by
 
+- [mapi_gate1_execute_response_rops](../../../../functions/tools/rca_outlook_connectivity_check/mapi_gate1_execute_response_rops.md)
 - [check_mapi_nspi_address_book](../../../../functions/tools/rca_outlook_connectivity_check/check_mapi_nspi_address_book.md)
 - [check_mapi_nspi_resolve_authenticated_mailbox](../../../../functions/tools/rca_outlook_connectivity_check/check_mapi_nspi_resolve_authenticated_mailbox.md)
 - [check_mapi_emsmdb_sent_message](../../../../functions/tools/rca_outlook_connectivity_check/check_mapi_emsmdb_sent_message.md)

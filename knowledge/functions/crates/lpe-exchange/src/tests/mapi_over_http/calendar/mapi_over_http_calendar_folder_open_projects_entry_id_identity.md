@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_folder_open_projects_entry_id_identity
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10113-L10174
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10252-L10321
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/append_rop_get_properties_specific
   - functions/crates/lpe-exchange/src/tests/execute_body
   - functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_scoped_mapi_identity
 ---
 
 # Signature
@@ -29,3 +30,4 @@ relationships:
 - [append_rop_get_properties_specific](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_get_properties_specific.md)
 - [execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/execute_body.md)
 - [response_rops_from_execute_response](../../../../../../../functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response.md)
+- [with_scoped_mapi_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_scoped_mapi_identity.md)

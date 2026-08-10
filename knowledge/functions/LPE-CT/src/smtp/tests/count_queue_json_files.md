@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: count_queue_json_files
-resource: LPE-CT/src/smtp/tests.rs#L3616-L3622
+resource: LPE-CT/src/smtp/tests.rs#L3593-L3599
 visibility: private
 generated:
   by: okf-rs/0.3.0

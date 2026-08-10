@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_common_view_named_view_accepts_microsoft_descriptor_write_stream_batch
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4372-L4465
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4096-L4189
 visibility: private
 generated:
   by: okf-rs/0.3.0

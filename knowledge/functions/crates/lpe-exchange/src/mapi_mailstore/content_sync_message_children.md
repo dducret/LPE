@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_sync_message_children
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L316-L339
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L319-L342
 visibility: private
 generated:
   by: okf-rs/0.3.0

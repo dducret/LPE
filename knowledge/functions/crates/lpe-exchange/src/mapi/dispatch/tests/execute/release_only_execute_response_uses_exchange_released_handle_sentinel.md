@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: release_only_execute_response_uses_exchange_released_handle_sentinel
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L397-L401
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L452-L456
 visibility: private
 generated:
   by: okf-rs/0.3.0

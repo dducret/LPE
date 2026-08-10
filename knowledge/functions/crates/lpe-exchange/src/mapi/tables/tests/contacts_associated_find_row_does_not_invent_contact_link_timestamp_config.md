@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_associated_find_row_does_not_invent_contact_link_timestamp_config
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5753-L5759
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5788-L5794
 visibility: private
 generated:
   by: okf-rs/0.3.0

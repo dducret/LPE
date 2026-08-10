@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rop_response_summary_keeps_get_property_ids_frame_boundary
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L851-L888
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L912-L955
 visibility: private
 generated:
   by: okf-rs/0.3.0

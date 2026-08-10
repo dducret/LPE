@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_recoverable_root_empty_folder_is_parseable_not_supported
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L746-L785
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L737-L776
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_message_sync_source_key_for_fact
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L257-L266
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L258-L267
 generated:
   by: okf-rs/0.3.0
 relationships:

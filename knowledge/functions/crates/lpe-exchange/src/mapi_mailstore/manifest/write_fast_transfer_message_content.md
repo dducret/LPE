@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_fast_transfer_message_content
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L100-L180
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L101-L181
 generated:
   by: okf-rs/0.3.0
 relationships:

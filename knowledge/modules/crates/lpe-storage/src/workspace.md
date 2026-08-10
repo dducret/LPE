@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: workspace
-resource: crates/lpe-storage/src/workspace.rs#L1-L1392
+resource: crates/lpe-storage/src/workspace.rs#L1-L1422
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,7 +12,7 @@ relationships:
   - external/sqlx-row
   - external/std-collections-btreemap
   - external/uuid-uuid
-  - external/crate-canonicalchangecategory-clientattachment-clientcontactrow-clienteventrow-clienttask-collaborationcollection-contactnamefields-contactsourcefields-storage-normalize-email
+  - external/crate-normalize-email-canonicalchangecategory-clientattachment-clientcontactrow-clienteventrow-clienttask-collaborationcollection-contactnamefields-contactsourcefields-jmapmailbox-storage
   - external/super-clientcontact-clientevent-contactsourcefields-upsertclientcontactinput-value-client-folder-json-text-matches-merge-contact-update-input
   - external/serde-json-json
   member_of:
@@ -22,6 +22,8 @@ relationships:
 # Contains
 
 - [ClientWorkspace](../../../../classes/crates/lpe-storage/src/workspace/ClientWorkspace.md)
+- [ClientMailbox](../../../../classes/crates/lpe-storage/src/workspace/ClientMailbox.md)
+- [from](../../../../functions/crates/lpe-storage/src/workspace/ClientMailbox/from-jmapmailbox/from.md)
 - [ClientMessage](../../../../classes/crates/lpe-storage/src/workspace/ClientMessage.md)
 - [ClientEvent](../../../../classes/crates/lpe-storage/src/workspace/ClientEvent.md)
 - [ClientContact](../../../../classes/crates/lpe-storage/src/workspace/ClientContact.md)
@@ -71,8 +73,9 @@ relationships:
 - `std::collections::BTreeMap`
 - `uuid::Uuid`
 - `crate::{
-    CanonicalChangeCategory, ClientAttachment, ClientContactRow, ClientEventRow, ClientTask,
-    CollaborationCollection, ContactNameFields, ContactSourceFields, Storage, normalize_email,
+    normalize_email, CanonicalChangeCategory, ClientAttachment, ClientContactRow, ClientEventRow,
+    ClientTask, CollaborationCollection, ContactNameFields, ContactSourceFields, JmapMailbox,
+    Storage,
 }`
 - `super::{
         ClientContact, ClientEvent, ContactSourceFields, UpsertClientContactInput, Value,

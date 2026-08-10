@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_modify_recipients
-resource: crates/lpe-exchange/src/tests/mod.rs#L15324-L15331
+resource: crates/lpe-exchange/src/tests/mod.rs#L15329-L15336
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/append_rop_modify_recipients_with_columns
   called_by:
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_pending_message_display_recipients_follow_modify_recipients
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/public_folders/mapi_over_http_public_folder_create_message_rejects_recipients
@@ -31,6 +32,7 @@ relationships:
 
 # Called by
 
+- [mapi_over_http_calendar_pending_event_modify_recipients_succeeds](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds.md)
 - [mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end.md)
 - [mapi_over_http_pending_message_display_recipients_follow_modify_recipients](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/properties/mapi_over_http_pending_message_display_recipients_follow_modify_recipients.md)
 - [mapi_over_http_public_folder_create_message_rejects_recipients](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/public_folders/mapi_over_http_public_folder_create_message_rejects_recipients.md)

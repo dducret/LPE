@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_recurrence_binary_maps_to_canonical_daily_rule
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4460-L4479
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4589-L4608
 visibility: private
 generated:
   by: okf-rs/0.3.0

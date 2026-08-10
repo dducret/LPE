@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: apiBlob
-resource: web/client/src/useClientWorkspace.ts#L56-L64
+resource: web/client/src/useClientWorkspace.ts#L57-L65
 generated:
   by: okf-rs/0.3.0
 relationships:

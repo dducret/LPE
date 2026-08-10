@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_content_sync_move_across_folders_exports_source_tombstone_and_target_change
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6031-L6105
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5869-L5943
 visibility: private
 generated:
   by: okf-rs/0.3.0

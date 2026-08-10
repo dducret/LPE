@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_collection_write_methods_manage_custom_calendars
-resource: crates/lpe-jmap/src/tests.rs#L12479-L12518
+resource: crates/lpe-jmap/src/tests.rs#L12482-L12521
 visibility: private
 generated:
   by: okf-rs/0.3.0

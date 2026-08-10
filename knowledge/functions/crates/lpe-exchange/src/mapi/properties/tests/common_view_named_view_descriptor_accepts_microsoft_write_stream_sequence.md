@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6110-L6199
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6240-L6329
 visibility: private
 generated:
   by: okf-rs/0.3.0

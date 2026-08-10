@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxcdata_reminder_restriction_example_parses_and_matches
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2689-L2820
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2754-L2885
 visibility: private
 generated:
   by: okf-rs/0.3.0

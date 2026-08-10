@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-storage/src/core/Storage/connect
   - functions/crates/lpe-core/src/sieve/Parser/expect
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -19,3 +20,4 @@ relationships:
 
 - [connect](../../../../../../functions/crates/lpe-storage/src/core/Storage/connect.md)
 - [expect](../../../../../../functions/crates/lpe-core/src/sieve/Parser/expect.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

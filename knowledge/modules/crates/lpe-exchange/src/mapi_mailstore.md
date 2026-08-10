@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mapi_mailstore
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1-L1487
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1-L1490
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -17,7 +17,7 @@ relationships:
   - external/pub-crate-use-manifest-sync-manifest-buffer-with-final-state
   - external/pub-crate-use-manifest-canonical-folder-change-number-canonical-message-change-number-canonical-message-change-number-with-attachments-change-key-for-change-number-change-number-for-store-id-filetime-from-change-number-filetime-from-rfc3339-utc-predecessor-change-list-source-key-for-mailbox-folder-source-key-for-mailbox-role-source-key-for-store-id-source-key-for-uuid-sync-manifest-buffer-with-special-objects-and-final-state-with-folder-versions-and-commit-times-and-normal-message-facts-sync-state-token-with-attachments-sync-state-token-with-special-objects-and-normal-message-facts-virtual-special-mailbox-attachmentsyncfact-faicontentsyncdebugcontext-messageattachmentsyncfacts
   - external/pub-crate-use-manifest-sync-manifest-buffer-with-special-objects-and-final-state-sync-manifest-buffer-with-special-objects-and-final-state-with-folder-versions
-  - external/pub-crate-use-special-message-fast-transfer-message-content-buffer-with-special-object-special-message-source-key-specialmessagepropertyvalue-specialmessagesyncfact
+  - external/pub-crate-use-special-message-fast-transfer-message-content-buffer-with-special-object-special-message-change-key-special-message-change-number-special-message-predecessor-change-list-special-message-source-key-special-message-sync-parent-source-key-special-message-sync-source-key-specialmessagepropertyvalue-specialmessagesyncfact
   - external/pub-crate-use-diagnostics-decode-content-transfer-fai-debug-summary-decode-hierarchy-transfer-debug-summary-fai-debug-state-origin-format-marker-tags-hierarchy-identity-properties-before-display-name-hierarchy-microsoft-payload-comparison-hierarchy-semantic-validation-contenttransferfaidebugsummary-contenttransferfaiitemdebug
   - external/pub-crate-use-diagnostics-default-folder-hierarchy-membership-summary-final-sync-state-debug-summary-hierarchy-parent-source-key-role-hierarchy-transfer-close-summary-log-fai-content-sync-debug-log-hierarchy-get-buffer-payload-summary-log-hierarchy-transfer-debug-replguid-globset-counters-replguid-globset-debug-summary
   - external/pub-crate-use-crate-mapi-identity-store-replica-guid
@@ -141,8 +141,10 @@ relationships:
     sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions,
 }`
 - `pub(crate) use special_message::{
-    fast_transfer_message_content_buffer_with_special_object, special_message_source_key,
-    SpecialMessagePropertyValue, SpecialMessageSyncFact,
+    fast_transfer_message_content_buffer_with_special_object, special_message_change_key,
+    special_message_change_number, special_message_predecessor_change_list,
+    special_message_source_key, special_message_sync_parent_source_key,
+    special_message_sync_source_key, SpecialMessagePropertyValue, SpecialMessageSyncFact,
 }`
 - `pub(crate) use diagnostics::{
     decode_content_transfer_fai_debug_summary, decode_hierarchy_transfer_debug_summary,

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: client_address_book_id_for_role
-resource: crates/lpe-storage/src/workspace.rs#L1245-L1252
+resource: crates/lpe-storage/src/workspace.rs#L1275-L1282
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_buffer_response_debug_exposes_wire_framing
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L764-L790
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L819-L845
 visibility: private
 generated:
   by: okf-rs/0.3.0

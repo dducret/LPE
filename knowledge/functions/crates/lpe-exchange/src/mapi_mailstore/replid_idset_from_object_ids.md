@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: replid_idset_from_object_ids
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1441-L1454
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1444-L1457
 visibility: private
 generated:
   by: okf-rs/0.3.0

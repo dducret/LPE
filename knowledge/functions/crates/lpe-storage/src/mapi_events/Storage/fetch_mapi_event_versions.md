@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_event_versions
-resource: crates/lpe-storage/src/mapi_events.rs#L467-L524
+resource: crates/lpe-storage/src/mapi_events.rs#L470-L531
 generated:
   by: okf-rs/0.3.0
 relationships:

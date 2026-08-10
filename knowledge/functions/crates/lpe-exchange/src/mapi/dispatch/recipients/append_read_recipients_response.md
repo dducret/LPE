@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_read_recipients_response
-resource: crates/lpe-exchange/src/mapi/dispatch/recipients.rs#L91-L128
+resource: crates/lpe-exchange/src/mapi/dispatch/recipients.rs#L98-L170
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,6 +12,8 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/session/input_handle
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   - functions/crates/lpe-exchange/src/mapi/session/input_object
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_pending_recipients
   - functions/crates/lpe-exchange/src/mapi/properties/rop_read_recipients_response
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_recipient_dispatch_response
@@ -29,6 +31,8 @@ relationships:
 - [input_handle](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/input_handle.md)
 - [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
 - [input_object](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/input_object.md)
+- [event_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id.md)
+- [calendar_pending_recipients](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_pending_recipients.md)
 - [rop_read_recipients_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/rop_read_recipients_response.md)
 
 # Called by

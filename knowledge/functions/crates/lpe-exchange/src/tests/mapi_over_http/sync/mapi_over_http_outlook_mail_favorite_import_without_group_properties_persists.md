@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_mail_favorite_import_without_group_properties_persists
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L3889-L4089
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L3763-L3963
 visibility: private
 generated:
   by: okf-rs/0.3.0

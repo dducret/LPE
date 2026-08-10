@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_content_sync_includes_associated
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L347-L354
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L350-L357
 visibility: private
 generated:
   by: okf-rs/0.3.0

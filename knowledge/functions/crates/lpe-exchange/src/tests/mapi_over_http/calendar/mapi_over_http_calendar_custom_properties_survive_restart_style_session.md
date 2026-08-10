@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_custom_properties_survive_restart_style_session
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L482-L609
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L500-L627
 visibility: private
 generated:
   by: okf-rs/0.3.0

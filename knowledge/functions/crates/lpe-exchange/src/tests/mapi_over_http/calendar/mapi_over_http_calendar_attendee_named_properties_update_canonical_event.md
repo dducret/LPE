@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_attendee_named_properties_update_canonical_event
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4472-L4570
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4519-L4617
 visibility: private
 generated:
   by: okf-rs/0.3.0

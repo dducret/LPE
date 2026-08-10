@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rop_response_summary_does_not_treat_find_row_payload_as_next_rop
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L1055-L1094
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L1148-L1187
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_attachment_rejects_invalid_microsoft_flags_without_batch_drift
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1542-L1604
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1536-L1598
 visibility: private
 generated:
   by: okf-rs/0.3.0

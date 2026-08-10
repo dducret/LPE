@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_event_handle_stages_until_save_and_release_discards
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1969-L2147
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1976-L2154
 visibility: private
 generated:
   by: okf-rs/0.3.0

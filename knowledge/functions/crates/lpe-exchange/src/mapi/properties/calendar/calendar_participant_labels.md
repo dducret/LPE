@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_participant_labels
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L230-L244
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L305-L319
 visibility: private
 generated:
   by: okf-rs/0.3.0

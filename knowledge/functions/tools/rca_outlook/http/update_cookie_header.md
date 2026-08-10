@@ -8,7 +8,9 @@ relationships:
   calls:
   - functions/tools/rca_outlook/http/cookie_header
   called_by:
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/tools/rca_outlook_connectivity_check/check_mapi_nspi_address_book
+  - functions/tools/test_rca_outlook_connectivity_check/MapiGate1ReadinessTests/test_cookie_updates_keep_context_and_sequence
 ---
 
 # Signature
@@ -21,4 +23,6 @@ relationships:
 
 # Called by
 
+- [execute](../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [check_mapi_nspi_address_book](../../../../functions/tools/rca_outlook_connectivity_check/check_mapi_nspi_address_book.md)
+- [test_cookie_updates_keep_context_and_sequence](../../../../functions/tools/test_rca_outlook_connectivity_check/MapiGate1ReadinessTests/test_cookie_updates_keep_context_and_sequence.md)

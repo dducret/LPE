@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_binary_property
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1351-L1355
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1354-L1358
 visibility: private
 generated:
   by: okf-rs/0.3.0

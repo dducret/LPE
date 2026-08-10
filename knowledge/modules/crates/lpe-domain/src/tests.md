@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-domain/src/tests.rs#L1-L317
+resource: crates/lpe-domain/src/tests.rs#L1-L322
 generated:
   by: okf-rs/0.3.0
 relationships:

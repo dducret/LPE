@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: conversation_id_from_index
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L378-L381
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L388-L391
 generated:
   by: okf-rs/0.3.0
 relationships:

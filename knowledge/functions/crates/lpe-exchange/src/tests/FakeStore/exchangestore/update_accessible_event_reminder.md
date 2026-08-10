@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_accessible_event_reminder
-resource: crates/lpe-exchange/src/tests/mod.rs#L9128-L9162
+resource: crates/lpe-exchange/src/tests/mod.rs#L9132-L9166
 visibility: private
 generated:
   by: okf-rs/0.3.0

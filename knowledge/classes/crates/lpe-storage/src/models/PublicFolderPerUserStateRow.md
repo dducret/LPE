@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: PublicFolderPerUserStateRow
-resource: crates/lpe-storage/src/models.rs#L764-L772
+resource: crates/lpe-storage/src/models.rs#L767-L775
 generated:
   by: okf-rs/0.3.0
 ---

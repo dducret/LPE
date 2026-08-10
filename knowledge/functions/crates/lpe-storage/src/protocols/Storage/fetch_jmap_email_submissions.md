@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_email_submissions
-resource: crates/lpe-storage/src/protocols.rs#L1207-L1310
+resource: crates/lpe-storage/src/protocols.rs#L1226-L1329
 generated:
   by: okf-rs/0.3.0
 relationships:

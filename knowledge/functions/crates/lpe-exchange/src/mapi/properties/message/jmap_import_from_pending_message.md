@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_import_from_pending_message
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L455-L507
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L465-L517
 generated:
   by: okf-rs/0.3.0
 relationships:

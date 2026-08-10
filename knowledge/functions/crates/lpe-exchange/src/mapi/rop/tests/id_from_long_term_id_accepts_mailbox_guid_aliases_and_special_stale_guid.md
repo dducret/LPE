@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: id_from_long_term_id_accepts_mailbox_guid_aliases_and_special_stale_guid
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5292-L5332
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5298-L5338
 generated:
   by: okf-rs/0.3.0
 relationships:

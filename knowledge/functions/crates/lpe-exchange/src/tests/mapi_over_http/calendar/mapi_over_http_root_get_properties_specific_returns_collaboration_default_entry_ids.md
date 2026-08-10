@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_root_get_properties_specific_returns_collaboration_default_entry_ids
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L11034-L11058
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L11191-L11218
 visibility: private
 generated:
   by: okf-rs/0.3.0

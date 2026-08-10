@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_and_email_changes_return_existing_ids_from_initial_state
-resource: crates/lpe-jmap/src/tests.rs#L4026-L4069
+resource: crates/lpe-jmap/src/tests.rs#L4029-L4072
 visibility: private
 generated:
   by: okf-rs/0.3.0

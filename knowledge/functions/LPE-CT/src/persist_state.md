@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: persist_state
-resource: LPE-CT/src/main.rs#L1020-L1030
+resource: LPE-CT/src/main.rs#L1035-L1045
 visibility: private
 generated:
   by: okf-rs/0.3.0

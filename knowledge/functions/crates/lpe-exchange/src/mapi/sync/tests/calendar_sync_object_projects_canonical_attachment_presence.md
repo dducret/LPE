@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_sync_object_projects_canonical_attachment_presence
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L929-L1043
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L957-L1103
 visibility: private
 generated:
   by: okf-rs/0.3.0

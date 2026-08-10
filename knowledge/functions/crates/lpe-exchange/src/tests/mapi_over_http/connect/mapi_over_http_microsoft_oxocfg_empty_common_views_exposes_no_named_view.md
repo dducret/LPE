@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxocfg_empty_common_views_exposes_no_named_view
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2397-L2471
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2280-L2354
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: snapshot
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1-L1617
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1-L1619
 generated:
   by: okf-rs/0.3.0
 relationships:

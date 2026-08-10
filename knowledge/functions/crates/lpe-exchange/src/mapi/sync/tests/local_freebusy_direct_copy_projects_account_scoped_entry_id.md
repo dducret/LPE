@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: local_freebusy_direct_copy_projects_account_scoped_entry_id
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2331-L2374
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2391-L2434
 visibility: private
 generated:
   by: okf-rs/0.3.0

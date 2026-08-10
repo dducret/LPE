@@ -1,15 +1,14 @@
 ---
 type: Rust Function
 title: mapi_over_http_create_folder_invalid_type_returns_invalid_parameter
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1307-L1364
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1302-L1350
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/mapi_headers
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_mapi_wire_id
   - functions/crates/lpe-exchange/src/tests/test_mapi_folder_id
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
@@ -25,8 +24,7 @@ relationships:
 # Calls
 
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_mapi_wire_id](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_wire_id.md)
 - [test_mapi_folder_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_folder_id.md)
 - [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)

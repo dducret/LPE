@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_column_support_reports_unknown_named_properties_as_dynamic
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2253-L2257
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2274-L2278
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: runtime_config_from_store
-resource: LPE-CT/src/smtp.rs#L699-L707
+resource: LPE-CT/src/smtp.rs#L695-L703
 generated:
   by: okf-rs/0.3.0
 relationships:

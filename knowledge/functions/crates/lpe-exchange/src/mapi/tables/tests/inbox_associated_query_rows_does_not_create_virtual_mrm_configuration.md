@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_query_rows_does_not_create_virtual_mrm_configuration
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7537-L7577
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7572-L7612
 visibility: private
 generated:
   by: okf-rs/0.3.0

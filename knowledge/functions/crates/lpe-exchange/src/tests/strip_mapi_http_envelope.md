@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strip_mapi_http_envelope
-resource: crates/lpe-exchange/src/tests/mod.rs#L12754-L12771
+resource: crates/lpe-exchange/src/tests/mod.rs#L12759-L12776
 visibility: private
 generated:
   by: okf-rs/0.3.0

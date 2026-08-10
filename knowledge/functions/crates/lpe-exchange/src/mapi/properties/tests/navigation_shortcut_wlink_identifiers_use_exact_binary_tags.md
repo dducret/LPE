@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: navigation_shortcut_wlink_identifiers_use_exact_binary_tags
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7160-L7260
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7290-L7390
 visibility: private
 generated:
   by: okf-rs/0.3.0

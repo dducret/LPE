@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_hierarchy_probe_summary_marks_default_folder_entry_id_getprops
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2144-L2164
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2165-L2187
 visibility: private
 generated:
   by: okf-rs/0.3.0

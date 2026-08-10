@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_phones_json
-resource: crates/lpe-storage/src/workspace.rs#L969-L980
+resource: crates/lpe-storage/src/workspace.rs#L999-L1010
 generated:
   by: okf-rs/0.3.0
 relationships:

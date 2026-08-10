@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: legacy_not_found
-resource: crates/lpe-jmap/src/tests.rs#L15417-L15422
+resource: crates/lpe-jmap/src/tests.rs#L15420-L15425
 visibility: private
 generated:
   by: okf-rs/0.3.0

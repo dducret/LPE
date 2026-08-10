@@ -7,7 +7,6 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_ascii_z
-  - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_utf16z
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_bytes
   called_by:
   - functions/crates/lpe-exchange/src/mapi/transport/diagnostics/log_connect_body_debug
@@ -21,7 +20,6 @@ relationships:
 # Calls
 
 - [read_ascii_z](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_ascii_z.md)
-- [read_utf16z](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_utf16z.md)
 - [read_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_bytes.md)
 
 # Called by

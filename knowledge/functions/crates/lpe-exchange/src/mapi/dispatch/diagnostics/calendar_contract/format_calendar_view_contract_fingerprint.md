@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_calendar_view_contract_fingerprint
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L10-L158
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L9-L157
 generated:
   by: okf-rs/0.3.0
 relationships:

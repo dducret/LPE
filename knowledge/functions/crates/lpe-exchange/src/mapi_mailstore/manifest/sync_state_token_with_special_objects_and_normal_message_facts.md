@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_state_token_with_special_objects_and_normal_message_facts
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L434-L539
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L435-L540
 generated:
   by: okf-rs/0.3.0
 relationships:

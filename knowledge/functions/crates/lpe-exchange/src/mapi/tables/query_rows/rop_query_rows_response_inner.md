@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rop_query_rows_response_inner
-resource: crates/lpe-exchange/src/mapi/tables/query_rows.rs#L42-L744
+resource: crates/lpe-exchange/src/mapi/tables/query_rows.rs#L42-L762
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -56,7 +56,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/sort_deleted_items_content_rows
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/categorized_deleted_items_content_rows
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/serialize_deleted_items_content_property_row
-  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid
   - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_events
   - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_versioned_event_row
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_for_folder
@@ -168,7 +168,7 @@ relationships:
 - [sort_deleted_items_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/sort_deleted_items_content_rows.md)
 - [categorized_deleted_items_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/categorized_deleted_items_content_rows.md)
 - [serialize_deleted_items_content_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/serialize_deleted_items_content_property_row.md)
-- [calendar_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows.md)
+- [calendar_content_rows_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid.md)
 - [sort_events](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_events.md)
 - [serialize_versioned_event_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_versioned_event_row.md)
 - [contacts_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_for_folder.md)

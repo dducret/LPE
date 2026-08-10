@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: smart_forward_reuses_source_message_and_attachments
-resource: crates/lpe-activesync/src/tests.rs#L5596-L5676
+resource: crates/lpe-activesync/src/tests.rs#L5597-L5677
 visibility: private
 generated:
   by: okf-rs/0.3.0

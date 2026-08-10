@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: split_headers_and_body_bytes
-resource: crates/lpe-magika/src/mime.rs#L219-L229
+resource: crates/lpe-magika/src/mime.rs#L210-L220
 visibility: private
 generated:
   by: okf-rs/0.3.0

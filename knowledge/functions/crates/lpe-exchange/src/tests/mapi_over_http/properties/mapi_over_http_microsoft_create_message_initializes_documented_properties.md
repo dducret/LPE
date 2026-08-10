@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_create_message_initializes_documented_properties
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L903-L994
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L852-L943
 visibility: private
 generated:
   by: okf-rs/0.3.0

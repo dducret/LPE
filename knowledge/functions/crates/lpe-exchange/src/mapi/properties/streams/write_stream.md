@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_stream
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L558-L584
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L559-L585
 generated:
   by: okf-rs/0.3.0
 relationships:

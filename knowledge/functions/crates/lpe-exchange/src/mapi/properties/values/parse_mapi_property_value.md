@@ -13,7 +13,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_u8
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_i64
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_ascii_z
-  - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_utf16z
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   - functions/crates/lpe-exchange/src/mapi/properties/tags/MapiPropertyTag/property_type_code
   called_by:
@@ -51,7 +50,6 @@ relationships:
 - [read_u8](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_u8.md)
 - [read_i64](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_i64.md)
 - [read_ascii_z](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_ascii_z.md)
-- [read_utf16z](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_utf16z.md)
 - [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
 - [property_type_code](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tags/MapiPropertyTag/property_type_code.md)
 

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: change_key_for_change_number
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L322-L324
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L323-L325
 generated:
   by: okf-rs/0.3.0
 ---

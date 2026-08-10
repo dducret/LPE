@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pending_recipients_for_import
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L509-L531
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L519-L541
 generated:
   by: okf-rs/0.3.0
 relationships:

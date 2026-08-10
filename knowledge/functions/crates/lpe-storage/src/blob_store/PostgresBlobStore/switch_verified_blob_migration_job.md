@@ -8,6 +8,7 @@ relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/blob_store/types/blob_migration_job_from_row
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/blob_store/tests/switch_verified_migration_job_leaves_one_active_target_placement
   - functions/crates/lpe-storage/src/blob_store/tests/repeated_switch_verified_migration_job_is_idempotent
@@ -34,6 +35,7 @@ relationships:
 
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [blob_migration_job_from_row](../../../../../../functions/crates/lpe-storage/src/blob_store/types/blob_migration_job_from_row.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_latest_activesync_sync_state
-resource: crates/lpe-activesync/src/tests.rs#L508-L528
+resource: crates/lpe-activesync/src/tests.rs#L509-L529
 visibility: private
 generated:
   by: okf-rs/0.3.0

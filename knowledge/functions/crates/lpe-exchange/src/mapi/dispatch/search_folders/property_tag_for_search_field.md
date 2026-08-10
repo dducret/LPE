@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_tag_for_search_field
-resource: crates/lpe-exchange/src/mapi/dispatch/search_folders.rs#L962-L985
+resource: crates/lpe-exchange/src/mapi/dispatch/search_folders.rs#L961-L984
 visibility: private
 generated:
   by: okf-rs/0.3.0

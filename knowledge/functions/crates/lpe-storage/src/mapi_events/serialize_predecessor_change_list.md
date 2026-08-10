@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_predecessor_change_list
-resource: crates/lpe-storage/src/mapi_events.rs#L1478-L1492
+resource: crates/lpe-storage/src/mapi_events.rs#L1493-L1507
 visibility: private
 generated:
   by: okf-rs/0.3.0

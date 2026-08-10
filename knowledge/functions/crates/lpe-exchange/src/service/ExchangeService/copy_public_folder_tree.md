@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: copy_public_folder_tree
-resource: crates/lpe-exchange/src/service.rs#L908-L976
+resource: crates/lpe-exchange/src/service.rs#L910-L978
 visibility: private
 generated:
   by: okf-rs/0.3.0

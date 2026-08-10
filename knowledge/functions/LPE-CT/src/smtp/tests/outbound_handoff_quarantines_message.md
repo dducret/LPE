@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outbound_handoff_quarantines_message
-resource: LPE-CT/src/smtp/tests.rs#L2009-L2047
+resource: LPE-CT/src/smtp/tests.rs#L2035-L2074
 visibility: private
 generated:
   by: okf-rs/0.3.0

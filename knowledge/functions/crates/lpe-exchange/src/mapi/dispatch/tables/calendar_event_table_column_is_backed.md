@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_table_column_is_backed
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1019-L1079
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1019-L1081
 visibility: private
 generated:
   by: okf-rs/0.3.0

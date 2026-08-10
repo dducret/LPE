@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_audit_event_with_actor
-resource: LPE-CT/src/main.rs#L976-L1004
+resource: LPE-CT/src/main.rs#L991-L1019
 visibility: private
 generated:
   by: okf-rs/0.3.0

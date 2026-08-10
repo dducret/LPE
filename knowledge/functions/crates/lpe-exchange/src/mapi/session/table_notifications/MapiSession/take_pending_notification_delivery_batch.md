@@ -16,6 +16,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/session/table_notifications/table_matches_event
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_restores_deliverable_notification_batch
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_does_not_restore_unmatched_notification
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table
@@ -45,6 +46,7 @@ relationships:
 # Called by
 
 - [execute_rops](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops.md)
+- [execute_preserves_pending_table_notification_after_releasing_its_table](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table.md)
 - [execute_overflow_restores_deliverable_notification_batch](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_restores_deliverable_notification_batch.md)
 - [execute_overflow_does_not_restore_unmatched_notification](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_does_not_restore_unmatched_notification.md)
 - [session_retains_folder_count_change_for_active_parent_hierarchy_table](../../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table.md)

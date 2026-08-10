@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_get_projects_delegated_submit_rights_from_sender_grants
-resource: crates/lpe-jmap/src/tests.rs#L2855-L2959
+resource: crates/lpe-jmap/src/tests.rs#L2858-L2962
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -15,6 +15,7 @@ relationships:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from
   - functions/crates/lpe-storage/src/mapi_store_identity/allocate_mapi_store_global_counter_in_tx
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/message_ops/Storage/move_jmap_email_membership
 ---
@@ -33,6 +34,7 @@ relationships:
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [try_from](../../../../../functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from.md)
 - [allocate_mapi_store_global_counter_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_store_identity/allocate_mapi_store_global_counter_in_tx.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

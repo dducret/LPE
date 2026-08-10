@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_meeting_cancel_save_fails_closed_without_atomic_delete
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4065-L4169
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4112-L4216
 visibility: private
 generated:
   by: okf-rs/0.3.0

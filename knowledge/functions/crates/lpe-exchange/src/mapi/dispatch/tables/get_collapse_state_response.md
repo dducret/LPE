@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_collapse_state_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1936-L1941
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1943-L1948
 generated:
   by: okf-rs/0.3.0
 relationships:

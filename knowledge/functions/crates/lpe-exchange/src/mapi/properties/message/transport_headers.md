@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: transport_headers
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L357-L376
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L367-L386
 visibility: private
 generated:
   by: okf-rs/0.3.0

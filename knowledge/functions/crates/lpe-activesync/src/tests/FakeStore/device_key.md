@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: device_key
-resource: crates/lpe-activesync/src/tests.rs#L246-L248
+resource: crates/lpe-activesync/src/tests.rs#L247-L249
 visibility: private
 generated:
   by: okf-rs/0.3.0

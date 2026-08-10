@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_rfc822_message_collects_headers_body_and_attachments
-resource: crates/lpe-storage/src/mail.rs#L404-L438
+resource: crates/lpe-storage/src/mail.rs#L427-L461
 visibility: private
 generated:
   by: okf-rs/0.3.0

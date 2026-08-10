@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: newly_created_associated_message_getprops_uses_new_message_contract
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3913-L3972
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3919-L3978
 visibility: private
 generated:
   by: okf-rs/0.3.0

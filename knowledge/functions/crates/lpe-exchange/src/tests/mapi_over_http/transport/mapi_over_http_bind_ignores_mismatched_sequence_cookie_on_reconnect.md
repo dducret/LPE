@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_bind_ignores_mismatched_sequence_cookie_on_reconnect
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1703-L1740
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1697-L1734
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: thread_query_returns_distinct_threads_for_filtered_emails
-resource: crates/lpe-jmap/src/tests.rs#L6144-L6184
+resource: crates/lpe-jmap/src/tests.rs#L6147-L6187
 visibility: private
 generated:
   by: okf-rs/0.3.0

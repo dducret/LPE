@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_fast_transfer_special_message_content
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L254-L426
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L265-L437
 visibility: private
 generated:
   by: okf-rs/0.3.0

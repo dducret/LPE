@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_message_has_attachments
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L184-L186
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L195-L197
 generated:
   by: okf-rs/0.3.0
 relationships:

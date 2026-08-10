@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: mapi_nspi_bind_cookie
-resource: tools/rca_outlook_connectivity_check.py#L807-L834
+resource: tools/rca_outlook_connectivity_check.py#L1056-L1083
 generated:
   by: okf-rs/0.3.0
 relationships:

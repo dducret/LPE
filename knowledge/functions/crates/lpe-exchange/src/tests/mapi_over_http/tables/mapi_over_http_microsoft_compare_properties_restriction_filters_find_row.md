@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_compare_properties_restriction_filters_find_row
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1980-L2058
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1845-L1923
 visibility: private
 generated:
   by: okf-rs/0.3.0

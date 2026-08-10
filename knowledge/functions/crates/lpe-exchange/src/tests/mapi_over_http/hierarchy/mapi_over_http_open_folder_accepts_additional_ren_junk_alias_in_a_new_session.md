@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_folder_accepts_additional_ren_junk_alias_in_a_new_session
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3664-L3770
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3569-L3675
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -10,7 +10,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/sync_mailboxes_with_collaboration_counts
   - functions/crates/lpe-exchange/src/mapi/sync/special_sync_objects_for
   - functions/crates/lpe-exchange/src/mapi/sync/sync_attachment_facts_for
-  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid
   - functions/crates/lpe-exchange/src/mapi/tables/counts/folder_message_count
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/deleted_items_content_rows
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection
@@ -31,7 +31,7 @@ relationships:
 - [sync_mailboxes_with_collaboration_counts](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/sync_mailboxes_with_collaboration_counts.md)
 - [special_sync_objects_for](../../../../../../../functions/crates/lpe-exchange/src/mapi/sync/special_sync_objects_for.md)
 - [sync_attachment_facts_for](../../../../../../../functions/crates/lpe-exchange/src/mapi/sync/sync_attachment_facts_for.md)
-- [calendar_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows.md)
+- [calendar_content_rows_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid.md)
 - [folder_message_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/folder_message_count.md)
 - [deleted_items_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/deleted_items_content_rows.md)
 - [mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection.md)

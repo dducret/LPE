@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: custom_collaboration_folders_are_ipm_subtree_children_and_root_depth_descendants
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3524-L3643
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3558-L3677
 visibility: private
 generated:
   by: okf-rs/0.3.0

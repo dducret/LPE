@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: ClientEventRow
-resource: crates/lpe-storage/src/models.rs#L435-L457
+resource: crates/lpe-storage/src/models.rs#L438-L460
 generated:
   by: okf-rs/0.3.0
 ---

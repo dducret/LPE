@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_class_for_email
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L271-L277
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L271-L279
 generated:
   by: okf-rs/0.3.0
 relationships:

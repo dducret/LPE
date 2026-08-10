@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stale_folder_sync_key_is_rejected_after_completed_round
-resource: crates/lpe-activesync/src/tests.rs#L3297-L3317
+resource: crates/lpe-activesync/src/tests.rs#L3298-L3318
 visibility: private
 generated:
   by: okf-rs/0.3.0

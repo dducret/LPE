@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_find_row_returns_not_found_for_unstored_elc_config
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5463-L5465
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5498-L5500
 visibility: private
 generated:
   by: okf-rs/0.3.0

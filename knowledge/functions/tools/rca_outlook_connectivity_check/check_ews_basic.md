@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_ews_basic
-resource: tools/rca_outlook_connectivity_check.py#L421-L439
+resource: tools/rca_outlook_connectivity_check.py#L670-L688
 generated:
   by: okf-rs/0.3.0
 relationships:

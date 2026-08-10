@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_chain_packs_terminal_fast_transfer_get_buffer_until_done
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L1163-L1296
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L1082-L1215
 visibility: private
 generated:
   by: okf-rs/0.3.0

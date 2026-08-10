@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_certificates_pem
-resource: LPE-CT/src/main.rs#L1128-L1137
+resource: LPE-CT/src/main.rs#L1143-L1152
 visibility: private
 generated:
   by: okf-rs/0.3.0

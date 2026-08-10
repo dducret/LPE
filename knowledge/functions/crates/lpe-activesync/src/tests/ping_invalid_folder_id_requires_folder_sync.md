@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ping_invalid_folder_id_requires_folder_sync
-resource: crates/lpe-activesync/src/tests.rs#L5279-L5301
+resource: crates/lpe-activesync/src/tests.rs#L5280-L5302
 visibility: private
 generated:
   by: okf-rs/0.3.0

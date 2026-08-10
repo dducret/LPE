@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_delete_moves_message_to_trash_by_default
-resource: crates/lpe-activesync/src/tests.rs#L2794-L2851
+resource: crates/lpe-activesync/src/tests.rs#L2795-L2852
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outbound_sender_policy_addresses
-resource: LPE-CT/src/smtp.rs#L1208-L1221
+resource: LPE-CT/src/smtp.rs#L1211-L1224
 visibility: private
 generated:
   by: okf-rs/0.3.0

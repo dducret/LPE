@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_deleted_items_mixed_offset_page_keeps_global_sort_order
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1249-L1342
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1159-L1252
 visibility: private
 generated:
   by: okf-rs/0.3.0

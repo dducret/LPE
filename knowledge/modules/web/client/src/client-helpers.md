@@ -1,7 +1,7 @@
 ---
 type: TypeScript Module
 title: client-helpers
-resource: web/client/src/client-helpers.ts#L1-L122
+resource: web/client/src/client-helpers.ts#L1-L124
 generated:
   by: okf-rs/0.3.0
 relationships:

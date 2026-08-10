@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: runtime_config_from_dashboard
-resource: LPE-CT/src/smtp.rs#L543-L697
+resource: LPE-CT/src/smtp.rs#L539-L693
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8760-L9779
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8859-L9894
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -10,12 +10,13 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/build
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/store_mapi_sync_checkpoint
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/virtual_special_mailbox
+  - functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test
   - functions/crates/lpe-exchange/src/tests/nspi_bound_headers
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/nspi_dn_to_mid_request
   - functions/crates/lpe-exchange/src/tests/response_bytes
-  - functions/crates/lpe-exchange/src/tests/mapi_headers
-  - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
   - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
+  - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
+  - functions/crates/lpe-exchange/src/tests/mapi_headers
   - functions/crates/lpe-exchange/src/tests/execute_body
   - functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response
   - functions/crates/lpe-exchange/src/tests/append_rop_get_properties_specific
@@ -37,12 +38,13 @@ relationships:
 - [build](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/calendar_identity/MapiMailStoreSnapshot/build.md)
 - [store_mapi_sync_checkpoint](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/store_mapi_sync_checkpoint.md)
 - [virtual_special_mailbox](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/virtual_special_mailbox.md)
+- [durable_special_folder_id_for_test](../../../../../../../functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test.md)
 - [nspi_bound_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/nspi_bound_headers.md)
 - [nspi_dn_to_mid_request](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/nspi_dn_to_mid_request.md)
 - [response_bytes](../../../../../../../functions/crates/lpe-exchange/src/tests/response_bytes.md)
-- [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
-- [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
 - [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
+- [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
+- [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
 - [execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/execute_body.md)
 - [response_rops_from_execute_response](../../../../../../../functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response.md)
 - [append_rop_get_properties_specific](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_get_properties_specific.md)

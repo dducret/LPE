@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_set_search_criteria_rejects_initial_empty_folder_scope
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3987-L4049
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3892-L3954
 visibility: private
 generated:
   by: okf-rs/0.3.0

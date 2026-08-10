@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: recoverable_items
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L1-L979
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L1-L970
 generated:
   by: okf-rs/0.3.0
 relationships:

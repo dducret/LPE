@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: replguid_idset_from_counters
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1429-L1439
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1432-L1442
 visibility: private
 generated:
   by: okf-rs/0.3.0

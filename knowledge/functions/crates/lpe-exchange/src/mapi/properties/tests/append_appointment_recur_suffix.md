@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_appointment_recur_suffix
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5057-L5065
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5186-L5194
 visibility: private
 generated:
   by: okf-rs/0.3.0

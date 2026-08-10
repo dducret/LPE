@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_hierarchy_sync_does_not_publish_recoverable_items
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L865-L914
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L856-L905
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_property_included
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L268-L274
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L271-L277
 generated:
   by: okf-rs/0.3.0
 relationships:

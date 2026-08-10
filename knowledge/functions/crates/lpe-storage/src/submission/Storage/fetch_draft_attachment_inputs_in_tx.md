@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_draft_attachment_inputs_in_tx
-resource: crates/lpe-storage/src/submission.rs#L60-L114
+resource: crates/lpe-storage/src/submission.rs#L61-L115
 visibility: private
 generated:
   by: okf-rs/0.3.0

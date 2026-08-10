@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_per_user_information_rops_reject_folder_handle_blob_batch
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2939-L3009
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2844-L2914
 visibility: private
 generated:
   by: okf-rs/0.3.0

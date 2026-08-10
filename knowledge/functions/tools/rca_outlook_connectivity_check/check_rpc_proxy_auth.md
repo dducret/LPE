@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_rpc_proxy_auth
-resource: tools/rca_outlook_connectivity_check.py#L1184-L1234
+resource: tools/rca_outlook_connectivity_check.py#L1433-L1483
 generated:
   by: okf-rs/0.3.0
 relationships:

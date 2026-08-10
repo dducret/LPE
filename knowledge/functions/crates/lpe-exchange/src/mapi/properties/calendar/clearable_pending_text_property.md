@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: clearable_pending_text_property
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L664-L674
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L831-L841
 visibility: private
 generated:
   by: okf-rs/0.3.0

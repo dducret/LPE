@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_search_criteria_rops_return_rop_specific_protocol_errors
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3572-L3625
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3455-L3508
 visibility: private
 generated:
   by: okf-rs/0.3.0

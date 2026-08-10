@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: le_u32
-resource: tools/rca_outlook/mapi.py#L147-L149
+resource: tools/rca_outlook/mapi.py#L239-L241
 generated:
   by: okf-rs/0.3.0
 relationships:

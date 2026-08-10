@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi_mailstore/folders/virtual_special_mailbox_ids
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -19,3 +20,4 @@ relationships:
 
 - [virtual_special_mailbox_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/folders/virtual_special_mailbox_ids.md)
 - [query](../../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

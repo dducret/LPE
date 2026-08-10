@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_imap_flags
-resource: crates/lpe-storage/src/protocols.rs#L1132-L1153
+resource: crates/lpe-storage/src/protocols.rs#L1151-L1172
 generated:
   by: okf-rs/0.3.0
 ---

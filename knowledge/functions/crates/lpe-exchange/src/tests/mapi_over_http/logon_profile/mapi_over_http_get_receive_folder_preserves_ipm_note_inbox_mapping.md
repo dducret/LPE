@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_receive_folder_preserves_ipm_note_inbox_mapping
-resource: crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs#L1198-L1210
+resource: crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs#L1126-L1138
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rotate_active_mapi_event_identities_in_tx
-resource: crates/lpe-storage/src/mapi_events.rs#L1231-L1237
+resource: crates/lpe-storage/src/mapi_events.rs#L1240-L1246
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_time_zone_description_updates_canonical_event
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4762-L4857
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4809-L4904
 visibility: private
 generated:
   by: okf-rs/0.3.0

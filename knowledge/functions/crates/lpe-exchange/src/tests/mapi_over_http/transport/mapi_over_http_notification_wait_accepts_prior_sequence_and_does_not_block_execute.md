@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_notification_wait_accepts_prior_sequence_and_does_not_block_execute
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1088-L1154
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1079-L1148
 visibility: private
 generated:
   by: okf-rs/0.3.0

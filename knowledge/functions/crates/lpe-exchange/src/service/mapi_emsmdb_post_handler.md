@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_emsmdb_post_handler
-resource: crates/lpe-exchange/src/service.rs#L240-L247
+resource: crates/lpe-exchange/src/service.rs#L242-L249
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_categorized_deleted_event_row
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L278-L305
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L286-L313
 visibility: private
 generated:
   by: okf-rs/0.3.0

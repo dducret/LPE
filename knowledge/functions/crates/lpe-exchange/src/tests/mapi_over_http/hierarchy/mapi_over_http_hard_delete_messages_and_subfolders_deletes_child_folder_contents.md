@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_hard_delete_messages_and_subfolders_deletes_child_folder_contents
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3502-L3580
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3407-L3485
 visibility: private
 generated:
   by: okf-rs/0.3.0

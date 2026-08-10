@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_local
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L5279-L5493
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L5326-L5529
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -11,8 +11,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/FakeDetector/pdf
   - functions/crates/lpe-exchange/src/tests/mapi_headers
   - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_mapi_utf16_property
   - functions/crates/lpe-exchange/src/tests/append_mapi_binary_property
   - functions/crates/lpe-exchange/src/tests/append_rop_open_folder
@@ -39,8 +38,7 @@ relationships:
 - [pdf](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeDetector/pdf.md)
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
 - [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_mapi_utf16_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_utf16_property.md)
 - [append_mapi_binary_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_binary_property.md)
 - [append_rop_open_folder](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_open_folder.md)

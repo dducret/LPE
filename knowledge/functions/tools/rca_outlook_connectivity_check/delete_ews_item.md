@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: delete_ews_item
-resource: tools/rca_outlook_connectivity_check.py#L681-L704
+resource: tools/rca_outlook_connectivity_check.py#L930-L953
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fallback_property_errors_for_debug_match_wire_error_codes
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4230-L4293
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4236-L4299
 visibility: private
 generated:
   by: okf-rs/0.3.0

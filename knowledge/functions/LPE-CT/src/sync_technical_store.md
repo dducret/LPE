@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_technical_store
-resource: LPE-CT/src/main.rs#L938-L943
+resource: LPE-CT/src/main.rs#L953-L958
 visibility: private
 generated:
   by: okf-rs/0.3.0

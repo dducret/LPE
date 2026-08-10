@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: attendees_from_mapi
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L880-L910
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1047-L1077
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_restriction_does_not_add_a_modeled_startup_class
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6732-L6748
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6767-L6783
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_mapi_nspi_address_book
-resource: tools/rca_outlook_connectivity_check.py#L842-L926
+resource: tools/rca_outlook_connectivity_check.py#L1091-L1175
 generated:
   by: okf-rs/0.3.0
 relationships:

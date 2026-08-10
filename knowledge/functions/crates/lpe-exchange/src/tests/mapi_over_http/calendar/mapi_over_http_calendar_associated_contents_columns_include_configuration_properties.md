@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_associated_contents_columns_include_configuration_properties
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7230-L7283
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7292-L7345
 visibility: private
 generated:
   by: okf-rs/0.3.0

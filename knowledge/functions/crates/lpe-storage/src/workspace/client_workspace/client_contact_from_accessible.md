@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: client_contact_from_accessible
-resource: crates/lpe-storage/src/workspace/client_workspace.rs#L286-L306
+resource: crates/lpe-storage/src/workspace/client_workspace.rs#L295-L315
 visibility: private
 generated:
   by: okf-rs/0.3.0

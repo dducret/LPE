@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: acknowledge_activesync_device_policy
-resource: crates/lpe-activesync/src/tests.rs#L569-L592
+resource: crates/lpe-activesync/src/tests.rs#L570-L593
 visibility: private
 generated:
   by: okf-rs/0.3.0

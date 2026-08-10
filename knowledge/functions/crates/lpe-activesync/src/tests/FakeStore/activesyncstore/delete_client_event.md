@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_client_event
-resource: crates/lpe-activesync/src/tests.rs#L1129-L1135
+resource: crates/lpe-activesync/src/tests.rs#L1130-L1136
 visibility: private
 generated:
   by: okf-rs/0.3.0

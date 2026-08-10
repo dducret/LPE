@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_task_collections
-resource: crates/lpe-exchange/src/tests/mod.rs#L7767-L7773
+resource: crates/lpe-exchange/src/tests/mod.rs#L7768-L7774
 visibility: private
 generated:
   by: okf-rs/0.3.0

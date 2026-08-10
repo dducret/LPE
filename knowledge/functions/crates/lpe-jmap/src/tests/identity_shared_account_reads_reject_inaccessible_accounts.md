@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: identity_shared_account_reads_reject_inaccessible_accounts
-resource: crates/lpe-jmap/src/tests.rs#L5855-L5900
+resource: crates/lpe-jmap/src/tests.rs#L5858-L5903
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: malformed_base64_query_is_rejected_predictably
-resource: crates/lpe-activesync/src/tests.rs#L1982-L1987
+resource: crates/lpe-activesync/src/tests.rs#L1983-L1988
 visibility: private
 generated:
   by: okf-rs/0.3.0

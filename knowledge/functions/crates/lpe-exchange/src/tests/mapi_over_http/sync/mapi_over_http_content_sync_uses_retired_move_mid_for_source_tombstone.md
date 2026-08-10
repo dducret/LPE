@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_content_sync_uses_retired_move_mid_for_source_tombstone
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5586-L5623
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5424-L5461
 visibility: private
 generated:
   by: okf-rs/0.3.0

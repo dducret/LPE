@@ -8,6 +8,7 @@ relationships:
   calls:
   - functions/LPE-CT/web/app/smoke/test/MockClassList/remove
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table
   - functions/crates/lpe-exchange/src/mapi/session/release_handle_slot
 ---
 
@@ -21,4 +22,5 @@ relationships:
 
 # Called by
 
+- [execute_preserves_pending_table_notification_after_releasing_its_table](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table.md)
 - [release_handle_slot](../../../../../../../../functions/crates/lpe-exchange/src/mapi/session/release_handle_slot.md)

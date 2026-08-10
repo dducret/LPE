@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_shared_calendar_read_only_rights_reject_mutations
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10555-L10679
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10722-L10846
 visibility: private
 generated:
   by: okf-rs/0.3.0

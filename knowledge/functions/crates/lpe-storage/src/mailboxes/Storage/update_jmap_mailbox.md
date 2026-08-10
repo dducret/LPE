@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-storage/src/mailboxes/Storage/ensure_mailbox_parent_valid_in_tx
   - functions/crates/lpe-storage/src/mailboxes/Storage/ensure_mailbox_name_available_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/allocate_mail_modseq_in_tx
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/insert_audit
   - functions/crates/lpe-storage/src/shared/Storage/affected_mail_principals_in_tx
@@ -31,6 +32,7 @@ relationships:
 - [ensure_mailbox_parent_valid_in_tx](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/ensure_mailbox_parent_valid_in_tx.md)
 - [ensure_mailbox_name_available_in_tx](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/ensure_mailbox_name_available_in_tx.md)
 - [allocate_mail_modseq_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_mail_modseq_in_tx.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [set_mailbox_subscription_in_tx](../../../../../../functions/crates/lpe-storage/src/mailboxes/Storage/set_mailbox_subscription_in_tx.md)
 - [insert_audit](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_audit.md)
 - [affected_mail_principals_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/affected_mail_principals_in_tx.md)

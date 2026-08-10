@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_modseq_change_number
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1251-L1253
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1254-L1256
 visibility: private
 generated:
   by: okf-rs/0.3.0

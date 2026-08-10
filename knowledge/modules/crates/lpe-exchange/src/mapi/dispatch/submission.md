@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: submission
-resource: crates/lpe-exchange/src/mapi/dispatch/submission.rs#L1-L862
+resource: crates/lpe-exchange/src/mapi/dispatch/submission.rs#L1-L869
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -10,7 +10,7 @@ relationships:
   - external/lpe-storage-cancelsubmissionresult
   - external/std-collections-hashmap
   - external/uuid-uuid
-  - external/crate-mapi-identity-global-counter-from-store-id-object-ids-from-message-entry-id-source-key-for-object-id-first-dynamic-global-counter-outbox-folder-id-sent-folder-id-properties-mapivalue-pid-tag-target-entry-id
+  - external/crate-mapi-identity-first-dynamic-global-counter-outbox-folder-id-sent-folder-id-global-counter-from-store-id-object-ids-from-message-entry-id-source-key-for-object-id-properties-mapivalue-pid-tag-target-entry-id
   member_of:
   - packages/crates/lpe-exchange
 ---
@@ -53,8 +53,8 @@ relationships:
 - `uuid::Uuid`
 - `crate::mapi::{
     identity::{
-        global_counter_from_store_id, object_ids_from_message_entry_id, source_key_for_object_id,
         FIRST_DYNAMIC_GLOBAL_COUNTER, OUTBOX_FOLDER_ID, SENT_FOLDER_ID,
+        global_counter_from_store_id, object_ids_from_message_entry_id, source_key_for_object_id,
     },
     properties::{MapiValue, PID_TAG_TARGET_ENTRY_ID},
 }`

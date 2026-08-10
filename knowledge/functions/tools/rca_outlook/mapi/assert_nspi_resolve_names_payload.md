@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: assert_nspi_resolve_names_payload
-resource: tools/rca_outlook/mapi.py#L169-L175
+resource: tools/rca_outlook/mapi.py#L261-L267
 generated:
   by: okf-rs/0.3.0
 relationships:

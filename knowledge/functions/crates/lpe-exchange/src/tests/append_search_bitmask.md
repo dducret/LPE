@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_search_bitmask
-resource: crates/lpe-exchange/src/tests/mod.rs#L15224-L15234
+resource: crates/lpe-exchange/src/tests/mod.rs#L15229-L15239
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_fast_transfer_folder_properties
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L920-L957
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L923-L960
 visibility: private
 generated:
   by: okf-rs/0.3.0

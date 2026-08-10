@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_participants_from_display_string
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L912-L932
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1079-L1099
 visibility: private
 generated:
   by: okf-rs/0.3.0

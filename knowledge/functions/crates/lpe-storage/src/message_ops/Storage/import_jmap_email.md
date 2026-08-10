@@ -15,6 +15,7 @@ relationships:
   - functions/crates/lpe-storage/src/mail/parse_message_date_header
   - functions/crates/lpe-domain/src/crypto/sha256_hex
   - functions/crates/lpe-storage/src/util/normalize_subject
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/replace_message_headers_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/upsert_message_body_in_tx
   - functions/crates/lpe-storage/src/attachments/Storage/ingest_message_attachments_in_tx
@@ -41,6 +42,7 @@ relationships:
 - [parse_message_date_header](../../../../../../functions/crates/lpe-storage/src/mail/parse_message_date_header.md)
 - [sha256_hex](../../../../../../functions/crates/lpe-domain/src/crypto/sha256_hex.md)
 - [normalize_subject](../../../../../../functions/crates/lpe-storage/src/util/normalize_subject.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [replace_message_headers_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/replace_message_headers_in_tx.md)
 - [upsert_message_body_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/upsert_message_body_in_tx.md)
 - [ingest_message_attachments_in_tx](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/ingest_message_attachments_in_tx.md)

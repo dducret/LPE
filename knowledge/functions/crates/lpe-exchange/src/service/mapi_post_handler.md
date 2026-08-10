@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_post_handler
-resource: crates/lpe-exchange/src/service.rs#L258-L293
+resource: crates/lpe-exchange/src/service.rs#L260-L295
 visibility: private
 generated:
   by: okf-rs/0.3.0

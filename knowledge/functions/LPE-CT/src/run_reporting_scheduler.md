@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: run_reporting_scheduler
-resource: LPE-CT/src/main.rs#L852-L918
+resource: LPE-CT/src/main.rs#L867-L933
 visibility: private
 generated:
   by: okf-rs/0.3.0

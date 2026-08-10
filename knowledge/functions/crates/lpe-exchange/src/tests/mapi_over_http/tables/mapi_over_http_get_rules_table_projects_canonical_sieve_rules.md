@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_rules_table_projects_canonical_sieve_rules
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L3556-L3645
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L3392-L3481
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_message_sync_fact_for
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L232-L255
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L233-L256
 generated:
   by: okf-rs/0.3.0
 relationships:

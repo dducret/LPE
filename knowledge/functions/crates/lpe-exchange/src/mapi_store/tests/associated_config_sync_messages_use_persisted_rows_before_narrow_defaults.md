@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_sync_messages_use_persisted_rows_before_narrow_defaults
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L871-L950
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L873-L952
 visibility: private
 generated:
   by: okf-rs/0.3.0

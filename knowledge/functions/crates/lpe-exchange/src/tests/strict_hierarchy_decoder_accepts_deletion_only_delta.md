@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_decoder_accepts_deletion_only_delta
-resource: crates/lpe-exchange/src/tests/mod.rs#L14817-L14827
+resource: crates/lpe-exchange/src/tests/mod.rs#L14822-L14832
 visibility: private
 generated:
   by: okf-rs/0.3.0

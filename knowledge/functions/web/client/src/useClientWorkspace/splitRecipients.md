@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: splitRecipients
-resource: web/client/src/useClientWorkspace.ts#L96-L102
+resource: web/client/src/useClientWorkspace.ts#L97-L103
 generated:
   by: okf-rs/0.3.0
 relationships:

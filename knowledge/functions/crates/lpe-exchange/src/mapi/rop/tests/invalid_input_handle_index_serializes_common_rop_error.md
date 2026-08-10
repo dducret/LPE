@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: invalid_input_handle_index_serializes_common_rop_error
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5710-L5724
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5716-L5730
 generated:
   by: okf-rs/0.3.0
 relationships:

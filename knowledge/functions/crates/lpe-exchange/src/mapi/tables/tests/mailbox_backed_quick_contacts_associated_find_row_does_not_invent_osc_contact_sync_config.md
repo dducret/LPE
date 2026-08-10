@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_backed_quick_contacts_associated_find_row_does_not_invent_osc_contact_sync_config
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6022-L6055
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6057-L6090
 visibility: private
 generated:
   by: okf-rs/0.3.0

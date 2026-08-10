@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: auth_score_application_penalizes_failures_and_alignment_gaps
-resource: LPE-CT/src/smtp/tests.rs#L3222-L3247
+resource: LPE-CT/src/smtp/tests.rs#L3198-L3223
 visibility: private
 generated:
   by: okf-rs/0.3.0

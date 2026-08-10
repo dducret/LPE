@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: replguid_idset_from_object_ids
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1420-L1427
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1423-L1430
 visibility: private
 generated:
   by: okf-rs/0.3.0

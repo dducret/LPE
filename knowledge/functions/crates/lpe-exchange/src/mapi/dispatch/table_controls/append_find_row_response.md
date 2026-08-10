@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_find_row_response
-resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L1388-L1520
+resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L1387-L1519
 generated:
   by: okf-rs/0.3.0
 relationships:

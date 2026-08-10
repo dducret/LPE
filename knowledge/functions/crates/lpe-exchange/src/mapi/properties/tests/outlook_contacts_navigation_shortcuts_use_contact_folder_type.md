@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_contacts_navigation_shortcuts_use_contact_folder_type
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5369-L5419
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5498-L5548
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: expand_row_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1950-L1959
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1957-L1966
 generated:
   by: okf-rs/0.3.0
 relationships:

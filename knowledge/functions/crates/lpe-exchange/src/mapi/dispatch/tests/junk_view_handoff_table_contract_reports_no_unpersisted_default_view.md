@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: junk_view_handoff_table_contract_reports_no_unpersisted_default_view
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L649-L662
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L653-L666
 visibility: private
 generated:
   by: okf-rs/0.3.0

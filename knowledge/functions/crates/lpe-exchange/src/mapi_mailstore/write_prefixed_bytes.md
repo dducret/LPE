@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_prefixed_bytes
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1255-L1258
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1258-L1261
 visibility: private
 generated:
   by: okf-rs/0.3.0

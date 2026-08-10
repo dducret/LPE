@@ -1,15 +1,14 @@
 ---
 type: Rust Function
 title: mapi_over_http_remove_all_recipients_clears_pending_message_recipients
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L665-L739
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L638-L703
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/mapi_headers
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/mapi_recipient_row
   - functions/crates/lpe-exchange/src/tests/append_mapi_wire_id
   - functions/crates/lpe-exchange/src/tests/test_mapi_folder_id
@@ -26,8 +25,7 @@ relationships:
 # Calls
 
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [mapi_recipient_row](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_recipient_row.md)
 - [append_mapi_wire_id](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_wire_id.md)
 - [test_mapi_folder_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_folder_id.md)

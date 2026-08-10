@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_submit_opened_draft_uses_source_draft_id
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1976-L2089
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1931-L2044
 visibility: private
 generated:
   by: okf-rs/0.3.0

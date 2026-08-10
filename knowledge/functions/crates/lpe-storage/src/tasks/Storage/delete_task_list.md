@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   - functions/crates/lpe-storage/src/change/Storage/insert_collaboration_tombstone_in_tx
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/change/Storage/emit_task_access_change
   called_by:
   - functions/crates/lpe-jmap/src/store/Storage/jmapstore/delete_jmap_task_list
@@ -27,6 +28,7 @@ relationships:
 - [push](../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
 - [insert_collaboration_tombstone_in_tx](../../../../../../functions/crates/lpe-storage/src/change/Storage/insert_collaboration_tombstone_in_tx.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [emit_task_access_change](../../../../../../functions/crates/lpe-storage/src/change/Storage/emit_task_access_change.md)
 
 # Called by

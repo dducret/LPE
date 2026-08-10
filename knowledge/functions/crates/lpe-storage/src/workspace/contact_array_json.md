@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_array_json
-resource: crates/lpe-storage/src/workspace.rs#L982-L988
+resource: crates/lpe-storage/src/workspace.rs#L1012-L1018
 generated:
   by: okf-rs/0.3.0
 relationships:

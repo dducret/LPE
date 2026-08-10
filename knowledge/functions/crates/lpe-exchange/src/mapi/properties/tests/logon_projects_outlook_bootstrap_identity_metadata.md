@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: logon_projects_outlook_bootstrap_identity_metadata
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7314-L7369
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7444-L7499
 visibility: private
 generated:
   by: okf-rs/0.3.0

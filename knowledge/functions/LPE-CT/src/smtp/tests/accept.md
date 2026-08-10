@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: accept
-resource: LPE-CT/src/smtp/tests.rs#L3558-L3570
+resource: LPE-CT/src/smtp/tests.rs#L3535-L3547
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_startup_calendar_folder_chain_uses_advertised_default_calendar
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L9964-L10035
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10079-L10159
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,6 +9,9 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/mapi_headers
   - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_scoped_mapi_identity
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_default_scoped_mapi_identity
+  - functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test
   - functions/crates/lpe-exchange/src/tests/append_mapi_wire_id
   - functions/crates/lpe-exchange/src/tests/append_rop_get_properties_specific
   - functions/crates/lpe-exchange/src/tests/append_rop_open_folder
@@ -26,6 +29,9 @@ relationships:
 
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
 - [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
+- [with_scoped_mapi_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_scoped_mapi_identity.md)
+- [with_default_scoped_mapi_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_default_scoped_mapi_identity.md)
+- [durable_special_folder_id_for_test](../../../../../../../functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test.md)
 - [append_mapi_wire_id](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_wire_id.md)
 - [append_rop_get_properties_specific](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_get_properties_specific.md)
 - [append_rop_open_folder](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_open_folder.md)

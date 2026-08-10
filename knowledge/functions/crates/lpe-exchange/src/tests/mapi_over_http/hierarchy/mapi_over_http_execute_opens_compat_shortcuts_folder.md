@@ -1,15 +1,14 @@
 ---
 type: Rust Function
 title: mapi_over_http_execute_opens_compat_shortcuts_folder
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L126-L176
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L126-L167
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/mapi_headers
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_mapi_wire_id
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   - functions/crates/lpe-exchange/src/tests/append_rop_get_properties_specific
@@ -25,8 +24,7 @@ relationships:
 # Calls
 
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_mapi_wire_id](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_wire_id.md)
 - [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
 - [append_rop_get_properties_specific](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_get_properties_specific.md)

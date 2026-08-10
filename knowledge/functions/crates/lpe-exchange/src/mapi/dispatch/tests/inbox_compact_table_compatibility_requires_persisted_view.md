@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_compact_table_compatibility_requires_persisted_view
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L859-L881
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L863-L885
 visibility: private
 generated:
   by: okf-rs/0.3.0

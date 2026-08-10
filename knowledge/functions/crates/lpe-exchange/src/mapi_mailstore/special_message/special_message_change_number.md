@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_message_change_number
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L124-L133
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L135-L144
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -15,7 +15,7 @@ relationships:
 
 # Signature
 
-`pub(super) fn special_message_change_number(object: &SpecialMessageSyncFact) -> u64`
+`pub(crate) fn special_message_change_number(object: &SpecialMessageSyncFact) -> u64`
 
 # Calls
 

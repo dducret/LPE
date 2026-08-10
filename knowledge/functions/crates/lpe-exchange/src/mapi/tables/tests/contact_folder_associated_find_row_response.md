@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_folder_associated_find_row_response
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8647-L8692
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8682-L8727
 visibility: private
 generated:
   by: okf-rs/0.3.0

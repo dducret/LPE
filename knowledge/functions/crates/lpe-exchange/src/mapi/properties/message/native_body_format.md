@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: native_body_format
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L279-L292
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L289-L302
 generated:
   by: okf-rs/0.3.0
 relationships:

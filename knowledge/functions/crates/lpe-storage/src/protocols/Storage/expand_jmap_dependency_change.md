@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: expand_jmap_dependency_change
-resource: crates/lpe-storage/src/protocols.rs#L535-L608
+resource: crates/lpe-storage/src/protocols.rs#L536-L609
 visibility: private
 generated:
   by: okf-rs/0.3.0

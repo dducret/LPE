@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_hierarchy_sync_preserves_nested_folder_parent_keys
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7350-L7431
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7143-L7224
 visibility: private
 generated:
   by: okf-rs/0.3.0

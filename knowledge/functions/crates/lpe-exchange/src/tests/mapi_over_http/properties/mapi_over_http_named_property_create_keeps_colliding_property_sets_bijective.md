@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_named_property_create_keeps_colliding_property_sets_bijective
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1250-L1329
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1181-L1260
 visibility: private
 generated:
   by: okf-rs/0.3.0

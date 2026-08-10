@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_exact_object_kind
-resource: crates/lpe-storage/src/protocols.rs#L1331-L1346
+resource: crates/lpe-storage/src/protocols.rs#L1350-L1365
 visibility: private
 generated:
   by: okf-rs/0.3.0

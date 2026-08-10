@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_ews_send_sent
-resource: tools/rca_outlook_connectivity_check.py#L463-L554
+resource: tools/rca_outlook_connectivity_check.py#L712-L803
 generated:
   by: okf-rs/0.3.0
 relationships:

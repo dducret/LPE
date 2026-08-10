@@ -18,6 +18,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/recoverable_items/serialize_recoverable_item_row
   - functions/crates/lpe-exchange/src/mapi/tables/rules/serialize_rule_row
   - functions/crates/lpe-exchange/src/mapi/tables/tests/query_rows_truncates_variable_property_values_to_microsoft_limit
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/captured_calendar_table_query_rows_projects_exact_requested_property_row
 ---
 
 # Signature
@@ -38,3 +39,4 @@ relationships:
 - [serialize_recoverable_item_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/recoverable_items/serialize_recoverable_item_row.md)
 - [serialize_rule_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/rules/serialize_rule_row.md)
 - [query_rows_truncates_variable_property_values_to_microsoft_limit](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/query_rows_truncates_variable_property_values_to_microsoft_limit.md)
+- [captured_calendar_table_query_rows_projects_exact_requested_property_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/captured_calendar_table_query_rows_projects_exact_requested_property_row.md)

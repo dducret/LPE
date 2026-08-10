@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: appointment_color_named_property_maps_to_stable_id
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6860-L6868
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6990-L6998
 visibility: private
 generated:
   by: okf-rs/0.3.0

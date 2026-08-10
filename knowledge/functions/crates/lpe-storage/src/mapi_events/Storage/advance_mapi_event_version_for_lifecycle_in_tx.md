@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: advance_mapi_event_version_for_lifecycle_in_tx
-resource: crates/lpe-storage/src/mapi_events.rs#L722-L783
+resource: crates/lpe-storage/src/mapi_events.rs#L731-L792
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-storage/src/mapi_events/mapi_event_identity_object_kind
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/mapi_events/rotate_active_mapi_event_identities_in_tx
   - functions/crates/lpe-storage/src/mapi_events/rotate_mapi_event_identities_in_tx
   called_by:
@@ -24,6 +25,7 @@ relationships:
 
 - [mapi_event_identity_object_kind](../../../../../../functions/crates/lpe-storage/src/mapi_events/mapi_event_identity_object_kind.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [rotate_active_mapi_event_identities_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/rotate_active_mapi_event_identities_in_tx.md)
 - [rotate_mapi_event_identities_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/rotate_mapi_event_identities_in_tx.md)
 

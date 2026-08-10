@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: TraceDetails
-resource: LPE-CT/src/smtp.rs#L284-L315
+resource: LPE-CT/src/smtp.rs#L280-L311
 generated:
   by: okf-rs/0.3.0
 ---

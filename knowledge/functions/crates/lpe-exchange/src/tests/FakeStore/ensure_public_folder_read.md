@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: ensure_public_folder_read
-resource: crates/lpe-exchange/src/tests/mod.rs#L4514-L4523
+resource: crates/lpe-exchange/src/tests/mod.rs#L4515-L4524
 visibility: private
 generated:
   by: okf-rs/0.3.0

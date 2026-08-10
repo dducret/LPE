@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: vacation_response_get_returns_disabled_without_active_vacation
-resource: crates/lpe-jmap/src/tests.rs#L11245-L11276
+resource: crates/lpe-jmap/src/tests.rs#L11248-L11279
 visibility: private
 generated:
   by: okf-rs/0.3.0

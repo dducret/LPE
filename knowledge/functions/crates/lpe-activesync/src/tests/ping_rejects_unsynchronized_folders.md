@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ping_rejects_unsynchronized_folders
-resource: crates/lpe-activesync/src/tests.rs#L5221-L5263
+resource: crates/lpe-activesync/src/tests.rs#L5222-L5264
 visibility: private
 generated:
   by: okf-rs/0.3.0

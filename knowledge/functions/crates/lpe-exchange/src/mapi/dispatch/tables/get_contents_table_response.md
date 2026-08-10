@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_contents_table_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1261-L1263
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1263-L1265
 generated:
   by: okf-rs/0.3.0
 relationships:

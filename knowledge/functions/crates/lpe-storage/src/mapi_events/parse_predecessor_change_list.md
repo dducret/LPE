@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_predecessor_change_list
-resource: crates/lpe-storage/src/mapi_events.rs#L1437-L1466
+resource: crates/lpe-storage/src/mapi_events.rs#L1452-L1481
 visibility: private
 generated:
   by: okf-rs/0.3.0

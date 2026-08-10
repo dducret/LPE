@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: integration_secret_must_be_present_and_strong
-resource: LPE-CT/src/main.rs#L1260-L1277
+resource: LPE-CT/src/main.rs#L1280-L1297
 visibility: private
 generated:
   by: okf-rs/0.3.0

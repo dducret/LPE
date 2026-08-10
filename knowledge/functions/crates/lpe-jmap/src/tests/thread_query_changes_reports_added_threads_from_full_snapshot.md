@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: thread_query_changes_reports_added_threads_from_full_snapshot
-resource: crates/lpe-jmap/src/tests.rs#L6233-L6294
+resource: crates/lpe-jmap/src/tests.rs#L6236-L6297
 visibility: private
 generated:
   by: okf-rs/0.3.0

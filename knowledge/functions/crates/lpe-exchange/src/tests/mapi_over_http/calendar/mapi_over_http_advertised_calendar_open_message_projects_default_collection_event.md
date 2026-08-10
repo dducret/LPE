@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_advertised_calendar_open_message_projects_default_collection_event
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6967-L7073
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7029-L7135
 visibility: private
 generated:
   by: okf-rs/0.3.0

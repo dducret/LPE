@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: evaluate_outbound_sender_policy
-resource: LPE-CT/src/smtp.rs#L1190-L1206
+resource: LPE-CT/src/smtp.rs#L1193-L1209
 visibility: private
 generated:
   by: okf-rs/0.3.0

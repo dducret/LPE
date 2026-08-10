@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: store_public_tls_profile
-resource: LPE-CT/src/main.rs#L1048-L1090
+resource: LPE-CT/src/main.rs#L1063-L1105
 visibility: private
 generated:
   by: okf-rs/0.3.0

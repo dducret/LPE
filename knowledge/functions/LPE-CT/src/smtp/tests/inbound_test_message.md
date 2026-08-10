@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbound_test_message
-resource: LPE-CT/src/smtp/tests.rs#L3484-L3515
+resource: LPE-CT/src/smtp/tests.rs#L3461-L3492
 visibility: private
 generated:
   by: okf-rs/0.3.0

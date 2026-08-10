@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normalized_subject_tag
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L63-L69
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L64-L70
 visibility: private
 generated:
   by: okf-rs/0.3.0

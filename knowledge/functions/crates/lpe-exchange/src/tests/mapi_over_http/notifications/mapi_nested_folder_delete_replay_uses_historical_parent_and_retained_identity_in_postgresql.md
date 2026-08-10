@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/postgres_mapi_audit
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/core/Storage/pool
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/poll_mapi_notifications
 ---
 
@@ -30,4 +31,5 @@ relationships:
 - [postgres_mapi_audit](../../../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_audit.md)
 - [query](../../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [pool](../../../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [poll_mapi_notifications](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/poll_mapi_notifications.md)

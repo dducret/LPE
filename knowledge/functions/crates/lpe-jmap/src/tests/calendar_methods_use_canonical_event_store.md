@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_methods_use_canonical_event_store
-resource: crates/lpe-jmap/src/tests.rs#L12386-L12476
+resource: crates/lpe-jmap/src/tests.rs#L12389-L12479
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_associated_content_sync_payload_emits_view_and_wunderbar_properties
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1705-L1812
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1765-L1872
 visibility: private
 generated:
   by: okf-rs/0.3.0

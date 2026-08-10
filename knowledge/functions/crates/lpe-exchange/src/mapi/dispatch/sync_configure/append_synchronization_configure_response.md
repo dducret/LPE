@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_synchronization_configure_response
-resource: crates/lpe-exchange/src/mapi/dispatch/sync_configure.rs#L8-L581
+resource: crates/lpe-exchange/src/mapi/dispatch/sync_configure.rs#L8-L590
 generated:
   by: okf-rs/0.3.0
 relationships:

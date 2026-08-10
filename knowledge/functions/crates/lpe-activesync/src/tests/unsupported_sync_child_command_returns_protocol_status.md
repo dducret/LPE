@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: unsupported_sync_child_command_returns_protocol_status
-resource: crates/lpe-activesync/src/tests.rs#L2591-L2623
+resource: crates/lpe-activesync/src/tests.rs#L2592-L2624
 visibility: private
 generated:
   by: okf-rs/0.3.0

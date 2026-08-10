@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: mapi_sent_content_sync_rops
-resource: tools/rca_outlook/mapi.py#L62-L75
+resource: tools/rca_outlook/mapi.py#L154-L167
 generated:
   by: okf-rs/0.3.0
 relationships:

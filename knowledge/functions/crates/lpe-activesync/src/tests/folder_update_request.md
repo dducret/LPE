@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_update_request
-resource: crates/lpe-activesync/src/tests.rs#L1816-L1830
+resource: crates/lpe-activesync/src/tests.rs#L1817-L1831
 visibility: private
 generated:
   by: okf-rs/0.3.0

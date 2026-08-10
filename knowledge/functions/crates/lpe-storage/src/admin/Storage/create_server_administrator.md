@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-storage/src/util/normalize_admin_permissions
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/util/permission_summary
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/insert_audit
 ---
 
@@ -23,4 +24,5 @@ relationships:
 - [normalize_admin_permissions](../../../../../../functions/crates/lpe-storage/src/util/normalize_admin_permissions.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [permission_summary](../../../../../../functions/crates/lpe-storage/src/util/permission_summary.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [insert_audit](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_audit.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_mapi_event_custom_properties
-resource: crates/lpe-storage/src/mapi_events.rs#L844-L867
+resource: crates/lpe-storage/src/mapi_events.rs#L853-L876
 visibility: private
 generated:
   by: okf-rs/0.3.0

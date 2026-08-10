@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: journal_entry_start_sort_key
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L30-L36
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L31-L37
 generated:
   by: okf-rs/0.3.0
 relationships:

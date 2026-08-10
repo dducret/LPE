@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_object_change_cursor
-resource: crates/lpe-jmap/src/tests.rs#L881-L895
+resource: crates/lpe-jmap/src/tests.rs#L883-L897
 visibility: private
 generated:
   by: okf-rs/0.3.0

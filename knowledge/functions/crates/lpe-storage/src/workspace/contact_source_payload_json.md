@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_source_payload_json
-resource: crates/lpe-storage/src/workspace.rs#L990-L995
+resource: crates/lpe-storage/src/workspace.rs#L1020-L1025
 generated:
   by: okf-rs/0.3.0
 relationships:

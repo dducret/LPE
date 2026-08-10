@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: save_draft_message
-resource: crates/lpe-storage/src/submission.rs#L245-L641
+resource: crates/lpe-storage/src/submission.rs#L246-L642
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -20,6 +20,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/store_message_blob_in_tx
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-domain/src/crypto/sha256_hex
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/replace_message_headers_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/recalculate_mailbox_counts_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/upsert_message_body_in_tx
@@ -54,6 +55,7 @@ relationships:
 - [store_message_blob_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/store_message_blob_in_tx.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [sha256_hex](../../../../../../functions/crates/lpe-domain/src/crypto/sha256_hex.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [replace_message_headers_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/replace_message_headers_in_tx.md)
 - [recalculate_mailbox_counts_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/recalculate_mailbox_counts_in_tx.md)
 - [upsert_message_body_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/upsert_message_body_in_tx.md)

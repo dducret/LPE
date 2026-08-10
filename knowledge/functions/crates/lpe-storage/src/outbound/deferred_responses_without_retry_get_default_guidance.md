@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deferred_responses_without_retry_get_default_guidance
-resource: crates/lpe-storage/src/outbound.rs#L522-L549
+resource: crates/lpe-storage/src/outbound.rs#L529-L556
 visibility: private
 generated:
   by: okf-rs/0.3.0

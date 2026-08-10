@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_bool_property
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1346-L1349
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1349-L1352
 visibility: private
 generated:
   by: okf-rs/0.3.0

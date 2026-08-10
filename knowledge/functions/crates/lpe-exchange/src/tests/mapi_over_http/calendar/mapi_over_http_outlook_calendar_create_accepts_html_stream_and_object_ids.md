@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_calendar_create_accepts_html_stream_and_object_ids
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3119-L3211
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3126-L3218
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_contact_empty_email_table_value
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L91-L103
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L92-L104
 visibility: private
 generated:
   by: okf-rs/0.3.0

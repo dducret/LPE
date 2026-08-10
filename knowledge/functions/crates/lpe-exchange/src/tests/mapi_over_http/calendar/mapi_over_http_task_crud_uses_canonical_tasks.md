@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_task_crud_uses_canonical_tasks
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6000-L6106
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6025-L6120
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,8 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/mapi_headers
   - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_mapi_utf16_property
   - functions/crates/lpe-exchange/src/tests/append_rop_create_message
   - functions/crates/lpe-exchange/src/tests/test_mapi_folder_id
@@ -35,8 +34,7 @@ relationships:
 
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
 - [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_mapi_utf16_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_utf16_property.md)
 - [append_rop_create_message](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_create_message.md)
 - [test_mapi_folder_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_folder_id.md)

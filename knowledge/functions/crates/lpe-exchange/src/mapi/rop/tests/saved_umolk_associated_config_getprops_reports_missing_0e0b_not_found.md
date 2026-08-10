@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: saved_umolk_associated_config_getprops_reports_missing_0e0b_not_found
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3339-L3408
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3345-L3414
 visibility: private
 generated:
   by: okf-rs/0.3.0

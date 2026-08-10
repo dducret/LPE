@@ -1,12 +1,13 @@
 ---
 type: Rust Module
 title: special_folders
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L1-L540
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L1-L780
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/super-super
+  - external/super
   member_of:
   - packages/crates/lpe-exchange
 ---
@@ -23,11 +24,15 @@ relationships:
 - [is_calendar_configuration_object](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/is_calendar_configuration_object.md)
 - [special_i64_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/special_i64_property.md)
 - [special_binary_property_len](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/special_binary_property_len.md)
+- [calendar_global_object_id_contract](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/calendar_global_object_id_contract.md)
+- [third_party_global_object_id_contract](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/third_party_global_object_id_contract.md)
+- [third_party_global_object_id_contract_flags_nonzero_creation_time](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/third_party_global_object_id_contract_flags_nonzero_creation_time.md)
 - [special_property_shape](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/special_property_shape.md)
 
 # Imports
 
 - `super::super::*`
+- `super::*`
 
 # Member of
 

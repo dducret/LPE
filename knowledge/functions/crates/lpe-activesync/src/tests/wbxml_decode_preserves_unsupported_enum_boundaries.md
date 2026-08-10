@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wbxml_decode_preserves_unsupported_enum_boundaries
-resource: crates/lpe-activesync/src/tests.rs#L2650-L2658
+resource: crates/lpe-activesync/src/tests.rs#L2651-L2659
 visibility: private
 generated:
   by: okf-rs/0.3.0

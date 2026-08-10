@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_property_ids_from_names_returns_registered_contact_source_id
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1233-L1246
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1242-L1255
 visibility: private
 generated:
   by: okf-rs/0.3.0

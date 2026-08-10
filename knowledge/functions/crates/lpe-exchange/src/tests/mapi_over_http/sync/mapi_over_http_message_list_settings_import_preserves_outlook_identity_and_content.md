@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_message_list_settings_import_preserves_outlook_identity_and_content
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L10723-L11764
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L10480-L11521
 visibility: private
 generated:
   by: okf-rs/0.3.0

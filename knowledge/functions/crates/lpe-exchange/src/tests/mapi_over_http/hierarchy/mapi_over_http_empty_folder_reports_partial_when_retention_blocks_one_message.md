@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_empty_folder_reports_partial_when_retention_blocks_one_message
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3331-L3399
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3236-L3304
 visibility: private
 generated:
   by: okf-rs/0.3.0

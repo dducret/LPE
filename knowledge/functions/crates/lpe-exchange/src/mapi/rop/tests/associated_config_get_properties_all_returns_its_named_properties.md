@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_get_properties_all_returns_its_named_properties
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1397-L1481
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1399-L1483
 visibility: private
 generated:
   by: okf-rs/0.3.0

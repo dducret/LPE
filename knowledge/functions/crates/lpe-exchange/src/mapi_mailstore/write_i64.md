@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_i64
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1268-L1270
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1271-L1273
 visibility: private
 generated:
   by: okf-rs/0.3.0

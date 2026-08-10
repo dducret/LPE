@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_get_hides_bcc_for_delegated_shared_mailbox_projection
-resource: crates/lpe-jmap/src/tests.rs#L3820-L3858
+resource: crates/lpe-jmap/src/tests.rs#L3823-L3861
 visibility: private
 generated:
   by: okf-rs/0.3.0

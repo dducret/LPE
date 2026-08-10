@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_folder_rejects_unlearned_client_local_folder_id
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3856-L3869
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3761-L3774
 visibility: private
 generated:
   by: okf-rs/0.3.0

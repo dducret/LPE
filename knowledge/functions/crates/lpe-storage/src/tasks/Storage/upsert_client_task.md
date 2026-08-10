@@ -17,6 +17,7 @@ relationships:
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   - functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
   - functions/crates/lpe-storage/src/change/Storage/emit_task_access_change
   - functions/crates/lpe-storage/src/tasks/types/map_task
@@ -39,6 +40,7 @@ relationships:
 - [push](../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
 - [allocate_account_modseq_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [insert_mail_change_log_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx.md)
 - [emit_task_access_change](../../../../../../functions/crates/lpe-storage/src/change/Storage/emit_task_access_change.md)
 - [map_task](../../../../../../functions/crates/lpe-storage/src/tasks/types/map_task.md)

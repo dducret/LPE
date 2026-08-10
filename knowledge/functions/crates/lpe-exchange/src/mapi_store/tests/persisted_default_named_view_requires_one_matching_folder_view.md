@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: persisted_default_named_view_requires_one_matching_folder_view
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1490-L1531
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1492-L1533
 visibility: private
 generated:
   by: okf-rs/0.3.0

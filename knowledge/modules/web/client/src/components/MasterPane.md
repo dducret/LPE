@@ -1,7 +1,7 @@
 ---
 type: TypeScript Module
 title: MasterPane
-resource: web/client/src/components/MasterPane.tsx#L1-L138
+resource: web/client/src/components/MasterPane.tsx#L1-L139
 generated:
   by: okf-rs/0.3.0
 relationships:

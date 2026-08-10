@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_fast_transfer_embedded_message
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1173-L1182
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1176-L1185
 visibility: private
 generated:
   by: okf-rs/0.3.0

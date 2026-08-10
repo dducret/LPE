@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: router
-resource: crates/lpe-exchange/src/service.rs#L153-L155
+resource: crates/lpe-exchange/src/service.rs#L155-L157
 generated:
   by: okf-rs/0.3.0
 relationships:

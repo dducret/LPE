@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: send_mail_uses_on_behalf_sender_for_delegated_mailbox
-resource: crates/lpe-activesync/src/tests.rs#L4672-L4711
+resource: crates/lpe-activesync/src/tests.rs#L4673-L4712
 visibility: private
 generated:
   by: okf-rs/0.3.0

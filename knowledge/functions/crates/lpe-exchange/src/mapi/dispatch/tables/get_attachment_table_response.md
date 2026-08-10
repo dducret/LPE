@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_attachment_table_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1265-L1267
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1267-L1269
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_long_term_id_round_trips_canonical_replica_ids
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4720-L4876
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L4603-L4759
 visibility: private
 generated:
   by: okf-rs/0.3.0

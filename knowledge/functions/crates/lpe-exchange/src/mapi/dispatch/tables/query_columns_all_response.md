@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query_columns_all_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1372-L1378
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1374-L1380
 generated:
   by: okf-rs/0.3.0
 relationships:

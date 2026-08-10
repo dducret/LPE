@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-storage/src/mapi_store_identity/ensure_mapi_mailbox_replica_in_tx
   - functions/crates/lpe-storage/src/mapi_events/mapi_change_key
   - functions/crates/lpe-storage/src/mapi_events/merge_predecessor_change_list
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/attachments/Storage/add_message_attachment
   - functions/crates/lpe-storage/src/attachments/Storage/delete_message_attachment
@@ -32,6 +33,7 @@ relationships:
 - [ensure_mapi_mailbox_replica_in_tx](../../../../../functions/crates/lpe-storage/src/mapi_store_identity/ensure_mapi_mailbox_replica_in_tx.md)
 - [mapi_change_key](../../../../../functions/crates/lpe-storage/src/mapi_events/mapi_change_key.md)
 - [merge_predecessor_change_list](../../../../../functions/crates/lpe-storage/src/mapi_events/merge_predecessor_change_list.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

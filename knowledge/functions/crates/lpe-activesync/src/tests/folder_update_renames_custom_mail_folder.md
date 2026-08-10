@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_update_renames_custom_mail_folder
-resource: crates/lpe-activesync/src/tests.rs#L3404-L3438
+resource: crates/lpe-activesync/src/tests.rs#L3405-L3439
 visibility: private
 generated:
   by: okf-rs/0.3.0

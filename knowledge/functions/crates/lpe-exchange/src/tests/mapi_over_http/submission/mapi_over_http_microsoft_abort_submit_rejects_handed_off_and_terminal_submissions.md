@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_abort_submit_rejects_handed_off_and_terminal_submissions
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2555-L2564
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L2483-L2492
 visibility: private
 generated:
   by: okf-rs/0.3.0

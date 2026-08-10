@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: empty_common_views_exposes_no_synthetic_fai
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1427-L1467
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1429-L1469
 visibility: private
 generated:
   by: okf-rs/0.3.0

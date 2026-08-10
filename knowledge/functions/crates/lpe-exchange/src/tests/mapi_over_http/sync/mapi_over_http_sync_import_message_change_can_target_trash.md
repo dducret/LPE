@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_message_change_can_target_trash
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L9969-L10033
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L9726-L9790
 visibility: private
 generated:
   by: okf-rs/0.3.0

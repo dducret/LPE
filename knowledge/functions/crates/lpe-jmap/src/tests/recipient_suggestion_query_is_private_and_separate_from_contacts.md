@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: recipient_suggestion_query_is_private_and_separate_from_contacts
-resource: crates/lpe-jmap/src/tests.rs#L12322-L12383
+resource: crates/lpe-jmap/src/tests.rs#L12325-L12386
 visibility: private
 generated:
   by: okf-rs/0.3.0

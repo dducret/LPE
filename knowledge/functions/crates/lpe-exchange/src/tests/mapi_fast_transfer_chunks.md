@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_fast_transfer_chunks
-resource: crates/lpe-exchange/src/tests/mod.rs#L14996-L15027
+resource: crates/lpe-exchange/src/tests/mod.rs#L15001-L15032
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_save_changes_attachment_rejects_conflicting_microsoft_save_flags_without_batch_drift
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1482-L1546
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1401-L1465
 visibility: private
 generated:
   by: okf-rs/0.3.0

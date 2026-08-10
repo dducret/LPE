@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_property_rops_reject_missing_input_handle_without_batch_drift
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L7049-L7074
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6620-L6645
 visibility: private
 generated:
   by: okf-rs/0.3.0

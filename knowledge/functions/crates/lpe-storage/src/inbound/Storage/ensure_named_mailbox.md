@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-domain/src/mailbox_name/MailboxCanonicalKey/collides_with
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/inbound/Storage/deliver_inbound_message
 ---
@@ -21,6 +22,7 @@ relationships:
 
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [collides_with](../../../../../../functions/crates/lpe-domain/src/mailbox_name/MailboxCanonicalKey/collides_with.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

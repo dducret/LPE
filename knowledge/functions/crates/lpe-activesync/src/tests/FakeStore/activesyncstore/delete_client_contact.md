@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_client_contact
-resource: crates/lpe-activesync/src/tests.rs#L1057-L1067
+resource: crates/lpe-activesync/src/tests.rs#L1058-L1068
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-storage/src/mapi_events/Storage/calendar_event_affected_principals_in_tx
   - functions/crates/lpe-storage/src/change/Storage/insert_collaboration_move_tombstone_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/collaboration/deleted_events/rekey_active_event_identities_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
   - functions/crates/lpe-storage/src/change/Storage/emit_collaboration_change
@@ -29,6 +30,7 @@ relationships:
 - [calendar_event_affected_principals_in_tx](../../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/calendar_event_affected_principals_in_tx.md)
 - [insert_collaboration_move_tombstone_in_tx](../../../../../../../functions/crates/lpe-storage/src/change/Storage/insert_collaboration_move_tombstone_in_tx.md)
 - [allocate_account_modseq_in_tx](../../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [rekey_active_event_identities_in_tx](../../../../../../../functions/crates/lpe-storage/src/collaboration/deleted_events/rekey_active_event_identities_in_tx.md)
 - [insert_mail_change_log_in_tx](../../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx.md)
 - [emit_collaboration_change](../../../../../../../functions/crates/lpe-storage/src/change/Storage/emit_collaboration_change.md)

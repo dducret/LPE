@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_message_flags
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L135-L169
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L146-L180
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: explicit_sender_fields_are_preserved
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L720-L742
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L721-L743
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: provider_defined_internal_property
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L280-L282
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L283-L285
 visibility: private
 generated:
   by: okf-rs/0.3.0

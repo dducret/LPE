@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_preserves_persisted_calendar_group_and_shortcut_identity
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1720-L1785
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1722-L1787
 visibility: private
 generated:
   by: okf-rs/0.3.0

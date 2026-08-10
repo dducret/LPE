@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rule_table_projects_canonical_sieve_rule
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4112-L4167
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4146-L4201
 visibility: private
 generated:
   by: okf-rs/0.3.0

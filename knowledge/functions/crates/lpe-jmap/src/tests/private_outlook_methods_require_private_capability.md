@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: private_outlook_methods_require_private_capability
-resource: crates/lpe-jmap/src/tests.rs#L14683-L14711
+resource: crates/lpe-jmap/src/tests.rs#L14686-L14714
 visibility: private
 generated:
   by: okf-rs/0.3.0

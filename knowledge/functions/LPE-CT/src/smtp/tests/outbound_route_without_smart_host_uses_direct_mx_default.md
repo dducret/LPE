@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outbound_route_without_smart_host_uses_direct_mx_default
-resource: LPE-CT/src/smtp/tests.rs#L2190-L2197
+resource: LPE-CT/src/smtp/tests.rs#L2217-L2224
 visibility: private
 generated:
   by: okf-rs/0.3.0

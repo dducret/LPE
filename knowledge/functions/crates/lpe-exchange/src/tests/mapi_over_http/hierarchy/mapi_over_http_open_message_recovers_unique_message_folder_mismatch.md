@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_message_recovers_unique_message_folder_mismatch
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2001-L2052
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1951-L2002
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outbound_handoff_quarantines_on_bayespam_score
-resource: LPE-CT/src/smtp/tests.rs#L2638-L2673
+resource: LPE-CT/src/smtp/tests.rs#L2614-L2649
 visibility: private
 generated:
   by: okf-rs/0.3.0

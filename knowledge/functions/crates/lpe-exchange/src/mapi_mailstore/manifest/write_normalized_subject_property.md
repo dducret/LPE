@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_normalized_subject_property
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L199-L207
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L200-L208
 visibility: private
 generated:
   by: okf-rs/0.3.0

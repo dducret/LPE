@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_permissions_table_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1325-L1327
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1327-L1329
 generated:
   by: okf-rs/0.3.0
 relationships:

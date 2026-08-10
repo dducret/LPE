@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reminder_patch_has_changes
-resource: crates/lpe-storage/src/mapi_events.rs#L997-L1001
+resource: crates/lpe-storage/src/mapi_events.rs#L1006-L1010
 visibility: private
 generated:
   by: okf-rs/0.3.0

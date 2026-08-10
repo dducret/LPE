@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_view_advertisement_preserves_matching_open_state
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L488-L517
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L492-L521
 visibility: private
 generated:
   by: okf-rs/0.3.0

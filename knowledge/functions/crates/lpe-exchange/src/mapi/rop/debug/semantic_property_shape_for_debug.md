@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: semantic_property_shape_for_debug
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L818-L855
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L819-L856
 visibility: private
 generated:
   by: okf-rs/0.3.0

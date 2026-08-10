@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_folder_type
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L375-L381
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L378-L384
 visibility: private
 generated:
   by: okf-rs/0.3.0

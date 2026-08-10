@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_calendar_associated_sort_trace
-resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L701-L714
+resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L702-L715
 generated:
   by: okf-rs/0.3.0
 relationships:

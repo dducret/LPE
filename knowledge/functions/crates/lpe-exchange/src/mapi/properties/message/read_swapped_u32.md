@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_swapped_u32
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L1005-L1012
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L1153-L1160
 visibility: private
 generated:
   by: okf-rs/0.3.0

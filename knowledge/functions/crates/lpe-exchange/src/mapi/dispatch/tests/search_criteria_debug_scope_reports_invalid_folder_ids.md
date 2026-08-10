@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: search_criteria_debug_scope_reports_invalid_folder_ids
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2858-L2877
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2879-L2898
 visibility: private
 generated:
   by: okf-rs/0.3.0

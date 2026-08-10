@@ -1,13 +1,14 @@
 ---
 type: Rust Function
 title: calendar_projection_backs_outlook_table_identity_and_status_columns
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4033-L4066
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4131-L4195
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_for_mapping
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder_and_mailbox_guid
 ---
 
 # Signature
@@ -17,3 +18,4 @@ relationships:
 # Calls
 
 - [default_event_for_mapping](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_for_mapping.md)
+- [event_property_value_with_reminder_and_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder_and_mailbox_guid.md)

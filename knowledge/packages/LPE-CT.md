@@ -30,7 +30,6 @@ generated:
 - [dns](../modules/LPE-CT/src/smtp/dns.md)
 - [dsn](../modules/LPE-CT/src/smtp/dsn.md)
 - [inbound_policy](../modules/LPE-CT/src/smtp/inbound_policy.md)
-- [outbound](../modules/LPE-CT/src/smtp/outbound.md)
 - [outbound_delivery](../modules/LPE-CT/src/smtp/outbound_delivery.md)
 - [outbound_policy](../modules/LPE-CT/src/smtp/outbound_policy.md)
 - [policy](../modules/LPE-CT/src/smtp/policy.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxnspi_hierarchy_and_query_rows_example_round_trips
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1448-L1570
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1443-L1566
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: event_is_meeting
-resource: crates/lpe-exchange/src/mapi/properties/calendar/meeting.rs#L54-L69
+resource: crates/lpe-exchange/src/mapi/properties/calendar/meeting.rs#L62-L77
 visibility: private
 generated:
   by: okf-rs/0.3.0

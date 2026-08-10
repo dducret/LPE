@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_set_maps_seen_and_flagged_keywords_to_draft_state
-resource: crates/lpe-jmap/src/tests.rs#L3355-L3399
+resource: crates/lpe-jmap/src/tests.rs#L3358-L3402
 visibility: private
 generated:
   by: okf-rs/0.3.0

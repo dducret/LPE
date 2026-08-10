@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/transport/cookies/request_sequence_cookie
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/log_post_common_views_handoff_execute_response
+  - functions/crates/lpe-exchange/src/mapi/session/lifecycle/established_session_request
 ---
 
 # Signature
@@ -24,3 +25,4 @@ relationships:
 # Called by
 
 - [log_post_common_views_handoff_execute_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/log_post_common_views_handoff_execute_response.md)
+- [established_session_request](../../../../../../../functions/crates/lpe-exchange/src/mapi/session/lifecycle/established_session_request.md)

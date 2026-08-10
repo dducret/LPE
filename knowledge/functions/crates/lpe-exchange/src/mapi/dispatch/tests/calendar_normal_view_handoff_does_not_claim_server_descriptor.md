@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_normal_view_handoff_does_not_claim_server_descriptor
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L768-L789
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L772-L793
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outbound_handoff_defers_when_local_throttle_hits
-resource: LPE-CT/src/smtp/tests.rs#L2086-L2122
+resource: LPE-CT/src/smtp/tests.rs#L2113-L2149
 visibility: private
 generated:
   by: okf-rs/0.3.0

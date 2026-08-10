@@ -1,15 +1,14 @@
 ---
 type: Rust Function
 title: mapi_over_http_find_row_returns_matching_contents_row
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1808-L1895
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1682-L1760
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/mapi_headers
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/mapi_content_restriction
   - functions/crates/lpe-exchange/src/tests/append_mapi_wire_id
   - functions/crates/lpe-exchange/src/tests/test_mapi_folder_id
@@ -26,8 +25,7 @@ relationships:
 # Calls
 
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [mapi_content_restriction](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_content_restriction.md)
 - [append_mapi_wire_id](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_wire_id.md)
 - [test_mapi_folder_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_folder_id.md)

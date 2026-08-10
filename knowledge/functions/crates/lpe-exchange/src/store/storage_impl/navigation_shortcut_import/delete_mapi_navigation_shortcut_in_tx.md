@@ -8,6 +8,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/insert_mapi_navigation_shortcut_change
 ---
 
@@ -18,4 +19,5 @@ relationships:
 # Calls
 
 - [query](../../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [insert_mapi_navigation_shortcut_change](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/insert_mapi_navigation_shortcut_change.md)

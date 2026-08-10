@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rop_debug_summary_uses_output_handle_for_open_stream_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L652-L695
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L707-L750
 visibility: private
 generated:
   by: okf-rs/0.3.0

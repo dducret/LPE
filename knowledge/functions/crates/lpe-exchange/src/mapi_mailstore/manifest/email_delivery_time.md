@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_delivery_time
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L71-L78
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L72-L79
 visibility: private
 generated:
   by: okf-rs/0.3.0

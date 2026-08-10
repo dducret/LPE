@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_descriptor_behavior_contract_requires_persisted_view_after_early_release
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L913-L1003
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L917-L1008
 visibility: private
 generated:
   by: okf-rs/0.3.0

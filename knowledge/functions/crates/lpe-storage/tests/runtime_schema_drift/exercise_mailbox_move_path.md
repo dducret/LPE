@@ -8,6 +8,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-core/src/sieve/context
   - functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from
   - functions/crates/lpe-storage/src/mapi_store_identity/mapi_xid
@@ -24,6 +25,7 @@ relationships:
 # Calls
 
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [context](../../../../../functions/crates/lpe-core/src/sieve/context.md)
 - [try_from](../../../../../functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from.md)
 - [mapi_xid](../../../../../functions/crates/lpe-storage/src/mapi_store_identity/mapi_xid.md)

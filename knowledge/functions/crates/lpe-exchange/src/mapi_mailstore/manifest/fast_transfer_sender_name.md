@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_sender_name
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L80-L87
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L81-L88
 visibility: private
 generated:
   by: okf-rs/0.3.0

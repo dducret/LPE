@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: expanded_categorized_rows
-resource: crates/lpe-exchange/src/mapi/tables/collapse.rs#L238-L277
+resource: crates/lpe-exchange/src/mapi/tables/collapse.rs#L238-L278
 visibility: private
 generated:
   by: okf-rs/0.3.0

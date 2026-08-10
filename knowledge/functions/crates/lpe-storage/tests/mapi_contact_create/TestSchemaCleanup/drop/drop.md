@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-core/src/sieve/context
   - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -23,3 +24,4 @@ relationships:
 - [context](../../../../../../../functions/crates/lpe-core/src/sieve/context.md)
 - [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
 - [query](../../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

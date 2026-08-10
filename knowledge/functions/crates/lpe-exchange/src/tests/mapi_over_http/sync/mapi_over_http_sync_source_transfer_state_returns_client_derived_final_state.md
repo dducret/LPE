@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_source_transfer_state_returns_client_derived_final_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8527-L8619
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8320-L8412
 visibility: private
 generated:
   by: okf-rs/0.3.0

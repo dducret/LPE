@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-storage/src/collaboration/Storage/ensure_default_calendar_in_tx
   - functions/crates/lpe-storage/src/mapi_events/Storage/move_calendar_events_to_collection_in_tx
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/change/Storage/insert_collaboration_tombstone_in_tx
   - functions/crates/lpe-storage/src/change/Storage/emit_collaboration_change
 ---
@@ -26,5 +27,6 @@ relationships:
 - [ensure_default_calendar_in_tx](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/ensure_default_calendar_in_tx.md)
 - [move_calendar_events_to_collection_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/move_calendar_events_to_collection_in_tx.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [insert_collaboration_tombstone_in_tx](../../../../../../functions/crates/lpe-storage/src/change/Storage/insert_collaboration_tombstone_in_tx.md)
 - [emit_collaboration_change](../../../../../../functions/crates/lpe-storage/src/change/Storage/emit_collaboration_change.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_backed_suggested_contacts_does_not_invent_osc_contact_sync
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1231-L1261
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1233-L1263
 visibility: private
 generated:
   by: okf-rs/0.3.0

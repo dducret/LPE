@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_folder_search_criteria_example_round_trips_message_class_and_importance
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L17254-L17472
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L16969-L17187
 visibility: private
 generated:
   by: okf-rs/0.3.0

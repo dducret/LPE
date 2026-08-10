@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_execute_returns_logon_owner_and_status_properties
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L537-L685
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L504-L652
 visibility: private
 generated:
   by: okf-rs/0.3.0

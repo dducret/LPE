@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: queue_metrics
-resource: LPE-CT/src/smtp.rs#L460-L488
+resource: LPE-CT/src/smtp.rs#L456-L484
 generated:
   by: okf-rs/0.3.0
 relationships:

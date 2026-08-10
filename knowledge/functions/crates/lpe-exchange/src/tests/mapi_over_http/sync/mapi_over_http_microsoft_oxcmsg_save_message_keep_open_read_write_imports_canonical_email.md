@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxcmsg_save_message_keep_open_read_write_imports_canonical_email
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L470-L561
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L434-L525
 visibility: private
 generated:
   by: okf-rs/0.3.0

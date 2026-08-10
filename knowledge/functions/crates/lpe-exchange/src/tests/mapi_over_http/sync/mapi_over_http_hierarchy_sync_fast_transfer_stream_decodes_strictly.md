@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7434-L7503
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7227-L7296
 visibility: private
 generated:
   by: okf-rs/0.3.0

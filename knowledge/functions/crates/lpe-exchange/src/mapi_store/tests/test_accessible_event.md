@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_accessible_event
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L108-L140
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L109-L141
 visibility: private
 generated:
   by: okf-rs/0.3.0

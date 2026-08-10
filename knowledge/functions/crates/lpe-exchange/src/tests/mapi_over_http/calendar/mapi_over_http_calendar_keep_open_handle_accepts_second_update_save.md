@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_keep_open_handle_accepts_second_update_save
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1407-L1717
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1425-L1724
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -10,8 +10,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test
   - functions/crates/lpe-exchange/src/tests/mapi_headers
   - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_mapi_utf16_property
   - functions/crates/lpe-exchange/src/tests/append_mapi_i64_property
   - functions/crates/lpe-exchange/src/tests/test_filetime
@@ -46,8 +45,7 @@ relationships:
 - [durable_special_folder_id_for_test](../../../../../../../functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test.md)
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
 - [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_mapi_utf16_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_utf16_property.md)
 - [append_mapi_i64_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_i64_property.md)
 - [test_filetime](../../../../../../../functions/crates/lpe-exchange/src/tests/test_filetime.md)

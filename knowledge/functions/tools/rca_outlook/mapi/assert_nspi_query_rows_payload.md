@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: assert_nspi_query_rows_payload
-resource: tools/rca_outlook/mapi.py#L185-L189
+resource: tools/rca_outlook/mapi.py#L277-L281
 generated:
   by: okf-rs/0.3.0
 relationships:

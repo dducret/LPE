@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_view_advertisement_state_tracks_multiple_owner_folders
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L546-L618
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L550-L622
 visibility: private
 generated:
   by: okf-rs/0.3.0

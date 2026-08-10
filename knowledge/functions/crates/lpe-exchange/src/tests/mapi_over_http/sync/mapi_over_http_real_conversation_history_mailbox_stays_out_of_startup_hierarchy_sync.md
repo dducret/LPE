@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_real_conversation_history_mailbox_stays_out_of_startup_hierarchy_sync
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7134-L7190
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6927-L6983
 visibility: private
 generated:
   by: okf-rs/0.3.0

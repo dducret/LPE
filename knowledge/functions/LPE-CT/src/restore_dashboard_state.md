@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: restore_dashboard_state
-resource: LPE-CT/src/main.rs#L952-L961
+resource: LPE-CT/src/main.rs#L967-L976
 visibility: private
 generated:
   by: okf-rs/0.3.0

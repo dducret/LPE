@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: captured_common_views_query_rows_flags_heterogeneous_missing_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5230-L5382
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5265-L5417
 visibility: private
 generated:
   by: okf-rs/0.3.0

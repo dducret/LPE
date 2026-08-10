@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: shared_mailbox_read_only_access
-resource: crates/lpe-jmap/src/tests.rs#L788-L795
+resource: crates/lpe-jmap/src/tests.rs#L790-L797
 visibility: private
 generated:
   by: okf-rs/0.3.0

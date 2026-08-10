@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_search_criteria_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1392-L1399
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1394-L1401
 generated:
   by: okf-rs/0.3.0
 relationships:

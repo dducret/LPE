@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: empty_conversation_action_settings_exposes_no_synthetic_rows
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1416-L1424
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1418-L1426
 visibility: private
 generated:
   by: okf-rs/0.3.0

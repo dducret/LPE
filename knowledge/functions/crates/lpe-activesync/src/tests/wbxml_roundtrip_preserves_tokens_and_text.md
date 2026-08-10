@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: wbxml_roundtrip_preserves_tokens_and_text
-resource: crates/lpe-activesync/src/tests.rs#L2637-L2647
+resource: crates/lpe-activesync/src/tests.rs#L2638-L2648
 visibility: private
 generated:
   by: okf-rs/0.3.0

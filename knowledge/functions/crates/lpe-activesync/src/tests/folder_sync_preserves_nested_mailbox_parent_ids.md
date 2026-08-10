@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_sync_preserves_nested_mailbox_parent_ids
-resource: crates/lpe-activesync/src/tests.rs#L3197-L3237
+resource: crates/lpe-activesync/src/tests.rs#L3198-L3238
 visibility: private
 generated:
   by: okf-rs/0.3.0

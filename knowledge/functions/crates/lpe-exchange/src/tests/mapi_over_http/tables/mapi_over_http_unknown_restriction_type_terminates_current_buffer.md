@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_unknown_restriction_type_terminates_current_buffer
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L3788-L3804
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L3615-L3631
 visibility: private
 generated:
   by: okf-rs/0.3.0

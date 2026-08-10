@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: event_mapi_access
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L158-L170
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L202-L214
 visibility: private
 generated:
   by: okf-rs/0.3.0

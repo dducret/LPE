@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ms_oxosfld_none_container_classes_serialize_as_empty_strings
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9882-L9901
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9945-L9964
 visibility: private
 generated:
   by: okf-rs/0.3.0

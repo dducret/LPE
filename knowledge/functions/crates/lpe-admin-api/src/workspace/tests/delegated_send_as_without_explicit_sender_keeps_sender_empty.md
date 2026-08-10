@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delegated_send_as_without_explicit_sender_keeps_sender_empty
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L698-L717
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L699-L718
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -7,7 +7,7 @@ generated:
 relationships:
   imports:
   - external/std-collections-btreemap
-  - external/anyhow-anyhow-bail-result
+  - external/anyhow-result-anyhow-bail
   - external/super
   member_of:
   - packages/crates/lpe-exchange
@@ -32,7 +32,7 @@ relationships:
 # Imports
 
 - `std::collections::BTreeMap`
-- `anyhow::{anyhow, bail, Result}`
+- `anyhow::{Result, anyhow, bail}`
 - `super::*`
 
 # Member of

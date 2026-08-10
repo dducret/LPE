@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: mapi_sent_subject_table_rops
-resource: tools/rca_outlook/mapi.py#L49-L60
+resource: tools/rca_outlook/mapi.py#L141-L152
 generated:
   by: okf-rs/0.3.0
 relationships:

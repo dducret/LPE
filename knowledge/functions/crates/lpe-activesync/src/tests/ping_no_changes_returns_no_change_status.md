@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ping_no_changes_returns_no_change_status
-resource: crates/lpe-activesync/src/tests.rs#L5326-L5356
+resource: crates/lpe-activesync/src/tests.rs#L5327-L5357
 visibility: private
 generated:
   by: okf-rs/0.3.0

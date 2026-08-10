@@ -31,7 +31,7 @@ relationships:
   - external/pub-use-crate-tasks-clienttask-clienttasklist-createtasklistinput-davtask-tasklistgrant-tasklistgrantinput-updatetasklistinput-upsertclienttaskinput
   - external/pub-use-crate-types-accountrecord-admindashboard-aliasrecord-antispamsettings-auditentryinput-auditevent-dashboardupdate-domainrecord-emailtraceresult-emailtracesearchinput-filterrule-healthresponse-localaisettings-mailflowentry-mailboxrecord-mailboxrule-newaccount-newalias-newdomain-newfilterrule-newmailbox-newserveradministrator-newstoragepool-outboundqueuestatusupdate-outlookprofilestate-overviewstats-protocolstatus-quarantineitem-securitysettings-serveradministrator-serversettings-sievescriptdocument-sievescriptsummary-storagecleanupcounts-storagecleanupplacementsummary-storagecleanupvisibilityresponse-storagehealthresponse-storagemetadatadiagnostics-storagemigrationcounts-storagemigrationjobsummary-storagemigrationvisibilityresponse-storageoverview-storageplacementcounts-storagepolicyoverview-storagepolicyscope-storagepolicysummary-storagepolicyupdate-storagepoolconfigsummary-storagepoolhealth-storagepoolreference-storagepoolsummary-updateaccount-updatedomain-updatestoragepool
   - external/pub-use-crate-util-normalize-mailbox-domain-normalize-mailbox-email
-  - external/pub-use-crate-workspace-clientcontact-clientevent-clientmessage-clientworkspace-recipientsuggestion-upsertclientcontactinput-upsertclienteventinput
+  - external/pub-use-crate-workspace-clientcontact-clientevent-clientmailbox-clientmessage-clientworkspace-recipientsuggestion-upsertclientcontactinput-upsertclienteventinput
   - external/pub-crate-use-crate-models
   - external/pub-crate-use-crate-pst-psttransferjobrow
   - external/pub-crate-use-crate-shared-canonical-change-channel-default-collection-id-default-contact-book-role-default-task-list-name-default-task-list-role-expected-schema-version-im-contact-list-collection-id-im-contact-list-role-max-sieve-scripts-per-account-max-sieve-script-bytes-platform-tenant-id-quick-contacts-collection-id-quick-contacts-role-suggested-contacts-collection-id-suggested-contacts-role
@@ -141,7 +141,7 @@ relationships:
 }`
 - `pub use crate::util::{normalize_mailbox_domain, normalize_mailbox_email}`
 - `pub use crate::workspace::{
-    ClientContact, ClientEvent, ClientMessage, ClientWorkspace, RecipientSuggestion,
+    ClientContact, ClientEvent, ClientMailbox, ClientMessage, ClientWorkspace, RecipientSuggestion,
     UpsertClientContactInput, UpsertClientEventInput,
 }`
 - `pub(crate) use crate::models::*`

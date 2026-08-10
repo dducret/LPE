@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_property_projects_outlook_table_identity_columns
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1513-L1545
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1569-L1601
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: blob_create_paths_reject_read_only_shared_accounts
-resource: crates/lpe-jmap/src/tests.rs#L8117-L8210
+resource: crates/lpe-jmap/src/tests.rs#L8120-L8213
 visibility: private
 generated:
   by: okf-rs/0.3.0

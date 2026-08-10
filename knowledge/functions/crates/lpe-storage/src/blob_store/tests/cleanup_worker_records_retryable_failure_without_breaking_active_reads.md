@@ -17,6 +17,7 @@ relationships:
   - functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/cleanup_old_retiring_placements
   - functions/crates/lpe-storage/src/blob_store/tests/assert_active_blob_read
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -35,3 +36,4 @@ relationships:
 - [cleanup_old_retiring_placements](../../../../../../functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/cleanup_old_retiring_placements.md)
 - [assert_active_blob_read](../../../../../../functions/crates/lpe-storage/src/blob_store/tests/assert_active_blob_read.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

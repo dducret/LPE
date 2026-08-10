@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rejected_quarantine_trace_recovers_from_spool_until_operator_delete
-resource: LPE-CT/src/smtp/tests.rs#L2860-L2918
+resource: LPE-CT/src/smtp/tests.rs#L2836-L2894
 visibility: private
 generated:
   by: okf-rs/0.3.0

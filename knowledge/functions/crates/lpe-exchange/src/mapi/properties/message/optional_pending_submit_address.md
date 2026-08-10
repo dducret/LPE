@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: optional_pending_submit_address
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L599-L604
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L747-L752
 visibility: private
 generated:
   by: okf-rs/0.3.0

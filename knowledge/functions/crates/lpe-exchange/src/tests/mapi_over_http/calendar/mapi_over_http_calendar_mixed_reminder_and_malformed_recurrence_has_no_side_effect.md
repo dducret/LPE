@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3880-L3976
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3938-L4034
 visibility: private
 generated:
   by: okf-rs/0.3.0

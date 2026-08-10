@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_sync_returns_mail_and_collaboration_collections
-resource: crates/lpe-activesync/src/tests.rs#L3093-L3194
+resource: crates/lpe-activesync/src/tests.rs#L3094-L3195
 visibility: private
 generated:
   by: okf-rs/0.3.0

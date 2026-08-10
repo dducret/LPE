@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_and_email_query_changes_replay_snapshot_differences
-resource: crates/lpe-jmap/src/tests.rs#L4142-L4219
+resource: crates/lpe-jmap/src/tests.rs#L4145-L4222
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -8,6 +8,7 @@ relationships:
   called_by:
   - functions/crates/lpe-dav/src/parse/parse_ical
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_display_to
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting_response_event_input_from_mapi
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_participants_from_mapi
   - functions/crates/lpe-exchange/src/service/ews/calendar/parse_create_event_input
@@ -23,6 +24,7 @@ relationships:
 
 - [parse_ical](../../../../../functions/crates/lpe-dav/src/parse/parse_ical.md)
 - [calendar_display_to](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_display_to.md)
+- [apply_calendar_pending_recipients](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients.md)
 - [meeting_response_event_input_from_mapi](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting_response_event_input_from_mapi.md)
 - [event_participants_from_mapi](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_participants_from_mapi.md)
 - [parse_create_event_input](../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/parse_create_event_input.md)

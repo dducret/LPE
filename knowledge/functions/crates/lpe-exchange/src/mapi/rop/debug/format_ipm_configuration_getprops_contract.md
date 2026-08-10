@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_ipm_configuration_getprops_contract
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1402-L1457
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L1403-L1458
 generated:
   by: okf-rs/0.3.0
 relationships:

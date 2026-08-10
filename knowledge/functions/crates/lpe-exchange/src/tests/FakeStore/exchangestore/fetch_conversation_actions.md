@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_conversation_actions
-resource: crates/lpe-exchange/src/tests/mod.rs#L9865-L9871
+resource: crates/lpe-exchange/src/tests/mod.rs#L9870-L9876
 visibility: private
 generated:
   by: okf-rs/0.3.0

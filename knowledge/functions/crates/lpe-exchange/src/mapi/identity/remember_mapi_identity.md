@@ -46,7 +46,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/tests/outlook_contact_view_email_alias_restriction_matches_primary_email
   - functions/crates/lpe-exchange/src/mapi/properties/tests/contact_property_projects_outlook_table_identity_columns
   - functions/crates/lpe-exchange/src/mapi/properties/tests/mailbox_parent_source_key_uses_real_parent_when_context_is_available
-  - functions/crates/lpe-exchange/src/mapi/properties/tests/rss_feed_messages_project_rss_message_class_and_named_properties
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/email_message_class_and_content_class_follow_canonical_projection
   - functions/crates/lpe-exchange/src/mapi/properties/tests/client_submit_time_falls_back_to_received_time_for_imported_mail
   - functions/crates/lpe-exchange/src/mapi/rop/tests/get_properties_specific_preserves_values_and_flags_absent_message_deadlines
   - functions/crates/lpe-exchange/src/mapi/rop/tests/get_properties_specific_resolves_unspecified_modeled_message_properties
@@ -124,6 +124,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_extended_rule_snapshot
   - functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_sort_snapshot
   - functions/crates/lpe-exchange/src/mapi/tables/tests/message_table_row_flags_absent_deadline_expiry_and_recall_times
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_invitation_contents_row_projects_meeting_request_class
   - functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items
   - functions/crates/lpe-exchange/src/mapi/tables/tests/message_row_projects_containing_folder_ids
   - functions/crates/lpe-exchange/src/mapi/tables/tests/draft_message_row_projects_mf_unsent_from_canonical_mailbox_state
@@ -289,7 +290,7 @@ relationships:
 - [outlook_contact_view_email_alias_restriction_matches_primary_email](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/outlook_contact_view_email_alias_restriction_matches_primary_email.md)
 - [contact_property_projects_outlook_table_identity_columns](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/contact_property_projects_outlook_table_identity_columns.md)
 - [mailbox_parent_source_key_uses_real_parent_when_context_is_available](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/mailbox_parent_source_key_uses_real_parent_when_context_is_available.md)
-- [rss_feed_messages_project_rss_message_class_and_named_properties](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/rss_feed_messages_project_rss_message_class_and_named_properties.md)
+- [email_message_class_and_content_class_follow_canonical_projection](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/email_message_class_and_content_class_follow_canonical_projection.md)
 - [client_submit_time_falls_back_to_received_time_for_imported_mail](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/client_submit_time_falls_back_to_received_time_for_imported_mail.md)
 - [get_properties_specific_preserves_values_and_flags_absent_message_deadlines](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/get_properties_specific_preserves_values_and_flags_absent_message_deadlines.md)
 - [get_properties_specific_resolves_unspecified_modeled_message_properties](../../../../../../functions/crates/lpe-exchange/src/mapi/rop/tests/get_properties_specific_resolves_unspecified_modeled_message_properties.md)
@@ -367,6 +368,7 @@ relationships:
 - [inbox_associated_extended_rule_snapshot](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/inbox_associated_extended_rule_snapshot.md)
 - [common_views_sort_snapshot](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_sort_snapshot.md)
 - [message_table_row_flags_absent_deadline_expiry_and_recall_times](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/message_table_row_flags_absent_deadline_expiry_and_recall_times.md)
+- [calendar_invitation_contents_row_projects_meeting_request_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_invitation_contents_row_projects_meeting_request_class.md)
 - [bcc_projections_only_expose_drafts_and_sent_items](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items.md)
 - [message_row_projects_containing_folder_ids](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/message_row_projects_containing_folder_ids.md)
 - [draft_message_row_projects_mf_unsent_from_canonical_mailbox_state](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/draft_message_row_projects_mf_unsent_from_canonical_mailbox_state.md)

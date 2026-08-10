@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: values
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/values.rs#L1-L128
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/values.rs#L1-L124
 generated:
   by: okf-rs/0.3.0
 relationships:

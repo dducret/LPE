@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normalize_smtp_target
-resource: LPE-CT/src/smtp.rs#L1235-L1241
+resource: LPE-CT/src/smtp.rs#L1238-L1244
 visibility: private
 generated:
   by: okf-rs/0.3.0

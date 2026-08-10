@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ensure_local_db_schema
-resource: LPE-CT/src/smtp.rs#L437-L441
+resource: LPE-CT/src/smtp.rs#L433-L437
 generated:
   by: okf-rs/0.3.0
 ---

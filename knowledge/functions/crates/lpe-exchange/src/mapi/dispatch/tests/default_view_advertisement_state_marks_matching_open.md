@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_view_advertisement_state_marks_matching_open
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L444-L485
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L444-L489
 visibility: private
 generated:
   by: okf-rs/0.3.0

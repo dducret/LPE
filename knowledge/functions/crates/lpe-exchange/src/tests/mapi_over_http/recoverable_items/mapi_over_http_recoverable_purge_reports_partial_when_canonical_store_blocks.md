@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_recoverable_purge_reports_partial_when_canonical_store_blocks
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L596-L646
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L587-L637
 visibility: private
 generated:
   by: okf-rs/0.3.0

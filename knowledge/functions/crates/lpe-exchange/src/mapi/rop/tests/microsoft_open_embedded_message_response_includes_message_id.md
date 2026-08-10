@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_open_embedded_message_response_includes_message_id
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4893-L4915
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4899-L4921
 generated:
   by: okf-rs/0.3.0
 relationships:

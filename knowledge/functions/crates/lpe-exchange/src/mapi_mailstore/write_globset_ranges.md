@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_globset_ranges
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1476-L1483
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1479-L1486
 visibility: private
 generated:
   by: okf-rs/0.3.0

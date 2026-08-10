@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rtf_uncompressed_container
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L343-L355
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L353-L365
 visibility: private
 generated:
   by: okf-rs/0.3.0

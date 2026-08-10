@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/ensure_copying_target_placement
   - functions/crates/lpe-storage/src/blob_store/io/PostgresBlobStore/write_migration_target_placement
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/blob_store/types/blob_migration_job_from_row
   called_by:
   - functions/crates/lpe-storage/src/blob_store/tests/create_verified_migration_job
@@ -38,6 +39,7 @@ relationships:
 - [ensure_copying_target_placement](../../../../../../functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/ensure_copying_target_placement.md)
 - [write_migration_target_placement](../../../../../../functions/crates/lpe-storage/src/blob_store/io/PostgresBlobStore/write_migration_target_placement.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [blob_migration_job_from_row](../../../../../../functions/crates/lpe-storage/src/blob_store/types/blob_migration_job_from_row.md)
 
 # Called by

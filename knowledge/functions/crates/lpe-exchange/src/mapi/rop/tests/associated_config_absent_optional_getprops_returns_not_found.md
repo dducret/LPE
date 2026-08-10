@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_absent_optional_getprops_returns_not_found
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2043-L2112
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2045-L2114
 visibility: private
 generated:
   by: okf-rs/0.3.0

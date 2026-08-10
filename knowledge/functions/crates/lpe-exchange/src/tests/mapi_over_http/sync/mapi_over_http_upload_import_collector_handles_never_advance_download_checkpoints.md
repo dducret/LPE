@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_upload_import_collector_handles_never_advance_download_checkpoints
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L9049-L9161
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8833-L8945
 visibility: private
 generated:
   by: okf-rs/0.3.0

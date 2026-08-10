@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_mailbox_owner_entry_id_details
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L670-L702
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L671-L703
 visibility: private
 generated:
   by: okf-rs/0.3.0

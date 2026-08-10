@@ -10,6 +10,9 @@ relationships:
   - functions/tools/rca_outlook/ews/require_ews_no_error
   - functions/tools/rca_outlook/ews/extract_ews_item_id
   - functions/tools/rca_outlook/http/require_guid_counter_header
+  - functions/tools/rca_outlook/mapi/parse_pox_mapi_http_endpoints
+  - functions/tools/rca_outlook/mapi/require_published_mapi_url
+  - functions/tools/rca_outlook/mapi/mapi_session_cookie_state
   - functions/tools/rca_outlook/mapi/mapi_http_binary_payload
   - functions/tools/rca_outlook/mapi/mapi_execute_response_rops
   - functions/tools/rca_outlook/mapi/le_u32
@@ -20,6 +23,11 @@ relationships:
   - functions/tools/rca_outlook/mapi/assert_nspi_query_rows_payload
   - functions/tools/rca_outlook/mapi/assert_nspi_get_props_payload
   - functions/tools/rca_outlook/mapi/assert_nspi_fixture_payload
+  - functions/tools/rca_outlook_connectivity_check/mapi_gate1_execute_response_rops
+  - functions/tools/rca_outlook_connectivity_check/mapi_gate1_hierarchy_rows
+  - functions/tools/rca_outlook_connectivity_check/read_utf16z
+  - functions/tools/rca_outlook_connectivity_check/read_string_cell
+  - functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness
   - functions/tools/rca_outlook_connectivity_check/check_pox_autodiscover
   - functions/tools/rca_outlook_connectivity_check/check_json_autodiscover
   - functions/tools/rca_outlook_connectivity_check/check_jmap_publication_headers
@@ -52,6 +60,9 @@ relationships:
 - [require_ews_no_error](../../../../functions/tools/rca_outlook/ews/require_ews_no_error.md)
 - [extract_ews_item_id](../../../../functions/tools/rca_outlook/ews/extract_ews_item_id.md)
 - [require_guid_counter_header](../../../../functions/tools/rca_outlook/http/require_guid_counter_header.md)
+- [parse_pox_mapi_http_endpoints](../../../../functions/tools/rca_outlook/mapi/parse_pox_mapi_http_endpoints.md)
+- [require_published_mapi_url](../../../../functions/tools/rca_outlook/mapi/require_published_mapi_url.md)
+- [mapi_session_cookie_state](../../../../functions/tools/rca_outlook/mapi/mapi_session_cookie_state.md)
 - [mapi_http_binary_payload](../../../../functions/tools/rca_outlook/mapi/mapi_http_binary_payload.md)
 - [mapi_execute_response_rops](../../../../functions/tools/rca_outlook/mapi/mapi_execute_response_rops.md)
 - [le_u32](../../../../functions/tools/rca_outlook/mapi/le_u32.md)
@@ -62,6 +73,11 @@ relationships:
 - [assert_nspi_query_rows_payload](../../../../functions/tools/rca_outlook/mapi/assert_nspi_query_rows_payload.md)
 - [assert_nspi_get_props_payload](../../../../functions/tools/rca_outlook/mapi/assert_nspi_get_props_payload.md)
 - [assert_nspi_fixture_payload](../../../../functions/tools/rca_outlook/mapi/assert_nspi_fixture_payload.md)
+- [mapi_gate1_execute_response_rops](../../../../functions/tools/rca_outlook_connectivity_check/mapi_gate1_execute_response_rops.md)
+- [mapi_gate1_hierarchy_rows](../../../../functions/tools/rca_outlook_connectivity_check/mapi_gate1_hierarchy_rows.md)
+- [read_utf16z](../../../../functions/tools/rca_outlook_connectivity_check/read_utf16z.md)
+- [read_string_cell](../../../../functions/tools/rca_outlook_connectivity_check/read_string_cell.md)
+- [check_mapi_gate1_readiness](../../../../functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness.md)
 - [check_pox_autodiscover](../../../../functions/tools/rca_outlook_connectivity_check/check_pox_autodiscover.md)
 - [check_json_autodiscover](../../../../functions/tools/rca_outlook_connectivity_check/check_json_autodiscover.md)
 - [check_jmap_publication_headers](../../../../functions/tools/rca_outlook_connectivity_check/check_jmap_publication_headers.md)

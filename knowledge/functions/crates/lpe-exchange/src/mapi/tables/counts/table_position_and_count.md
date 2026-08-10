@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_position_and_count
-resource: crates/lpe-exchange/src/mapi/tables/counts.rs#L221-L529
+resource: crates/lpe-exchange/src/mapi/tables/counts.rs#L221-L547
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -14,7 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/sort_deleted_items_content_rows
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/categorized_deleted_items_content_rows
   - functions/crates/lpe-exchange/src/mapi/tables/columns/default_contents_columns
-  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_for_folder
   - functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_contact_in_folder
@@ -75,7 +75,7 @@ relationships:
 - [sort_deleted_items_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/sort_deleted_items_content_rows.md)
 - [categorized_deleted_items_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/categorized_deleted_items_content_rows.md)
 - [default_contents_columns](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/columns/default_contents_columns.md)
-- [calendar_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows.md)
+- [calendar_content_rows_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid.md)
 - [collaboration_folder_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id.md)
 - [contacts_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_for_folder.md)
 - [restriction_matches_contact_in_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_contact_in_folder.md)

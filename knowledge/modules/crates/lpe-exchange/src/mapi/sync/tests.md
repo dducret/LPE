@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1-L2374
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1-L2434
 generated:
   by: okf-rs/0.3.0
 relationships:

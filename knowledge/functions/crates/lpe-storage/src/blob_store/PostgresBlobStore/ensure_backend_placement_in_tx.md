@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/active_blob_placement_exists_in_tx
   - functions/crates/lpe-storage/src/storage_backend/s3_put_object
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/put_durable_blob_in_tx
 ---
@@ -23,6 +24,7 @@ relationships:
 - [active_blob_placement_exists_in_tx](../../../../../../functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/active_blob_placement_exists_in_tx.md)
 - [s3_put_object](../../../../../../functions/crates/lpe-storage/src/storage_backend/s3_put_object.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

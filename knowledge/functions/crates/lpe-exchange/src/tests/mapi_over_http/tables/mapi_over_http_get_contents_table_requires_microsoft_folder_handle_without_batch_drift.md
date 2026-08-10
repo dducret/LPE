@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_contents_table_requires_microsoft_folder_handle_without_batch_drift
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L2607-L2666
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L2472-L2531
 visibility: private
 generated:
   by: okf-rs/0.3.0

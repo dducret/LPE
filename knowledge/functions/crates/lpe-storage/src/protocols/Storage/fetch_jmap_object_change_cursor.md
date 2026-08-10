@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_object_change_cursor
-resource: crates/lpe-storage/src/protocols.rs#L323-L348
+resource: crates/lpe-storage/src/protocols.rs#L324-L349
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ipm_hierarchy_state_matches_emitted_folder_projection
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1238-L1246
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1298-L1306
 visibility: private
 generated:
   by: okf-rs/0.3.0

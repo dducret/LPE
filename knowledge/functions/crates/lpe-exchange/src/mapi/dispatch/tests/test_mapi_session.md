@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_mapi_session
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L3030-L3082
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L3057-L3109
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -36,6 +36,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/unadvertised_default_conversation_action_set_properties_is_rejected
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/virtual_default_conversation_action_set_rejects_wrong_folder
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/unadvertised_default_conversation_action_delete_properties_is_rejected
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_restores_deliverable_notification_batch
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_does_not_restore_unmatched_notification
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/release_only_execute_with_notification_target_requires_identity_scope
@@ -83,6 +84,7 @@ relationships:
 - [unadvertised_default_conversation_action_set_properties_is_rejected](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/unadvertised_default_conversation_action_set_properties_is_rejected.md)
 - [virtual_default_conversation_action_set_rejects_wrong_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/virtual_default_conversation_action_set_rejects_wrong_folder.md)
 - [unadvertised_default_conversation_action_delete_properties_is_rejected](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/associated_config/unadvertised_default_conversation_action_delete_properties_is_rejected.md)
+- [execute_preserves_pending_table_notification_after_releasing_its_table](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table.md)
 - [execute_overflow_restores_deliverable_notification_batch](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_restores_deliverable_notification_batch.md)
 - [execute_overflow_does_not_restore_unmatched_notification](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_does_not_restore_unmatched_notification.md)
 - [release_only_execute_with_notification_target_requires_identity_scope](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/release_only_execute_with_notification_target_requires_identity_scope.md)

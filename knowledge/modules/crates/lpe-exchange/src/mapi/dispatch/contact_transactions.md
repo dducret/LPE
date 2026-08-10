@@ -7,7 +7,7 @@ generated:
 relationships:
   imports:
   - external/super
-  - external/anyhow-bail-result
+  - external/anyhow-result-bail
   member_of:
   - packages/crates/lpe-exchange
 ---
@@ -23,7 +23,7 @@ relationships:
 # Imports
 
 - `super::*`
-- `anyhow::{bail, Result}`
+- `anyhow::{Result, bail}`
 
 # Member of
 

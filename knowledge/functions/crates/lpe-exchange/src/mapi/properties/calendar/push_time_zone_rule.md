@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: push_time_zone_rule
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L391-L403
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L466-L478
 visibility: private
 generated:
   by: okf-rs/0.3.0

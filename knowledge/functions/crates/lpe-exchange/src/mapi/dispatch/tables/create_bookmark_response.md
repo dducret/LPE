@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: create_bookmark_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1344-L1353
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1346-L1355
 generated:
   by: okf-rs/0.3.0
 relationships:

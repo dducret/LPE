@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_view_handoff_table_contract_reports_client_normal_view
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L697-L710
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L701-L714
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_failed_sort_and_restrict_invalidate_table_until_success
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L17061-L17251
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L16776-L16966
 visibility: private
 generated:
   by: okf-rs/0.3.0

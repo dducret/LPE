@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_task_sync_versions
-resource: crates/lpe-exchange/src/tests/mod.rs#L8893-L8916
+resource: crates/lpe-exchange/src/tests/mod.rs#L8897-L8920
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_manifest_buffer_with_attachments
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L711-L771
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L714-L774
 generated:
   by: okf-rs/0.3.0
 relationships:

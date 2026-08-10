@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-storage/src/attachments/Storage/store_attachment_blob_in_tx
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/attachments/attachment_disposition
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   called_by:
   - functions/crates/lpe-storage/src/attachments/Storage/add_message_attachment
@@ -35,6 +36,7 @@ relationships:
 - [store_attachment_blob_in_tx](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/store_attachment_blob_in_tx.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [attachment_disposition](../../../../../../functions/crates/lpe-storage/src/attachments/attachment_disposition.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [push](../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
 
 # Called by

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_u64_from
-resource: crates/lpe-exchange/src/mapi/tables/collapse.rs#L291-L295
+resource: crates/lpe-exchange/src/mapi/tables/collapse.rs#L292-L296
 visibility: private
 generated:
   by: okf-rs/0.3.0

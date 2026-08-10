@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_deleted_events
-resource: crates/lpe-exchange/src/tests/mod.rs#L7853-L7859
+resource: crates/lpe-exchange/src/tests/mod.rs#L7854-L7860
 visibility: private
 generated:
   by: okf-rs/0.3.0

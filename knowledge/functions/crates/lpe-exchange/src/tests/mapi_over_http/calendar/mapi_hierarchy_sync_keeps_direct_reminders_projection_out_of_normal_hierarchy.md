@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_hierarchy_sync_keeps_direct_reminders_projection_out_of_normal_hierarchy
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8069-L8114
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8139-L8184
 visibility: private
 generated:
   by: okf-rs/0.3.0

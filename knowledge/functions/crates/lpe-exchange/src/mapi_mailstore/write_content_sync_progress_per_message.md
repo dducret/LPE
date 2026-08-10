@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_content_sync_progress_per_message
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1336-L1344
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1339-L1347
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ping_reports_changed_collections_after_sync_state_exists
-resource: crates/lpe-activesync/src/tests.rs#L5072-L5149
+resource: crates/lpe-activesync/src/tests.rs#L5073-L5150
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_ews_delegate
-resource: crates/lpe-exchange/src/tests/mod.rs#L5934-L5973
+resource: crates/lpe-exchange/src/tests/mod.rs#L5935-L5974
 visibility: private
 generated:
   by: okf-rs/0.3.0

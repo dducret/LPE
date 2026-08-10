@@ -1,24 +1,34 @@
 ---
 type: Python Module
 title: mapi
-resource: tools/rca_outlook/mapi.py#L1-L206
+resource: tools/rca_outlook/mapi.py#L1-L298
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/struct
   - external/uuid
+  - external/urllib-parse
+  - external/xml-etree-elementtree-as-et
+  - external/dataclasses
   - external/itertools
   - external/http
 ---
 
 # Contains
 
+- [MapiHttpEndpoints](../../../classes/tools/rca_outlook/mapi/MapiHttpEndpoints.md)
+- [xml_local_name](../../../functions/tools/rca_outlook/mapi/xml_local_name.md)
+- [xml_child_text](../../../functions/tools/rca_outlook/mapi/xml_child_text.md)
+- [parse_pox_mapi_http_endpoints](../../../functions/tools/rca_outlook/mapi/parse_pox_mapi_http_endpoints.md)
+- [require_published_mapi_url](../../../functions/tools/rca_outlook/mapi/require_published_mapi_url.md)
+- [mapi_session_cookie_state](../../../functions/tools/rca_outlook/mapi/mapi_session_cookie_state.md)
 - [mapi_request_id](../../../functions/tools/rca_outlook/mapi/mapi_request_id.md)
 - [mapi_client_info](../../../functions/tools/rca_outlook/mapi/mapi_client_info.md)
 - [utf16z](../../../functions/tools/rca_outlook/mapi/utf16z.md)
 - [contains_bytes](../../../functions/tools/rca_outlook/mapi/contains_bytes.md)
 - [mapi_folder_id](../../../functions/tools/rca_outlook/mapi/mapi_folder_id.md)
+- [mapi_wire_folder_id](../../../functions/tools/rca_outlook/mapi/mapi_wire_folder_id.md)
 - [mapi_execute_body](../../../functions/tools/rca_outlook/mapi/mapi_execute_body.md)
 - [mapi_rop_buffer](../../../functions/tools/rca_outlook/mapi/mapi_rop_buffer.md)
 - [mapi_sent_subject_table_rops](../../../functions/tools/rca_outlook/mapi/mapi_sent_subject_table_rops.md)
@@ -43,5 +53,8 @@ relationships:
 
 - `struct`
 - `uuid`
+- `urllib.parse`
+- `xml.etree.ElementTree as ET`
+- `dataclasses`
 - `itertools`
 - `.http`

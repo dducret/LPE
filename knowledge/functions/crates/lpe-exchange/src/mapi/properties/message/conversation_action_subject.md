@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: conversation_action_subject
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L383-L394
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L393-L404
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize
-resource: LPE-CT/src/smtp.rs#L1270-L1275
+resource: LPE-CT/src/smtp.rs#L1273-L1278
 generated:
   by: okf-rs/0.3.0
 ---

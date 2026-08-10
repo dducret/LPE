@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_nspi_operation_requires_bound_session_cookie
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L704-L724
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L686-L706
 visibility: private
 generated:
   by: okf-rs/0.3.0

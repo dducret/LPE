@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_mapi_only_change
-resource: crates/lpe-storage/src/protocols.rs#L1313-L1318
+resource: crates/lpe-storage/src/protocols.rs#L1332-L1337
 visibility: private
 generated:
   by: okf-rs/0.3.0

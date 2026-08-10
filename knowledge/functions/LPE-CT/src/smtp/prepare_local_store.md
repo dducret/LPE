@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: prepare_local_store
-resource: LPE-CT/src/smtp.rs#L429-L435
+resource: LPE-CT/src/smtp.rs#L425-L431
 generated:
   by: okf-rs/0.3.0
 relationships:

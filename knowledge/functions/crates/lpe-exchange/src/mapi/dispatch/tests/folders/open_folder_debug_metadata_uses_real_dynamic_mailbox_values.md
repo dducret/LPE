@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: open_folder_debug_metadata_uses_real_dynamic_mailbox_values
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L855-L877
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L856-L878
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_properties_for_open_reports_inbox_associated_content_count
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L781-L820
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L782-L821
 visibility: private
 generated:
   by: okf-rs/0.3.0

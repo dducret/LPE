@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxctabl_set_columns_example_round_trips_through_typed_parser
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5469-L5495
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5475-L5501
 visibility: private
 generated:
   by: okf-rs/0.3.0

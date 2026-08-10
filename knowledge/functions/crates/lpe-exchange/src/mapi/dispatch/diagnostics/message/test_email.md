@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_email
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/message.rs#L322-L371
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/message.rs#L322-L372
 visibility: private
 generated:
   by: okf-rs/0.3.0

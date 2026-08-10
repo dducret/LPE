@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_whole_start_end_update_canonical_event
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4860-L4976
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4907-L5023
 visibility: private
 generated:
   by: okf-rs/0.3.0

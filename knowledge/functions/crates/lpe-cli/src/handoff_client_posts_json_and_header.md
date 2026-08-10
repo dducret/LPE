@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: handoff_client_posts_json_and_header
-resource: crates/lpe-cli/src/main.rs#L457-L570
+resource: crates/lpe-cli/src/main.rs#L457-L571
 visibility: private
 generated:
   by: okf-rs/0.3.0

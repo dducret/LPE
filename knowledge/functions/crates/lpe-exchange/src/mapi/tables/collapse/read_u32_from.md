@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_u32_from
-resource: crates/lpe-exchange/src/mapi/tables/collapse.rs#L285-L289
+resource: crates/lpe-exchange/src/mapi/tables/collapse.rs#L286-L290
 visibility: private
 generated:
   by: okf-rs/0.3.0

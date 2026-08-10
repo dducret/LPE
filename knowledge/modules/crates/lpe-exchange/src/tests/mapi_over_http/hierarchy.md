@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: hierarchy
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1-L4120
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1-L4025
 generated:
   by: okf-rs/0.3.0
 relationships:

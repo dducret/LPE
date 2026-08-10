@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: websocket_push_states_include_shared_mailbox_accounts
-resource: crates/lpe-jmap/src/tests.rs#L11395-L11434
+resource: crates/lpe-jmap/src/tests.rs#L11398-L11437
 visibility: private
 generated:
   by: okf-rs/0.3.0

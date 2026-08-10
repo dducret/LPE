@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sort_table_rejects_hierarchy_tables
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L452-L510
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L407-L465
 visibility: private
 generated:
   by: okf-rs/0.3.0

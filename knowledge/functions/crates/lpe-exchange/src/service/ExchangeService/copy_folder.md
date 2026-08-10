@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: copy_folder
-resource: crates/lpe-exchange/src/service.rs#L565-L609
+resource: crates/lpe-exchange/src/service.rs#L567-L611
 visibility: private
 generated:
   by: okf-rs/0.3.0

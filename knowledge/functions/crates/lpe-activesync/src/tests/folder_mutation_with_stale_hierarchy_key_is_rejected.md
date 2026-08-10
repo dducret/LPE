@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_mutation_with_stale_hierarchy_key_is_rejected
-resource: crates/lpe-activesync/src/tests.rs#L3573-L3595
+resource: crates/lpe-activesync/src/tests.rs#L3574-L3596
 visibility: private
 generated:
   by: okf-rs/0.3.0

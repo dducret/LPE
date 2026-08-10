@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_create_search_folder_persists_only_after_criteria
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L849-L919
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L862-L932
 visibility: private
 generated:
   by: okf-rs/0.3.0

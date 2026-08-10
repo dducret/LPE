@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: json_text_matches
-resource: crates/lpe-storage/src/workspace.rs#L1095-L1106
+resource: crates/lpe-storage/src/workspace.rs#L1125-L1136
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_virtual_contacts_content_sync_stores_virtual_checkpoint
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1374-L1436
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1363-L1425
 visibility: private
 generated:
   by: okf-rs/0.3.0

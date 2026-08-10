@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_message_attachments_preserves_inline_content_id_metadata
-resource: crates/lpe-storage/src/mail.rs#L375-L401
+resource: crates/lpe-storage/src/mail.rs#L398-L424
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: appointment_fast_transfer_named_lid_includes_property_definition
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L744-L784
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L744-L812
 visibility: private
 generated:
   by: okf-rs/0.3.0

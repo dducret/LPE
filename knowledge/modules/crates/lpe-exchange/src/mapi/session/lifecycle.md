@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: lifecycle
-resource: crates/lpe-exchange/src/mapi/session/lifecycle.rs#L1-L445
+resource: crates/lpe-exchange/src/mapi/session/lifecycle.rs#L1-L453
 generated:
   by: okf-rs/0.3.0
 relationships:

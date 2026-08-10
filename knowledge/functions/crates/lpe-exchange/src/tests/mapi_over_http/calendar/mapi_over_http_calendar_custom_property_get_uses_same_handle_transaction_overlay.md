@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_custom_property_get_uses_same_handle_transaction_overlay
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1258-L1404
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1276-L1422
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_rop_binary_u16
-resource: crates/lpe-exchange/src/tests/mod.rs#L13625-L13639
+resource: crates/lpe-exchange/src/tests/mod.rs#L13630-L13644
 visibility: private
 generated:
   by: okf-rs/0.3.0

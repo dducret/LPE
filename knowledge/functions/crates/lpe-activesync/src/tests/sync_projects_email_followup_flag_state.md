@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_projects_email_followup_flag_state
-resource: crates/lpe-activesync/src/tests.rs#L5004-L5069
+resource: crates/lpe-activesync/src/tests.rs#L5005-L5070
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: PublicFolderRow
-resource: crates/lpe-storage/src/models.rs#L698-L715
+resource: crates/lpe-storage/src/models.rs#L701-L718
 generated:
   by: okf-rs/0.3.0
 ---

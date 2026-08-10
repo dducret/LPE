@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_get_projects_mapi_written_canonical_fields
-resource: crates/lpe-jmap/src/tests.rs#L12622-L12751
+resource: crates/lpe-jmap/src/tests.rs#L12625-L12754
 visibility: private
 generated:
   by: okf-rs/0.3.0

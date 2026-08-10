@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_resolve_names_projects_each_requested_recipient
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1048-L1098
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1043-L1093
 visibility: private
 generated:
   by: okf-rs/0.3.0

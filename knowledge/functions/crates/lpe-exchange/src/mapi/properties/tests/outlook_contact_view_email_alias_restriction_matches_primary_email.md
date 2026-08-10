@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_contact_view_email_alias_restriction_matches_primary_email
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1421-L1510
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1477-L1566
 visibility: private
 generated:
   by: okf-rs/0.3.0

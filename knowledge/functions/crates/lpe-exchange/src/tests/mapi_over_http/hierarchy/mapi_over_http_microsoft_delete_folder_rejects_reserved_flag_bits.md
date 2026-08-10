@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_delete_folder_rejects_reserved_flag_bits
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1570-L1620
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1529-L1579
 visibility: private
 generated:
   by: okf-rs/0.3.0

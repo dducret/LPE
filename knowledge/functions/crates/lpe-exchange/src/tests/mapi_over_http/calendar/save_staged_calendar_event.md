@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: save_staged_calendar_event
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3-L23
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L25-L45
 visibility: private
 generated:
   by: okf-rs/0.3.0

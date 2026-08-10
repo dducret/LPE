@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delegated_mailbox_access_requires_a_canonical_grant
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L800-L817
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L801-L818
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_move_copy_messages_accepts_nonzero_boolean_fields
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L878-L956
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L815-L893
 visibility: private
 generated:
   by: okf-rs/0.3.0

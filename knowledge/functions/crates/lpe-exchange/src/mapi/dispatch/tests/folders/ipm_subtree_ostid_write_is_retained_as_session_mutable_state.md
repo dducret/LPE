@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ipm_subtree_ostid_write_is_retained_as_session_mutable_state
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2028-L2048
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2041-L2061
 visibility: private
 generated:
   by: okf-rs/0.3.0

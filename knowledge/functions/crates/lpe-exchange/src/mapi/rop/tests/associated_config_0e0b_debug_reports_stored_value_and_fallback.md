@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_0e0b_debug_reports_stored_value_and_fallback
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1977-L2006
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1979-L2008
 visibility: private
 generated:
   by: okf-rs/0.3.0

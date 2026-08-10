@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_nspi_bootstrap_requests_return_success
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2114-L2398
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2130-L2414
 visibility: private
 generated:
   by: okf-rs/0.3.0

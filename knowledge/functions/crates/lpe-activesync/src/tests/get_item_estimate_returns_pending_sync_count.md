@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_item_estimate_returns_pending_sync_count
-resource: crates/lpe-activesync/src/tests.rs#L3952-L4058
+resource: crates/lpe-activesync/src/tests.rs#L3953-L4059
 visibility: private
 generated:
   by: okf-rs/0.3.0

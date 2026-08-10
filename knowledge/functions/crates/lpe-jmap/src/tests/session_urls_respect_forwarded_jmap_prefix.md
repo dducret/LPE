@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_urls_respect_forwarded_jmap_prefix
-resource: crates/lpe-jmap/src/tests.rs#L2473-L2514
+resource: crates/lpe-jmap/src/tests.rs#L2476-L2517
 visibility: private
 generated:
   by: okf-rs/0.3.0

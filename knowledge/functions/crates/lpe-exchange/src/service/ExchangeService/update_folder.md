@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_folder
-resource: crates/lpe-exchange/src/service.rs#L687-L775
+resource: crates/lpe-exchange/src/service.rs#L689-L777
 visibility: private
 generated:
   by: okf-rs/0.3.0

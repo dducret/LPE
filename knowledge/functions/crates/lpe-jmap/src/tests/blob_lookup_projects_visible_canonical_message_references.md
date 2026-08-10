@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: blob_lookup_projects_visible_canonical_message_references
-resource: crates/lpe-jmap/src/tests.rs#L11048-L11108
+resource: crates/lpe-jmap/src/tests.rs#L11051-L11111
 visibility: private
 generated:
   by: okf-rs/0.3.0

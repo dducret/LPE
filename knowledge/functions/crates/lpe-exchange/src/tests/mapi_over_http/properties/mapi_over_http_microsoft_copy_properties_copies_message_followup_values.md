@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_copy_properties_copies_message_followup_values
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6963-L7046
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L6534-L6617
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: PendingOutboundQueueRow
-resource: crates/lpe-storage/src/models.rs#L231-L246
+resource: crates/lpe-storage/src/models.rs#L232-L248
 generated:
   by: okf-rs/0.3.0
 ---

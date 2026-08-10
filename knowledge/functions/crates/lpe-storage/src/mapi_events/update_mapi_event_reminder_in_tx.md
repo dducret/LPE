@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_mapi_event_reminder_in_tx
-resource: crates/lpe-storage/src/mapi_events.rs#L951-L995
+resource: crates/lpe-storage/src/mapi_events.rs#L960-L1004
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-storage/src/mapi_events/reminder_patch_has_changes
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/mapi_events/Storage/create_mapi_event
   - functions/crates/lpe-storage/src/mapi_events/Storage/commit_mapi_event_update
@@ -22,6 +23,7 @@ relationships:
 
 - [reminder_patch_has_changes](../../../../../functions/crates/lpe-storage/src/mapi_events/reminder_patch_has_changes.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

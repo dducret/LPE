@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: process_outbound_handoff
-resource: LPE-CT/src/smtp.rs#L718-L1168
+resource: LPE-CT/src/smtp.rs#L714-L1171
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -11,8 +11,8 @@ relationships:
   - functions/LPE-CT/src/smtp/audit/append_transport_audit
   - functions/LPE-CT/src/smtp/outbound_policy/outbound_handoff_response_from_spool
   - functions/LPE-CT/src/smtp/outbound_policy/resolve_outbound_route
+  - functions/LPE-CT/src/smtp/protocol/max_smtp_message_size_bytes
   - functions/LPE-CT/src/dkim_signing/maybe_sign_outbound_message
-  - functions/LPE-CT/src/smtp/outbound/compose_rfc822_message
   - functions/crates/lpe-domain/src/transport/OutboundMessageHandoffRequest/envelope_recipients
   - functions/LPE-CT/src/smtp/evaluate_outbound_sender_policy
   - functions/LPE-CT/src/smtp/queue_store/persist_message
@@ -53,8 +53,8 @@ relationships:
 - [append_transport_audit](../../../../functions/LPE-CT/src/smtp/audit/append_transport_audit.md)
 - [outbound_handoff_response_from_spool](../../../../functions/LPE-CT/src/smtp/outbound_policy/outbound_handoff_response_from_spool.md)
 - [resolve_outbound_route](../../../../functions/LPE-CT/src/smtp/outbound_policy/resolve_outbound_route.md)
+- [max_smtp_message_size_bytes](../../../../functions/LPE-CT/src/smtp/protocol/max_smtp_message_size_bytes.md)
 - [maybe_sign_outbound_message](../../../../functions/LPE-CT/src/dkim_signing/maybe_sign_outbound_message.md)
-- [compose_rfc822_message](../../../../functions/LPE-CT/src/smtp/outbound/compose_rfc822_message.md)
 - [envelope_recipients](../../../../functions/crates/lpe-domain/src/transport/OutboundMessageHandoffRequest/envelope_recipients.md)
 - [evaluate_outbound_sender_policy](../../../../functions/LPE-CT/src/smtp/evaluate_outbound_sender_policy.md)
 - [persist_message](../../../../functions/LPE-CT/src/smtp/queue_store/persist_message.md)

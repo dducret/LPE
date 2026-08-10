@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_dn_to_mid_resolves_connect_display_name_legacy_dn_to_principal
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2513-L2535
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2529-L2551
 visibility: private
 generated:
   by: okf-rs/0.3.0

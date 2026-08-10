@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: new
-resource: crates/lpe-exchange/src/mapi/session/types.rs#L366-L375
+resource: crates/lpe-exchange/src/mapi/session/types.rs#L367-L377
 generated:
   by: okf-rs/0.3.0
 ---

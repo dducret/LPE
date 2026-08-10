@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bearer_headers
-resource: crates/lpe-exchange/src/tests/mod.rs#L12313-L12320
+resource: crates/lpe-exchange/src/tests/mod.rs#L12318-L12325
 visibility: private
 generated:
   by: okf-rs/0.3.0

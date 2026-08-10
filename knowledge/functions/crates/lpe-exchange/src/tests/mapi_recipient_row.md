@@ -1,12 +1,13 @@
 ---
 type: Rust Function
 title: mapi_recipient_row
-resource: crates/lpe-exchange/src/tests/mod.rs#L15811-L15817
+resource: crates/lpe-exchange/src/tests/mod.rs#L15816-L15822
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_reload_cached_information_returns_pending_message_summary
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities
@@ -27,6 +28,7 @@ relationships:
 
 # Called by
 
+- [mapi_over_http_calendar_pending_event_modify_recipients_succeeds](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds.md)
 - [mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end.md)
 - [mapi_over_http_reload_cached_information_returns_pending_message_summary](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/connect/mapi_over_http_reload_cached_information_returns_pending_message_summary.md)
 - [submit_new_mapi_message_with_identities](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/submission/submit_new_mapi_message_with_identities.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_common_views_import_classifies_non_wlink_fai_at_save
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L3052-L3203
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L2926-L3077
 visibility: private
 generated:
   by: okf-rs/0.3.0

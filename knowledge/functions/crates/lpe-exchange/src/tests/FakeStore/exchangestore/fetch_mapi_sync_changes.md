@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_mapi_sync_changes
-resource: crates/lpe-exchange/src/tests/mod.rs#L7225-L7234
+resource: crates/lpe-exchange/src/tests/mod.rs#L7226-L7235
 visibility: private
 generated:
   by: okf-rs/0.3.0

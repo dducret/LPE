@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mapi_events
-resource: crates/lpe-storage/src/mapi_events.rs#L1-L1518
+resource: crates/lpe-storage/src/mapi_events.rs#L1-L1533
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -53,7 +53,7 @@ relationships:
 - [rotate_active_mapi_event_identities_in_tx](../../../../functions/crates/lpe-storage/src/mapi_events/rotate_active_mapi_event_identities_in_tx.md)
 - [rotate_mapi_event_identities_in_tx](../../../../functions/crates/lpe-storage/src/mapi_events/rotate_mapi_event_identities_in_tx.md)
 - [calendar_event_affected_principals_in_tx](../../../../functions/crates/lpe-storage/src/mapi_events/Storage/calendar_event_affected_principals_in_tx.md)
-- [fetch_event_updated_at_in_tx](../../../../functions/crates/lpe-storage/src/mapi_events/fetch_event_updated_at_in_tx.md)
+- [fetch_event_timestamps_in_tx](../../../../functions/crates/lpe-storage/src/mapi_events/fetch_event_timestamps_in_tx.md)
 - [mapi_event_version_from_row](../../../../functions/crates/lpe-storage/src/mapi_events/mapi_event_version_from_row.md)
 - [mapi_change_key](../../../../functions/crates/lpe-storage/src/mapi_events/mapi_change_key.md)
 - [merge_predecessor_change_list](../../../../functions/crates/lpe-storage/src/mapi_events/merge_predecessor_change_list.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_value_stream_bytes
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L309-L324
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L310-L325
 visibility: private
 generated:
   by: okf-rs/0.3.0

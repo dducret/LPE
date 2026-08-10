@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_cached_mode_properties_include_canonical_change_keys
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4031-L4153
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L3764-L3877
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -10,8 +10,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/canonical_message_change_number
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_rfc3339_utc
   - functions/crates/lpe-exchange/src/tests/mapi_headers
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_mapi_wire_id
   - functions/crates/lpe-exchange/src/tests/test_mapi_folder_id
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
@@ -31,8 +30,7 @@ relationships:
 - [canonical_message_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/canonical_message_change_number.md)
 - [filetime_from_rfc3339_utc](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_rfc3339_utc.md)
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_mapi_wire_id](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_wire_id.md)
 - [test_mapi_folder_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_folder_id.md)
 - [push](../../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)

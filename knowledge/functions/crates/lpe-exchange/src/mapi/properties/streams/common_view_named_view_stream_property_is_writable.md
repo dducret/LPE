@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_view_named_view_stream_property_is_writable
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L298-L307
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L299-L308
 visibility: private
 generated:
   by: okf-rs/0.3.0

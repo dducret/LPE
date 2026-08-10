@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_notification_wait_serializes_canonical_hierarchy_details
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3012-L3105
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2917-L3010
 visibility: private
 generated:
   by: okf-rs/0.3.0

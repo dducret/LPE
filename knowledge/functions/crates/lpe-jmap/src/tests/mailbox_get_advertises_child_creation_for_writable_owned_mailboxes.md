@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_get_advertises_child_creation_for_writable_owned_mailboxes
-resource: crates/lpe-jmap/src/tests.rs#L6830-L6878
+resource: crates/lpe-jmap/src/tests.rs#L6833-L6881
 visibility: private
 generated:
   by: okf-rs/0.3.0

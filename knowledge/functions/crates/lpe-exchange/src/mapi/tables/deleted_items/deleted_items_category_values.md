@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_items_category_values
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L224-L241
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L232-L249
 visibility: private
 generated:
   by: okf-rs/0.3.0

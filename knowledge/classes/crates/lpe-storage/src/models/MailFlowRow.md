@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: MailFlowRow
-resource: crates/lpe-storage/src/models.rs#L842-L865
+resource: crates/lpe-storage/src/models.rs#L845-L868
 generated:
   by: okf-rs/0.3.0
 ---

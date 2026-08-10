@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_special_message_property
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L428-L475
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L439-L487
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -17,7 +17,7 @@ relationships:
 
 # Signature
 
-`pub(super) fn write_special_message_property( buffer: &mut Vec<u8>, object: &SpecialMessageSyncFact, property_tag: u32, value: &SpecialMessagePropertyValue, )`
+`pub(super) fn write_special_message_property( buffer: &mut Vec<u8>, object: &SpecialMessageSyncFact, property_tag: u32, value: &SpecialMessagePropertyValue, ) -> bool`
 
 # Calls
 

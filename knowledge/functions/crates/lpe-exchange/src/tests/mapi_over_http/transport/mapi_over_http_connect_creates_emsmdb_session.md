@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/mapi_headers
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
+  - functions/crates/lpe-core/src/sieve/Parser/expect
   - functions/crates/lpe-exchange/src/tests/strip_mapi_http_envelope
 ---
 
@@ -20,4 +21,5 @@ relationships:
 
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
 - [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
+- [expect](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/expect.md)
 - [strip_mapi_http_envelope](../../../../../../../functions/crates/lpe-exchange/src/tests/strip_mapi_http_envelope.md)

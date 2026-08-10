@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_mapi_empty_deleted_items_fixture
-resource: tools/rca_outlook_connectivity_check.py#L1094-L1181
+resource: tools/rca_outlook_connectivity_check.py#L1343-L1430
 generated:
   by: okf-rs/0.3.0
 relationships:

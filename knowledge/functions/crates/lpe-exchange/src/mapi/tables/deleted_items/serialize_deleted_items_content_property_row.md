@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_deleted_items_content_property_row
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L112-L134
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L120-L142
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_accessible_contact
-resource: crates/lpe-exchange/src/tests/mod.rs#L8971-L9018
+resource: crates/lpe-exchange/src/tests/mod.rs#L8975-L9022
 visibility: private
 generated:
   by: okf-rs/0.3.0

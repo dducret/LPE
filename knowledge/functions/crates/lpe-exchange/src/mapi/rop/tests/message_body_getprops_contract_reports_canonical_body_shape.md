@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_body_getprops_contract_reports_canonical_body_shape
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2730-L2838
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2732-L2841
 visibility: private
 generated:
   by: okf-rs/0.3.0

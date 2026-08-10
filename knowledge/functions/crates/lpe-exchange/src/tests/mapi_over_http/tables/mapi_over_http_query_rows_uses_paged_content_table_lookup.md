@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_query_rows_uses_paged_content_table_lookup
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L2718-L2784
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L2583-L2649
 visibility: private
 generated:
   by: okf-rs/0.3.0

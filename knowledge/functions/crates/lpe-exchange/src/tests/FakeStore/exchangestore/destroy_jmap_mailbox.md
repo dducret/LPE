@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: destroy_jmap_mailbox
-resource: crates/lpe-exchange/src/tests/mod.rs#L11006-L11023
+resource: crates/lpe-exchange/src/tests/mod.rs#L11011-L11028
 visibility: private
 generated:
   by: okf-rs/0.3.0

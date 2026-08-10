@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_items_content_row_time
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L321-L326
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L329-L334
 visibility: private
 generated:
   by: okf-rs/0.3.0

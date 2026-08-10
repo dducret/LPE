@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ping_too_many_monitored_folders_returns_max_folders
-resource: crates/lpe-activesync/src/tests.rs#L5481-L5499
+resource: crates/lpe-activesync/src/tests.rs#L5482-L5500
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_get_valid_attachments_rejects_missing_event_handle
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2598-L2623
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2600-L2625
 visibility: private
 generated:
   by: okf-rs/0.3.0

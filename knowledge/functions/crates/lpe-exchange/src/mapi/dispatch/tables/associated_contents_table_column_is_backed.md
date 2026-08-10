@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_contents_table_column_is_backed
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1081-L1129
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1083-L1131
 visibility: private
 generated:
   by: okf-rs/0.3.0

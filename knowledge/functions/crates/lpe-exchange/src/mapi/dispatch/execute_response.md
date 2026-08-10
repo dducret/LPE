@@ -52,8 +52,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan
   - functions/crates/lpe-exchange/src/mapi/store_adapter/access_plan/hierarchy_sync_selective_fallback_plan
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/identity_codec
-  called_by:
-  - functions/crates/lpe-exchange/src/mapi/transport/handle_mapi
 ---
 
 # Signature
@@ -108,7 +106,3 @@ relationships:
 - [load_mapi_store_for_access_plan](../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/load_mapi_store_for_access_plan.md)
 - [hierarchy_sync_selective_fallback_plan](../../../../../../functions/crates/lpe-exchange/src/mapi/store_adapter/access_plan/hierarchy_sync_selective_fallback_plan.md)
 - [identity_codec](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/identity_codec.md)
-
-# Called by
-
-- [handle_mapi](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/handle_mapi.md)

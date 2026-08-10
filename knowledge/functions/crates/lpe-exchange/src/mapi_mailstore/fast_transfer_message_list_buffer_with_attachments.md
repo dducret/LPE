@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_message_list_buffer_with_attachments
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L773-L799
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L776-L802
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: release
-resource: crates/lpe-exchange/src/mapi/dispatch/release.rs#L1-L768
+resource: crates/lpe-exchange/src/mapi/dispatch/release.rs#L1-L761
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_content_sync_first_folder_decodes_outlook_message_changes
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5676-L5752
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5514-L5590
 visibility: private
 generated:
   by: okf-rs/0.3.0

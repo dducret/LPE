@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_event_row_with_reminder_and_attachments
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L131-L151
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L132-L152
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: client_submit_time_falls_back_to_received_time_for_imported_mail
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5744-L5825
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5873-L5955
 visibility: private
 generated:
   by: okf-rs/0.3.0

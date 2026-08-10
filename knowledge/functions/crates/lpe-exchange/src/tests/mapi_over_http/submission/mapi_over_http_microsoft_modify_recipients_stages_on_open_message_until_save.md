@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_modify_recipients_stages_on_open_message_until_save
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L831-L931
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L795-L895
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: duplicate_terminal_handoff_is_recognized_by_remote_reference
-resource: crates/lpe-storage/src/outbound.rs#L476-L488
+resource: crates/lpe-storage/src/outbound.rs#L483-L495
 visibility: private
 generated:
   by: okf-rs/0.3.0

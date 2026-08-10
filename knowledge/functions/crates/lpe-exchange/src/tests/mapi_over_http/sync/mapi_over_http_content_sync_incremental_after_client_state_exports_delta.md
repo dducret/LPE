@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_content_sync_incremental_after_client_state_exports_delta
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5921-L6028
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5759-L5866
 visibility: private
 generated:
   by: okf-rs/0.3.0

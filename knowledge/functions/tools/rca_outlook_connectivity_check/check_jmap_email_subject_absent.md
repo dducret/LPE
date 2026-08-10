@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_jmap_email_subject_absent
-resource: tools/rca_outlook_connectivity_check.py#L380-L418
+resource: tools/rca_outlook_connectivity_check.py#L629-L667
 generated:
   by: okf-rs/0.3.0
 relationships:

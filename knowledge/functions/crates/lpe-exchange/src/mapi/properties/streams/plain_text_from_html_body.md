@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: plain_text_from_html_body
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L915-L941
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L916-L942
 visibility: private
 generated:
   by: okf-rs/0.3.0

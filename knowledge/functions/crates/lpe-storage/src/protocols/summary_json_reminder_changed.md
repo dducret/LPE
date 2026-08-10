@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: summary_json_reminder_changed
-resource: crates/lpe-storage/src/protocols.rs#L1393-L1398
+resource: crates/lpe-storage/src/protocols.rs#L1412-L1417
 visibility: private
 generated:
   by: okf-rs/0.3.0

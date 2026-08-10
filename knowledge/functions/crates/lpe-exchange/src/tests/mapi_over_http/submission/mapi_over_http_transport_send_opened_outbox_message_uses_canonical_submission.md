@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_transport_send_opened_outbox_message_uses_canonical_submission
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1766-L1840
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1730-L1804
 visibility: private
 generated:
   by: okf-rs/0.3.0

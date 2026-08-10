@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_create_search_folder_without_criteria_is_not_persisted
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L989-L1031
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1002-L1044
 visibility: private
 generated:
   by: okf-rs/0.3.0

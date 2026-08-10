@@ -78,6 +78,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_ids
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_ids
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_empty_advertised_calendar_create_uses_default_collection
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect
@@ -134,6 +135,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_shared_calendar_hierarchy_sync_projects_owner_entry_id_identity
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_shared_calendar_read_only_rights_reject_mutations
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_get_properties_all_lists_entry_id_identity
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_accepts_canonical_calendar_mapping
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_accepts_canonical_custom_calendar_mapping
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_rejects_noncanonical_calendar_mapping
@@ -281,7 +283,9 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_bind_reestablishes_nspi_session_cookie
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_operation_rejects_mismatched_sequence_cookie
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_bootstrap_requests_handle_stale_cleanup_and_reject_stateful_cookies
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_returns_nspi_and_mailbox_urls
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_microsoft_oxnspi_hierarchy_and_query_rows_example_round_trips
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves_self
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_unbind_consumes_nspi_session
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_freebusy_messages
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_sharing_8aa6_named_property_no_create_is_well_known
@@ -760,6 +764,7 @@ relationships:
 - [mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_ids](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_create_resolves_mailbox_named_property_ids.md)
 - [mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_ids](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_outlook_calendar_sort_normalizes_dynamic_named_property_ids.md)
 - [mapi_over_http_empty_advertised_calendar_create_uses_default_collection](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_empty_advertised_calendar_create_uses_default_collection.md)
+- [mapi_over_http_calendar_pending_event_modify_recipients_succeeds](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds.md)
 - [mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event.md)
 - [mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_create_reports_malformed_recurrence_and_saves_valid_properties.md)
 - [mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect.md)
@@ -816,6 +821,7 @@ relationships:
 - [mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity.md)
 - [mapi_over_http_shared_calendar_hierarchy_sync_projects_owner_entry_id_identity](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_shared_calendar_hierarchy_sync_projects_owner_entry_id_identity.md)
 - [mapi_over_http_shared_calendar_read_only_rights_reject_mutations](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_shared_calendar_read_only_rights_reject_mutations.md)
+- [mapi_over_http_calendar_get_properties_all_lists_entry_id_identity](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_get_properties_all_lists_entry_id_identity.md)
 - [mapi_over_http_set_receive_folder_accepts_canonical_calendar_mapping](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_accepts_canonical_calendar_mapping.md)
 - [mapi_over_http_set_receive_folder_accepts_canonical_custom_calendar_mapping](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_accepts_canonical_custom_calendar_mapping.md)
 - [mapi_over_http_set_receive_folder_rejects_noncanonical_calendar_mapping](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_set_receive_folder_rejects_noncanonical_calendar_mapping.md)
@@ -963,7 +969,9 @@ relationships:
 - [mapi_over_http_bind_reestablishes_nspi_session_cookie](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_bind_reestablishes_nspi_session_cookie.md)
 - [mapi_over_http_nspi_operation_rejects_mismatched_sequence_cookie](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_operation_rejects_mismatched_sequence_cookie.md)
 - [mapi_over_http_nspi_bootstrap_requests_handle_stale_cleanup_and_reject_stateful_cookies](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_nspi_bootstrap_requests_handle_stale_cleanup_and_reject_stateful_cookies.md)
+- [mapi_over_http_returns_nspi_and_mailbox_urls](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_returns_nspi_and_mailbox_urls.md)
 - [mapi_over_http_microsoft_oxnspi_hierarchy_and_query_rows_example_round_trips](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_microsoft_oxnspi_hierarchy_and_query_rows_example_round_trips.md)
+- [mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves_self](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves_self.md)
 - [mapi_over_http_unbind_consumes_nspi_session](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/nspi/mapi_over_http_unbind_consumes_nspi_session.md)
 - [mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_freebusy_messages](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_freebusy_messages.md)
 - [mapi_over_http_sharing_8aa6_named_property_no_create_is_well_known](../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/permissions/mapi_over_http_sharing_8aa6_named_property_no_create_is_well_known.md)

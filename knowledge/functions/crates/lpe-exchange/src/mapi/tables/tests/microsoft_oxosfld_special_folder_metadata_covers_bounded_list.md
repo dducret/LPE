@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxosfld_special_folder_metadata_covers_bounded_list
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3206-L3375
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L3240-L3409
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_rfc822_headers_bytes
-resource: crates/lpe-magika/src/mime.rs#L231-L234
+resource: crates/lpe-magika/src/mime.rs#L222-L225
 visibility: private
 generated:
   by: okf-rs/0.3.0

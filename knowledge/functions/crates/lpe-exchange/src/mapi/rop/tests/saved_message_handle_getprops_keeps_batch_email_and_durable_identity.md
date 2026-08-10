@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: saved_message_handle_getprops_keeps_batch_email_and_durable_identity
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2953-L3162
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2957-L3167
 visibility: private
 generated:
   by: okf-rs/0.3.0

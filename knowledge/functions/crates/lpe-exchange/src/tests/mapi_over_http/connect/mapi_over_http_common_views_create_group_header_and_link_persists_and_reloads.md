@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_common_views_create_group_header_and_link_persists_and_reloads
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2539-L2672
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2422-L2555
 visibility: private
 generated:
   by: okf-rs/0.3.0

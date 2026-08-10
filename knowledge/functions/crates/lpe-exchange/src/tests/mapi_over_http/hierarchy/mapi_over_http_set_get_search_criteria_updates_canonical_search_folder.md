@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_get_search_criteria_updates_canonical_search_folder
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3872-L3984
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3777-L3889
 visibility: private
 generated:
   by: okf-rs/0.3.0

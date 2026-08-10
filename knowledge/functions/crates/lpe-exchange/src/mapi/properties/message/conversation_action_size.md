@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: conversation_action_size
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L396-L414
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L406-L424
 generated:
   by: okf-rs/0.3.0
 relationships:

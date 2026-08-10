@@ -44,6 +44,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/property_mutations/append_set_properties_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/property_mutations/append_delete_properties_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_read_recipients_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_remove_all_recipients_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_modify_recipients_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/release/append_release_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/rules/append_get_rules_table_response
@@ -122,6 +123,7 @@ relationships:
 - [append_set_properties_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/property_mutations/append_set_properties_response.md)
 - [append_delete_properties_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/property_mutations/append_delete_properties_response.md)
 - [append_read_recipients_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_read_recipients_response.md)
+- [append_remove_all_recipients_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_remove_all_recipients_response.md)
 - [append_modify_recipients_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_modify_recipients_response.md)
 - [append_release_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/release/append_release_response.md)
 - [append_get_rules_table_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/rules/append_get_rules_table_response.md)

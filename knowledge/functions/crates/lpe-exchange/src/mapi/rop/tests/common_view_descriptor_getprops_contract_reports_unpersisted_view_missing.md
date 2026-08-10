@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_view_descriptor_getprops_contract_reports_unpersisted_view_missing
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1109-L1138
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1111-L1140
 visibility: private
 generated:
   by: okf-rs/0.3.0

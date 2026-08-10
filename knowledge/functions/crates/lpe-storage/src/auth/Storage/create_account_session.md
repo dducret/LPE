@@ -7,6 +7,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-admin-api/src/client_auth/client_login
   - functions/crates/lpe-admin-api/src/client_auth/client_oidc_callback
@@ -19,6 +20,7 @@ relationships:
 # Calls
 
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

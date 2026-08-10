@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_hierarchy_change_number
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L467-L472
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L470-L475
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_resolve_names_honors_requested_rca_columns
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L938-L980
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L933-L975
 visibility: private
 generated:
   by: okf-rs/0.3.0

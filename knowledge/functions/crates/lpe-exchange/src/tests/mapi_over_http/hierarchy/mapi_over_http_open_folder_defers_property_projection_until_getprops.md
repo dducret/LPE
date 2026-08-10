@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_folder_defers_property_projection_until_getprops
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2220-L2288
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2143-L2211
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: benchmark_mailbox_listing_and_push_paths
-resource: crates/lpe-jmap/src/tests.rs#L15401-L15563
+resource: crates/lpe-jmap/src/tests.rs#L15404-L15566
 visibility: private
 generated:
   by: okf-rs/0.3.0

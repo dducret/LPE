@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: submit_message
-resource: crates/lpe-storage/src/submission.rs#L643-L1019
+resource: crates/lpe-storage/src/submission.rs#L644-L1022
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -15,10 +15,12 @@ relationships:
   - functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx
   - functions/crates/lpe-storage/src/submission/types/participants_normalized
   - functions/crates/lpe-storage/src/shared/Storage/load_account_domain_id_in_tx
+  - functions/crates/lpe-storage/src/submission/mime/render_submission_raw_message
   - functions/crates/lpe-storage/src/shared/Storage/store_message_blob_in_tx
   - functions/crates/lpe-storage/src/submission/types/canonical_submission_phases
   - functions/crates/lpe-storage/src/shared/Storage/ensure_mailbox
   - functions/crates/lpe-domain/src/crypto/sha256_hex
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/replace_message_headers_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/upsert_message_body_in_tx
   - functions/crates/lpe-storage/src/attachments/Storage/ingest_message_attachments_in_tx
@@ -50,10 +52,12 @@ relationships:
 - [fetch_draft_attachment_inputs_in_tx](../../../../../../functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx.md)
 - [participants_normalized](../../../../../../functions/crates/lpe-storage/src/submission/types/participants_normalized.md)
 - [load_account_domain_id_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/load_account_domain_id_in_tx.md)
+- [render_submission_raw_message](../../../../../../functions/crates/lpe-storage/src/submission/mime/render_submission_raw_message.md)
 - [store_message_blob_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/store_message_blob_in_tx.md)
 - [canonical_submission_phases](../../../../../../functions/crates/lpe-storage/src/submission/types/canonical_submission_phases.md)
 - [ensure_mailbox](../../../../../../functions/crates/lpe-storage/src/shared/Storage/ensure_mailbox.md)
 - [sha256_hex](../../../../../../functions/crates/lpe-domain/src/crypto/sha256_hex.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [replace_message_headers_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/replace_message_headers_in_tx.md)
 - [upsert_message_body_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/upsert_message_body_in_tx.md)
 - [ingest_message_attachments_in_tx](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/ingest_message_attachments_in_tx.md)

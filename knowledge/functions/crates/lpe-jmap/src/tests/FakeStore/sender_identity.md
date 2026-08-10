@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: sender_identity
-resource: crates/lpe-jmap/src/tests.rs#L807-L818
+resource: crates/lpe-jmap/src/tests.rs#L809-L820
 visibility: private
 generated:
   by: okf-rs/0.3.0

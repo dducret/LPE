@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: decode_text_charset
-resource: crates/lpe-magika/src/mime.rs#L334-L343
+resource: crates/lpe-magika/src/mime.rs#L325-L334
 visibility: private
 generated:
   by: okf-rs/0.3.0

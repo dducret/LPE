@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: queue_metrics_count_runtime_spool_messages_by_state
-resource: LPE-CT/src/main.rs#L1233-L1256
+resource: LPE-CT/src/main.rs#L1253-L1276
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_async_table_control_rops_return_rop_specific_protocol_errors
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8259-L8330
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8052-L8123
 visibility: private
 generated:
   by: okf-rs/0.3.0

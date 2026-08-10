@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/LPE-CT/src/smtp/reputation/load_reputation_store
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/LPE-CT/src/smtp/reputation/save_reputation_store
   called_by:
   - functions/LPE-CT/src/smtp/session/receive_message_with_validator
@@ -28,6 +29,7 @@ relationships:
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [load_reputation_store](../../../../../functions/LPE-CT/src/smtp/reputation/load_reputation_store.md)
 - [get](../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [save_reputation_store](../../../../../functions/LPE-CT/src/smtp/reputation/save_reputation_store.md)
 
 # Called by

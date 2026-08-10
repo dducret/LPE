@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: apiVoid
-resource: web/client/src/useClientWorkspace.ts#L66-L73
+resource: web/client/src/useClientWorkspace.ts#L67-L74
 generated:
   by: okf-rs/0.3.0
 relationships:

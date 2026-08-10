@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/postgres_mapi_calendar_fixture
   - functions/crates/lpe-storage/src/core/Storage/pool
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_or_allocate_mapi_identities
   - functions/LPE-CT/web/app/smoke/test/MockClassList/remove
 ---
@@ -23,5 +24,6 @@ relationships:
 - [postgres_mapi_calendar_fixture](../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_calendar_fixture.md)
 - [pool](../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [fetch_or_allocate_mapi_identities](../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_or_allocate_mapi_identities.md)
 - [remove](../../../../../functions/LPE-CT/web/app/smoke/test/MockClassList/remove.md)

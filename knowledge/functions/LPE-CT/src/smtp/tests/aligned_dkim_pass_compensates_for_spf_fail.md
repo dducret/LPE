@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: aligned_dkim_pass_compensates_for_spf_fail
-resource: LPE-CT/src/smtp/tests.rs#L3343-L3359
+resource: LPE-CT/src/smtp/tests.rs#L3319-L3335
 visibility: private
 generated:
   by: okf-rs/0.3.0

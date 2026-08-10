@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L12554-L12690
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L12311-L12447
 visibility: private
 generated:
   by: okf-rs/0.3.0

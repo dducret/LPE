@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_contents_table_rejects_soft_deletes_flag
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L2513-L2555
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L2378-L2420
 visibility: private
 generated:
   by: okf-rs/0.3.0

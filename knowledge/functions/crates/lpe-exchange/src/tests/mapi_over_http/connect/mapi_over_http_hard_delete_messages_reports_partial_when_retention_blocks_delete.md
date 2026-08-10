@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_hard_delete_messages_reports_partial_when_retention_blocks_delete
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1294-L1353
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1222-L1281
 visibility: private
 generated:
   by: okf-rs/0.3.0

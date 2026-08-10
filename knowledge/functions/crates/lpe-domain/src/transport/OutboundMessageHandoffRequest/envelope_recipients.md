@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: envelope_recipients
-resource: crates/lpe-domain/src/transport.rs#L96-L103
+resource: crates/lpe-domain/src/transport.rs#L100-L107
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_submit_message_response
-resource: crates/lpe-exchange/src/mapi/dispatch/submission.rs#L347-L787
+resource: crates/lpe-exchange/src/mapi/dispatch/submission.rs#L347-L794
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -7,6 +7,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/change/Storage/emit_mail_change
   - functions/crates/lpe-storage/src/change/Storage/emit_mail_delegation_change
@@ -31,6 +32,7 @@ relationships:
 # Calls
 
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_contact_and_calendar_projection_includes_supported_application_data
-resource: crates/lpe-activesync/src/tests.rs#L5952-L6079
+resource: crates/lpe-activesync/src/tests.rs#L5953-L6080
 visibility: private
 generated:
   by: okf-rs/0.3.0

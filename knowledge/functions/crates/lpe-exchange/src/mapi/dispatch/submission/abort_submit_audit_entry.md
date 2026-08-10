@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: abort_submit_audit_entry
-resource: crates/lpe-exchange/src/mapi/dispatch/submission.rs#L853-L862
+resource: crates/lpe-exchange/src/mapi/dispatch/submission.rs#L860-L869
 generated:
   by: okf-rs/0.3.0
 relationships:

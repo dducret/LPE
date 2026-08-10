@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_resolve_names_resolves_canonical_contact
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1011-L1045
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1006-L1040
 visibility: private
 generated:
   by: okf-rs/0.3.0

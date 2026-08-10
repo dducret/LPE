@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: local_db_config_from_dashboard
-resource: LPE-CT/src/main.rs#L928-L936
+resource: LPE-CT/src/main.rs#L943-L951
 visibility: private
 generated:
   by: okf-rs/0.3.0

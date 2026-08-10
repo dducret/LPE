@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: options_handler
-resource: crates/lpe-exchange/src/service.rs#L179-L185
+resource: crates/lpe-exchange/src/service.rs#L181-L187
 visibility: private
 generated:
   by: okf-rs/0.3.0

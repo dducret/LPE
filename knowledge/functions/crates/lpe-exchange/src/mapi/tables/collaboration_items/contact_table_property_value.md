@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_table_property_value
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L80-L89
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L81-L90
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_message_property_is_server_projected
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L198-L203
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L209-L214
 generated:
   by: okf-rs/0.3.0
 relationships:

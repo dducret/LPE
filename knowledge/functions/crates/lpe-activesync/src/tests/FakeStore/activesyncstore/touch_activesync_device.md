@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: touch_activesync_device
-resource: crates/lpe-activesync/src/tests.rs#L594-L608
+resource: crates/lpe-activesync/src/tests.rs#L595-L609
 visibility: private
 generated:
   by: okf-rs/0.3.0

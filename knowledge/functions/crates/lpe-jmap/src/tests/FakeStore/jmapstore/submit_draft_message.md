@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: submit_draft_message
-resource: crates/lpe-jmap/src/tests.rs#L1422-L1448
+resource: crates/lpe-jmap/src/tests.rs#L1424-L1450
 visibility: private
 generated:
   by: okf-rs/0.3.0

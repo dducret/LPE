@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: release_with_appended_notification_uses_exchange_released_handle_sentinel
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L404-L409
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L459-L464
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: trim_ascii_line_end
-resource: crates/lpe-magika/src/mime.rs#L302-L308
+resource: crates/lpe-magika/src/mime.rs#L293-L299
 visibility: private
 generated:
   by: okf-rs/0.3.0

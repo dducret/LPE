@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_meeting_response_rejects_binary_payload_without_side_effect
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4375-L4469
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4422-L4516
 visibility: private
 generated:
   by: okf-rs/0.3.0

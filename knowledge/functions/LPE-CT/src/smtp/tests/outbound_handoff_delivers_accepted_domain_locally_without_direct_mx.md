@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outbound_handoff_delivers_accepted_domain_locally_without_direct_mx
-resource: LPE-CT/src/smtp/tests.rs#L2201-L2255
+resource: LPE-CT/src/smtp/tests.rs#L2228-L2282
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_fast_transfer_destination_upload_saves_canonical_email
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8162-L8256
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7955-L8049
 visibility: private
 generated:
   by: okf-rs/0.3.0

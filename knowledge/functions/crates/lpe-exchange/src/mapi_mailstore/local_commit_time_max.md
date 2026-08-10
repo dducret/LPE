@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: local_commit_time_max
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L383-L411
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L386-L414
 visibility: private
 generated:
   by: okf-rs/0.3.0

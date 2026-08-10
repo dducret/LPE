@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_mapi_special_folder_aliases
-resource: crates/lpe-exchange/src/tests/mod.rs#L6178-L6272
+resource: crates/lpe-exchange/src/tests/mod.rs#L6179-L6273
 visibility: private
 generated:
   by: okf-rs/0.3.0

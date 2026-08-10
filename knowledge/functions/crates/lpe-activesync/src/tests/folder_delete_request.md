@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_delete_request
-resource: crates/lpe-activesync/src/tests.rs#L1832-L1839
+resource: crates/lpe-activesync/src/tests.rs#L1833-L1840
 visibility: private
 generated:
   by: okf-rs/0.3.0

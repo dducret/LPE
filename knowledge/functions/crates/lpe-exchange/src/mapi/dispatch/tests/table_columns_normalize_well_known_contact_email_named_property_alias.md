@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_columns_normalize_well_known_contact_email_named_property_alias
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1086-L1103
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1091-L1108
 visibility: private
 generated:
   by: okf-rs/0.3.0

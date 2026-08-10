@@ -1,7 +1,7 @@
 ---
 type: Python Module
 title: cli
-resource: tools/rca_outlook/cli.py#L1-L109
+resource: tools/rca_outlook/cli.py#L1-L115
 generated:
   by: okf-rs/0.3.0
 relationships:

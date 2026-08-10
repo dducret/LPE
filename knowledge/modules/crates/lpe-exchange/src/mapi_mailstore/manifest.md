@@ -1,14 +1,15 @@
 ---
 type: Rust Module
 title: manifest
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L1-L1465
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L1-L1539
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
-  - external/super-special-message-special-message-access-special-message-access-level-special-message-change-key-special-message-change-number-special-message-flags-special-message-has-attachments-special-message-parent-source-key-special-message-predecessor-change-list-special-message-property-is-ics-identity-special-message-property-is-server-projected-special-message-search-key-special-message-status-special-message-sync-source-key-write-special-message-property-pid-tag-has-attachments-pid-tag-message-status
+  - external/super-special-message-special-message-access-special-message-access-level-special-message-change-key-special-message-change-number-special-message-flags-special-message-has-attachments-special-message-predecessor-change-list-special-message-sync-parent-source-key-special-message-property-is-ics-identity-special-message-property-is-server-projected-special-message-search-key-special-message-status-special-message-sync-source-key-write-special-message-property-pid-tag-has-attachments-pid-tag-message-status
   - external/super
   - external/crate-mapi-properties-message-class-for-email
+  - external/sha2-digest-sha256
   member_of:
   - packages/crates/lpe-exchange
 ---
@@ -59,13 +60,14 @@ relationships:
 - `super::special_message::{
     special_message_access, special_message_access_level, special_message_change_key,
     special_message_change_number, special_message_flags, special_message_has_attachments,
-    special_message_parent_source_key, special_message_predecessor_change_list,
+    special_message_predecessor_change_list, special_message_sync_parent_source_key,
     special_message_property_is_ics_identity, special_message_property_is_server_projected,
     special_message_search_key, special_message_status, special_message_sync_source_key,
     write_special_message_property, PID_TAG_HAS_ATTACHMENTS, PID_TAG_MESSAGE_STATUS,
 }`
 - `super::*`
 - `crate::mapi::properties::message_class_for_email`
+- `sha2::{Digest, Sha256}`
 
 # Member of
 

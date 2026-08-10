@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_size
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L23-L28
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L24-L29
 generated:
   by: okf-rs/0.3.0
 relationships:

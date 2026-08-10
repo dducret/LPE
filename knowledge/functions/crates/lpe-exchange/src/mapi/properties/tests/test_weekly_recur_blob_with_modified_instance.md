@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_weekly_recur_blob_with_modified_instance
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4865-L4922
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4994-L5051
 visibility: private
 generated:
   by: okf-rs/0.3.0

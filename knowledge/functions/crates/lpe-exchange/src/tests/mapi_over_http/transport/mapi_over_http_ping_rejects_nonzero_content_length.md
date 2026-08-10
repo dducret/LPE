@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_ping_rejects_nonzero_content_length
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1288-L1312
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1282-L1306
 visibility: private
 generated:
   by: okf-rs/0.3.0

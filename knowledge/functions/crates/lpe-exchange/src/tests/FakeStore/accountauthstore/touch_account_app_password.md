@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: touch_account_app_password
-resource: crates/lpe-exchange/src/tests/mod.rs#L4779-L4785
+resource: crates/lpe-exchange/src/tests/mod.rs#L4780-L4786
 visibility: private
 generated:
   by: okf-rs/0.3.0

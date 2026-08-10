@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query_rows_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1972-L1981
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1979-L1988
 generated:
   by: okf-rs/0.3.0
 relationships:

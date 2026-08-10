@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_fields
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L612-L833
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L630-L851
 visibility: private
 generated:
   by: okf-rs/0.3.0

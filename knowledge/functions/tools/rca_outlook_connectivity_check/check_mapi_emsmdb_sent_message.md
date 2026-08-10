@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_mapi_emsmdb_sent_message
-resource: tools/rca_outlook_connectivity_check.py#L964-L1024
+resource: tools/rca_outlook_connectivity_check.py#L1213-L1273
 generated:
   by: okf-rs/0.3.0
 relationships:

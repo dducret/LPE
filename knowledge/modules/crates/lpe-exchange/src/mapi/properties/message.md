@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: message
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L1-L1024
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L1-L1172
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -22,6 +22,7 @@ relationships:
 - [email_sent_representing_address](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/email_sent_representing_address.md)
 - [conversation_index_for_uuid](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/conversation_index_for_uuid.md)
 - [message_class_for_email](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/message_class_for_email.md)
+- [content_class_for_email](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/content_class_for_email.md)
 - [native_body_format](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/native_body_format.md)
 - [html_body_from_plain_text](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/html_body_from_plain_text.md)
 - [uncompressed_rtf_body](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/uncompressed_rtf_body.md)
@@ -38,6 +39,10 @@ relationships:
 - [jmap_import_from_pending_message](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/jmap_import_from_pending_message.md)
 - [pending_recipients_for_import](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/pending_recipients_for_import.md)
 - [mapi_submit_from_pending_message](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_submit_from_pending_message.md)
+- [meeting_request_attachment](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/meeting_request_attachment.md)
+- [ical_utc_filetime](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/ical_utc_filetime.md)
+- [ical_text_escape](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/ical_text_escape.md)
+- [ical_parameter_escape](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/ical_parameter_escape.md)
 - [optional_pending_submit_address](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/optional_pending_submit_address.md)
 - [normalize_mapi_submit_address](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/normalize_mapi_submit_address.md)
 - [mapi_submit_from_email](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_submit_from_email.md)

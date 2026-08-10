@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_recur_header
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5022-L5031
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5151-L5160
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: quick_step_view_handoff_table_contract_reports_unsupported_default_view
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L665-L678
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L669-L682
 visibility: private
 generated:
   by: okf-rs/0.3.0

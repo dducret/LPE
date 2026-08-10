@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_manifest_for_object
-resource: crates/lpe-exchange/src/mapi/sync.rs#L1125-L1381
+resource: crates/lpe-exchange/src/mapi/sync.rs#L1130-L1386
 generated:
   by: okf-rs/0.3.0
 relationships:

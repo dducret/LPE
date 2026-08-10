@@ -14,6 +14,8 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_values
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_deletions
+  - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_remove_all_recipients_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_modify_recipients_response
 ---
 
 # Signature
@@ -30,3 +32,5 @@ relationships:
 - [save_existing_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event.md)
 - [stage_event_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_values.md)
 - [stage_event_property_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_deletions.md)
+- [append_remove_all_recipients_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_remove_all_recipients_response.md)
+- [append_modify_recipients_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_modify_recipients_response.md)

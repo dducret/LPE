@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_getprops_specific_projects_visible_event
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2497-L2557
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2499-L2559
 visibility: private
 generated:
   by: okf-rs/0.3.0

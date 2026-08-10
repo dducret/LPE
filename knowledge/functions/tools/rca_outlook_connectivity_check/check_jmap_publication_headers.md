@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_jmap_publication_headers
-resource: tools/rca_outlook_connectivity_check.py#L311-L347
+resource: tools/rca_outlook_connectivity_check.py#L560-L596
 generated:
   by: okf-rs/0.3.0
 relationships:

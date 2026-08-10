@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_category_instance_value
-resource: crates/lpe-exchange/src/mapi/tables/contents.rs#L516-L524
+resource: crates/lpe-exchange/src/mapi/tables/contents.rs#L518-L526
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: seek_row_fractional_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1914-L1923
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1921-L1930
 generated:
   by: okf-rs/0.3.0
 relationships:

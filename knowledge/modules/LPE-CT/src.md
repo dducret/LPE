@@ -1,13 +1,13 @@
 ---
 type: Rust Module
 title: src
-resource: LPE-CT/src/main.rs#L1-L1499
+resource: LPE-CT/src/main.rs#L1-L1520
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/anyhow-context-result
-  - external/axum-extract-path-as-axumpath-query-state-http-header-content-disposition-content-type-headermap-headervalue-statuscode-middleware-response-intoresponse-response-routing-get-post-put-json-router
+  - external/axum-extract-defaultbodylimit-path-as-axumpath-query-state-http-header-content-disposition-content-type-headermap-headervalue-statuscode-middleware-response-intoresponse-response-routing-get-post-put-json-router
   - external/lpe-domain-current-unix-timestamp-bridgeautherror-outboundmessagehandoffrequest-outboundmessagehandoffresponse-recipientverificationrequest-recipientverificationresponse-signedintegrationheaders-default-max-skew-seconds-integration-key-header-integration-nonce-header-integration-signature-header-integration-timestamp-header
   - external/serde-deserialize-serialize
   - external/std-env-fs-path-path-pathbuf-sync-arc-mutex-time-duration-systemtime-unix-epoch
@@ -25,7 +25,7 @@ relationships:
   - external/pub-crate-use-readiness-address-binds-publicly
   - external/readiness-check-dashboard-state-store-check-local-data-store-policy-check-non-empty-value-check-optional-http-dependency-check-optional-tcp-dependency-check-quarantine-backlog-check-spool-layout-check-spool-pressure-dkim-key-status-ha-activation-check-readiness-failed-readiness-ok-readiness-status
   - external/std-os-unix-fs-permissionsext
-  - external/super-address-binds-publicly-apply-env-overrides-default-state-env-test-lock-ha-activation-check-ha-non-active-role-for-traffic-integration-shared-secret-lpe-bridge-probe-url-lpe-health-probe-url-mark-accepted-domain-verified-normalize-local-data-stores-persist-state-require-integration-request-submission-listener-is-configured-accepteddomain-dashboardresponse-outbound-handoff-path
+  - external/super-address-binds-publicly-apply-env-overrides-default-state-env-test-lock-ha-activation-check-ha-non-active-role-for-traffic-integration-shared-secret-lpe-bridge-probe-url-lpe-health-probe-url-mark-accepted-domain-verified-normalize-local-data-stores-outbound-handoff-body-limit-persist-state-require-integration-request-submission-listener-is-configured-accepteddomain-dashboardresponse-outbound-handoff-path
   - external/axum-http-headermap
   - external/lpe-domain-current-unix-timestamp-outboundmessagehandoffrequest-signedintegrationheaders-transportrecipient-integration-key-header-integration-nonce-header-integration-signature-header-integration-timestamp-header
   - external/std-fs-path-pathbuf-time-systemtime-unix-epoch
@@ -82,6 +82,7 @@ relationships:
 - [main](../../functions/LPE-CT/src/main.md)
 - [install_rustls_crypto_provider](../../functions/LPE-CT/src/install_rustls_crypto_provider.md)
 - [router](../../functions/LPE-CT/src/router.md)
+- [outbound_handoff_body_limit](../../functions/LPE-CT/src/outbound_handoff_body_limit.md)
 - [mutate_state](../../functions/LPE-CT/src/mutate_state.md)
 - [run_reporting_scheduler](../../functions/LPE-CT/src/run_reporting_scheduler.md)
 - [read_state](../../functions/LPE-CT/src/read_state.md)
@@ -102,6 +103,7 @@ relationships:
 - [parse_certificates_pem](../../functions/LPE-CT/src/parse_certificates_pem.md)
 - [parse_private_key_pem](../../functions/LPE-CT/src/parse_private_key_pem.md)
 - [current_timestamp](../../functions/LPE-CT/src/current_timestamp.md)
+- [outbound_handoff_body_limit_accepts_base64_encoded_maximum_message](../../functions/LPE-CT/src/outbound_handoff_body_limit_accepts_base64_encoded_maximum_message.md)
 - [temp_file](../../functions/LPE-CT/src/temp_file.md)
 - [temp_dir](../../functions/LPE-CT/src/temp_dir.md)
 - [dashboard_response_serializes_runtime_system_without_persisting_it](../../functions/LPE-CT/src/dashboard_response_serializes_runtime_system_without_persisting_it.md)
@@ -120,7 +122,7 @@ relationships:
 
 - `anyhow::{Context, Result}`
 - `axum::{
-    extract::{Path as AxumPath, Query, State},
+    extract::{DefaultBodyLimit, Path as AxumPath, Query, State},
     http::{
         header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderMap, HeaderValue, StatusCode,
@@ -201,7 +203,7 @@ relationships:
         address_binds_publicly, apply_env_overrides, default_state, env_test_lock,
         ha_activation_check, ha_non_active_role_for_traffic, integration_shared_secret,
         lpe_bridge_probe_url, lpe_health_probe_url, mark_accepted_domain_verified,
-        normalize_local_data_stores, persist_state, require_integration_request,
+        normalize_local_data_stores, outbound_handoff_body_limit, persist_state, require_integration_request,
         submission_listener_is_configured, AcceptedDomain, DashboardResponse,
         OUTBOUND_HANDOFF_PATH,
     }`

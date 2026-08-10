@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_manifest_buffer_with_attachments
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L542-L573
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L543-L574
 generated:
   by: okf-rs/0.3.0
 relationships:

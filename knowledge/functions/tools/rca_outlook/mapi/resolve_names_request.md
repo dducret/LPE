@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: resolve_names_request
-resource: tools/rca_outlook/mapi.py#L85-L103
+resource: tools/rca_outlook/mapi.py#L177-L195
 generated:
   by: okf-rs/0.3.0
 ---

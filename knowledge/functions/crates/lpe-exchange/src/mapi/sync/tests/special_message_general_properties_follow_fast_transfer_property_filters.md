@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_message_general_properties_follow_fast_transfer_property_filters
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1872-L2039
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1932-L2099
 visibility: private
 generated:
   by: okf-rs/0.3.0

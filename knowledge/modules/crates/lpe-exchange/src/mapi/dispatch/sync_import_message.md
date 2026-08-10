@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: sync_import_message
-resource: crates/lpe-exchange/src/mapi/dispatch/sync_import_message.rs#L1-L637
+resource: crates/lpe-exchange/src/mapi/dispatch/sync_import_message.rs#L1-L641
 generated:
   by: okf-rs/0.3.0
 relationships:

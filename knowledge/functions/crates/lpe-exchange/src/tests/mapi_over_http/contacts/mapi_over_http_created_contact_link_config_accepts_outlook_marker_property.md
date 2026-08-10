@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_created_contact_link_config_accepts_outlook_marker_property
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1624-L1703
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1613-L1692
 visibility: private
 generated:
   by: okf-rs/0.3.0

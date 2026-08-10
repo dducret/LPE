@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deserialize
-resource: LPE-CT/src/smtp.rs#L1277-L1283
+resource: LPE-CT/src/smtp.rs#L1280-L1286
 generated:
   by: okf-rs/0.3.0
 ---

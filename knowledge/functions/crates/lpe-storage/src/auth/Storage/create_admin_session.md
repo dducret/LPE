@@ -8,6 +8,7 @@ relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/util/normalize_admin_session_auth_method
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-admin-api/src/admin_auth/login
   - functions/crates/lpe-admin-api/src/admin_auth/oidc_callback
@@ -21,6 +22,7 @@ relationships:
 
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [normalize_admin_session_auth_method](../../../../../../functions/crates/lpe-storage/src/util/normalize_admin_session_auth_method.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

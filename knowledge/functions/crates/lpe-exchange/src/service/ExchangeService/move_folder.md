@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: move_folder
-resource: crates/lpe-exchange/src/service.rs#L641-L685
+resource: crates/lpe-exchange/src/service.rs#L643-L687
 visibility: private
 generated:
   by: okf-rs/0.3.0

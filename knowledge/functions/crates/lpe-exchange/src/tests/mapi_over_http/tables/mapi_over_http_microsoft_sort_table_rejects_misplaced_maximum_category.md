@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_sort_table_rejects_misplaced_maximum_category
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L513-L569
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L468-L524
 visibility: private
 generated:
   by: okf-rs/0.3.0

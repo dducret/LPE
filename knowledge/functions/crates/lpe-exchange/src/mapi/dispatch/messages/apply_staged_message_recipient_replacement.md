@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: apply_staged_message_recipient_replacement
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L436-L467
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L440-L471
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ping_surfaces_hierarchy_change_as_folder_sync_required
-resource: crates/lpe-activesync/src/tests.rs#L5502-L5532
+resource: crates/lpe-activesync/src/tests.rs#L5503-L5533
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_sync_projects_shared_mailbox_folders_with_hierarchy
-resource: crates/lpe-activesync/src/tests.rs#L3240-L3294
+resource: crates/lpe-activesync/src/tests.rs#L3241-L3295
 visibility: private
 generated:
   by: okf-rs/0.3.0

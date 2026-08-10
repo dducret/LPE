@@ -1,12 +1,13 @@
 ---
 type: Rust Function
 title: mapi_over_http_open_message_resolves_virtual_local_freebusy_without_folder_id
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6304-L6371
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L6309-L6379
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_scoped_mapi_identity
   - functions/crates/lpe-exchange/src/tests/mapi_headers
   - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_rop_open_message
@@ -22,6 +23,7 @@ relationships:
 
 # Calls
 
+- [with_scoped_mapi_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_scoped_mapi_identity.md)
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
 - [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_rop_open_message](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_open_message.md)

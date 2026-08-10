@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_properties_report_real_subfolder_state
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L518-L544
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L574-L600
 visibility: private
 generated:
   by: okf-rs/0.3.0

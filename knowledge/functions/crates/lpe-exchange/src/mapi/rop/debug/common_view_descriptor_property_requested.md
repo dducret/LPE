@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_view_descriptor_property_requested
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L906-L920
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L907-L921
 generated:
   by: okf-rs/0.3.0
 relationships:

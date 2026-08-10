@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: retry_trace_clears_stale_execution_state_and_appends_audit
-resource: LPE-CT/src/smtp/tests.rs#L2698-L2775
+resource: LPE-CT/src/smtp/tests.rs#L2674-L2751
 visibility: private
 generated:
   by: okf-rs/0.3.0

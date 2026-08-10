@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: event_input_from_mapi
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L562-L662
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L669-L769
 generated:
   by: okf-rs/0.3.0
 relationships:

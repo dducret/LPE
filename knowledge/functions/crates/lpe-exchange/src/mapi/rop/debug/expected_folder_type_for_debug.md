@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: expected_folder_type_for_debug
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L729-L751
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L730-L752
 generated:
   by: okf-rs/0.3.0
 relationships:

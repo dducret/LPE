@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_recipients_success_response_includes_row_count
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L183-L226
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L239-L282
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6238-L6303
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6076-L6141
 visibility: private
 generated:
   by: okf-rs/0.3.0

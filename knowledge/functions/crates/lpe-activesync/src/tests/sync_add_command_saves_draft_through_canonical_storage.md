@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_add_command_saves_draft_through_canonical_storage
-resource: crates/lpe-activesync/src/tests.rs#L3640-L3694
+resource: crates/lpe-activesync/src/tests.rs#L3641-L3695
 visibility: private
 generated:
   by: okf-rs/0.3.0

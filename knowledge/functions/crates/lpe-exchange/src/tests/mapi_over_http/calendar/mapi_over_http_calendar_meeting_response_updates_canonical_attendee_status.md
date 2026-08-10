@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_meeting_response_updates_canonical_attendee_status
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4266-L4372
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4313-L4419
 visibility: private
 generated:
   by: okf-rs/0.3.0

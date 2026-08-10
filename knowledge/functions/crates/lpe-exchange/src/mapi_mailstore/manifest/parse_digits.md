@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_digits
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L405-L410
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L406-L411
 visibility: private
 generated:
   by: okf-rs/0.3.0

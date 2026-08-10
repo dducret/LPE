@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: event_save
-resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L1-L355
+resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L1-L366
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_contents_table_query_find_and_expand_require_set_columns
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L10431-L10514
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L10494-L10577
 visibility: private
 generated:
   by: okf-rs/0.3.0

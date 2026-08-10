@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_ews_mailbox_access
-resource: tools/rca_outlook_connectivity_check.py#L442-L460
+resource: tools/rca_outlook_connectivity_check.py#L691-L709
 generated:
   by: okf-rs/0.3.0
 relationships:

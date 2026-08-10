@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: empty_conversation_action_settings_find_row_returns_not_found
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6058-L6099
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6093-L6134
 visibility: private
 generated:
   by: okf-rs/0.3.0

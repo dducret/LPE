@@ -8,6 +8,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-core/src/sieve/context
   called_by:
   - functions/crates/lpe-storage/tests/runtime_schema_drift/exercise_notes_journal_reminder_path
@@ -20,6 +21,7 @@ relationships:
 # Calls
 
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [context](../../../../../functions/crates/lpe-core/src/sieve/context.md)
 
 # Called by

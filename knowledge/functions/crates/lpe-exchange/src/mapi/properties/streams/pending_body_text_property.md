@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pending_body_text_property
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L879-L887
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L880-L888
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,6 +12,7 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/properties/message/jmap_import_from_pending_message
   - functions/crates/lpe-exchange/src/mapi/properties/message/mapi_submit_from_pending_message
+  - functions/crates/lpe-exchange/src/mapi/properties/message/meeting_request_attachment
   - functions/crates/lpe-exchange/src/mapi/properties/streams/pending_message_size
 ---
 
@@ -29,4 +30,5 @@ relationships:
 
 - [jmap_import_from_pending_message](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/jmap_import_from_pending_message.md)
 - [mapi_submit_from_pending_message](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_submit_from_pending_message.md)
+- [meeting_request_attachment](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/meeting_request_attachment.md)
 - [pending_message_size](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/pending_message_size.md)

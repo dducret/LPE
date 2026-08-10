@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-storage/src/public_folders/types/ensure_tree_admin
   - functions/crates/lpe-storage/src/public_folders/Storage/fetch_public_folder_row
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/public_folders/changes/Storage/record_public_folder_change
   - functions/crates/lpe-storage/src/shared/Storage/insert_audit
 ---
@@ -24,5 +25,6 @@ relationships:
 - [ensure_tree_admin](../../../../../../functions/crates/lpe-storage/src/public_folders/types/ensure_tree_admin.md)
 - [fetch_public_folder_row](../../../../../../functions/crates/lpe-storage/src/public_folders/Storage/fetch_public_folder_row.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [record_public_folder_change](../../../../../../functions/crates/lpe-storage/src/public_folders/changes/Storage/record_public_folder_change.md)
 - [insert_audit](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_audit.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_set_rejects_inaccessible_account_id
-resource: crates/lpe-jmap/src/tests.rs#L3248-L3289
+resource: crates/lpe-jmap/src/tests.rs#L3251-L3292
 visibility: private
 generated:
   by: okf-rs/0.3.0

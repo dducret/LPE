@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_canonical_message_text_properties
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L469-L515
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L473-L519
 generated:
   by: okf-rs/0.3.0
 relationships:

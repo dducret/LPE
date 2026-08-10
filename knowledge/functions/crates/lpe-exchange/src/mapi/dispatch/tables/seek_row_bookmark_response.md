@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: seek_row_bookmark_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1333-L1342
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1335-L1344
 generated:
   by: okf-rs/0.3.0
 relationships:

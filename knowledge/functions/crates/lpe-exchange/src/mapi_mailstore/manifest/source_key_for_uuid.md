@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: source_key_for_uuid
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L268-L275
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L269-L276
 generated:
   by: okf-rs/0.3.0
 relationships:

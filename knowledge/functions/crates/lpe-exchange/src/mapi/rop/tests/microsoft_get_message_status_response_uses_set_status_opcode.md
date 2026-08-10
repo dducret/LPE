@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_get_message_status_response_uses_set_status_opcode
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4876-L4890
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4882-L4896
 generated:
   by: okf-rs/0.3.0
 relationships:

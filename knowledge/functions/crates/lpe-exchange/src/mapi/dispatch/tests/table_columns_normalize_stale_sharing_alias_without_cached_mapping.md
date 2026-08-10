@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_columns_normalize_stale_sharing_alias_without_cached_mapping
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1070-L1083
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1075-L1088
 visibility: private
 generated:
   by: okf-rs/0.3.0

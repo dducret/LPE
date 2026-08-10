@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_client_event
-resource: crates/lpe-activesync/src/tests.rs#L1090-L1127
+resource: crates/lpe-activesync/src/tests.rs#L1091-L1128
 visibility: private
 generated:
   by: okf-rs/0.3.0

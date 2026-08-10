@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: release_only_execute_batch_is_store_independent
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L362-L373
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L417-L428
 visibility: private
 generated:
   by: okf-rs/0.3.0

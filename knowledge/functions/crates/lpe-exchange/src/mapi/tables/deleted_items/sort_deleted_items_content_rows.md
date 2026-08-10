@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sort_deleted_items_content_rows
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L45-L82
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L51-L88
 generated:
   by: okf-rs/0.3.0
 relationships:

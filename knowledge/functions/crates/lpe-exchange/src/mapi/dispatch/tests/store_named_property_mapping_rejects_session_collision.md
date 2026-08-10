@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: store_named_property_mapping_rejects_session_collision
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1274-L1296
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1283-L1305
 visibility: private
 generated:
   by: okf-rs/0.3.0

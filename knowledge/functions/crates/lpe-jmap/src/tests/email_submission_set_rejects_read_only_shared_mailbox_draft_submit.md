@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_submission_set_rejects_read_only_shared_mailbox_draft_submit
-resource: crates/lpe-jmap/src/tests.rs#L3572-L3620
+resource: crates/lpe-jmap/src/tests.rs#L3575-L3623
 visibility: private
 generated:
   by: okf-rs/0.3.0

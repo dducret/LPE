@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reject_unsupported_calendar_message_class
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1026-L1042
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1193-L1209
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_accessible_contact
-resource: crates/lpe-exchange/src/tests/mod.rs#L9020-L9031
+resource: crates/lpe-exchange/src/tests/mod.rs#L9024-L9035
 visibility: private
 generated:
   by: okf-rs/0.3.0

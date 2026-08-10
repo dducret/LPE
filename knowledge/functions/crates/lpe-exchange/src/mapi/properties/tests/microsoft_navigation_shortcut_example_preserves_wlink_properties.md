@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_navigation_shortcut_example_preserves_wlink_properties
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5204-L5366
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5333-L5495
 visibility: private
 generated:
   by: okf-rs/0.3.0

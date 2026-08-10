@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxcfxics_4_1_2_hierarchy_delete_returns_transfer_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15985-L16081
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15709-L15805
 visibility: private
 generated:
   by: okf-rs/0.3.0

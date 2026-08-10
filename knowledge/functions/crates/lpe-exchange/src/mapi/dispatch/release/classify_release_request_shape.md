@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: classify_release_request_shape
-resource: crates/lpe-exchange/src/mapi/dispatch/release.rs#L611-L627
+resource: crates/lpe-exchange/src/mapi/dispatch/release.rs#L604-L620
 visibility: private
 generated:
   by: okf-rs/0.3.0

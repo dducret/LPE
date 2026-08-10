@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_delete_messages_accepts_nonzero_boolean_fields
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1152-L1229
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1080-L1157
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_search_criteria_rejects_unsupported_restriction
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L3927-L4200
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L3754-L4027
 visibility: private
 generated:
   by: okf-rs/0.3.0

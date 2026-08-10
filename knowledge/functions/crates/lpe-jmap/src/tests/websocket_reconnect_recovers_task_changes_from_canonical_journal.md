@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: websocket_reconnect_recovers_task_changes_from_canonical_journal
-resource: crates/lpe-jmap/src/tests.rs#L11576-L11626
+resource: crates/lpe-jmap/src/tests.rs#L11579-L11629
 visibility: private
 generated:
   by: okf-rs/0.3.0

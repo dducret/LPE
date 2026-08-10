@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_query_position_wire_summary_reports_compact_response_shape
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2035-L2070
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2052-L2087
 visibility: private
 generated:
   by: okf-rs/0.3.0

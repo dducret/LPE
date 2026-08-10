@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_notification_wait_reports_hierarchy_event_after_registered_create_folder
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3108-L3149
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3013-L3054
 visibility: private
 generated:
   by: okf-rs/0.3.0

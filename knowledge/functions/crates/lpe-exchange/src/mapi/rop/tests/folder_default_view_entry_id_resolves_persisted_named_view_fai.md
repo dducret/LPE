@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_default_view_entry_id_resolves_persisted_named_view_fai
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4141-L4227
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4147-L4233
 visibility: private
 generated:
   by: okf-rs/0.3.0

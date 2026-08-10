@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-core/src/sieve/Parser/next
   - functions/crates/lpe-storage/src/message_ops/rekey_mapi_message_identity_in_tx
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/recalculate_mailbox_counts_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/insert_audit
   - functions/crates/lpe-storage/src/shared/Storage/affected_mail_principals_in_tx
@@ -35,6 +36,7 @@ relationships:
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [next](../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
 - [rekey_mapi_message_identity_in_tx](../../../../../../functions/crates/lpe-storage/src/message_ops/rekey_mapi_message_identity_in_tx.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [recalculate_mailbox_counts_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/recalculate_mailbox_counts_in_tx.md)
 - [insert_audit](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_audit.md)
 - [affected_mail_principals_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/affected_mail_principals_in_tx.md)

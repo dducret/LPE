@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_email
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L555-L626
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L555-L627
 visibility: private
 generated:
   by: okf-rs/0.3.0

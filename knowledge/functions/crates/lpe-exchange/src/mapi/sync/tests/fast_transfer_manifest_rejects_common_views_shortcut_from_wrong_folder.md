@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_manifest_rejects_common_views_shortcut_from_wrong_folder
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2215-L2237
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2275-L2297
 visibility: private
 generated:
   by: okf-rs/0.3.0

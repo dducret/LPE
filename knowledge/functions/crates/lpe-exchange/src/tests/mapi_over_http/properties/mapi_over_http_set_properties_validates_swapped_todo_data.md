@@ -1,15 +1,14 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_properties_validates_swapped_todo_data
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L3933-L4028
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L3675-L3761
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/mapi_headers
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_mapi_binary_property
   - functions/crates/lpe-exchange/src/tests/append_rop_open_folder
   - functions/crates/lpe-exchange/src/tests/test_mapi_folder_id
@@ -30,8 +29,7 @@ relationships:
 # Calls
 
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_mapi_binary_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_binary_property.md)
 - [append_rop_open_folder](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_open_folder.md)
 - [test_mapi_folder_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_folder_id.md)

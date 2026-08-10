@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: assert_nspi_get_props_payload
-resource: tools/rca_outlook/mapi.py#L191-L196
+resource: tools/rca_outlook/mapi.py#L283-L288
 generated:
   by: okf-rs/0.3.0
 relationships:

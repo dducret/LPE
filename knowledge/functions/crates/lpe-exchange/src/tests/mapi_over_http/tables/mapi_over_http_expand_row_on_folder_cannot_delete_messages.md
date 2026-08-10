@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_expand_row_on_folder_cannot_delete_messages
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L2451-L2510
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L2316-L2375
 visibility: private
 generated:
   by: okf-rs/0.3.0

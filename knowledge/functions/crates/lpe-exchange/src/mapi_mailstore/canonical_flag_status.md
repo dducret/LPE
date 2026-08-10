@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_flag_status
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1058-L1065
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1061-L1068
 generated:
   by: okf-rs/0.3.0
 relationships:

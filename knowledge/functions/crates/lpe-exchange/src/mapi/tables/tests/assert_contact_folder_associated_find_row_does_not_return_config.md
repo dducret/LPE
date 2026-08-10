@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: assert_contact_folder_associated_find_row_does_not_return_config
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8632-L8645
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8667-L8680
 visibility: private
 generated:
   by: okf-rs/0.3.0

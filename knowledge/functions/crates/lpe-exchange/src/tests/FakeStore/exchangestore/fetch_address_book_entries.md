@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_address_book_entries
-resource: crates/lpe-exchange/src/tests/mod.rs#L7475-L7610
+resource: crates/lpe-exchange/src/tests/mod.rs#L7476-L7611
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_real_conversation_history_open_props_contents_and_notifications_succeed
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3147-L3236
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L3030-L3119
 visibility: private
 generated:
   by: okf-rs/0.3.0

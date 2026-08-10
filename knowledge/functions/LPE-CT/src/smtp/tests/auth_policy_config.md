@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: auth_policy_config
-resource: LPE-CT/src/smtp/tests.rs#L3249-L3256
+resource: LPE-CT/src/smtp/tests.rs#L3225-L3232
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_submission_set_rejects_delegated_submit_without_sender_grant
-resource: crates/lpe-jmap/src/tests.rs#L3521-L3569
+resource: crates/lpe-jmap/src/tests.rs#L3524-L3572
 visibility: private
 generated:
   by: okf-rs/0.3.0

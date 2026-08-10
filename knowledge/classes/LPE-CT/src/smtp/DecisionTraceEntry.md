@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: DecisionTraceEntry
-resource: LPE-CT/src/smtp.rs#L228-L232
+resource: LPE-CT/src/smtp.rs#L224-L228
 generated:
   by: okf-rs/0.3.0
 ---

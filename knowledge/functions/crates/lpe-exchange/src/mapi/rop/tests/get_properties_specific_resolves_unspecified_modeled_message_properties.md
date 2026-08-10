@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_properties_specific_resolves_unspecified_modeled_message_properties
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L975-L1106
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L976-L1108
 visibility: private
 generated:
   by: okf-rs/0.3.0

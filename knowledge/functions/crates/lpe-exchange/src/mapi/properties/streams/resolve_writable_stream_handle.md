@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: resolve_writable_stream_handle
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L586-L619
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L587-L620
 generated:
   by: okf-rs/0.3.0
 relationships:

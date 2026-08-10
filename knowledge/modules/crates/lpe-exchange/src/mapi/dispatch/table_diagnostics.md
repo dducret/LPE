@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: table_diagnostics
-resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1-L1456
+resource: crates/lpe-exchange/src/mapi/dispatch/table_diagnostics.rs#L1-L1466
 generated:
   by: okf-rs/0.3.0
 relationships:

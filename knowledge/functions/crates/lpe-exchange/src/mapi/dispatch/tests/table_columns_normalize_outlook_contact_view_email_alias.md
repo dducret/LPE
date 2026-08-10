@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_columns_normalize_outlook_contact_view_email_alias
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1106-L1126
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1111-L1131
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_private_key_pem
-resource: LPE-CT/src/main.rs#L1139-L1156
+resource: LPE-CT/src/main.rs#L1154-L1171
 visibility: private
 generated:
   by: okf-rs/0.3.0

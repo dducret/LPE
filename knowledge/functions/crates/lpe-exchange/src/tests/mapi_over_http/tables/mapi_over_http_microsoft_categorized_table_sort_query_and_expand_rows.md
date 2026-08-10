@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_categorized_table_sort_query_and_expand_rows
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1023-L1114
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L933-L1024
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parsed_base64_query
-resource: crates/lpe-activesync/src/tests.rs#L1919-L1926
+resource: crates/lpe-activesync/src/tests.rs#L1920-L1927
 visibility: private
 generated:
   by: okf-rs/0.3.0

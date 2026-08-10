@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_root_ipm_and_inbox_open_batch_returns_all_handles
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2291-L2343
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2214-L2266
 visibility: private
 generated:
   by: okf-rs/0.3.0

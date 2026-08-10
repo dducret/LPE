@@ -8,6 +8,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/core/Storage/pool
   called_by:
   - functions/crates/lpe-storage/tests/mapi_event_commit/microsoft_oxcfxics_imported_event_keeps_client_xids_and_allocates_server_cn
@@ -22,6 +23,7 @@ relationships:
 # Calls
 
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [pool](../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)
 
 # Called by

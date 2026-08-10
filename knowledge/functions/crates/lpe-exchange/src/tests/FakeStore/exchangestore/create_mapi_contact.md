@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_mapi_contact
-resource: crates/lpe-exchange/src/tests/mod.rs#L8139-L8522
+resource: crates/lpe-exchange/src/tests/mod.rs#L8142-L8525
 visibility: private
 generated:
   by: okf-rs/0.3.0

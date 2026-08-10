@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_property_tags_with_types
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L319-L331
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L320-L332
 visibility: private
 generated:
   by: okf-rs/0.3.0

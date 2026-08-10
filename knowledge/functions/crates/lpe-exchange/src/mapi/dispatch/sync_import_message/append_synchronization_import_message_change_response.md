@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_synchronization_import_message_change_response
-resource: crates/lpe-exchange/src/mapi/dispatch/sync_import_message.rs#L84-L637
+resource: crates/lpe-exchange/src/mapi/dispatch/sync_import_message.rs#L84-L641
 generated:
   by: okf-rs/0.3.0
 relationships:

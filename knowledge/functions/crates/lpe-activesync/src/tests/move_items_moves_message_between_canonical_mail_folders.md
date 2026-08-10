@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: move_items_moves_message_between_canonical_mail_folders
-resource: crates/lpe-activesync/src/tests.rs#L2696-L2791
+resource: crates/lpe-activesync/src/tests.rs#L2697-L2792
 visibility: private
 generated:
   by: okf-rs/0.3.0

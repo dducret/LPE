@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_message_children
-resource: crates/lpe-exchange/src/mapi/sync.rs#L1099-L1123
+resource: crates/lpe-exchange/src/mapi/sync.rs#L1104-L1128
 visibility: private
 generated:
   by: okf-rs/0.3.0

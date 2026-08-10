@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_properties_specific_request
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L3004-L3017
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L3031-L3044
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ping
-resource: crates/lpe-activesync/src/tests.rs#L2113-L2124
+resource: crates/lpe-activesync/src/tests.rs#L2114-L2125
 visibility: private
 generated:
   by: okf-rs/0.3.0

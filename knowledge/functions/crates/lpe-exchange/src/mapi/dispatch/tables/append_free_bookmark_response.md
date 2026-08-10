@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_free_bookmark_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1362-L1370
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1364-L1372
 generated:
   by: okf-rs/0.3.0
 relationships:

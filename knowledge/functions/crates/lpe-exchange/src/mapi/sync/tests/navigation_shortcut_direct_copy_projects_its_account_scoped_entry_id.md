@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: navigation_shortcut_direct_copy_projects_its_account_scoped_entry_id
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2042-L2084
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2102-L2144
 visibility: private
 generated:
   by: okf-rs/0.3.0

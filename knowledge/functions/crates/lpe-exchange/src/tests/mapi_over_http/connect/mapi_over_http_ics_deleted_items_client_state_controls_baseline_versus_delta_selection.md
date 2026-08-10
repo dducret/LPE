@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_ics_deleted_items_client_state_controls_baseline_versus_delta_selection
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2983-L3102
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2866-L2985
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: install_ews_mail_app
-resource: crates/lpe-exchange/src/tests/mod.rs#L5639-L5678
+resource: crates/lpe-exchange/src/tests/mod.rs#L5640-L5679
 visibility: private
 generated:
   by: okf-rs/0.3.0

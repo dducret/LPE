@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query
-resource: crates/lpe-activesync/src/tests.rs#L6120-L6127
+resource: crates/lpe-activesync/src/tests.rs#L6121-L6128
 visibility: private
 generated:
   by: okf-rs/0.3.0

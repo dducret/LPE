@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombstone
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5449-L5583
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5287-L5421
 visibility: private
 generated:
   by: okf-rs/0.3.0

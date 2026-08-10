@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_contacts_search_content_sync_uses_search_folder_parent
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1439-L1520
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1428-L1509
 visibility: private
 generated:
   by: okf-rs/0.3.0

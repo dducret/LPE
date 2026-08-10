@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: logon_special_folder_contract_reports_mismatched_inbox
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2051-L2060
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2064-L2073
 visibility: private
 generated:
   by: okf-rs/0.3.0

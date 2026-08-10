@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: submission
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1-L2564
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L1-L2492
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: row_keys
-resource: crates/lpe-exchange/src/mapi/tables/row_keys.rs#L1-L254
+resource: crates/lpe-exchange/src/mapi/tables/row_keys.rs#L1-L271
 generated:
   by: okf-rs/0.3.0
 relationships:

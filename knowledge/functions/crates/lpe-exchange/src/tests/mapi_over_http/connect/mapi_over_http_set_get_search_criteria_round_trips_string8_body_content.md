@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_get_search_criteria_round_trips_string8_body_content
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5696-L5785
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5561-L5650
 visibility: private
 generated:
   by: okf-rs/0.3.0

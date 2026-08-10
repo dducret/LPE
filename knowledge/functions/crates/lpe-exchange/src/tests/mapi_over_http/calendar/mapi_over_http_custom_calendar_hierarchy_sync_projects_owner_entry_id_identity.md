@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_identity
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10379-L10470
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L10537-L10637
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -10,6 +10,8 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_store/T/mapistore/load_mapi_mail_store
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folders
   - functions/crates/lpe-core/src/sieve/Parser/expect
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_scoped_mapi_identity
+  - functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test
   - functions/crates/lpe-exchange/src/tests/mapi_headers
   - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
   - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
@@ -30,6 +32,8 @@ relationships:
 - [load_mapi_mail_store](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/T/mapistore/load_mapi_mail_store.md)
 - [collaboration_folders](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folders.md)
 - [expect](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/expect.md)
+- [with_scoped_mapi_identity](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_scoped_mapi_identity.md)
+- [durable_special_folder_id_for_test](../../../../../../../functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test.md)
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
 - [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
 - [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_delete
-resource: crates/lpe-activesync/src/tests.rs#L6111-L6115
+resource: crates/lpe-activesync/src/tests.rs#L6112-L6116
 visibility: private
 generated:
   by: okf-rs/0.3.0

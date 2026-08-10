@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upload_sync_state_stream_with_uploaded_property
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L539-L578
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L542-L581
 generated:
   by: okf-rs/0.3.0
 relationships:

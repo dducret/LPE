@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: spawn_custody_asserting_core
-resource: LPE-CT/src/smtp/tests.rs#L3583-L3614
+resource: LPE-CT/src/smtp/tests.rs#L3560-L3591
 visibility: private
 generated:
   by: okf-rs/0.3.0

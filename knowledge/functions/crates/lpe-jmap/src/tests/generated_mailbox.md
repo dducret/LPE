@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: generated_mailbox
-resource: crates/lpe-jmap/src/tests.rs#L15402-L15415
+resource: crates/lpe-jmap/src/tests.rs#L15405-L15418
 visibility: private
 generated:
   by: okf-rs/0.3.0

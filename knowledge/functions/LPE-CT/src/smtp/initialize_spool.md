@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: initialize_spool
-resource: LPE-CT/src/smtp.rs#L421-L427
+resource: LPE-CT/src/smtp.rs#L417-L423
 generated:
   by: okf-rs/0.3.0
 relationships:

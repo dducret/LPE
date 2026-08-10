@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxctabl_4_1_to_4_4_contents_table_setcolumns_sort_query_rows
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1514-L1608
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L1406-L1500
 visibility: private
 generated:
   by: okf-rs/0.3.0

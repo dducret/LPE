@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_exact_named_view_find_row_respects_existing_table_restriction
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6403-L6460
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L6438-L6495
 visibility: private
 generated:
   by: okf-rs/0.3.0

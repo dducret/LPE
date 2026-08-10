@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: record_visible_inbox_message_open
-resource: crates/lpe-exchange/src/mapi/dispatch/message_open.rs#L538-L576
+resource: crates/lpe-exchange/src/mapi/dispatch/message_open.rs#L538-L577
 visibility: private
 generated:
   by: okf-rs/0.3.0

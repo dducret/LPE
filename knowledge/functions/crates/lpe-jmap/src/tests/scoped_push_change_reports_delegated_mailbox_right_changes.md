@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: scoped_push_change_reports_delegated_mailbox_right_changes
-resource: crates/lpe-jmap/src/tests.rs#L11808-L11848
+resource: crates/lpe-jmap/src/tests.rs#L11811-L11851
 visibility: private
 generated:
   by: okf-rs/0.3.0

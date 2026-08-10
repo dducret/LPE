@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_idle_expiry_follows_cookie_max_age
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1240-L1299
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1242-L1301
 generated:
   by: okf-rs/0.3.0
 ---

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_properties_specific_size_limit_preserves_unspecified_property_type
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1190-L1237
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1192-L1239
 visibility: private
 generated:
   by: okf-rs/0.3.0

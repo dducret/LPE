@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: mailbox_is_system
-resource: crates/lpe-jmap/src/tests.rs#L797-L805
+resource: crates/lpe-jmap/src/tests.rs#L799-L807
 visibility: private
 generated:
   by: okf-rs/0.3.0

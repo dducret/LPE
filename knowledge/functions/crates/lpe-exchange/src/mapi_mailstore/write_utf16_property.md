@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_utf16_property
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1357-L1366
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1360-L1369
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -9,6 +9,7 @@ relationships:
   - functions/LPE-CT/web/app/smoke/test/MockClassList/remove
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_open/append_open_table_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_new_mail_hierarchy_row_survives_preceding_basic_table_change
   - functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts
@@ -26,6 +27,7 @@ relationships:
 # Called by
 
 - [append_open_table_response](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_open/append_open_table_response.md)
+- [execute_preserves_pending_table_notification_after_releasing_its_table](../../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table.md)
 - [session_retains_folder_count_change_for_active_parent_hierarchy_table](../../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_folder_count_change_for_active_parent_hierarchy_table.md)
 - [session_new_mail_hierarchy_row_survives_preceding_basic_table_change](../../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_new_mail_hierarchy_row_survives_preceding_basic_table_change.md)
 - [session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts](../../../../../../../../functions/crates/lpe-exchange/src/mapi/session/tests/session_retains_collaboration_content_changes_for_active_root_depth_hierarchy_table_without_counts.md)

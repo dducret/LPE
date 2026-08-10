@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_associated_config_ignores_client_read_only_properties_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L5257-L5496
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4981-L5220
 visibility: private
 generated:
   by: okf-rs/0.3.0

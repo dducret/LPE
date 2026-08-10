@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times_and_normal_message_facts
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L764-L1465
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L765-L1539
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -53,7 +53,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/special_message_delivery_sort_time
   - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_change_number
   - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_source_key
-  - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_parent_source_key
+  - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_parent_source_key
   - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_change_key
   - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_predecessor_change_list
   - functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_search_key
@@ -127,7 +127,7 @@ relationships:
 - [special_message_delivery_sort_time](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/special_message_delivery_sort_time.md)
 - [special_message_change_number](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_change_number.md)
 - [special_message_sync_source_key](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_source_key.md)
-- [special_message_parent_source_key](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_parent_source_key.md)
+- [special_message_sync_parent_source_key](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_parent_source_key.md)
 - [special_message_change_key](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_change_key.md)
 - [special_message_predecessor_change_list](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_predecessor_change_list.md)
 - [special_message_search_key](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_search_key.md)

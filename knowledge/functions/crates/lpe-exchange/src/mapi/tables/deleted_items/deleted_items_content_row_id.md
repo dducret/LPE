@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_items_content_row_id
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L84-L91
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L90-L97
 generated:
   by: okf-rs/0.3.0
 relationships:

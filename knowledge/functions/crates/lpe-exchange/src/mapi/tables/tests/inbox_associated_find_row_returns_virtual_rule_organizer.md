@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_find_row_returns_virtual_rule_organizer
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5539-L5545
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5574-L5580
 visibility: private
 generated:
   by: okf-rs/0.3.0

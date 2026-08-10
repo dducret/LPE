@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_round_trips_schema_backed_fields
-resource: crates/lpe-jmap/src/tests.rs#L12521-L12619
+resource: crates/lpe-jmap/src/tests.rs#L12524-L12622
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_second_save_without_global_object_id_uses_distinct_uid
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3012-L3116
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3019-L3123
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -8,6 +8,7 @@ relationships:
   calls:
   - functions/crates/lpe-storage/src/shared/Storage/allocate_mail_modseq_in_tx
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/recalculate_mailbox_counts_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/affected_mail_principals_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
@@ -29,6 +30,7 @@ relationships:
 
 - [allocate_mail_modseq_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_mail_modseq_in_tx.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [recalculate_mailbox_counts_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/recalculate_mailbox_counts_in_tx.md)
 - [affected_mail_principals_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/affected_mail_principals_in_tx.md)
 - [insert_mail_change_log_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx.md)

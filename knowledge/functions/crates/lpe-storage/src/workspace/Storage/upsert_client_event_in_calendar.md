@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_client_event_in_calendar
-resource: crates/lpe-storage/src/workspace.rs#L471-L670
+resource: crates/lpe-storage/src/workspace.rs#L501-L700
 generated:
   by: okf-rs/0.3.0
 relationships:

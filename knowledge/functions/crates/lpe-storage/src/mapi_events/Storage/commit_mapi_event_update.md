@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: commit_mapi_event_update
-resource: crates/lpe-storage/src/mapi_events.rs#L526-L699
+resource: crates/lpe-storage/src/mapi_events.rs#L533-L708
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -20,7 +20,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
   - functions/crates/lpe-storage/src/change/Storage/emit_collaboration_change
   - functions/crates/lpe-storage/src/mapi_events/fetch_mapi_event_reminder_state_in_tx
-  - functions/crates/lpe-storage/src/mapi_events/fetch_event_updated_at_in_tx
+  - functions/crates/lpe-storage/src/mapi_events/fetch_event_timestamps_in_tx
 ---
 
 # Signature
@@ -43,4 +43,4 @@ relationships:
 - [insert_mail_change_log_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx.md)
 - [emit_collaboration_change](../../../../../../functions/crates/lpe-storage/src/change/Storage/emit_collaboration_change.md)
 - [fetch_mapi_event_reminder_state_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/fetch_mapi_event_reminder_state_in_tx.md)
-- [fetch_event_updated_at_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/fetch_event_updated_at_in_tx.md)
+- [fetch_event_timestamps_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/fetch_event_timestamps_in_tx.md)

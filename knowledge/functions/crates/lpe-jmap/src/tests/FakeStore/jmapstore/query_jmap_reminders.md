@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: query_jmap_reminders
-resource: crates/lpe-jmap/src/tests.rs#L2214-L2227
+resource: crates/lpe-jmap/src/tests.rs#L2217-L2230
 visibility: private
 generated:
   by: okf-rs/0.3.0

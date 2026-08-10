@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_payload_fingerprint
-resource: crates/lpe-exchange/src/mapi/session/lifecycle.rs#L438-L445
+resource: crates/lpe-exchange/src/mapi/session/lifecycle.rs#L446-L453
 generated:
   by: okf-rs/0.3.0
 relationships:

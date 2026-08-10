@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_properties_project_canonical_dates_status_priority_and_recurrence
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3561-L3609
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L3643-L3691
 visibility: private
 generated:
   by: okf-rs/0.3.0

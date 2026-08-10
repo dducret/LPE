@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: expected_special_folder_parent_id
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L423-L428
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L584-L589
 generated:
   by: okf-rs/0.3.0
 relationships:

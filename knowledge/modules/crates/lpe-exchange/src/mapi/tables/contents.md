@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: contents
-resource: crates/lpe-exchange/src/mapi/tables/contents.rs#L1-L524
+resource: crates/lpe-exchange/src/mapi/tables/contents.rs#L1-L526
 generated:
   by: okf-rs/0.3.0
 relationships:

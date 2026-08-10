@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_message_status
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L188-L196
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L199-L207
 generated:
   by: okf-rs/0.3.0
 relationships:

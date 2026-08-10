@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_associated_message_persists_and_replays_fai
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L10427-L10720
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L10184-L10477
 visibility: private
 generated:
   by: okf-rs/0.3.0

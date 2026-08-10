@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_rfc822_message_prefers_plaintext_but_keeps_html_body
-resource: crates/lpe-storage/src/mail.rs#L441-L464
+resource: crates/lpe-storage/src/mail.rs#L464-L487
 visibility: private
 generated:
   by: okf-rs/0.3.0

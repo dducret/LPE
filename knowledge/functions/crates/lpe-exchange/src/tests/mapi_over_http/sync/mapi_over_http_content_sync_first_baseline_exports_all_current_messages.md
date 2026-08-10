@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_content_sync_first_baseline_exports_all_current_messages
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5626-L5673
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5464-L5511
 visibility: private
 generated:
   by: okf-rs/0.3.0

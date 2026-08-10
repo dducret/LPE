@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: dispatch
-resource: crates/lpe-exchange/src/mapi/dispatch.rs#L1-L1688
+resource: crates/lpe-exchange/src/mapi/dispatch.rs#L1-L1731
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -20,10 +20,10 @@ relationships:
   - external/crate-mapi-identity-conversation-members-contents-table-id-quick-step-settings-folder-id
   - external/crate-mapi-outlook-startup-normal-inbox-visible-row-missing-reason-normal-inbox-visible-row-release-request-shape-outlook-startup-gate-summary
   - external/crate-store-commitmapiassociatedconfigimportinput-commitmapinavigationshortcutcreateinput-commitmapinavigationshortcutimportinput-mapicustompropertyobjectkind-mapicustompropertyvalue-mapieventcreateoutcome-mapifaiimportdisposition-mapifaiimportedidentity-mapifolderhierarchycommitoutcome-mapiidentityobjectkind-mapispecialfolderalias-mapisyncchangeset-mapisynccheckpoint-upsertmapiassociatedconfiginput-upsertmapinavigationshortcutinput
-  - external/lpe-core-outlook-trace-write-outlook-trace-outlooktracedirection-outlooktraceevent
+  - external/lpe-core-outlook-trace-outlooktracedirection-outlooktraceevent-write-outlook-trace
   - external/lpe-domain-current-windows-filetime
   - external/lpe-storage-auditentryinput-createpublicfolderinput-jmapemail-jmapmailbox-jmapmailboxcreateinput-jmapmailboxupdateinput-mapicontactcreateinput-mapicontactcustompropertyvalue-mapieventattachmentchanges-mapieventattachmentupsert-mapieventcommitinput-mapieventcommitoutcome-mapieventcreateinput-mapieventcustompropertyvalue-mapieventimportedidentity-mapieventimportedmoveidentity-mapieventreminderpatch-mapimessageimportedmoveidentity-publicfolderpermissioninput-searchfolderdefinition-submittedrecipientinput-updatepublicfolderinput-upsertpublicfolderiteminput
-  - external/serde-json-json-value
+  - external/serde-json-value-json
   - external/sha2-digest-sha256
   - external/std-cmp-ordering
   - external/associated-config
@@ -95,6 +95,7 @@ relationships:
 - [execute_response](../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute_response.md)
 - [log_post_common_views_handoff_execute_response](../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/log_post_common_views_handoff_execute_response.md)
 - [execute_rops](../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops.md)
+- [append_preexisting_notification_responses](../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/append_preexisting_notification_responses.md)
 
 # Imports
 
@@ -124,7 +125,7 @@ relationships:
     MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
     UpsertMapiNavigationShortcutInput,
 }`
-- `lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent}`
+- `lpe_core::outlook_trace::{OutlookTraceDirection, OutlookTraceEvent, write_outlook_trace}`
 - `lpe_domain::current_windows_filetime`
 - `lpe_storage::{
     AuditEntryInput, CreatePublicFolderInput, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
@@ -135,7 +136,7 @@ relationships:
     MapiMessageImportedMoveIdentity, PublicFolderPermissionInput, SearchFolderDefinition,
     SubmittedRecipientInput, UpdatePublicFolderInput, UpsertPublicFolderItemInput,
 }`
-- `serde_json::{json, Value}`
+- `serde_json::{Value, json}`
 - `sha2::{Digest, Sha256}`
 - `std::cmp::Ordering`
 - `associated_config::*`

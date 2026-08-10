@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_dashboard_to_postgres
-resource: LPE-CT/src/main.rs#L945-L950
+resource: LPE-CT/src/main.rs#L960-L965
 visibility: private
 generated:
   by: okf-rs/0.3.0

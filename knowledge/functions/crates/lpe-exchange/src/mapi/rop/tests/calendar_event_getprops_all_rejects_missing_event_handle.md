@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_getprops_all_rejects_missing_event_handle
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2560-L2595
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2562-L2597
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_categorized_expand_collapse_report_current_state_errors
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L10212-L10311
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L10275-L10374
 visibility: private
 generated:
   by: okf-rs/0.3.0

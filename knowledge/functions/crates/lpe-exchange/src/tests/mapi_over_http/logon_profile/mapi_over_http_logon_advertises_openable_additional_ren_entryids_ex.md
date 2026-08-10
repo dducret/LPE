@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_logon_advertises_openable_additional_ren_entryids_ex
-resource: crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs#L632-L773
+resource: crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs#L596-L737
 visibility: private
 generated:
   by: okf-rs/0.3.0

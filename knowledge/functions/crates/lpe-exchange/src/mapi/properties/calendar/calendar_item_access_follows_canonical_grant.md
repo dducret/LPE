@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_item_access_follows_canonical_grant
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L506-L529
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L613-L636
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: mirror_jmap_email_into_mailbox
-resource: crates/lpe-exchange/src/tests/mod.rs#L11728-L11771
+resource: crates/lpe-exchange/src/tests/mod.rs#L11733-L11776
 visibility: private
 generated:
   by: okf-rs/0.3.0

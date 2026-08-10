@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_activesync_message_attachments
-resource: crates/lpe-activesync/src/tests.rs#L802-L815
+resource: crates/lpe-activesync/src/tests.rs#L803-L816
 visibility: private
 generated:
   by: okf-rs/0.3.0

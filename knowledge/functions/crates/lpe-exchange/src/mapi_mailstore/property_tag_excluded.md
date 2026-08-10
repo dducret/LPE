@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_tag_excluded
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L276-L278
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L279-L281
 visibility: private
 generated:
   by: okf-rs/0.3.0

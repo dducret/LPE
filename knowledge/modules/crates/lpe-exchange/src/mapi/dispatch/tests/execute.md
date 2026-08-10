@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: execute
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L1-L1266
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L1-L1363
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -15,6 +15,7 @@ relationships:
 
 # Contains
 
+- [execute_preserves_pending_table_notification_after_releasing_its_table](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table.md)
 - [execute_max_rop_out_returns_buffer_too_small_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_max_rop_out_returns_buffer_too_small_response.md)
 - [execute_overflow_restores_deliverable_notification_batch](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_restores_deliverable_notification_batch.md)
 - [execute_overflow_does_not_restore_unmatched_notification](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_does_not_restore_unmatched_notification.md)

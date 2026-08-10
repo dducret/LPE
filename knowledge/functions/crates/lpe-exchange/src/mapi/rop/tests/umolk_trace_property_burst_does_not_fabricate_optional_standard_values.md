@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: umolk_trace_property_burst_does_not_fabricate_optional_standard_values
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3482-L3558
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3488-L3564
 visibility: private
 generated:
   by: okf-rs/0.3.0

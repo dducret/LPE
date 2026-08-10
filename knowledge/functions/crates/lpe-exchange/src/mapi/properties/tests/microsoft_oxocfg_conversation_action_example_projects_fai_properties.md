@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxocfg_conversation_action_example_projects_fai_properties
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L414-L495
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L470-L551
 visibility: private
 generated:
   by: okf-rs/0.3.0

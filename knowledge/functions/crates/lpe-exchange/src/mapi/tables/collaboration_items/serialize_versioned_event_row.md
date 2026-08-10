@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_versioned_event_row
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L173-L183
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L187-L199
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -16,7 +16,7 @@ relationships:
 
 # Signature
 
-`pub(in crate::mapi) fn serialize_versioned_event_row( event: &crate::mapi_store::MapiEvent, columns: &[u32], ) -> Vec<u8>`
+`pub(in crate::mapi) fn serialize_versioned_event_row( event: &crate::mapi_store::MapiEvent, mailbox_guid: Uuid, columns: &[u32], ) -> Vec<u8>`
 
 # Calls
 

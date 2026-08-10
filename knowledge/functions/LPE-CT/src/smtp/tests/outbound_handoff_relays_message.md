@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outbound_handoff_relays_message
-resource: LPE-CT/src/smtp/tests.rs#L1762-L1841
+resource: LPE-CT/src/smtp/tests.rs#L1762-L1867
 visibility: private
 generated:
   by: okf-rs/0.3.0

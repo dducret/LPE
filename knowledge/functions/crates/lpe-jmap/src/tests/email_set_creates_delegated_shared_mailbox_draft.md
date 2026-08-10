@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_set_creates_delegated_shared_mailbox_draft
-resource: crates/lpe-jmap/src/tests.rs#L3145-L3197
+resource: crates/lpe-jmap/src/tests.rs#L3148-L3200
 visibility: private
 generated:
   by: okf-rs/0.3.0

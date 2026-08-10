@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1-L10522
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L1-L10585
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -187,6 +187,7 @@ relationships:
 - [common_views_sort_snapshot](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/common_views_sort_snapshot.md)
 - [message_table_row_flags_absent_deadline_expiry_and_recall_times](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/message_table_row_flags_absent_deadline_expiry_and_recall_times.md)
 - [test_table_email](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/test_table_email.md)
+- [calendar_invitation_contents_row_projects_meeting_request_class](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_invitation_contents_row_projects_meeting_request_class.md)
 - [bcc_projections_only_expose_drafts_and_sent_items](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items.md)
 - [assert_response_contains_utf16](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/assert_response_contains_utf16.md)
 - [utf16_position](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/utf16_position.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_set_rejects_writes_to_read_only_shared_task_list
-resource: crates/lpe-jmap/src/tests.rs#L14925-L14976
+resource: crates/lpe-jmap/src/tests.rs#L14928-L14979
 visibility: private
 generated:
   by: okf-rs/0.3.0

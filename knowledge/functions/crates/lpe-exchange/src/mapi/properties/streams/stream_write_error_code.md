@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stream_write_error_code
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L635-L640
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L636-L641
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_child_mailboxes
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L959-L977
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L962-L980
 visibility: private
 generated:
   by: okf-rs/0.3.0

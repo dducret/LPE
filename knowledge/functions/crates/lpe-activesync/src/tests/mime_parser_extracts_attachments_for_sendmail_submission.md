@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mime_parser_extracts_attachments_for_sendmail_submission
-resource: crates/lpe-activesync/src/tests.rs#L4821-L4843
+resource: crates/lpe-activesync/src/tests.rs#L4822-L4844
 visibility: private
 generated:
   by: okf-rs/0.3.0

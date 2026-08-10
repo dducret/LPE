@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: options_returns_capabilities_after_authentication
-resource: crates/lpe-activesync/src/tests.rs#L1390-L1431
+resource: crates/lpe-activesync/src/tests.rs#L1391-L1432
 visibility: private
 generated:
   by: okf-rs/0.3.0

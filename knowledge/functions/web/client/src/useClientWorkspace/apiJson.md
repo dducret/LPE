@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: apiJson
-resource: web/client/src/useClientWorkspace.ts#L39-L54
+resource: web/client/src/useClientWorkspace.ts#L40-L55
 generated:
   by: okf-rs/0.3.0
 relationships:

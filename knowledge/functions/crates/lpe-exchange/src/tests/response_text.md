@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: response_text
-resource: crates/lpe-exchange/src/tests/mod.rs#L12677-L12680
+resource: crates/lpe-exchange/src/tests/mod.rs#L12682-L12685
 visibility: private
 generated:
   by: okf-rs/0.3.0

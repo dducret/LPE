@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_accessible_event
-resource: crates/lpe-exchange/src/tests/mod.rs#L9164-L9175
+resource: crates/lpe-exchange/src/tests/mod.rs#L9168-L9179
 visibility: private
 generated:
   by: okf-rs/0.3.0

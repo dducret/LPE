@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_columns_normalize_stale_sharing_named_property_alias
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1045-L1067
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1050-L1072
 visibility: private
 generated:
   by: okf-rs/0.3.0

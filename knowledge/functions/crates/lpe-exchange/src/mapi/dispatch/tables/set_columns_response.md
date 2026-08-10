@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: set_columns_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1380-L1382
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1382-L1384
 generated:
   by: okf-rs/0.3.0
 relationships:

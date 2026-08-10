@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_csv_env
-resource: LPE-CT/src/smtp.rs#L709-L716
+resource: LPE-CT/src/smtp.rs#L705-L712
 visibility: private
 generated:
   by: okf-rs/0.3.0

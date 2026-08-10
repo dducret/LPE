@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_accessible_event
-resource: crates/lpe-jmap/src/tests.rs#L1831-L1867
+resource: crates/lpe-jmap/src/tests.rs#L1834-L1870
 visibility: private
 generated:
   by: okf-rs/0.3.0

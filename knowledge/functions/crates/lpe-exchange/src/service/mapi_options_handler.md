@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_options_handler
-resource: crates/lpe-exchange/src/service.rs#L228-L238
+resource: crates/lpe-exchange/src/service.rs#L230-L240
 generated:
   by: okf-rs/0.3.0
 relationships:

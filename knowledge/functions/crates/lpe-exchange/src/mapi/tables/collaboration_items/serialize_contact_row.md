@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_contact_row
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L38-L52
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L39-L53
 generated:
   by: okf-rs/0.3.0
 relationships:

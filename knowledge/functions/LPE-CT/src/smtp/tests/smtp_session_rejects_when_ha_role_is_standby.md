@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: smtp_session_rejects_when_ha_role_is_standby
-resource: LPE-CT/src/smtp/tests.rs#L1974-L2006
+resource: LPE-CT/src/smtp/tests.rs#L2000-L2032
 visibility: private
 generated:
   by: okf-rs/0.3.0

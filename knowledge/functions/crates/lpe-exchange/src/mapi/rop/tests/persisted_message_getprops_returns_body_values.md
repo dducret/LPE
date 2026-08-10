@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: persisted_message_getprops_returns_body_values
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3165-L3280
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3170-L3286
 generated:
   by: okf-rs/0.3.0
 relationships:

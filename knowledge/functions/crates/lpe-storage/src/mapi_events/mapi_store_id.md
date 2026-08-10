@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_store_id
-resource: crates/lpe-storage/src/mapi_events.rs#L1227-L1229
+resource: crates/lpe-storage/src/mapi_events.rs#L1236-L1238
 generated:
   by: okf-rs/0.3.0
 ---

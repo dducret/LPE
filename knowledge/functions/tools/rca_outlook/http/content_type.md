@@ -9,6 +9,8 @@ relationships:
   - functions/crates/lpe-admin-api/src/client_attachments/read_multipart_attachment
   - functions/crates/lpe-admin-api/src/console/upload_pst_import
   - functions/tools/rca_outlook/ews/ews_call
+  - functions/tools/rca_outlook_connectivity_check/mapi_gate1_execute_response_rops
+  - functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness
   - functions/tools/rca_outlook_connectivity_check/check_pox_autodiscover
   - functions/tools/rca_outlook_connectivity_check/check_jmap_session
   - functions/tools/rca_outlook_connectivity_check/check_ews_basic
@@ -31,6 +33,8 @@ relationships:
 - [read_multipart_attachment](../../../../functions/crates/lpe-admin-api/src/client_attachments/read_multipart_attachment.md)
 - [upload_pst_import](../../../../functions/crates/lpe-admin-api/src/console/upload_pst_import.md)
 - [ews_call](../../../../functions/tools/rca_outlook/ews/ews_call.md)
+- [mapi_gate1_execute_response_rops](../../../../functions/tools/rca_outlook_connectivity_check/mapi_gate1_execute_response_rops.md)
+- [check_mapi_gate1_readiness](../../../../functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness.md)
 - [check_pox_autodiscover](../../../../functions/tools/rca_outlook_connectivity_check/check_pox_autodiscover.md)
 - [check_jmap_session](../../../../functions/tools/rca_outlook_connectivity_check/check_jmap_session.md)
 - [check_ews_basic](../../../../functions/tools/rca_outlook_connectivity_check/check_ews_basic.md)

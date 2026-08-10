@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: decode_rfc2047_words
-resource: crates/lpe-magika/src/mime.rs#L376-L408
+resource: crates/lpe-magika/src/mime.rs#L367-L399
 visibility: private
 generated:
   by: okf-rs/0.3.0

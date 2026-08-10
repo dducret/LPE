@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_empty_virtual_calendar_sync_has_no_placeholder_rows
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7076-L7119
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7138-L7181
 visibility: private
 generated:
   by: okf-rs/0.3.0

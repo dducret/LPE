@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_reads_empty_associated_config_body_stream
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L12693-L12780
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L12450-L12537
 visibility: private
 generated:
   by: okf-rs/0.3.0

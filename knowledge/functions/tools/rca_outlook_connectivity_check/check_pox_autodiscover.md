@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_pox_autodiscover
-resource: tools/rca_outlook_connectivity_check.py#L156-L259
+resource: tools/rca_outlook_connectivity_check.py#L405-L508
 generated:
   by: okf-rs/0.3.0
 relationships:

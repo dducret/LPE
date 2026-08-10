@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: owned_mailbox_access
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L652-L664
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L653-L665
 visibility: private
 generated:
   by: okf-rs/0.3.0

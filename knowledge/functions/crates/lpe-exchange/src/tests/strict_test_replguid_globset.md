@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_test_replguid_globset
-resource: crates/lpe-exchange/src/tests/mod.rs#L13846-L13858
+resource: crates/lpe-exchange/src/tests/mod.rs#L13851-L13863
 visibility: private
 generated:
   by: okf-rs/0.3.0

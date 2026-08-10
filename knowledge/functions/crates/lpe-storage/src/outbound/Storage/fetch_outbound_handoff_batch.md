@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_outbound_handoff_batch
-resource: crates/lpe-storage/src/outbound.rs#L121-L257
+resource: crates/lpe-storage/src/outbound.rs#L121-L264
 generated:
   by: okf-rs/0.3.0
 relationships:

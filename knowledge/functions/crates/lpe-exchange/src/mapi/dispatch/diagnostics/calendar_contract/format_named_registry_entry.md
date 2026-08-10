@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_named_registry_entry
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L263-L273
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L264-L274
 visibility: private
 generated:
   by: okf-rs/0.3.0

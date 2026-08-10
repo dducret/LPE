@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_event_identity_object_kind
-resource: crates/lpe-storage/src/mapi_events.rs#L814-L820
+resource: crates/lpe-storage/src/mapi_events.rs#L823-L829
 visibility: private
 generated:
   by: okf-rs/0.3.0

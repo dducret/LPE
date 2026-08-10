@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_get_store_state_accepts_live_handle_without_batch_drift
-resource: crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs#L1170-L1195
+resource: crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs#L1098-L1123
 visibility: private
 generated:
   by: okf-rs/0.3.0

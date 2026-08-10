@@ -1,13 +1,14 @@
 ---
 type: Rust Method
 title: move_calendar_events_to_collection_in_tx
-resource: crates/lpe-storage/src/mapi_events.rs#L123-L219
+resource: crates/lpe-storage/src/mapi_events.rs#L124-L220
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx
   - functions/crates/lpe-storage/src/mapi_events/Storage/advance_calendar_event_version_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
@@ -23,6 +24,7 @@ relationships:
 
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [push](../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [allocate_account_modseq_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx.md)
 - [advance_calendar_event_version_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/Storage/advance_calendar_event_version_in_tx.md)
 - [insert_mail_change_log_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx.md)

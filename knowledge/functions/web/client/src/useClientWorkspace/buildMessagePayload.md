@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: buildMessagePayload
-resource: web/client/src/useClientWorkspace.ts#L104-L129
+resource: web/client/src/useClientWorkspace.ts#L105-L130
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -32,12 +32,13 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/source_key_for_uuid
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/source_key_for_mailbox_role
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/canonical_message_change_number
+  - functions/crates/lpe-exchange/src/mapi/properties/message/content_class_for_email
   - functions/crates/lpe-exchange/src/mapi/properties/message/transport_headers
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/normal_message_debug_property_value
   - functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_email_with_attachments
   - functions/crates/lpe-exchange/src/mapi/properties/message/email_property_value_with_durable_identity
-  - functions/crates/lpe-exchange/src/mapi/properties/tests/rss_feed_messages_project_rss_message_class_and_named_properties
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/email_message_class_and_content_class_follow_canonical_projection
   - functions/crates/lpe-exchange/src/mapi/rop/fallback_default_specific_property
   - functions/crates/lpe-exchange/src/mapi/tables/contents/category_values_for_email
   - functions/crates/lpe-exchange/src/mapi/tables/diagnostics/inbox_contents_row_invariant_property_value
@@ -75,6 +76,7 @@ relationships:
 - [source_key_for_uuid](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/source_key_for_uuid.md)
 - [source_key_for_mailbox_role](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/source_key_for_mailbox_role.md)
 - [canonical_message_change_number](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/canonical_message_change_number.md)
+- [content_class_for_email](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/content_class_for_email.md)
 - [transport_headers](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/transport_headers.md)
 
 # Called by
@@ -82,7 +84,7 @@ relationships:
 - [normal_message_debug_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/normal_message_debug_property_value.md)
 - [restriction_matches_email_with_attachments](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/restriction_matches_email_with_attachments.md)
 - [email_property_value_with_durable_identity](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/email_property_value_with_durable_identity.md)
-- [rss_feed_messages_project_rss_message_class_and_named_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/rss_feed_messages_project_rss_message_class_and_named_properties.md)
+- [email_message_class_and_content_class_follow_canonical_projection](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/email_message_class_and_content_class_follow_canonical_projection.md)
 - [fallback_default_specific_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/fallback_default_specific_property.md)
 - [category_values_for_email](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/contents/category_values_for_email.md)
 - [inbox_contents_row_invariant_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/diagnostics/inbox_contents_row_invariant_property_value.md)

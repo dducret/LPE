@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ipm_hierarchy_runtime_uses_outlook_safe_folder_projection
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1224-L1235
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1284-L1295
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_canonical_change_listener
-resource: crates/lpe-activesync/src/tests.rs#L610-L615
+resource: crates/lpe-activesync/src/tests.rs#L611-L616
 visibility: private
 generated:
   by: okf-rs/0.3.0

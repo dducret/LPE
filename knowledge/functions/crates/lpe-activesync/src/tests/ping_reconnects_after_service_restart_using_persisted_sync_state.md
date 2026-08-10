@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ping_reconnects_after_service_restart_using_persisted_sync_state
-resource: crates/lpe-activesync/src/tests.rs#L5152-L5218
+resource: crates/lpe-activesync/src/tests.rs#L5153-L5219
 visibility: private
 generated:
   by: okf-rs/0.3.0

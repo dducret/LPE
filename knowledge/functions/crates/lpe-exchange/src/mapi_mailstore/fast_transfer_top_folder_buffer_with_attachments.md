@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_top_folder_buffer_with_attachments
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L850-L875
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L853-L878
 generated:
   by: okf-rs/0.3.0
 relationships:

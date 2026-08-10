@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: round_trip
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L497-L501
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L553-L557
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -8,6 +8,8 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-core/src/sieve/Parser/next
+  called_by:
+  - functions/crates/lpe-magika/src/validator/normalize_mime
 ---
 
 # Signature
@@ -17,3 +19,7 @@ relationships:
 # Calls
 
 - [next](../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+
+# Called by
+
+- [normalize_mime](../../../../../functions/crates/lpe-magika/src/validator/normalize_mime.md)

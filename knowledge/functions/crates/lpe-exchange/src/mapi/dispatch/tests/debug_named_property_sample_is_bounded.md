@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: debug_named_property_sample_is_bounded
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2178-L2200
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2197-L2219
 visibility: private
 generated:
   by: okf-rs/0.3.0

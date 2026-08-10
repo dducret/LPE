@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_logon_bootstrap_row_shape
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L542-L564
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L543-L565
 generated:
   by: okf-rs/0.3.0
 relationships:

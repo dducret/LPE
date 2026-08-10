@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_wire_id_bytes
-resource: crates/lpe-exchange/src/tests/mod.rs#L15141-L15143
+resource: crates/lpe-exchange/src/tests/mod.rs#L15146-L15148
 visibility: private
 generated:
   by: okf-rs/0.3.0

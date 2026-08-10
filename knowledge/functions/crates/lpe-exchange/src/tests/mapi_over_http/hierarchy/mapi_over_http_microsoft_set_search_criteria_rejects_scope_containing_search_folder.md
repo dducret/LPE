@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_set_search_criteria_rejects_scope_containing_search_folder
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L4052-L4120
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3957-L4025
 visibility: private
 generated:
   by: okf-rs/0.3.0

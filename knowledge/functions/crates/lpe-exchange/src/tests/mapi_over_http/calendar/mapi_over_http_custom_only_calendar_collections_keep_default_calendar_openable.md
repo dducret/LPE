@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_custom_only_calendar_collections_keep_default_calendar_openable
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8587-L8699
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L8672-L8795
 visibility: private
 generated:
   by: okf-rs/0.3.0

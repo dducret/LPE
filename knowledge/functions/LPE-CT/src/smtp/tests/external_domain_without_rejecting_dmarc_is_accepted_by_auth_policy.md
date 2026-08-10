@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: external_domain_without_rejecting_dmarc_is_accepted_by_auth_policy
-resource: LPE-CT/src/smtp/tests.rs#L3305-L3321
+resource: LPE-CT/src/smtp/tests.rs#L3281-L3297
 visibility: private
 generated:
   by: okf-rs/0.3.0

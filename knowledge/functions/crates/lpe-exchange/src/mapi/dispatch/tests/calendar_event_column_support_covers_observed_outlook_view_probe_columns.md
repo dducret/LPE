@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_event_column_support_covers_observed_outlook_view_probe_columns
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2219-L2250
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2240-L2271
 visibility: private
 generated:
   by: okf-rs/0.3.0

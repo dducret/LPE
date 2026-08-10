@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: split_lines_inclusive
-resource: crates/lpe-magika/src/mime.rs#L287-L300
+resource: crates/lpe-magika/src/mime.rs#L278-L291
 visibility: private
 generated:
   by: okf-rs/0.3.0

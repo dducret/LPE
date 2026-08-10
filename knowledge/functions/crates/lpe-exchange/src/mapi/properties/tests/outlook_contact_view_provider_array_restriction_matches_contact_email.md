@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_contact_view_provider_array_restriction_matches_contact_email
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1364-L1418
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1420-L1474
 visibility: private
 generated:
   by: okf-rs/0.3.0

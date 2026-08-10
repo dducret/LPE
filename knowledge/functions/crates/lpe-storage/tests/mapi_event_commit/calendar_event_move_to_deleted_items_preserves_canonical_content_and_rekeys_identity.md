@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-storage/tests/mapi_event_commit/event_fixture
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/core/Storage/pool
   - functions/crates/lpe-storage/tests/mapi_event_commit/change_key
   - functions/crates/lpe-storage/tests/mapi_event_commit/commit_input
@@ -23,6 +24,7 @@ relationships:
 
 - [event_fixture](../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/event_fixture.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [pool](../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)
 - [change_key](../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/change_key.md)
 - [commit_input](../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/commit_input.md)

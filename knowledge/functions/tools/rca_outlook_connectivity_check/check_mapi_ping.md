@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_mapi_ping
-resource: tools/rca_outlook_connectivity_check.py#L735-L804
+resource: tools/rca_outlook_connectivity_check.py#L984-L1053
 generated:
   by: okf-rs/0.3.0
 relationships:

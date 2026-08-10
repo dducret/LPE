@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_content_sync_progress_mode
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1289-L1334
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1292-L1337
 visibility: private
 generated:
   by: okf-rs/0.3.0

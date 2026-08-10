@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_submit_pending_message_uses_canonical_submission
-resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L934-L1096
+resource: crates/lpe-exchange/src/tests/mapi_over_http/submission.rs#L898-L1060
 visibility: private
 generated:
   by: okf-rs/0.3.0

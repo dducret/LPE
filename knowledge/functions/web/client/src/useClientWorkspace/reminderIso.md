@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: reminderIso
-resource: web/client/src/useClientWorkspace.ts#L150-L152
+resource: web/client/src/useClientWorkspace.ts#L151-L153
 generated:
   by: okf-rs/0.3.0
 relationships:

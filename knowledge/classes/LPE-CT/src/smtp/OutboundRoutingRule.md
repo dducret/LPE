@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: OutboundRoutingRule
-resource: LPE-CT/src/smtp.rs#L209-L214
+resource: LPE-CT/src/smtp.rs#L205-L210
 generated:
   by: okf-rs/0.3.0
 ---

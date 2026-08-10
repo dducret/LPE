@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_rfc3339_utc_filetime
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L348-L393
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L349-L394
 visibility: private
 generated:
   by: okf-rs/0.3.0

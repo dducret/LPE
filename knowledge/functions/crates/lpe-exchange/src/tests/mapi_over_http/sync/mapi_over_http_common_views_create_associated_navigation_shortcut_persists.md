@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_common_views_create_associated_navigation_shortcut_persists
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L1850-L1932
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L1724-L1806
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -16,6 +16,7 @@ relationships:
   - functions/LPE-CT/web/app/smoke/test/MockClassList/remove
   - functions/crates/lpe-exchange/src/tests/test_merge_mapi_predecessor_change_lists
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -33,3 +34,4 @@ relationships:
 - [remove](../../../../../functions/LPE-CT/web/app/smoke/test/MockClassList/remove.md)
 - [test_merge_mapi_predecessor_change_lists](../../../../../functions/crates/lpe-exchange/src/tests/test_merge_mapi_predecessor_change_lists.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

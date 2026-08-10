@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_property_value_start
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1376-L1418
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1379-L1421
 generated:
   by: okf-rs/0.3.0
 relationships:

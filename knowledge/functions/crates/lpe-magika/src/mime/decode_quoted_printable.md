@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: decode_quoted_printable
-resource: crates/lpe-magika/src/mime.rs#L345-L374
+resource: crates/lpe-magika/src/mime.rs#L336-L365
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: sync
-resource: crates/lpe-exchange/src/mapi/sync.rs#L1-L1463
+resource: crates/lpe-exchange/src/mapi/sync.rs#L1-L1468
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fallback_event_version
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1607-L1617
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1607-L1619
 visibility: private
 generated:
   by: okf-rs/0.3.0

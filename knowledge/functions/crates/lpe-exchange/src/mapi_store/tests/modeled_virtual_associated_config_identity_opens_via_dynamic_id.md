@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: modeled_virtual_associated_config_identity_opens_via_dynamic_id
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1369-L1413
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1371-L1415
 visibility: private
 generated:
   by: okf-rs/0.3.0

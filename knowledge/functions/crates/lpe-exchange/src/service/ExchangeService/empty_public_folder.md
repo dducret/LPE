@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: empty_public_folder
-resource: crates/lpe-exchange/src/service.rs#L978-L1035
+resource: crates/lpe-exchange/src/service.rs#L980-L1037
 visibility: private
 generated:
   by: okf-rs/0.3.0

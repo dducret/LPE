@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stored_email_query_state_keeps_snapshot_out_of_token_and_paginates_changes
-resource: crates/lpe-jmap/src/tests.rs#L4516-L4628
+resource: crates/lpe-jmap/src/tests.rs#L4519-L4631
 visibility: private
 generated:
   by: okf-rs/0.3.0

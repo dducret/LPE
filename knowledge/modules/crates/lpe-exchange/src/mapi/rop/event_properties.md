@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: event_properties
-resource: crates/lpe-exchange/src/mapi/rop/event_properties.rs#L1-L55
+resource: crates/lpe-exchange/src/mapi/rop/event_properties.rs#L1-L57
 generated:
   by: okf-rs/0.3.0
 relationships:

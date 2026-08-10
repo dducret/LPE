@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_type_parameter
-resource: crates/lpe-magika/src/mime.rs#L310-L318
+resource: crates/lpe-magika/src/mime.rs#L301-L309
 visibility: private
 generated:
   by: okf-rs/0.3.0

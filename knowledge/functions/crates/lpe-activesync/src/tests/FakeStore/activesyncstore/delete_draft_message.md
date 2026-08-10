@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_draft_message
-resource: crates/lpe-activesync/src/tests.rs#L964-L972
+resource: crates/lpe-activesync/src/tests.rs#L965-L973
 visibility: private
 generated:
   by: okf-rs/0.3.0

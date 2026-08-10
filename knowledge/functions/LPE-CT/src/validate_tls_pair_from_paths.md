@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_tls_pair_from_paths
-resource: LPE-CT/src/main.rs#L1110-L1116
+resource: LPE-CT/src/main.rs#L1125-L1131
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/change/Storage/insert_collaboration_tombstone_in_tx
   - functions/crates/lpe-storage/src/change/Storage/insert_collaboration_move_tombstone_in_tx
@@ -24,6 +25,7 @@ relationships:
 - [allocate_account_modseq_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_account_modseq_in_tx.md)
 - [insert_mail_change_log_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_table_omits_unpersisted_default_named_view_for_exact_lookup
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5892-L5917
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5927-L5952
 visibility: private
 generated:
   by: okf-rs/0.3.0

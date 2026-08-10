@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/event_is_meeting
   called_by:
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/response_status
 ---
 
 # Signature
@@ -22,3 +23,4 @@ relationships:
 # Called by
 
 - [event_property_value_with_optional_version](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version.md)
+- [response_status](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/response_status.md)

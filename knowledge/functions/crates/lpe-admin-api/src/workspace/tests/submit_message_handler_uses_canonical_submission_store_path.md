@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: submit_message_handler_uses_canonical_submission_store_path
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L772-L797
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L773-L798
 visibility: private
 generated:
   by: okf-rs/0.3.0

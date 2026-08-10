@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_task_property_tags
-resource: crates/lpe-exchange/src/mapi/tables/columns.rs#L357-L394
+resource: crates/lpe-exchange/src/mapi/tables/columns.rs#L362-L399
 generated:
   by: okf-rs/0.3.0
 relationships:

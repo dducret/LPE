@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_draft_message
-resource: crates/lpe-storage/src/submission.rs#L1228-L1242
+resource: crates/lpe-storage/src/submission.rs#L1231-L1245
 generated:
   by: okf-rs/0.3.0
 relationships:

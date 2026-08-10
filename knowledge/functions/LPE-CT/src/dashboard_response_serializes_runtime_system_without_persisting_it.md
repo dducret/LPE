@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: dashboard_response_serializes_runtime_system_without_persisting_it
-resource: LPE-CT/src/main.rs#L1209-L1230
+resource: LPE-CT/src/main.rs#L1229-L1250
 visibility: private
 generated:
   by: okf-rs/0.3.0

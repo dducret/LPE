@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: exact_event_mid_wins_over_another_events_foreign_cached_alias
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L188-L214
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L190-L216
 visibility: private
 generated:
   by: okf-rs/0.3.0

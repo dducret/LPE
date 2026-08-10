@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_mailbox_accounts
-resource: crates/lpe-jmap/src/tests.rs#L989-L998
+resource: crates/lpe-jmap/src/tests.rs#L991-L1000
 visibility: private
 generated:
   by: okf-rs/0.3.0

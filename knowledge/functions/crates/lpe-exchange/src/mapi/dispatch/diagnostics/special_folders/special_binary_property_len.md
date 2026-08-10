@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_binary_property_len
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L494-L505
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L655-L666
 visibility: private
 generated:
   by: okf-rs/0.3.0

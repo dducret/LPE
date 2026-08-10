@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: snapshot_resolves_tracked_mail_processing_by_advertised_folder_id
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2731-L2766
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L2734-L2769
 visibility: private
 generated:
   by: okf-rs/0.3.0

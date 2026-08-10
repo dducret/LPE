@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_status_from_mapi
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L944-L955
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1111-L1122
 visibility: private
 generated:
   by: okf-rs/0.3.0

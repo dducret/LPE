@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_open_loop_summary_requires_repeated_probe_without_contents_table
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1793-L1824
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1804-L1835
 visibility: private
 generated:
   by: okf-rs/0.3.0

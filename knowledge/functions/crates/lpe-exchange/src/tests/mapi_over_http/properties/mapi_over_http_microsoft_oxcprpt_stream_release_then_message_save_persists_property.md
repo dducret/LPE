@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxcprpt_stream_release_then_message_save_persists_property
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4582-L4683
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4306-L4407
 visibility: private
 generated:
   by: okf-rs/0.3.0

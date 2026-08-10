@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_outbound_queue_status
-resource: crates/lpe-storage/src/outbound.rs#L259-L412
+resource: crates/lpe-storage/src/outbound.rs#L266-L419
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_event_input
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L532-L560
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L639-L667
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -34,8 +34,6 @@ relationships:
   - functions/LPE-CT/src/smtp/bayes/tokenize_for_bayespam
   - functions/LPE-CT/src/smtp/inbound_policy/evaluate_inbound_policy
   - functions/LPE-CT/src/smtp/inbound_policy/finalize_policy_decision
-  - functions/LPE-CT/src/smtp/outbound/compose_rfc822_message
-  - functions/LPE-CT/src/smtp/outbound/encode_quoted_printable
   - functions/LPE-CT/src/smtp/outbound_delivery/relay_message
   - functions/LPE-CT/src/smtp/outbound_delivery/relay_message_direct_mx
   - functions/LPE-CT/src/smtp/outbound_delivery/direct_mx_targets
@@ -405,6 +403,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/message/append_rtf_escaped_text
   - functions/crates/lpe-exchange/src/mapi/properties/message/transport_headers
   - functions/crates/lpe-exchange/src/mapi/properties/message/pending_recipients_for_import
+  - functions/crates/lpe-exchange/src/mapi/properties/message/meeting_request_attachment
   - functions/crates/lpe-exchange/src/mapi/properties/message/apply_pending_recipient_changes
   - functions/crates/lpe-exchange/src/mapi/properties/message/apply_canonical_message_property_values
   - functions/crates/lpe-exchange/src/mapi/properties/recurrence/appointment_recurrence_from_mapi
@@ -1273,6 +1272,7 @@ relationships:
   - functions/crates/lpe-storage/src/storage_visibility/cleanup_blocker_labels
   - functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx
   - functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_sender_identities
+  - functions/crates/lpe-storage/src/submission/mime/render_submission_raw_message
   - functions/crates/lpe-storage/src/submission/types/canonical_submission_phases
   - functions/crates/lpe-storage/src/submission/types/push_recipients
   - functions/crates/lpe-storage/src/submission/types/push_bcc_recipients
@@ -1324,8 +1324,6 @@ relationships:
 - [tokenize_for_bayespam](../../../../../../functions/LPE-CT/src/smtp/bayes/tokenize_for_bayespam.md)
 - [evaluate_inbound_policy](../../../../../../functions/LPE-CT/src/smtp/inbound_policy/evaluate_inbound_policy.md)
 - [finalize_policy_decision](../../../../../../functions/LPE-CT/src/smtp/inbound_policy/finalize_policy_decision.md)
-- [compose_rfc822_message](../../../../../../functions/LPE-CT/src/smtp/outbound/compose_rfc822_message.md)
-- [encode_quoted_printable](../../../../../../functions/LPE-CT/src/smtp/outbound/encode_quoted_printable.md)
 - [relay_message](../../../../../../functions/LPE-CT/src/smtp/outbound_delivery/relay_message.md)
 - [relay_message_direct_mx](../../../../../../functions/LPE-CT/src/smtp/outbound_delivery/relay_message_direct_mx.md)
 - [direct_mx_targets](../../../../../../functions/LPE-CT/src/smtp/outbound_delivery/direct_mx_targets.md)
@@ -1695,6 +1693,7 @@ relationships:
 - [append_rtf_escaped_text](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/append_rtf_escaped_text.md)
 - [transport_headers](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/transport_headers.md)
 - [pending_recipients_for_import](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/pending_recipients_for_import.md)
+- [meeting_request_attachment](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/meeting_request_attachment.md)
 - [apply_pending_recipient_changes](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/apply_pending_recipient_changes.md)
 - [apply_canonical_message_property_values](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/apply_canonical_message_property_values.md)
 - [appointment_recurrence_from_mapi](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/recurrence/appointment_recurrence_from_mapi.md)
@@ -2563,6 +2562,7 @@ relationships:
 - [cleanup_blocker_labels](../../../../../../functions/crates/lpe-storage/src/storage_visibility/cleanup_blocker_labels.md)
 - [fetch_draft_attachment_inputs_in_tx](../../../../../../functions/crates/lpe-storage/src/submission/Storage/fetch_draft_attachment_inputs_in_tx.md)
 - [fetch_sender_identities](../../../../../../functions/crates/lpe-storage/src/submission/delegation/Storage/fetch_sender_identities.md)
+- [render_submission_raw_message](../../../../../../functions/crates/lpe-storage/src/submission/mime/render_submission_raw_message.md)
 - [canonical_submission_phases](../../../../../../functions/crates/lpe-storage/src/submission/types/canonical_submission_phases.md)
 - [push_recipients](../../../../../../functions/crates/lpe-storage/src/submission/types/push_recipients.md)
 - [push_bcc_recipients](../../../../../../functions/crates/lpe-storage/src/submission/types/push_bcc_recipients.md)

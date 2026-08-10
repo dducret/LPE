@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: types
-resource: crates/lpe-exchange/src/mapi/session/types.rs#L1-L626
+resource: crates/lpe-exchange/src/mapi/session/types.rs#L1-L630
 generated:
   by: okf-rs/0.3.0
 relationships:

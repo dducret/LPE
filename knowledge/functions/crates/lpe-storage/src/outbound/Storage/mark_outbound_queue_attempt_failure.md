@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: mark_outbound_queue_attempt_failure
-resource: crates/lpe-storage/src/outbound.rs#L414-L432
+resource: crates/lpe-storage/src/outbound.rs#L421-L439
 generated:
   by: okf-rs/0.3.0
 relationships:

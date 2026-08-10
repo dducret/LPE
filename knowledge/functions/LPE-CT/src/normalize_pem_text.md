@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normalize_pem_text
-resource: LPE-CT/src/main.rs#L1092-L1098
+resource: LPE-CT/src/main.rs#L1107-L1113
 visibility: private
 generated:
   by: okf-rs/0.3.0

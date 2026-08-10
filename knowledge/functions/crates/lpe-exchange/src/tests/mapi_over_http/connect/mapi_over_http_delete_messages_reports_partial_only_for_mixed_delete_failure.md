@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_delete_messages_reports_partial_only_for_mixed_delete_failure
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1072-L1149
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1000-L1077
 visibility: private
 generated:
   by: okf-rs/0.3.0

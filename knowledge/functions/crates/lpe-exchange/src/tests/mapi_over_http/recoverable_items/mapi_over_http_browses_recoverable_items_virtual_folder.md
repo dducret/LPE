@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_browses_recoverable_items_virtual_folder
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L328-L385
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L319-L376
 visibility: private
 generated:
   by: okf-rs/0.3.0

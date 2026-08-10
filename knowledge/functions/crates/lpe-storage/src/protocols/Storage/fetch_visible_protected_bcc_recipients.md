@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_visible_protected_bcc_recipients
-resource: crates/lpe-storage/src/protocols.rs#L1086-L1130
+resource: crates/lpe-storage/src/protocols.rs#L1105-L1149
 visibility: private
 generated:
   by: okf-rs/0.3.0

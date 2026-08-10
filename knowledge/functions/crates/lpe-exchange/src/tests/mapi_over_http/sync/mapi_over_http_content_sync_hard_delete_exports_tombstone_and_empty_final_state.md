@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_content_sync_hard_delete_exports_tombstone_and_empty_final_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6108-L6163
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5946-L6001
 visibility: private
 generated:
   by: okf-rs/0.3.0

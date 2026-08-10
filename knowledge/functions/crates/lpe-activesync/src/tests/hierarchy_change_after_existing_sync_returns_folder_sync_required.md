@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_change_after_existing_sync_returns_folder_sync_required
-resource: crates/lpe-activesync/src/tests.rs#L4574-L4637
+resource: crates/lpe-activesync/src/tests.rs#L4575-L4638
 visibility: private
 generated:
   by: okf-rs/0.3.0

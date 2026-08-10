@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_open_folder_response
-resource: crates/lpe-exchange/src/mapi/dispatch/folder_open.rs#L38-L572
+resource: crates/lpe-exchange/src/mapi/dispatch/folder_open.rs#L38-L575
 generated:
   by: okf-rs/0.3.0
 relationships:

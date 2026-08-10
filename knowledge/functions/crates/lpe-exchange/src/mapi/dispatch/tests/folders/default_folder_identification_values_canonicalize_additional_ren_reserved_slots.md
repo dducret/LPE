@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_folder_identification_values_canonicalize_additional_ren_reserved_slots
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L1882-L1941
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L1895-L1954
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: copy_jmap_email_between_accounts
-resource: crates/lpe-jmap/src/tests.rs#L1467-L1521
+resource: crates/lpe-jmap/src/tests.rs#L1469-L1523
 visibility: private
 generated:
   by: okf-rs/0.3.0

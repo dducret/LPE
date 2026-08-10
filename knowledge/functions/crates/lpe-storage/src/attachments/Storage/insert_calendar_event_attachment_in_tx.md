@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/attachments/attachment_disposition
   - functions/crates/lpe-storage/src/attachments/normalize_attachment_content_id
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/attachments/calendar_attachment_file_reference
   called_by:
   - functions/crates/lpe-storage/src/attachments/Storage/apply_mapi_event_attachment_changes_in_tx
@@ -27,6 +28,7 @@ relationships:
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [attachment_disposition](../../../../../../functions/crates/lpe-storage/src/attachments/attachment_disposition.md)
 - [normalize_attachment_content_id](../../../../../../functions/crates/lpe-storage/src/attachments/normalize_attachment_content_id.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [calendar_attachment_file_reference](../../../../../../functions/crates/lpe-storage/src/attachments/calendar_attachment_file_reference.md)
 
 # Called by

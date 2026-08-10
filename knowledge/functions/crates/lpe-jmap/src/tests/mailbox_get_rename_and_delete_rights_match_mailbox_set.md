@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_get_rename_and_delete_rights_match_mailbox_set
-resource: crates/lpe-jmap/src/tests.rs#L6939-L7053
+resource: crates/lpe-jmap/src/tests.rs#L6942-L7056
 visibility: private
 generated:
   by: okf-rs/0.3.0

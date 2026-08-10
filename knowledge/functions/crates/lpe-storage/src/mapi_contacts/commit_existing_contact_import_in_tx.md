@@ -17,6 +17,7 @@ relationships:
   - functions/crates/lpe-storage/src/mapi_contacts/merge_contact_predecessor_change_lists
   - functions/crates/lpe-storage/src/mapi_contacts/normalize_filetime
   - functions/crates/lpe-storage/src/mapi_contacts/imported_contact_version_wins_last_writer
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
 ---
@@ -37,6 +38,7 @@ relationships:
 - [merge_contact_predecessor_change_lists](../../../../../functions/crates/lpe-storage/src/mapi_contacts/merge_contact_predecessor_change_lists.md)
 - [normalize_filetime](../../../../../functions/crates/lpe-storage/src/mapi_contacts/normalize_filetime.md)
 - [imported_contact_version_wins_last_writer](../../../../../functions/crates/lpe-storage/src/mapi_contacts/imported_contact_version_wins_last_writer.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

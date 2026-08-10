@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outbound_request
-resource: LPE-CT/src/smtp/tests.rs#L3459-L3482
+resource: LPE-CT/src/smtp/tests.rs#L3435-L3459
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -16,7 +16,6 @@ relationships:
   - functions/LPE-CT/src/smtp/tests/outbound_handoff_uses_matching_routing_rule
   - functions/LPE-CT/src/smtp/tests/outbound_route_without_smart_host_uses_direct_mx_default
   - functions/LPE-CT/src/smtp/tests/outbound_handoff_delivers_accepted_domain_locally_without_direct_mx
-  - functions/LPE-CT/src/smtp/tests/outbound_handoff_emits_sender_header_for_delegated_sender
   - functions/LPE-CT/src/smtp/tests/outbound_handoff_quarantines_on_bayespam_score
   - functions/LPE-CT/src/smtp/tests/outbound_handoff_rejects_blocked_delegated_sender
   - functions/LPE-CT/src/smtp/tests/benchmark_relay_hot_path
@@ -37,7 +36,6 @@ relationships:
 - [outbound_handoff_uses_matching_routing_rule](../../../../../functions/LPE-CT/src/smtp/tests/outbound_handoff_uses_matching_routing_rule.md)
 - [outbound_route_without_smart_host_uses_direct_mx_default](../../../../../functions/LPE-CT/src/smtp/tests/outbound_route_without_smart_host_uses_direct_mx_default.md)
 - [outbound_handoff_delivers_accepted_domain_locally_without_direct_mx](../../../../../functions/LPE-CT/src/smtp/tests/outbound_handoff_delivers_accepted_domain_locally_without_direct_mx.md)
-- [outbound_handoff_emits_sender_header_for_delegated_sender](../../../../../functions/LPE-CT/src/smtp/tests/outbound_handoff_emits_sender_header_for_delegated_sender.md)
 - [outbound_handoff_quarantines_on_bayespam_score](../../../../../functions/LPE-CT/src/smtp/tests/outbound_handoff_quarantines_on_bayespam_score.md)
 - [outbound_handoff_rejects_blocked_delegated_sender](../../../../../functions/LPE-CT/src/smtp/tests/outbound_handoff_rejects_blocked_delegated_sender.md)
 - [benchmark_relay_hot_path](../../../../../functions/LPE-CT/src/smtp/tests/benchmark_relay_hot_path.md)

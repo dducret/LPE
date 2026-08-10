@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: final_sync_state_stream
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L474-L485
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L477-L488
 generated:
   by: okf-rs/0.3.0
 relationships:

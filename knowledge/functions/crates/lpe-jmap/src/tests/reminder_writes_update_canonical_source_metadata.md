@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reminder_writes_update_canonical_source_metadata
-resource: crates/lpe-jmap/src/tests.rs#L13767-L13909
+resource: crates/lpe-jmap/src/tests.rs#L13770-L13912
 visibility: private
 generated:
   by: okf-rs/0.3.0

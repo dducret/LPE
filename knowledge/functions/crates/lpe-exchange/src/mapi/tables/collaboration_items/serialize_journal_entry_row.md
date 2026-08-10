@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_journal_entry_row
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L238-L252
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L254-L268
 generated:
   by: okf-rs/0.3.0
 relationships:

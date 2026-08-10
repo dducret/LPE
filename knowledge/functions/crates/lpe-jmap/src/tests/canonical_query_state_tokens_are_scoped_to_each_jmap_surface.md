@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_query_state_tokens_are_scoped_to_each_jmap_surface
-resource: crates/lpe-jmap/src/tests.rs#L4746-L4888
+resource: crates/lpe-jmap/src/tests.rs#L4749-L4891
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_recipients_row_zero_on_empty_message_returns_not_found
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L284-L306
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L340-L362
 visibility: private
 generated:
   by: okf-rs/0.3.0

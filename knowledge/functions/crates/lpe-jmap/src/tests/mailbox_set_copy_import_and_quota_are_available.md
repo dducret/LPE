@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_set_copy_import_and_quota_are_available
-resource: crates/lpe-jmap/src/tests.rs#L7211-L7281
+resource: crates/lpe-jmap/src/tests.rs#L7214-L7284
 visibility: private
 generated:
   by: okf-rs/0.3.0

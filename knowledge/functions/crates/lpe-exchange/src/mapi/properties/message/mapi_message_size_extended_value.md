@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_message_size_extended_value
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L451-L453
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L461-L463
 generated:
   by: okf-rs/0.3.0
 relationships:

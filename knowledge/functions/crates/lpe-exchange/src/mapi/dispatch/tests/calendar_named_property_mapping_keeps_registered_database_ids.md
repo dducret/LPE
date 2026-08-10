@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_named_property_mapping_keeps_registered_database_ids
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1179-L1212
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1184-L1221
 visibility: private
 generated:
   by: okf-rs/0.3.0

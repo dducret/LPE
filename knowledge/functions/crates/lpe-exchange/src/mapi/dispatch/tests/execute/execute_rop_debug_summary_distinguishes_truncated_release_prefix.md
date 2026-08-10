@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rop_debug_summary_distinguishes_truncated_release_prefix
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L698-L726
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L753-L781
 visibility: private
 generated:
   by: okf-rs/0.3.0

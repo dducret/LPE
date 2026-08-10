@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-storage/src/core/Storage/pool
   - functions/crates/lpe-core/src/sieve/Parser/expect
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/copy_and_verify_one_blob_migration_job
 ---
 
@@ -26,4 +27,5 @@ relationships:
 - [pool](../../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)
 - [expect](../../../../../../functions/crates/lpe-core/src/sieve/Parser/expect.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [copy_and_verify_one_blob_migration_job](../../../../../../functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/copy_and_verify_one_blob_migration_job.md)

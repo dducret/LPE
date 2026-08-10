@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: custom_properties
-resource: crates/lpe-exchange/src/mapi/dispatch/custom_properties.rs#L1-L506
+resource: crates/lpe-exchange/src/mapi/dispatch/custom_properties.rs#L1-L508
 generated:
   by: okf-rs/0.3.0
 relationships:

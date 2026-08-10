@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: same_trace_can_progress_from_deferred_to_relayed
-resource: crates/lpe-storage/src/outbound.rs#L506-L519
+resource: crates/lpe-storage/src/outbound.rs#L513-L526
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: query_recipient_suggestions
-resource: crates/lpe-jmap/src/tests.rs#L1717-L1743
+resource: crates/lpe-jmap/src/tests.rs#L1720-L1746
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_fast_transfer_copy_properties_message_includes_only_requested_subject
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8090-L8159
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7883-L7952
 visibility: private
 generated:
   by: okf-rs/0.3.0

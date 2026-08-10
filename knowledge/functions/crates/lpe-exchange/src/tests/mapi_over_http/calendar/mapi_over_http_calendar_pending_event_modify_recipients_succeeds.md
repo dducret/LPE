@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_pending_event_modify_recipients_succeeds
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3654-L3693
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3654-L3724
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -12,9 +12,16 @@ relationships:
   - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
   - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_rop_create_message
+  - functions/crates/lpe-exchange/src/tests/append_mapi_utf16_property
+  - functions/crates/lpe-exchange/src/tests/append_mapi_i64_property
+  - functions/crates/lpe-exchange/src/tests/test_filetime
+  - functions/crates/lpe-exchange/src/tests/append_rop_set_properties
+  - functions/crates/lpe-exchange/src/tests/mapi_recipient_row
   - functions/crates/lpe-exchange/src/tests/append_rop_modify_recipients
+  - functions/crates/lpe-exchange/src/tests/append_rop_save_changes_message
   - functions/crates/lpe-exchange/src/tests/execute_body
   - functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response
+  - functions/crates/lpe-storage/src/calendar/parse_calendar_participants_metadata
 ---
 
 # Signature
@@ -28,6 +35,13 @@ relationships:
 - [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
 - [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_rop_create_message](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_create_message.md)
+- [append_mapi_utf16_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_utf16_property.md)
+- [append_mapi_i64_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_i64_property.md)
+- [test_filetime](../../../../../../../functions/crates/lpe-exchange/src/tests/test_filetime.md)
+- [append_rop_set_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_set_properties.md)
+- [mapi_recipient_row](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_recipient_row.md)
 - [append_rop_modify_recipients](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_modify_recipients.md)
+- [append_rop_save_changes_message](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_save_changes_message.md)
 - [execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/execute_body.md)
 - [response_rops_from_execute_response](../../../../../../../functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response.md)
+- [parse_calendar_participants_metadata](../../../../../../../functions/crates/lpe-storage/src/calendar/parse_calendar_participants_metadata.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_get_honors_body_fetch_options_and_truncation
-resource: crates/lpe-jmap/src/tests.rs#L10893-L10934
+resource: crates/lpe-jmap/src/tests.rs#L10896-L10937
 visibility: private
 generated:
   by: okf-rs/0.3.0

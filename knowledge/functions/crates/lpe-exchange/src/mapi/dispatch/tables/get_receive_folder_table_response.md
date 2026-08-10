@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_receive_folder_table_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1269-L1271
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1271-L1273
 generated:
   by: okf-rs/0.3.0
 relationships:

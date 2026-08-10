@@ -26,6 +26,9 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_message_status_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/object_ids/debug_object_scope_for_id
   - functions/crates/lpe-exchange/src/mapi/dispatch/property_mutations/persisted_object_property_delete_is_idempotent
+  - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_read_recipients_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_remove_all_recipients_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_modify_recipients_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message_move/append_synchronization_import_message_move_response
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_canonical_event_property_values
@@ -68,6 +71,9 @@ relationships:
 - [append_message_status_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/messages/append_message_status_response.md)
 - [debug_object_scope_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/object_ids/debug_object_scope_for_id.md)
 - [persisted_object_property_delete_is_idempotent](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/property_mutations/persisted_object_property_delete_is_idempotent.md)
+- [append_read_recipients_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_read_recipients_response.md)
+- [append_remove_all_recipients_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_remove_all_recipients_response.md)
+- [append_modify_recipients_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/recipients/append_modify_recipients_response.md)
 - [append_synchronization_import_message_change_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response.md)
 - [append_synchronization_import_message_move_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message_move/append_synchronization_import_message_move_response.md)
 - [apply_canonical_event_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_canonical_event_property_values.md)

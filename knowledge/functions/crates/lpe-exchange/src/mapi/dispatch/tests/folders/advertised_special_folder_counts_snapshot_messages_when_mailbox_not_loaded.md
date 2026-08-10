@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: advertised_special_folder_counts_snapshot_messages_when_mailbox_not_loaded
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L705-L778
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L705-L779
 visibility: private
 generated:
   by: okf-rs/0.3.0

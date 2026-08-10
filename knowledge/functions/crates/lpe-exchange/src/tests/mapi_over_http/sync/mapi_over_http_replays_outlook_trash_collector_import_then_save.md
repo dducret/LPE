@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_replays_outlook_trash_collector_import_then_save
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L13933-L14021
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L13693-L13781
 visibility: private
 generated:
   by: okf-rs/0.3.0

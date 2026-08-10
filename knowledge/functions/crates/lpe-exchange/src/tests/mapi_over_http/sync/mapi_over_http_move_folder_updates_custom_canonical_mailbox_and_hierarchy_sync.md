@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_move_folder_updates_custom_canonical_mailbox_and_hierarchy_sync
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L123-L221
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L105-L203
 visibility: private
 generated:
   by: okf-rs/0.3.0

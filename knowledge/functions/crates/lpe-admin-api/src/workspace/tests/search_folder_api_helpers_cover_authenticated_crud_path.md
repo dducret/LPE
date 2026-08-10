@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: search_folder_api_helpers_cover_authenticated_crud_path
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L1075-L1117
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L1076-L1118
 visibility: private
 generated:
   by: okf-rs/0.3.0

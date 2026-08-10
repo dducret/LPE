@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_view_match_state_reports_pre_advertised_folder_open
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L520-L543
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L524-L547
 visibility: private
 generated:
   by: okf-rs/0.3.0

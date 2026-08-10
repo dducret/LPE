@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_folder_type_getprops_response_context_includes_wire_preview
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L944-L953
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L945-L954
 visibility: private
 generated:
   by: okf-rs/0.3.0

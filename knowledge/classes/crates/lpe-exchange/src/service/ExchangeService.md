@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: ExchangeService
-resource: crates/lpe-exchange/src/service.rs#L158-L161
+resource: crates/lpe-exchange/src/service.rs#L160-L163
 generated:
   by: okf-rs/0.3.0
 ---

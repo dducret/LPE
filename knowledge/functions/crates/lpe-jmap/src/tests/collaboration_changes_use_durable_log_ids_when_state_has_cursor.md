@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_changes_use_durable_log_ids_when_state_has_cursor
-resource: crates/lpe-jmap/src/tests.rs#L12920-L12996
+resource: crates/lpe-jmap/src/tests.rs#L12923-L12999
 visibility: private
 generated:
   by: okf-rs/0.3.0

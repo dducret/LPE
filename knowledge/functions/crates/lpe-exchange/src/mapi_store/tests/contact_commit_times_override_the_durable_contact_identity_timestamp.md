@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_commit_times_override_the_durable_contact_identity_timestamp
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L217-L254
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L219-L256
 visibility: private
 generated:
   by: okf-rs/0.3.0

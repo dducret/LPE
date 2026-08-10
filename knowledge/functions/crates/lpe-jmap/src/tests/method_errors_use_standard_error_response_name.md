@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: method_errors_use_standard_error_response_name
-resource: crates/lpe-jmap/src/tests.rs#L8291-L8331
+resource: crates/lpe-jmap/src/tests.rs#L8294-L8334
 visibility: private
 generated:
   by: okf-rs/0.3.0

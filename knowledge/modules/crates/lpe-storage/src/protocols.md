@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: protocols
-resource: crates/lpe-storage/src/protocols.rs#L1-L1526
+resource: crates/lpe-storage/src/protocols.rs#L1-L1545
 generated:
   by: okf-rs/0.3.0
 relationships:

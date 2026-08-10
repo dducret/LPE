@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: navigation_shortcut_parser_decodes_typed_and_wrapped_entry_id
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4325-L4342
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4359-L4376
 visibility: private
 generated:
   by: okf-rs/0.3.0

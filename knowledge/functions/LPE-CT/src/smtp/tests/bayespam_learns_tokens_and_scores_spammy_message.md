@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bayespam_learns_tokens_and_scores_spammy_message
-resource: LPE-CT/src/smtp/tests.rs#L2555-L2596
+resource: LPE-CT/src/smtp/tests.rs#L2531-L2572
 visibility: private
 generated:
   by: okf-rs/0.3.0

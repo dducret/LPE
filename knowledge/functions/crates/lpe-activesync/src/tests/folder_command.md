@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_command
-resource: crates/lpe-activesync/src/tests.rs#L1841-L1857
+resource: crates/lpe-activesync/src/tests.rs#L1842-L1858
 visibility: private
 generated:
   by: okf-rs/0.3.0

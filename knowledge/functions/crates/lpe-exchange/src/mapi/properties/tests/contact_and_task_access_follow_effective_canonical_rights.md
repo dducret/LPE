@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_and_task_access_follow_effective_canonical_rights
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1668-L1714
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1724-L1770
 visibility: private
 generated:
   by: okf-rs/0.3.0

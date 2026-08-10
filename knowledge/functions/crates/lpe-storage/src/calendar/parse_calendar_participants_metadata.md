@@ -17,10 +17,13 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_all_attendees
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_required_attendees
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_optional_attendees
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_pending_recipients
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting_response_event_input_from_mapi
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_participants_from_mapi
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/event_is_meeting
   - functions/crates/lpe-exchange/src/service/ews/calendar/ews_attendees_xml
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds
   - functions/crates/lpe-jmap/src/calendar/participants_from_event
   - functions/crates/lpe-storage/src/calendar/parser_still_accepts_legacy_combined_participant_metadata
 ---
@@ -44,9 +47,12 @@ relationships:
 - [calendar_all_attendees](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_all_attendees.md)
 - [calendar_required_attendees](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_required_attendees.md)
 - [calendar_optional_attendees](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_optional_attendees.md)
+- [calendar_pending_recipients](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_pending_recipients.md)
+- [apply_calendar_pending_recipients](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients.md)
 - [meeting_response_event_input_from_mapi](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting_response_event_input_from_mapi.md)
 - [event_participants_from_mapi](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_participants_from_mapi.md)
 - [event_is_meeting](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/event_is_meeting.md)
 - [ews_attendees_xml](../../../../../functions/crates/lpe-exchange/src/service/ews/calendar/ews_attendees_xml.md)
+- [mapi_over_http_calendar_pending_event_modify_recipients_succeeds](../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds.md)
 - [participants_from_event](../../../../../functions/crates/lpe-jmap/src/calendar/participants_from_event.md)
 - [parser_still_accepts_legacy_combined_participant_metadata](../../../../../functions/crates/lpe-storage/src/calendar/parser_still_accepts_legacy_combined_participant_metadata.md)

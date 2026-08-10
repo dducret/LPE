@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: aligned_spf_pass_accepts_message_under_dmarc
-resource: LPE-CT/src/smtp/tests.rs#L3324-L3340
+resource: LPE-CT/src/smtp/tests.rs#L3300-L3316
 visibility: private
 generated:
   by: okf-rs/0.3.0

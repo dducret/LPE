@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_table_window_emails_skips_insufficient_containing_window
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L313-L375
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L315-L377
 visibility: private
 generated:
   by: okf-rs/0.3.0

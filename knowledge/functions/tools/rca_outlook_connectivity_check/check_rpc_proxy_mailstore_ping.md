@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_rpc_proxy_mailstore_ping
-resource: tools/rca_outlook_connectivity_check.py#L1237-L1296
+resource: tools/rca_outlook_connectivity_check.py#L1486-L1545
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -15,7 +15,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_ascii_z
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/remaining
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_i32
-  - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_utf16z
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/write_u16_prefixed_bytes
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/write_utf16z
   - functions/crates/lpe-exchange/src/mapi/rop/errors/rop_id_is_reserved
@@ -40,7 +39,6 @@ relationships:
 - [read_ascii_z](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_ascii_z.md)
 - [remaining](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/remaining.md)
 - [read_i32](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_i32.md)
-- [read_utf16z](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_utf16z.md)
 - [write_u16_prefixed_bytes](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/write_u16_prefixed_bytes.md)
 - [write_utf16z](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/write_utf16z.md)
 - [rop_id_is_reserved](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/errors/rop_id_is_reserved.md)

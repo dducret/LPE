@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: nspi_first_minimal_id
-resource: tools/rca_outlook/mapi.py#L151-L155
+resource: tools/rca_outlook/mapi.py#L243-L247
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,15 +1,16 @@
 ---
 type: Rust Module
 title: client_workspace
-resource: crates/lpe-storage/src/workspace/client_workspace.rs#L1-L306
+resource: crates/lpe-storage/src/workspace/client_workspace.rs#L1-L331
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/anyhow-result
   - external/uuid-uuid
-  - external/crate-accessiblecontact-accessibleevent-clientattachment-clientattachmentrow-clientmessagerow-storage-attachments
-  - external/super-clientmessage-clientworkspace
+  - external/crate-attachments-accessiblecontact-accessibleevent-clientattachment-clientattachmentrow-clientmessagerow-storage
+  - external/super-clientmailbox-clientmessage-clientworkspace
+  - external/super-client-folder
   member_of:
   - packages/crates/lpe-storage
 ---
@@ -23,16 +24,18 @@ relationships:
 - [format_size](../../../../../functions/crates/lpe-storage/src/workspace/client_workspace/format_size.md)
 - [client_event_from_accessible](../../../../../functions/crates/lpe-storage/src/workspace/client_workspace/client_event_from_accessible.md)
 - [client_contact_from_accessible](../../../../../functions/crates/lpe-storage/src/workspace/client_workspace/client_contact_from_accessible.md)
+- [client_folder_keeps_custom_mailboxes_distinct](../../../../../functions/crates/lpe-storage/src/workspace/client_workspace/client_folder_keeps_custom_mailboxes_distinct.md)
 
 # Imports
 
 - `anyhow::Result`
 - `uuid::Uuid`
 - `crate::{
-    AccessibleContact, AccessibleEvent, ClientAttachment, ClientAttachmentRow, ClientMessageRow,
-    Storage, attachments,
+    attachments, AccessibleContact, AccessibleEvent, ClientAttachment, ClientAttachmentRow,
+    ClientMessageRow, Storage,
 }`
-- `super::{ClientMessage, ClientWorkspace}`
+- `super::{ClientMailbox, ClientMessage, ClientWorkspace}`
+- `super::client_folder`
 
 # Member of
 

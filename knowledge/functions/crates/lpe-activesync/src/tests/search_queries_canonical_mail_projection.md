@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: search_queries_canonical_mail_projection
-resource: crates/lpe-activesync/src/tests.rs#L4924-L5001
+resource: crates/lpe-activesync/src/tests.rs#L4925-L5002
 visibility: private
 generated:
   by: okf-rs/0.3.0

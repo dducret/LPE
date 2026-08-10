@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: search_folders
-resource: crates/lpe-exchange/src/mapi/dispatch/search_folders.rs#L1-L1014
+resource: crates/lpe-exchange/src/mapi/dispatch/search_folders.rs#L1-L1013
 generated:
   by: okf-rs/0.3.0
 relationships:

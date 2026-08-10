@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tests
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1-L7410
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1-L7540
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -22,6 +22,7 @@ relationships:
 - [store_test_principal](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/store_test_principal.md)
 - [valid_swapped_todo_data](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/valid_swapped_todo_data.md)
 - [pending_html_only_message_derives_plain_body_for_save_and_submit](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/pending_html_only_message_derives_plain_body_for_save_and_submit.md)
+- [meeting_request_submit_includes_calendar_request_attachment](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/meeting_request_submit_includes_calendar_request_attachment.md)
 - [microsoft_inline_image_html_body_preserves_cid_for_save_and_submit](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_inline_image_html_body_preserves_cid_for_save_and_submit.md)
 - [read_recipients_success_response_includes_row_count](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/read_recipients_success_response_includes_row_count.md)
 - [read_recipients_uses_row_id_value_not_vector_index](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/read_recipients_uses_row_id_value_not_vector_index.md)
@@ -89,7 +90,7 @@ relationships:
 - [push_property_restriction](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/push_property_restriction.md)
 - [push_content_restriction](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/push_content_restriction.md)
 - [push_exist_restriction](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/push_exist_restriction.md)
-- [rss_feed_messages_project_rss_message_class_and_named_properties](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/rss_feed_messages_project_rss_message_class_and_named_properties.md)
+- [email_message_class_and_content_class_follow_canonical_projection](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/email_message_class_and_content_class_follow_canonical_projection.md)
 - [followup_mail_projects_outlook_flag_properties](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/followup_mail_projects_outlook_flag_properties.md)
 - [reminder_signal_time_wins_independently_of_property_order](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/reminder_signal_time_wins_independently_of_property_order.md)
 - [reminder_named_properties_project_from_canonical_reminder_links](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/reminder_named_properties_project_from_canonical_reminder_links.md)
@@ -97,6 +98,7 @@ relationships:
 - [task_property_updates_map_to_canonical_state_dates_and_priority](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/task_property_updates_map_to_canonical_state_dates_and_priority.md)
 - [zero_duration_events_project_non_zero_mapi_appointment_window](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/zero_duration_events_project_non_zero_mapi_appointment_window.md)
 - [calendar_projection_uses_canonical_all_day_status_and_participants](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_uses_canonical_all_day_status_and_participants.md)
+- [calendar_fallback_global_object_id_uses_zero_creation_time](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_fallback_global_object_id_uses_zero_creation_time.md)
 - [calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting.md)
 - [calendar_projection_keeps_a_named_exchange_recipient_as_a_meeting](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_keeps_a_named_exchange_recipient_as_a_meeting.md)
 - [calendar_projection_keeps_meeting_state_after_all_attendees_are_removed](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_keeps_meeting_state_after_all_attendees_are_removed.md)

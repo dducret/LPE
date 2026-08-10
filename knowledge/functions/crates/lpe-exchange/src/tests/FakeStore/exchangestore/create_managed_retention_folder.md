@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_managed_retention_folder
-resource: crates/lpe-exchange/src/tests/mod.rs#L5182-L5241
+resource: crates/lpe-exchange/src/tests/mod.rs#L5183-L5242
 visibility: private
 generated:
   by: okf-rs/0.3.0

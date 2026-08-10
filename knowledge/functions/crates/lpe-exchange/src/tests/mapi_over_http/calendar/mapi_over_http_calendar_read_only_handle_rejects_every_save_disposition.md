@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1048-L1154
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1066-L1172
 visibility: private
 generated:
   by: okf-rs/0.3.0

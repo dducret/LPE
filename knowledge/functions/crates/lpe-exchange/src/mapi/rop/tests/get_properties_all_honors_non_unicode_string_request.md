@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_properties_all_honors_non_unicode_string_request
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2402-L2452
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2404-L2454
 visibility: private
 generated:
   by: okf-rs/0.3.0

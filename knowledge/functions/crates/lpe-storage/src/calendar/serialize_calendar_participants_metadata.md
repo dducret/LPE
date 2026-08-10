@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-dav/src/tests/get_serializes_organizer_and_participant_status
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_for_mapping
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_input
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting_response_event_input_from_mapi
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_participants_from_mapi
   - functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_uses_canonical_all_day_status_and_participants
@@ -41,6 +42,7 @@ relationships:
 - [get_serializes_organizer_and_participant_status](../../../../../functions/crates/lpe-dav/src/tests/get_serializes_organizer_and_participant_status.md)
 - [default_event_for_mapping](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_for_mapping.md)
 - [default_event_input](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_input.md)
+- [apply_calendar_pending_recipients](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients.md)
 - [meeting_response_event_input_from_mapi](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting_response_event_input_from_mapi.md)
 - [event_participants_from_mapi](../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_participants_from_mapi.md)
 - [calendar_projection_uses_canonical_all_day_status_and_participants](../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_uses_canonical_all_day_status_and_participants.md)

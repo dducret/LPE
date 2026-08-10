@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_reload_cached_information_matches_open_message_shape
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1484-L1520
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1486-L1522
 visibility: private
 generated:
   by: okf-rs/0.3.0

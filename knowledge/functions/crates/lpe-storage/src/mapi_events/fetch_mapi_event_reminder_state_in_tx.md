@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fetch_mapi_event_reminder_state_in_tx
-resource: crates/lpe-storage/src/mapi_events.rs#L1187-L1225
+resource: crates/lpe-storage/src/mapi_events.rs#L1196-L1234
 visibility: private
 generated:
   by: okf-rs/0.3.0

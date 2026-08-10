@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rop_response_summary_keeps_contents_table_frame_boundary
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L891-L943
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L958-L1020
 visibility: private
 generated:
   by: okf-rs/0.3.0

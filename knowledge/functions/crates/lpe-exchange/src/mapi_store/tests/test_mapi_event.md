@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: test_mapi_event
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L142-L161
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L143-L163
 visibility: private
 generated:
   by: okf-rs/0.3.0

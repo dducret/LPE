@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_create_creates_root_custom_mail_folder_and_advances_hierarchy_key
-resource: crates/lpe-activesync/src/tests.rs#L3320-L3359
+resource: crates/lpe-activesync/src/tests.rs#L3321-L3360
 visibility: private
 generated:
   by: okf-rs/0.3.0

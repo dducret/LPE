@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_create_root_search_folder_accepts_criteria
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L922-L986
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L935-L999
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3658-L3792
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L3727-L3861
 visibility: private
 generated:
   by: okf-rs/0.3.0

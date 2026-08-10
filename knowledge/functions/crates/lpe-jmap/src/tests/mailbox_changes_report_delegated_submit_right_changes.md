@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_changes_report_delegated_submit_right_changes
-resource: crates/lpe-jmap/src/tests.rs#L3035-L3098
+resource: crates/lpe-jmap/src/tests.rs#L3038-L3101
 visibility: private
 generated:
   by: okf-rs/0.3.0

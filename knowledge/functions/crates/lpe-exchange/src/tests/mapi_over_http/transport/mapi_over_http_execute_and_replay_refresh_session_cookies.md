@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_execute_and_replay_refresh_session_cookies
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1315-L1351
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1309-L1345
 visibility: private
 generated:
   by: okf-rs/0.3.0

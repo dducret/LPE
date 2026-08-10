@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_message_column_support_covers_visible_inbox_probe_columns
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2203-L2216
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2222-L2237
 visibility: private
 generated:
   by: okf-rs/0.3.0

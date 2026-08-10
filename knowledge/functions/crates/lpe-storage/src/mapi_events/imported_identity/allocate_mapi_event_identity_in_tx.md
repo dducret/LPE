@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-storage/src/mapi_events/mapi_change_key
   - functions/crates/lpe-storage/src/mapi_events/merge_predecessor_change_list
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/mapi_events/Storage/create_mapi_event
 ---
@@ -30,6 +31,7 @@ relationships:
 - [mapi_change_key](../../../../../../functions/crates/lpe-storage/src/mapi_events/mapi_change_key.md)
 - [merge_predecessor_change_list](../../../../../../functions/crates/lpe-storage/src/mapi_events/merge_predecessor_change_list.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

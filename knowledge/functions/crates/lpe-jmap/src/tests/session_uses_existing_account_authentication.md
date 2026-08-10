@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_uses_existing_account_authentication
-resource: crates/lpe-jmap/src/tests.rs#L2424-L2470
+resource: crates/lpe-jmap/src/tests.rs#L2427-L2473
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: root_default_folder_getprops_uses_canonical_projection_not_setprops_state
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2167-L2197
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2190-L2220
 visibility: private
 generated:
   by: okf-rs/0.3.0

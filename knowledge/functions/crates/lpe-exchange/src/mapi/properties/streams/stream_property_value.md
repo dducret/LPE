@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stream_property_value
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L801-L818
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L802-L819
 generated:
   by: okf-rs/0.3.0
 relationships:

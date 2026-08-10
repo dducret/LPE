@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_i64_property
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L481-L492
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L642-L653
 visibility: private
 generated:
   by: okf-rs/0.3.0

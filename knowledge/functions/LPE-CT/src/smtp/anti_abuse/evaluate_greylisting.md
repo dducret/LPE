@@ -8,6 +8,7 @@ relationships:
   calls:
   - functions/LPE-CT/src/smtp/stable_key_id
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/LPE-CT/src/smtp/inbound_policy/evaluate_inbound_policy
   - functions/LPE-CT/src/smtp/tests/greylisting_defers_first_triplet_then_allows_after_release_window
@@ -21,6 +22,7 @@ relationships:
 
 - [stable_key_id](../../../../../functions/LPE-CT/src/smtp/stable_key_id.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

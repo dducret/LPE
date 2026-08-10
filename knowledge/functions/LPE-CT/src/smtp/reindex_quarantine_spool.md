@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reindex_quarantine_spool
-resource: LPE-CT/src/smtp.rs#L443-L458
+resource: LPE-CT/src/smtp.rs#L439-L454
 visibility: private
 generated:
   by: okf-rs/0.3.0

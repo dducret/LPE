@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_query_rows_wire_summary_decodes_flagged_folder_projection
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1692-L1740
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1703-L1751
 visibility: private
 generated:
   by: okf-rs/0.3.0

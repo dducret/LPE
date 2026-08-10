@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_message_flags_for_state
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1038-L1056
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1041-L1059
 generated:
   by: okf-rs/0.3.0
 relationships:

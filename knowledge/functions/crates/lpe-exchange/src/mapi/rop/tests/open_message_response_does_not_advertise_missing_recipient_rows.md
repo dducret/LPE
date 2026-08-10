@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: open_message_response_does_not_advertise_missing_recipient_rows
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1327-L1348
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1329-L1350
 visibility: private
 generated:
   by: okf-rs/0.3.0

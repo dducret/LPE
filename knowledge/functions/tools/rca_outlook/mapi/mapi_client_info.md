@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: mapi_client_info
-resource: tools/rca_outlook/mapi.py#L20-L21
+resource: tools/rca_outlook/mapi.py#L108-L109
 generated:
   by: okf-rs/0.3.0
 relationships:

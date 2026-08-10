@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_submission_set_submits_existing_draft_and_returns_queued_state
-resource: crates/lpe-jmap/src/tests.rs#L3402-L3468
+resource: crates/lpe-jmap/src/tests.rs#L3405-L3471
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -24,7 +24,6 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/transport/cookies/log_session_cookie_lookup
   - functions/crates/lpe-exchange/src/mapi/transport/connect_response
   - functions/crates/lpe-exchange/src/mapi/transport/disconnect_response
-  - functions/crates/lpe-exchange/src/mapi/dispatch/execute_response
   - functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_response
   - functions/crates/lpe-exchange/src/mapi/transport/ping_response
   - functions/crates/lpe-exchange/src/mapi/nspi/handle_nspi_request
@@ -55,7 +54,6 @@ relationships:
 - [log_session_cookie_lookup](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/cookies/log_session_cookie_lookup.md)
 - [connect_response](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/connect_response.md)
 - [disconnect_response](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/disconnect_response.md)
-- [execute_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute_response.md)
 - [notification_wait_response](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/notification_wait/notification_wait_response.md)
 - [ping_response](../../../../../../functions/crates/lpe-exchange/src/mapi/transport/ping_response.md)
 - [handle_nspi_request](../../../../../../functions/crates/lpe-exchange/src/mapi/nspi/handle_nspi_request.md)

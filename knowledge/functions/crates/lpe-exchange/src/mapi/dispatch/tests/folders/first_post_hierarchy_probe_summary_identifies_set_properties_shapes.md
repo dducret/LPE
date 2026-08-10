@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: first_post_hierarchy_probe_summary_identifies_set_properties_shapes
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2200-L2230
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2223-L2257
 visibility: private
 generated:
   by: okf-rs/0.3.0

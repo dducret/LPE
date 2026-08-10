@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions_and_commit_times
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L713-L761
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L714-L762
 generated:
   by: okf-rs/0.3.0
 relationships:

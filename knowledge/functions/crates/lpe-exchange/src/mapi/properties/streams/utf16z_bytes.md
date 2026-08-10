@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: utf16z_bytes
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L513-L520
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L514-L521
 generated:
   by: okf-rs/0.3.0
 ---

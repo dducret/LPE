@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_common_probe_named_properties_have_stable_ids
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2589-L2618
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2646-L2675
 visibility: private
 generated:
   by: okf-rs/0.3.0

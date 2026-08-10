@@ -106,6 +106,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_freebusy_row_staged
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_property_value_with_mailbox_guid
   - functions/crates/lpe-exchange/src/mapi/tables/associated_contents/delegate_freebusy_property_value
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event_with_mailbox_guid
   - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_mapi_contact_row
   - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/contact_table_property_value
   - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_event_row_with_reminder_and_attachments
@@ -245,6 +246,7 @@ relationships:
 - [serialize_freebusy_row_staged](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/serialize_freebusy_row_staged.md)
 - [associated_config_property_value_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/associated_config_property_value_with_mailbox_guid.md)
 - [delegate_freebusy_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/associated_contents/delegate_freebusy_property_value.md)
+- [restriction_matches_event_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event_with_mailbox_guid.md)
 - [serialize_mapi_contact_row](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_mapi_contact_row.md)
 - [contact_table_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/contact_table_property_value.md)
 - [serialize_event_row_with_reminder_and_attachments](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_event_row_with_reminder_and_attachments.md)

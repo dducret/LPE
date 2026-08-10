@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_associated_config_delete_does_not_allocate_identity
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5158-L5206
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5023-L5071
 visibility: private
 generated:
   by: okf-rs/0.3.0

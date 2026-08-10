@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/shared/Storage/allocate_mail_modseq_in_tx
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/upsert_message_body_in_tx
   - functions/crates/lpe-storage/src/mapi_message_identity/rotate_active_mapi_message_identity_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/insert_audit
@@ -30,6 +31,7 @@ relationships:
 - [tenant_id_for_account_id](../../../../../../functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [allocate_mail_modseq_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_mail_modseq_in_tx.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [upsert_message_body_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/upsert_message_body_in_tx.md)
 - [rotate_active_mapi_message_identity_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_message_identity/rotate_active_mapi_message_identity_in_tx.md)
 - [insert_audit](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_audit.md)

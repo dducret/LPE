@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_draft_message_in_tx
-resource: crates/lpe-storage/src/submission.rs#L1495-L1607
+resource: crates/lpe-storage/src/submission.rs#L1498-L1610
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/shared/Storage/affected_mail_principals_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/recalculate_mailbox_counts_in_tx
   called_by:
   - functions/crates/lpe-storage/src/submission/Storage/submit_message
@@ -27,6 +28,7 @@ relationships:
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [affected_mail_principals_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/affected_mail_principals_in_tx.md)
 - [insert_mail_change_log_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_mail_change_log_in_tx.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [recalculate_mailbox_counts_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/recalculate_mailbox_counts_in_tx.md)
 
 # Called by

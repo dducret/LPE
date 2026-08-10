@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_state
-resource: LPE-CT/src/main.rs#L920-L926
+resource: LPE-CT/src/main.rs#L935-L941
 visibility: private
 generated:
   by: okf-rs/0.3.0

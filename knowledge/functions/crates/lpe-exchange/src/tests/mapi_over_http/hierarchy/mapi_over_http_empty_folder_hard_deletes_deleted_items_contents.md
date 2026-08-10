@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_empty_folder_hard_deletes_deleted_items_contents
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3152-L3214
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3057-L3119
 visibility: private
 generated:
   by: okf-rs/0.3.0

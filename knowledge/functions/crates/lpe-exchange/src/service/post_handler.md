@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_handler
-resource: crates/lpe-exchange/src/service.rs#L187-L226
+resource: crates/lpe-exchange/src/service.rs#L189-L228
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxocfg_writing_view_definition_sequence_succeeds
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2230-L2394
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2113-L2277
 visibility: private
 generated:
   by: okf-rs/0.3.0

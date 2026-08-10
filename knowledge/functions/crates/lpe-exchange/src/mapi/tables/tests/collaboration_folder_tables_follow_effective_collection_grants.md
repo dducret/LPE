@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: collaboration_folder_tables_follow_effective_collection_grants
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9549-L9653
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9612-L9716
 visibility: private
 generated:
   by: okf-rs/0.3.0

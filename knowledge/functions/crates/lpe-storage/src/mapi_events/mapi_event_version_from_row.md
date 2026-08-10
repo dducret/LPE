@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_event_version_from_row
-resource: crates/lpe-storage/src/mapi_events.rs#L1398-L1411
+resource: crates/lpe-storage/src/mapi_events.rs#L1412-L1426
 visibility: private
 generated:
   by: okf-rs/0.3.0

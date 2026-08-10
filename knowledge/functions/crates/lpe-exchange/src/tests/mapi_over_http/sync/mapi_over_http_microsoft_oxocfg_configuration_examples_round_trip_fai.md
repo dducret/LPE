@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxocfg_configuration_examples_round_trip_fai
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L11767-L12040
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L11524-L11797
 visibility: private
 generated:
   by: okf-rs/0.3.0

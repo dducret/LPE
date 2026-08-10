@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_tag_requested
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L294-L298
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L297-L301
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,17 +1,16 @@
 ---
 type: Rust Function
 title: event_property_value_with_reminder
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L15-L31
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L15-L30
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
-  - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder_and_mailbox_guid
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_deletions
   - functions/crates/lpe-exchange/src/mapi/dispatch/property_mutations/persisted_object_property_delete_is_idempotent
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value
-  - functions/crates/lpe-exchange/src/mapi/properties/streams/property_stream_data
   - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_event_row_with_reminder_and_attachments
 ---
 
@@ -21,12 +20,11 @@ relationships:
 
 # Calls
 
-- [event_property_value_with_optional_version](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version.md)
+- [event_property_value_with_reminder_and_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder_and_mailbox_guid.md)
 
 # Called by
 
 - [stage_event_property_deletions](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/stage_event_property_deletions.md)
 - [persisted_object_property_delete_is_idempotent](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/property_mutations/persisted_object_property_delete_is_idempotent.md)
 - [event_property_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value.md)
-- [property_stream_data](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/streams/property_stream_data.md)
 - [serialize_event_row_with_reminder_and_attachments](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_event_row_with_reminder_and_attachments.md)

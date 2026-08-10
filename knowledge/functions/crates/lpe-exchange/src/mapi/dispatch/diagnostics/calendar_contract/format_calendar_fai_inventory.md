@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_calendar_fai_inventory
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L194-L231
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L193-L230
 visibility: private
 generated:
   by: okf-rs/0.3.0

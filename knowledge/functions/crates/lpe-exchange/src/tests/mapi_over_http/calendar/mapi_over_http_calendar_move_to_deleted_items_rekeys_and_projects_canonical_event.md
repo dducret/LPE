@@ -1,12 +1,13 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L150-L479
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L172-L497
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
+  - functions/crates/lpe-exchange/src/tests/test_mapi_uuid_id
   - functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/virtual_special_mailbox
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/store_mapi_sync_checkpoint
@@ -39,6 +40,7 @@ relationships:
 
 # Calls
 
+- [test_mapi_uuid_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_uuid_id.md)
 - [durable_special_folder_id_for_test](../../../../../../../functions/crates/lpe-exchange/src/tests/durable_special_folder_id_for_test.md)
 - [virtual_special_mailbox](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/virtual_special_mailbox.md)
 - [store_mapi_sync_checkpoint](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/store_mapi_sync_checkpoint.md)

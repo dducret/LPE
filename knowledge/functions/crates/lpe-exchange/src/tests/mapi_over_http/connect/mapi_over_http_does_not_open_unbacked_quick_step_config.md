@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_does_not_open_unbacked_quick_step_config
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5177-L5232
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5042-L5097
 visibility: private
 generated:
   by: okf-rs/0.3.0

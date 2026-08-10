@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_notes
-resource: crates/lpe-jmap/src/tests.rs#L2116-L2118
+resource: crates/lpe-jmap/src/tests.rs#L2119-L2121
 visibility: private
 generated:
   by: okf-rs/0.3.0

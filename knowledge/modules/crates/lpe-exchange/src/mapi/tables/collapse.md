@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: collapse
-resource: crates/lpe-exchange/src/mapi/tables/collapse.rs#L1-L295
+resource: crates/lpe-exchange/src/mapi/tables/collapse.rs#L1-L296
 generated:
   by: okf-rs/0.3.0
 relationships:

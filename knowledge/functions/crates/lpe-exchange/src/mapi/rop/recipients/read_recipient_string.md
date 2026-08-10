@@ -7,7 +7,6 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
-  - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_utf16z
   - functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_ascii_z
   called_by:
   - functions/crates/lpe-exchange/src/mapi/rop/recipients/parse_wrapped_pending_recipient_row
@@ -19,7 +18,6 @@ relationships:
 
 # Calls
 
-- [read_utf16z](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_utf16z.md)
 - [read_ascii_z](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/buffer/Cursor/read_ascii_z.md)
 
 # Called by

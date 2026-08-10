@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_rows_project_folder_id_and_last_modification_time
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7791-L8295
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L7826-L8330
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: multiple_string_search_property_tag
-resource: crates/lpe-exchange/src/mapi/dispatch/search_folders.rs#L995-L1001
+resource: crates/lpe-exchange/src/mapi/dispatch/search_folders.rs#L994-L1000
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_status_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1401-L1403
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1403-L1405
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_recipients_uses_row_id_value_not_vector_index
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L229-L281
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L285-L337
 visibility: private
 generated:
   by: okf-rs/0.3.0

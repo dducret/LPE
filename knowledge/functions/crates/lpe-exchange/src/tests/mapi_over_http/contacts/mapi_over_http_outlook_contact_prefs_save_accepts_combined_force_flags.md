@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1523-L1621
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1512-L1610
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: first_post_hierarchy_probe_summary_identifies_open_folder_and_getprops_shapes
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2097-L2141
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2110-L2162
 visibility: private
 generated:
   by: okf-rs/0.3.0

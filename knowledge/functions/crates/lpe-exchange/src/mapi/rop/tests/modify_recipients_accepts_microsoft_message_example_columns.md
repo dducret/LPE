@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: modify_recipients_accepts_microsoft_message_example_columns
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1523-L1587
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1525-L1589
 visibility: private
 generated:
   by: okf-rs/0.3.0

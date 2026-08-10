@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: all
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L230-L232
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L233-L235
 generated:
   by: okf-rs/0.3.0
 ---

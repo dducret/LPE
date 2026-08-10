@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: api_request_concurrency_permits_match_advertised_limit
-resource: crates/lpe-jmap/src/tests.rs#L10292-L10304
+resource: crates/lpe-jmap/src/tests.rs#L10295-L10307
 visibility: private
 generated:
   by: okf-rs/0.3.0

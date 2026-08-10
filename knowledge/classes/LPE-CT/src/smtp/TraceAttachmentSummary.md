@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: TraceAttachmentSummary
-resource: LPE-CT/src/smtp.rs#L278-L281
+resource: LPE-CT/src/smtp.rs#L274-L277
 generated:
   by: okf-rs/0.3.0
 ---

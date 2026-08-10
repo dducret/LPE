@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_mapi_event_commit_input
-resource: crates/lpe-storage/src/mapi_events.rs#L796-L812
+resource: crates/lpe-storage/src/mapi_events.rs#L805-L821
 visibility: private
 generated:
   by: okf-rs/0.3.0

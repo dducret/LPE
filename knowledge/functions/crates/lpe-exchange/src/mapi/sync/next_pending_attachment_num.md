@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: next_pending_attachment_num
-resource: crates/lpe-exchange/src/mapi/sync.rs#L1399-L1438
+resource: crates/lpe-exchange/src/mapi/sync.rs#L1404-L1443
 generated:
   by: okf-rs/0.3.0
 relationships:

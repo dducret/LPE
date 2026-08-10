@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_items_content_rows
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L9-L30
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L9-L33
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -9,7 +9,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/sync/scope/emails_for_folder
   - functions/crates/lpe-exchange/src/mapi/tables/filters/restriction_matches_email_in_snapshot
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/events_for_folder
-  - functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event_with_mailbox_guid
   called_by:
   - functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response
   - functions/crates/lpe-exchange/src/mapi/tables/collapse/expanded_categorized_rows
@@ -20,14 +20,14 @@ relationships:
 
 # Signature
 
-`pub(super) fn deleted_items_content_rows<'a>( mailboxes: &[JmapMailbox], emails: &'a [JmapEmail], snapshot: &'a MapiMailStoreSnapshot, restriction: Option<&MapiRestriction>, ) -> Vec<DeletedItemsContentRow<'a>>`
+`pub(super) fn deleted_items_content_rows<'a>( mailboxes: &[JmapMailbox], emails: &'a [JmapEmail], snapshot: &'a MapiMailStoreSnapshot, restriction: Option<&MapiRestriction>, mailbox_guid: Uuid, ) -> Vec<DeletedItemsContentRow<'a>>`
 
 # Calls
 
 - [emails_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi/sync/scope/emails_for_folder.md)
 - [restriction_matches_email_in_snapshot](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/filters/restriction_matches_email_in_snapshot.md)
 - [events_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/events_for_folder.md)
-- [restriction_matches_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event.md)
+- [restriction_matches_event_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event_with_mailbox_guid.md)
 
 # Called by
 

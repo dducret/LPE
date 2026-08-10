@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: log_special_sync_objects
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L314-L402
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L475-L563
 generated:
   by: okf-rs/0.3.0
 relationships:

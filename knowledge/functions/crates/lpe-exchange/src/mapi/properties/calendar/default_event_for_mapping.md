@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: default_event_for_mapping
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L467-L499
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L544-L576
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -11,10 +11,13 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/validate_pending_event_property_values
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_html_omits_dangling_outlook_file_list_link
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_text_converts_html_when_plain_text_is_absent
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_item_access_follows_canonical_grant
   - functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_oxprops_message_size_projects_integer32_property
   - functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_oxcdata_reminder_restriction_matches_recurring_calendar_items
   - functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_oxcdata_reminder_restriction_example_parses_and_matches
+  - functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_fallback_global_object_id_uses_zero_creation_time
   - functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting
   - functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_keeps_a_named_exchange_recipient_as_a_meeting
   - functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_keeps_meeting_state_after_all_attendees_are_removed
@@ -59,10 +62,13 @@ relationships:
 
 - [save_pending_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event.md)
 - [validate_pending_event_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/validate_pending_event_property_values.md)
+- [calendar_body_html_omits_dangling_outlook_file_list_link](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_html_omits_dangling_outlook_file_list_link.md)
+- [calendar_body_text_converts_html_when_plain_text_is_absent](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_text_converts_html_when_plain_text_is_absent.md)
 - [calendar_item_access_follows_canonical_grant](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_item_access_follows_canonical_grant.md)
 - [microsoft_oxprops_message_size_projects_integer32_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_oxprops_message_size_projects_integer32_property.md)
 - [microsoft_oxcdata_reminder_restriction_matches_recurring_calendar_items](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_oxcdata_reminder_restriction_matches_recurring_calendar_items.md)
 - [microsoft_oxcdata_reminder_restriction_example_parses_and_matches](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_oxcdata_reminder_restriction_example_parses_and_matches.md)
+- [calendar_fallback_global_object_id_uses_zero_creation_time](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_fallback_global_object_id_uses_zero_creation_time.md)
 - [calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting.md)
 - [calendar_projection_keeps_a_named_exchange_recipient_as_a_meeting](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_keeps_a_named_exchange_recipient_as_a_meeting.md)
 - [calendar_projection_keeps_meeting_state_after_all_attendees_are_removed](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_keeps_meeting_state_after_all_attendees_are_removed.md)

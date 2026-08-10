@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ping_recoverable_errors_return_documented_statuses
-resource: crates/lpe-activesync/src/tests.rs#L2548-L2588
+resource: crates/lpe-activesync/src/tests.rs#L2549-L2589
 visibility: private
 generated:
   by: okf-rs/0.3.0

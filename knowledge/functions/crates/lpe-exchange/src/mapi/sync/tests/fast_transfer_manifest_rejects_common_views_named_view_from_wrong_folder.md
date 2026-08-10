@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_manifest_rejects_common_views_named_view_from_wrong_folder
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2240-L2260
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2300-L2320
 visibility: private
 generated:
   by: okf-rs/0.3.0

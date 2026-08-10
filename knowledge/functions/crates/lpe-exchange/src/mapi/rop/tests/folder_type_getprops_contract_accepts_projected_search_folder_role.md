@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_type_getprops_contract_accepts_projected_search_folder_role
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4654-L4695
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L4660-L4701
 visibility: private
 generated:
   by: okf-rs/0.3.0

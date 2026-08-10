@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_string8_property
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1368-L1374
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1371-L1377
 visibility: private
 generated:
   by: okf-rs/0.3.0

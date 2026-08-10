@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_sync_object_start_end_order_ok
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L450-L463
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L611-L624
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,15 +1,14 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_stale_message_handle_requires_force_save
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1983-L2131
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1875-L2014
 visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/crates/lpe-exchange/src/tests/mapi_headers
-  - functions/LPE-CT/web/app/smoke/test/MockFormData/get
-  - functions/crates/lpe-core/src/sieve/Parser/next
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/append_mapi_i32_property
   - functions/crates/lpe-exchange/src/tests/append_mapi_wire_id
   - functions/crates/lpe-exchange/src/tests/test_mapi_folder_id
@@ -17,7 +16,6 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/test_mapi_message_id
   - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
   - functions/crates/lpe-exchange/src/tests/execute_body
-  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
   - functions/crates/lpe-exchange/src/tests/response_bytes
   - functions/crates/lpe-exchange/src/tests/response_rops_and_handles_from_execute_body
   - functions/crates/lpe-exchange/src/tests/append_rop_set_properties
@@ -33,8 +31,7 @@ relationships:
 # Calls
 
 - [mapi_headers](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_headers.md)
-- [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
-- [next](../../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [append_mapi_i32_property](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_i32_property.md)
 - [append_mapi_wire_id](../../../../../../../functions/crates/lpe-exchange/src/tests/append_mapi_wire_id.md)
 - [test_mapi_folder_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_folder_id.md)
@@ -42,7 +39,6 @@ relationships:
 - [test_mapi_message_id](../../../../../../../functions/crates/lpe-exchange/src/tests/test_mapi_message_id.md)
 - [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
 - [execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/execute_body.md)
-- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)
 - [response_bytes](../../../../../../../functions/crates/lpe-exchange/src/tests/response_bytes.md)
 - [response_rops_and_handles_from_execute_body](../../../../../../../functions/crates/lpe-exchange/src/tests/response_rops_and_handles_from_execute_body.md)
 - [append_rop_set_properties](../../../../../../../functions/crates/lpe-exchange/src/tests/append_rop_set_properties.md)

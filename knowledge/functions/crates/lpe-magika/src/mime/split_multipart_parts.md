@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: split_multipart_parts
-resource: crates/lpe-magika/src/mime.rs#L256-L285
+resource: crates/lpe-magika/src/mime.rs#L247-L276
 visibility: private
 generated:
   by: okf-rs/0.3.0

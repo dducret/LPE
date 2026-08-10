@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: restrict_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1388-L1390
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1390-L1392
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_nspi_operation_rejects_mismatched_sequence_cookie
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L727-L756
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L709-L749
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str
   - functions/crates/lpe-exchange/src/tests/mapi_cookie_header_with_mismatched_sequence
   - functions/crates/lpe-exchange/src/tests/response_bytes
+  - functions/crates/lpe-exchange/src/tests/mapi_cookie_header
 ---
 
 # Signature
@@ -23,3 +24,4 @@ relationships:
 - [from_str](../../../../../../../functions/crates/lpe-storage/src/change/CanonicalChangeCategory/from_str.md)
 - [mapi_cookie_header_with_mismatched_sequence](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header_with_mismatched_sequence.md)
 - [response_bytes](../../../../../../../functions/crates/lpe-exchange/src/tests/response_bytes.md)
+- [mapi_cookie_header](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_cookie_header.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normal_message_column_support_covers_observed_inbox_compact_projection
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2284-L2423
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2305-L2444
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: new
-resource: crates/lpe-exchange/src/service.rs#L164-L169
+resource: crates/lpe-exchange/src/service.rs#L166-L171
 generated:
   by: okf-rs/0.3.0
 ---

@@ -8,6 +8,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/core/Storage/pool
   called_by:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/notifications/mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql
@@ -22,6 +23,7 @@ relationships:
 # Calls
 
 - [query](../../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [pool](../../../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)
 
 # Called by

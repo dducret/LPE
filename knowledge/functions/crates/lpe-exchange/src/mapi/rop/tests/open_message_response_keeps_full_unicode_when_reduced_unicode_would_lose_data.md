@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: open_message_response_keeps_full_unicode_when_reduced_unicode_would_lose_data
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1381-L1394
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L1383-L1396
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_jmap_mailbox
-resource: crates/lpe-activesync/src/tests.rs#L327-L366
+resource: crates/lpe-activesync/src/tests.rs#L328-L367
 visibility: private
 generated:
   by: okf-rs/0.3.0

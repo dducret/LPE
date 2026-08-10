@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_property_ids_from_names_keeps_registered_reserved_range_id
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1249-L1271
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1258-L1280
 visibility: private
 generated:
   by: okf-rs/0.3.0

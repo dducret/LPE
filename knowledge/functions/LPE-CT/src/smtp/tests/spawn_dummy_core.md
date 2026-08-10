@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: spawn_dummy_core
-resource: LPE-CT/src/smtp/tests.rs#L3557-L3581
+resource: LPE-CT/src/smtp/tests.rs#L3534-L3558
 visibility: private
 generated:
   by: okf-rs/0.3.0

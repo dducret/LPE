@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_writes_map_supported_mapi_fields_to_canonical_event_fields
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4069-L4132
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4198-L4261
 visibility: private
 generated:
   by: okf-rs/0.3.0

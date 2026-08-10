@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: ha_non_active_gate_reports_non_active_roles
-resource: LPE-CT/src/main.rs#L1306-L1324
+resource: LPE-CT/src/main.rs#L1326-L1344
 visibility: private
 generated:
   by: okf-rs/0.3.0

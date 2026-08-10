@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: empty_stream_bytes_for_property_tag
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L326-L333
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L327-L334
 visibility: private
 generated:
   by: okf-rs/0.3.0

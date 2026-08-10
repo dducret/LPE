@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: dkim_signer_prefers_from_domain_before_sender_domain
-resource: LPE-CT/src/dkim_signing.rs#L251-L302
+resource: LPE-CT/src/dkim_signing.rs#L252-L303
 visibility: private
 generated:
   by: okf-rs/0.3.0

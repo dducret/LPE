@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: open_message_fallback_preserves_valid_requested_folder
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1406-L1495
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1415-L1505
 visibility: private
 generated:
   by: okf-rs/0.3.0

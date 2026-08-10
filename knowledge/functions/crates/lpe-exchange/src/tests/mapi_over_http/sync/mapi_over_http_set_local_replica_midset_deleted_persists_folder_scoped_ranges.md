@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_local_replica_midset_deleted_persists_folder_scoped_ranges
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L9522-L9675
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L9297-L9450
 visibility: private
 generated:
   by: okf-rs/0.3.0

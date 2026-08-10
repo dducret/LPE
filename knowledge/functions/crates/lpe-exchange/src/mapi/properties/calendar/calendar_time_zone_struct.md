@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_time_zone_struct
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L289-L300
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L364-L375
 visibility: private
 generated:
   by: okf-rs/0.3.0

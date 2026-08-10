@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query_position_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1961-L1970
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1968-L1977
 generated:
   by: okf-rs/0.3.0
 relationships:

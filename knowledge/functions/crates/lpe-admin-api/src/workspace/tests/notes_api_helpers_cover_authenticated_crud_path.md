@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: notes_api_helpers_cover_authenticated_crud_path
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L982-L1022
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L983-L1023
 visibility: private
 generated:
   by: okf-rs/0.3.0

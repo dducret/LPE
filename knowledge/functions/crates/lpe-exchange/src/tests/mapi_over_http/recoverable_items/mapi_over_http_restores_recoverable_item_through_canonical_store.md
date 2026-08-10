@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_restores_recoverable_item_through_canonical_store
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L470-L530
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L461-L521
 visibility: private
 generated:
   by: okf-rs/0.3.0

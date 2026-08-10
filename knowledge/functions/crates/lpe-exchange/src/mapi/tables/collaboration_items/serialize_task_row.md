@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_task_row
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L185-L199
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L201-L215
 generated:
   by: okf-rs/0.3.0
 relationships:

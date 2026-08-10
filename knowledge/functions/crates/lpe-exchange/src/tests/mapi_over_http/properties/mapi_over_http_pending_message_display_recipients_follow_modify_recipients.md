@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_pending_message_display_recipients_follow_modify_recipients
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L997-L1030
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L946-L979
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: public_tls_store_dir
-resource: LPE-CT/src/main.rs#L1032-L1046
+resource: LPE-CT/src/main.rs#L1047-L1061
 visibility: private
 generated:
   by: okf-rs/0.3.0

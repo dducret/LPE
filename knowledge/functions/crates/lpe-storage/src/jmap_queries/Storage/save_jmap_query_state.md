@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/jmap_queries/jmap_query_hash
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -20,3 +21,4 @@ relationships:
 - [tenant_id_for_account_id](../../../../../../functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [jmap_query_hash](../../../../../../functions/crates/lpe-storage/src/jmap_queries/jmap_query_hash.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

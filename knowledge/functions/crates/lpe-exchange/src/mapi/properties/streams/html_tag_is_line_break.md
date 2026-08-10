@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: html_tag_is_line_break
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L943-L953
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L944-L954
 visibility: private
 generated:
   by: okf-rs/0.3.0

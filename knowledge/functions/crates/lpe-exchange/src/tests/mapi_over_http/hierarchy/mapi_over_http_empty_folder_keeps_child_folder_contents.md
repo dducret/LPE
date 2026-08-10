@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_empty_folder_keeps_child_folder_contents
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3583-L3661
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L3488-L3566
 visibility: private
 generated:
   by: okf-rs/0.3.0

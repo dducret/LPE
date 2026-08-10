@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_mail_change_cursor
-resource: crates/lpe-jmap/src/tests.rs#L873-L879
+resource: crates/lpe-jmap/src/tests.rs#L875-L881
 visibility: private
 generated:
   by: okf-rs/0.3.0

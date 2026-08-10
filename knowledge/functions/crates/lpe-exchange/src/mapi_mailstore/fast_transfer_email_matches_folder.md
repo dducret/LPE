@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_email_matches_folder
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L998-L1024
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1001-L1027
 visibility: private
 generated:
   by: okf-rs/0.3.0

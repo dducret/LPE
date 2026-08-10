@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_save_message_acknowledges_trash_sync_metadata_only_import
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L10212-L10286
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L9969-L10043
 visibility: private
 generated:
   by: okf-rs/0.3.0

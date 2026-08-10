@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: load_or_initialize_state
-resource: LPE-CT/src/main.rs#L1006-L1018
+resource: LPE-CT/src/main.rs#L1021-L1033
 visibility: private
 generated:
   by: okf-rs/0.3.0

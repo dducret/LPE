@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: organizer_json_from_mapi
-resource: crates/lpe-exchange/src/mapi/properties/calendar/meeting.rs#L16-L52
+resource: crates/lpe-exchange/src/mapi/properties/calendar/meeting.rs#L24-L60
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/event_is_meeting
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_participants_from_mapi
 ---
 
@@ -23,4 +24,5 @@ relationships:
 
 # Called by
 
+- [apply_calendar_pending_recipients](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients.md)
 - [event_participants_from_mapi](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_participants_from_mapi.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_contact_create_update_delete_round_trips_canonical_fields
-resource: crates/lpe-activesync/src/tests.rs#L5765-L5845
+resource: crates/lpe-activesync/src/tests.rs#L5766-L5846
 visibility: private
 generated:
   by: okf-rs/0.3.0

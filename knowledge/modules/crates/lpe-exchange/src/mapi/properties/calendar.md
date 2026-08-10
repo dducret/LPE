@@ -1,13 +1,13 @@
 ---
 type: Rust Module
 title: calendar
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1-L1107
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1-L1274
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
   - external/super
-  - external/meeting-appointment-state-flags-organizer-json-from-mapi
+  - external/meeting-appointment-state-flags-organizer-json-from-mapi-response-status
   member_of:
   - packages/crates/lpe-exchange
 ---
@@ -16,12 +16,15 @@ relationships:
 
 - [event_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value.md)
 - [event_property_value_with_reminder](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder.md)
+- [event_property_value_with_reminder_and_mailbox_guid](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder_and_mailbox_guid.md)
 - [versioned_event_property_value_with_reminder](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/versioned_event_property_value_with_reminder.md)
 - [event_property_value_with_optional_version](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version.md)
 - [event_mapi_access](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_mapi_access.md)
 - [calendar_organizer](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_organizer.md)
 - [calendar_organizer_name](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_organizer_name.md)
 - [calendar_organizer_email](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_organizer_email.md)
+- [calendar_body_html_for_mapi](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_html_for_mapi.md)
+- [calendar_body_text_for_mapi](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_text_for_mapi.md)
 - [calendar_display_to](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_display_to.md)
 - [calendar_all_attendees](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_all_attendees.md)
 - [calendar_required_attendees](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_required_attendees.md)
@@ -43,9 +46,13 @@ relationships:
 - [calendar_global_object_id](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_global_object_id.md)
 - [event_reminder_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_reminder_property_value.md)
 - [default_event_for_mapping](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_for_mapping.md)
+- [calendar_body_html_omits_dangling_outlook_file_list_link](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_html_omits_dangling_outlook_file_list_link.md)
+- [calendar_body_text_converts_html_when_plain_text_is_absent](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_text_converts_html_when_plain_text_is_absent.md)
 - [calendar_item_access_follows_canonical_grant](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_item_access_follows_canonical_grant.md)
 - [default_event_input](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_input.md)
 - [event_input_from_mapi](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_input_from_mapi.md)
+- [calendar_pending_recipients](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_pending_recipients.md)
+- [apply_calendar_pending_recipients](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients.md)
 - [clearable_pending_text_property](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/clearable_pending_text_property.md)
 - [clearable_pending_html_property](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/clearable_pending_html_property.md)
 - [calendar_time_zone_from_mapi](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_time_zone_from_mapi.md)
@@ -67,7 +74,7 @@ relationships:
 # Imports
 
 - `super::*`
-- `meeting::{appointment_state_flags, organizer_json_from_mapi}`
+- `meeting::{appointment_state_flags, organizer_json_from_mapi, response_status}`
 
 # Member of
 

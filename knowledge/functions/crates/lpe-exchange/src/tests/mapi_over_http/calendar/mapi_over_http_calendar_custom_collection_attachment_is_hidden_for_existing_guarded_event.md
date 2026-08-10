@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_custom_collection_attachment_is_hidden_for_existing_guarded_event
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7894-L8066
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7964-L8136
 visibility: private
 generated:
   by: okf-rs/0.3.0

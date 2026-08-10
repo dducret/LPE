@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: dkim_signer_adds_header_when_domain_key_exists
-resource: LPE-CT/src/dkim_signing.rs#L206-L247
+resource: LPE-CT/src/dkim_signing.rs#L207-L248
 visibility: private
 generated:
   by: okf-rs/0.3.0

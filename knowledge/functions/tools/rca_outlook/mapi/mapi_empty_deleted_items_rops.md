@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: mapi_empty_deleted_items_rops
-resource: tools/rca_outlook/mapi.py#L77-L83
+resource: tools/rca_outlook/mapi.py#L169-L175
 generated:
   by: okf-rs/0.3.0
 relationships:

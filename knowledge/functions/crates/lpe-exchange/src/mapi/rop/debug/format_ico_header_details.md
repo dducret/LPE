@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_ico_header_details
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L704-L727
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L705-L728
 visibility: private
 generated:
   by: okf-rs/0.3.0

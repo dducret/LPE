@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_tls_pair_from_pem
-resource: LPE-CT/src/main.rs#L1118-L1126
+resource: LPE-CT/src/main.rs#L1133-L1141
 visibility: private
 generated:
   by: okf-rs/0.3.0

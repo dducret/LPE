@@ -13,6 +13,7 @@ relationships:
   - functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/copy_and_verify_one_blob_migration_job
   - functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/switch_verified_blob_migration_job
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/cleanup_one_old_placement
   called_by:
   - functions/crates/lpe-storage/src/pst/pst_export_reconstructs_attachment_after_old_placement_cleanup
@@ -30,6 +31,7 @@ relationships:
 - [copy_and_verify_one_blob_migration_job](../../../../../functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/copy_and_verify_one_blob_migration_job.md)
 - [switch_verified_blob_migration_job](../../../../../functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/switch_verified_blob_migration_job.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [cleanup_one_old_placement](../../../../../functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/cleanup_one_old_placement.md)
 
 # Called by

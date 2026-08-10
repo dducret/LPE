@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: submission
-resource: crates/lpe-storage/src/submission.rs#L1-L1608
+resource: crates/lpe-storage/src/submission.rs#L1-L1611
 generated:
   by: okf-rs/0.3.0
 relationships:

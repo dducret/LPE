@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_ping_accepts_an_earlier_sequence_cookie
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1262-L1285
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1256-L1279
 visibility: private
 generated:
   by: okf-rs/0.3.0

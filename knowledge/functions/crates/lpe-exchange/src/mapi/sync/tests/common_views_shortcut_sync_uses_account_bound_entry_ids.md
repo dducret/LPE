@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_shortcut_sync_uses_account_bound_entry_ids
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1286-L1350
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1346-L1410
 visibility: private
 generated:
   by: okf-rs/0.3.0

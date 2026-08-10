@@ -6,6 +6,8 @@ visibility: private
 generated:
   by: okf-rs/0.3.0
 relationships:
+  calls:
+  - functions/crates/lpe-magika/src/validator/strip_content_type_parameters
   called_by:
   - functions/crates/lpe-magika/src/validator/decide_policy
   - functions/crates/lpe-magika/src/validator/matches_expected_kind
@@ -15,6 +17,10 @@ relationships:
 # Signature
 
 `fn normalize_mime(value: &str) -> String`
+
+# Calls
+
+- [strip_content_type_parameters](../../../../../functions/crates/lpe-magika/src/validator/strip_content_type_parameters.md)
 
 # Called by
 

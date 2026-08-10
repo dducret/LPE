@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_message_search_key
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L103-L110
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L114-L121
 generated:
   by: okf-rs/0.3.0
 relationships:

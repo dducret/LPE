@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stable_key_id
-resource: LPE-CT/src/smtp.rs#L1177-L1181
+resource: LPE-CT/src/smtp.rs#L1180-L1184
 visibility: private
 generated:
   by: okf-rs/0.3.0

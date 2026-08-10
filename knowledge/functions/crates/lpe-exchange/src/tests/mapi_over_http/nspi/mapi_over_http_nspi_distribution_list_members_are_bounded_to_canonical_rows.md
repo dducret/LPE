@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_nspi_distribution_list_members_are_bounded_to_canonical_rows
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1618-L1679
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1614-L1675
 visibility: private
 generated:
   by: okf-rs/0.3.0

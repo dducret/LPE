@@ -8,6 +8,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-core/src/sieve/context
   - functions/crates/lpe-storage/tests/runtime_schema_drift/expect_constraint_failure
   called_by:
@@ -21,6 +22,7 @@ relationships:
 # Calls
 
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [context](../../../../../functions/crates/lpe-core/src/sieve/context.md)
 - [expect_constraint_failure](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/expect_constraint_failure.md)
 

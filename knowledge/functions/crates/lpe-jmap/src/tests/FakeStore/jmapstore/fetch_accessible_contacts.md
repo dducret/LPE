@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_accessible_contacts
-resource: crates/lpe-jmap/src/tests.rs#L1624-L1636
+resource: crates/lpe-jmap/src/tests.rs#L1627-L1639
 visibility: private
 generated:
   by: okf-rs/0.3.0

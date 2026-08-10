@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_jmap_draft
-resource: crates/lpe-activesync/src/tests.rs#L617-L630
+resource: crates/lpe-activesync/src/tests.rs#L618-L631
 visibility: private
 generated:
   by: okf-rs/0.3.0

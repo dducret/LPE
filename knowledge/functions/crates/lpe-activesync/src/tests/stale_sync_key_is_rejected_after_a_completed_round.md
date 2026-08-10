@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stale_sync_key_is_rejected_after_a_completed_round
-resource: crates/lpe-activesync/src/tests.rs#L4311-L4426
+resource: crates/lpe-activesync/src/tests.rs#L4312-L4427
 visibility: private
 generated:
   by: okf-rs/0.3.0

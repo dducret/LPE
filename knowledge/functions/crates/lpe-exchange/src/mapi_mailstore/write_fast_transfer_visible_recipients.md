@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_fast_transfer_visible_recipients
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1094-L1117
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1097-L1120
 visibility: private
 generated:
   by: okf-rs/0.3.0

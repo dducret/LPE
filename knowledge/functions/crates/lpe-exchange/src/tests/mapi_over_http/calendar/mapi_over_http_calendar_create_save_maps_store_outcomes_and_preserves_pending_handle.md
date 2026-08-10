@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_create_save_maps_store_outcomes_and_preserves_pending_handle
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1157-L1255
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1175-L1273
 visibility: private
 generated:
   by: okf-rs/0.3.0

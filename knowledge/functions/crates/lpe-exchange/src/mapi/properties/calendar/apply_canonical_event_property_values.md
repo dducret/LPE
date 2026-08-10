@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: apply_canonical_event_property_values
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1044-L1107
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L1211-L1274
 generated:
   by: okf-rs/0.3.0
 relationships:

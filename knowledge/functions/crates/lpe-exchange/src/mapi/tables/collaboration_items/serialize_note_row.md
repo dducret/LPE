@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_note_row
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L222-L236
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L238-L252
 generated:
   by: okf-rs/0.3.0
 relationships:

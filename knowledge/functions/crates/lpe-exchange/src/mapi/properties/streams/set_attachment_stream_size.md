@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: set_attachment_stream_size
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L840-L865
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L841-L866
 generated:
   by: okf-rs/0.3.0
 relationships:

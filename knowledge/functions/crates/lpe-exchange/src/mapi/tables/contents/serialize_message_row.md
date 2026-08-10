@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/table_lifecycle/format_visible_inbox_first_row_projection_audit
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_normal_message_query_row_summary
   - functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property
+  - functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_invitation_contents_row_projects_meeting_request_class
   - functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items
   - functions/crates/lpe-exchange/src/mapi/tables/tests/message_row_projects_containing_folder_ids
   - functions/crates/lpe-exchange/src/mapi/tables/tests/draft_message_row_projects_mf_unsent_from_canonical_mailbox_state
@@ -32,6 +33,7 @@ relationships:
 - [format_visible_inbox_first_row_projection_audit](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/table_lifecycle/format_visible_inbox_first_row_projection_audit.md)
 - [format_normal_message_query_row_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_normal_message_query_row_summary.md)
 - [serialize_object_property](../../../../../../../functions/crates/lpe-exchange/src/mapi/rop/serialize_object_property.md)
+- [calendar_invitation_contents_row_projects_meeting_request_class](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_invitation_contents_row_projects_meeting_request_class.md)
 - [bcc_projections_only_expose_drafts_and_sent_items](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/bcc_projections_only_expose_drafts_and_sent_items.md)
 - [message_row_projects_containing_folder_ids](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/message_row_projects_containing_folder_ids.md)
 - [draft_message_row_projects_mf_unsent_from_canonical_mailbox_state](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/tests/draft_message_row_projects_mf_unsent_from_canonical_mailbox_state.md)

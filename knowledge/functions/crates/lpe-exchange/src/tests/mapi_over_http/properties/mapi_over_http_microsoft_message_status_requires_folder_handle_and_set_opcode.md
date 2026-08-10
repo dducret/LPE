@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_message_status_requires_folder_handle_and_set_opcode
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1548-L1625
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1452-L1529
 visibility: private
 generated:
   by: okf-rs/0.3.0

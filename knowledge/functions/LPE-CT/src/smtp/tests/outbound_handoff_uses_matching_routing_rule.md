@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outbound_handoff_uses_matching_routing_rule
-resource: LPE-CT/src/smtp/tests.rs#L2156-L2187
+resource: LPE-CT/src/smtp/tests.rs#L2183-L2214
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: categorized_keywords_project_multivalue_instances_and_table_row_metadata
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2871-L2913
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2905-L2947
 visibility: private
 generated:
   by: okf-rs/0.3.0

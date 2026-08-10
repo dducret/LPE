@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_row_kind_reports_fallback_defaults_as_flagged
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3663-L3716
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3669-L3722
 visibility: private
 generated:
   by: okf-rs/0.3.0

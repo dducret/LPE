@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: send_mail_rejects_inaccessible_shared_mailbox_address
-resource: crates/lpe-activesync/src/tests.rs#L4714-L4740
+resource: crates/lpe-activesync/src/tests.rs#L4715-L4741
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: log_post_hierarchy_release_events
-resource: crates/lpe-exchange/src/mapi/dispatch/release.rs#L641-L768
+resource: crates/lpe-exchange/src/mapi/dispatch/release.rs#L634-L761
 generated:
   by: okf-rs/0.3.0
 relationships:

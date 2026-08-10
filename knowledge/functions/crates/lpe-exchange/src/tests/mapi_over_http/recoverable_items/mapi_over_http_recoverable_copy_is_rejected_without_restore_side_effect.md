@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_recoverable_copy_is_rejected_without_restore_side_effect
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L533-L593
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L524-L584
 visibility: private
 generated:
   by: okf-rs/0.3.0

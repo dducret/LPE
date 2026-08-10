@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: includes
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L255-L265
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L258-L268
 generated:
   by: okf-rs/0.3.0
 relationships:

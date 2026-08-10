@@ -1,12 +1,12 @@
 ---
 type: Rust Module
 title: tests
-resource: LPE-CT/src/smtp/tests.rs#L1-L3654
+resource: LPE-CT/src/smtp/tests.rs#L1-L3631
 generated:
   by: okf-rs/0.3.0
 relationships:
   imports:
-  - external/super-apply-authentication-scores-classify-inbound-message-compose-rfc822-message-delete-trace-dkim-disposition-dnsbl-query-name-encode-quoted-printable-evaluate-greylisting-finalize-policy-decision-handle-smtp-command-handle-smtp-session-initialize-spool-load-antivirus-providers-load-bayespam-corpus-load-reputation-score-load-trace-details-parse-antivirus-output-parse-peer-ip-persist-message-postfix-style-mail-log-line-process-outbound-handoff-receive-message-receive-message-with-validator-release-trace-resolve-outbound-route-retry-after-seconds-retry-trace-score-bayespam-smtp-starttls-acceptor-for-paths-spf-disposition-stable-key-id-summarize-dkim-summarize-dmarc-summarize-spf-train-bayespam-unix-now-update-reputation-write-smtp-accepteddomainconfig-antivirusproviderconfig-antivirusproviderdecision-authsummary-authenticationassessment-bayeslabel-decisiontraceentry-dkimdisposition-filteraction-greylistentry-outboundroutingrule-outboundthrottlerule-parsedsmtppath-queuedmessage-runtimeconfig-smtpcommandoutcome-smtppatherror-smtppathkind-smtptransaction-spfdisposition-transportauditevent-transportdsnreport-transportroutedecision-transporttechnicalstatus-transportthrottlestatus-bayespam-min-scoring-tokens-default-greylist-delay-seconds-max-smtp-command-line-len-max-smtp-rcpt-per-transaction
+  - external/super-apply-authentication-scores-classify-inbound-message-delete-trace-dkim-disposition-dnsbl-query-name-evaluate-greylisting-finalize-policy-decision-handle-smtp-command-handle-smtp-session-initialize-spool-load-antivirus-providers-load-bayespam-corpus-load-reputation-score-load-trace-details-parse-antivirus-output-parse-peer-ip-persist-message-postfix-style-mail-log-line-process-outbound-handoff-receive-message-receive-message-with-validator-release-trace-resolve-outbound-route-retry-after-seconds-retry-trace-score-bayespam-smtp-starttls-acceptor-for-paths-spf-disposition-stable-key-id-summarize-dkim-summarize-dmarc-summarize-spf-train-bayespam-unix-now-update-reputation-write-smtp-accepteddomainconfig-antivirusproviderconfig-antivirusproviderdecision-authsummary-authenticationassessment-bayeslabel-decisiontraceentry-dkimdisposition-filteraction-greylistentry-outboundroutingrule-outboundthrottlerule-parsedsmtppath-queuedmessage-runtimeconfig-smtpcommandoutcome-smtppatherror-smtppathkind-smtptransaction-spfdisposition-transportauditevent-transportdsnreport-transportroutedecision-transporttechnicalstatus-transportthrottlestatus-bayespam-min-scoring-tokens-default-greylist-delay-seconds-max-smtp-command-line-len-max-smtp-rcpt-per-transaction
   - external/crate-env-test-lock
   - external/axum-routing-post-json-router
   - external/email-auth-dkim-dkimresult-dmarc-disposition-as-dmarcdisposition-spf-spfresult
@@ -78,9 +78,6 @@ relationships:
 - [inbound_message_posts_to_core_delivery_api](../../../../functions/LPE-CT/src/smtp/tests/inbound_message_posts_to_core_delivery_api.md)
 - [inbound_mismatch_is_rejected_before_delivery](../../../../functions/LPE-CT/src/smtp/tests/inbound_mismatch_is_rejected_before_delivery.md)
 - [inbound_magika_failure_is_quarantined](../../../../functions/LPE-CT/src/smtp/tests/inbound_magika_failure_is_quarantined.md)
-- [outbound_handoff_builds_multipart_alternative_when_html_is_present](../../../../functions/LPE-CT/src/smtp/tests/outbound_handoff_builds_multipart_alternative_when_html_is_present.md)
-- [outbound_handoff_emits_sender_header_for_delegated_sender](../../../../functions/LPE-CT/src/smtp/tests/outbound_handoff_emits_sender_header_for_delegated_sender.md)
-- [quoted_printable_encoder_handles_utf8_and_line_breaks](../../../../functions/LPE-CT/src/smtp/tests/quoted_printable_encoder_handles_utf8_and_line_breaks.md)
 - [inbound_message_keeps_non_utf8_raw_bytes](../../../../functions/LPE-CT/src/smtp/tests/inbound_message_keeps_non_utf8_raw_bytes.md)
 - [greylisting_defers_first_triplet_then_allows_after_release_window](../../../../functions/LPE-CT/src/smtp/tests/greylisting_defers_first_triplet_then_allows_after_release_window.md)
 - [reputation_score_penalizes_quarantine_and_rejects](../../../../functions/LPE-CT/src/smtp/tests/reputation_score_penalizes_quarantine_and_rejects.md)
@@ -125,8 +122,8 @@ relationships:
 # Imports
 
 - `super::{
-    apply_authentication_scores, classify_inbound_message, compose_rfc822_message, delete_trace,
-    dkim_disposition, dnsbl_query_name, encode_quoted_printable, evaluate_greylisting,
+    apply_authentication_scores, classify_inbound_message, delete_trace, dkim_disposition,
+    dnsbl_query_name, evaluate_greylisting,
     finalize_policy_decision, handle_smtp_command, handle_smtp_session, initialize_spool,
     load_antivirus_providers, load_bayespam_corpus, load_reputation_score, load_trace_details,
     parse_antivirus_output, parse_peer_ip, persist_message, postfix_style_mail_log_line,

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_state_token_with_attachments
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L412-L432
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L413-L433
 generated:
   by: okf-rs/0.3.0
 relationships:

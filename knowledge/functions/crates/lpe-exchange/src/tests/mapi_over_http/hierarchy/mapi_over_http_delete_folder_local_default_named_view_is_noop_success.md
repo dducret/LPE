@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_delete_folder_local_default_named_view_is_noop_success
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2762-L2802
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2667-L2707
 visibility: private
 generated:
   by: okf-rs/0.3.0

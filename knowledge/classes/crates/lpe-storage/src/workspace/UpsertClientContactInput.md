@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: UpsertClientContactInput
-resource: crates/lpe-storage/src/workspace.rs#L140-L171
+resource: crates/lpe-storage/src/workspace.rs#L170-L201
 generated:
   by: okf-rs/0.3.0
 ---

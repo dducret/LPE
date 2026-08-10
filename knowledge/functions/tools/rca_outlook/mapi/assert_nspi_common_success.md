@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: assert_nspi_common_success
-resource: tools/rca_outlook/mapi.py#L164-L167
+resource: tools/rca_outlook/mapi.py#L256-L259
 generated:
   by: okf-rs/0.3.0
 relationships:

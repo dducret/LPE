@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bcc_projections_only_expose_drafts_and_sent_items
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8895-L8947
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8958-L9010
 visibility: private
 generated:
   by: okf-rs/0.3.0

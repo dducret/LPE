@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: filterMessages
-resource: web/client/src/client-helpers.ts#L84-L93
+resource: web/client/src/client-helpers.ts#L86-L95
 generated:
   by: okf-rs/0.3.0
 relationships:

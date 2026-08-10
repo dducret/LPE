@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_selective_reopen_uses_durable_event_modseq
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L2604-L2720
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L2611-L2727
 visibility: private
 generated:
   by: okf-rs/0.3.0

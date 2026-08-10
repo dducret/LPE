@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-core/src/sieve/context
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/tests/runtime_schema_drift/run_runtime_drift_validation
 ---
@@ -21,6 +22,7 @@ relationships:
 
 - [context](../../../../../functions/crates/lpe-core/src/sieve/context.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

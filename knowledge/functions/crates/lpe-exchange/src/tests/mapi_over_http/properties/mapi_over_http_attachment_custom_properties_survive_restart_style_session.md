@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_attachment_custom_properties_survive_restart_style_session
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2169-L2282
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L2037-L2150
 visibility: private
 generated:
   by: okf-rs/0.3.0

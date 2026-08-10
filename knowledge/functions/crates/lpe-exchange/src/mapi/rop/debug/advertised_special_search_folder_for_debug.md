@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: advertised_special_search_folder_for_debug
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L753-L762
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L754-L763
 visibility: private
 generated:
   by: okf-rs/0.3.0

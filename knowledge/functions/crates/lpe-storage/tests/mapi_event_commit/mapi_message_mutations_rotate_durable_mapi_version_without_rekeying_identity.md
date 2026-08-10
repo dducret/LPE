@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-storage/tests/mapi_event_commit/event_fixture
   - functions/crates/lpe-storage/src/core/Storage/pool
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/tests/mapi_event_commit/change_key
   - functions/crates/lpe-core/src/sieve/Parser/expect
 ---
@@ -23,5 +24,6 @@ relationships:
 - [event_fixture](../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/event_fixture.md)
 - [pool](../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [change_key](../../../../../functions/crates/lpe-storage/tests/mapi_event_commit/change_key.md)
 - [expect](../../../../../functions/crates/lpe-core/src/sieve/Parser/expect.md)

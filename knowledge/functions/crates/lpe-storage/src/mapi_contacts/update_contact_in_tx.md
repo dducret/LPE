@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/create_mapi_contact
   - functions/crates/lpe-storage/src/mapi_contacts/Storage/commit_mapi_contact_update
@@ -22,6 +23,7 @@ relationships:
 
 - [try_from](../../../../../functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

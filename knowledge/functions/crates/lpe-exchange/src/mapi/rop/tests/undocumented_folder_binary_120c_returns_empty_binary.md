@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: undocumented_folder_binary_120c_returns_empty_binary
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3975-L4138
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3981-L4144
 visibility: private
 generated:
   by: okf-rs/0.3.0

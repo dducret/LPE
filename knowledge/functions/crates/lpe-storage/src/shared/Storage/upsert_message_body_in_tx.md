@@ -7,6 +7,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-domain/src/crypto/sha256_hex
   called_by:
   - functions/crates/lpe-storage/src/inbound/Storage/store_inbound_message_in_tx
@@ -25,6 +26,7 @@ relationships:
 # Calls
 
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [sha256_hex](../../../../../../functions/crates/lpe-domain/src/crypto/sha256_hex.md)
 
 # Called by

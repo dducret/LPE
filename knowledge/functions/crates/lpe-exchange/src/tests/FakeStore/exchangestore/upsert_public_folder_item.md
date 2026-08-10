@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_public_folder_item
-resource: crates/lpe-exchange/src/tests/mod.rs#L6632-L6685
+resource: crates/lpe-exchange/src/tests/mod.rs#L6633-L6686
 visibility: private
 generated:
   by: okf-rs/0.3.0

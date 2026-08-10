@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_visible_recipient_facts
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1067-L1092
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1070-L1095
 visibility: private
 generated:
   by: okf-rs/0.3.0

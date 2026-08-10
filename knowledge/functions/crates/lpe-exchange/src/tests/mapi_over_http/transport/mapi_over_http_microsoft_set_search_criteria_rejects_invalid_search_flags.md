@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_set_search_criteria_rejects_invalid_search_flags
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1618-L1700
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1612-L1694
 visibility: private
 generated:
   by: okf-rs/0.3.0

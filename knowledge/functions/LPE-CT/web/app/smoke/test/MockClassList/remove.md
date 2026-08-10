@@ -39,6 +39,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/release/append_release_response
   - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/and_restriction
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/apply_outlook_smart_input_variant_before_query_rows
+  - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table
   - functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_does_not_restore_unmatched_notification
   - functions/crates/lpe-exchange/src/mapi/identity/MapiRequestIdentityScope/forget
   - functions/crates/lpe-exchange/src/mapi/identity/forget_mapi_identity
@@ -146,6 +147,7 @@ relationships:
 - [append_release_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/release/append_release_response.md)
 - [and_restriction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/and_restriction.md)
 - [apply_outlook_smart_input_variant_before_query_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/apply_outlook_smart_input_variant_before_query_rows.md)
+- [execute_preserves_pending_table_notification_after_releasing_its_table](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table.md)
 - [execute_overflow_does_not_restore_unmatched_notification](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_does_not_restore_unmatched_notification.md)
 - [forget](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/MapiRequestIdentityScope/forget.md)
 - [forget_mapi_identity](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/forget_mapi_identity.md)

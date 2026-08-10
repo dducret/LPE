@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: contacts
-resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1-L1761
+resource: crates/lpe-exchange/src/tests/mapi_over_http/contacts.rs#L1-L1750
 generated:
   by: okf-rs/0.3.0
 relationships:

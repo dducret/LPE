@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: smtp
-resource: LPE-CT/src/smtp.rs#L1-L1284
+resource: LPE-CT/src/smtp.rs#L1-L1287
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -43,8 +43,6 @@ relationships:
   - external/pub-crate-use-protocol-max-smtp-message-size-bytes-parse-smtp-path-smtp-path-error-reply-smtppathkind
   - external/pub-crate-use-protocol-parsedsmtppath-smtppatherror
   - external/reputation-load-reputation-score-update-reputation
-  - external/pub-crate-use-outbound-compose-rfc822-message
-  - external/pub-crate-use-outbound-encode-quoted-printable
   - external/outbound-delivery-relay-message-sanitize-outbound-ehlo-name
   - external/outbound-policy-default-queue-for-status-evaluate-outbound-throttle-outbound-handoff-response-from-spool-resolve-outbound-route
   - external/session-handle-smtp-session
@@ -193,8 +191,6 @@ relationships:
 }`
 - `pub(crate) use protocol::{ParsedSmtpPath, SmtpPathError}`
 - `reputation::{load_reputation_score, update_reputation}`
-- `pub(crate) use outbound::compose_rfc822_message`
-- `pub(crate) use outbound::encode_quoted_printable`
 - `outbound_delivery::{relay_message, sanitize_outbound_ehlo_name}`
 - `outbound_policy::{
     default_queue_for_status, evaluate_outbound_throttle, outbound_handoff_response_from_spool,

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: new
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L223-L228
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L226-L231
 generated:
   by: okf-rs/0.3.0
 ---

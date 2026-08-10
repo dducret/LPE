@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: property_tag_type
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L335-L337
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L336-L338
 generated:
   by: okf-rs/0.3.0
 relationships:

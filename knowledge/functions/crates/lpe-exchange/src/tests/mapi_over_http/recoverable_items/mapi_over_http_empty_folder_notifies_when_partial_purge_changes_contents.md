@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_empty_folder_notifies_when_partial_purge_changes_contents
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L917-L979
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L908-L970
 visibility: private
 generated:
   by: okf-rs/0.3.0

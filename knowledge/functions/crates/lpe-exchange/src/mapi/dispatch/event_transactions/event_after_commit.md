@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: event_after_commit
-resource: crates/lpe-exchange/src/mapi/dispatch/event_transactions.rs#L620-L646
+resource: crates/lpe-exchange/src/mapi/dispatch/event_transactions.rs#L634-L660
 generated:
   by: okf-rs/0.3.0
 relationships:

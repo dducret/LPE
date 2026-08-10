@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: parse_peer_ip
-resource: LPE-CT/src/smtp.rs#L1170-L1175
+resource: LPE-CT/src/smtp.rs#L1173-L1178
 visibility: private
 generated:
   by: okf-rs/0.3.0

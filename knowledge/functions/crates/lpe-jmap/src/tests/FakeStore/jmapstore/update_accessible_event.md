@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: update_accessible_event
-resource: crates/lpe-jmap/src/tests.rs#L1869-L1878
+resource: crates/lpe-jmap/src/tests.rs#L1872-L1881
 visibility: private
 generated:
   by: okf-rs/0.3.0

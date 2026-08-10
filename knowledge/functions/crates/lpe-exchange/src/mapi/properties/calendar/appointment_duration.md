@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: appointment_duration
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L256-L263
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L331-L338
 visibility: private
 generated:
   by: okf-rs/0.3.0

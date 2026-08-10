@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_columns_normalize_outlook_calendar_common_aliases
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1146-L1176
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1151-L1181
 visibility: private
 generated:
   by: okf-rs/0.3.0

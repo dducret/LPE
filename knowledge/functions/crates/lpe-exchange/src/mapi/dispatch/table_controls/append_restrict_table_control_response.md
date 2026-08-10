@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_restrict_table_control_response
-resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L852-L880
+resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L851-L879
 generated:
   by: okf-rs/0.3.0
 relationships:

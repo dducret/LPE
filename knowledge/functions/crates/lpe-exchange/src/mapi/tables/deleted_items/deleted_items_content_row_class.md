@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_items_content_row_class
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L314-L319
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L322-L327
 visibility: private
 generated:
   by: okf-rs/0.3.0

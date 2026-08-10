@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: changes_reject_malformed_and_cross_account_state_tokens
-resource: crates/lpe-jmap/src/tests.rs#L4072-L4139
+resource: crates/lpe-jmap/src/tests.rs#L4075-L4142
 visibility: private
 generated:
   by: okf-rs/0.3.0

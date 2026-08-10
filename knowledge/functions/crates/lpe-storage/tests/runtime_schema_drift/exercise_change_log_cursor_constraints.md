@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-storage/tests/runtime_schema_drift/expect_constraint_failure
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-core/src/sieve/context
   - functions/crates/lpe-storage/src/change/Storage/purge_expired_replay_rows
   called_by:
@@ -23,6 +24,7 @@ relationships:
 
 - [expect_constraint_failure](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/expect_constraint_failure.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [context](../../../../../functions/crates/lpe-core/src/sieve/context.md)
 - [purge_expired_replay_rows](../../../../../functions/crates/lpe-storage/src/change/Storage/purge_expired_replay_rows.md)
 

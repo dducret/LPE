@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_guessed_recoverable_items_folder_id_is_not_opened
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L291-L325
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L282-L316
 visibility: private
 generated:
   by: okf-rs/0.3.0

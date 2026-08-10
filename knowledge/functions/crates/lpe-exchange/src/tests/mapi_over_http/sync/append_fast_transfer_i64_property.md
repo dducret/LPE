@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_fast_transfer_i64_property
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L10433-L10436
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L10190-L10193
 visibility: private
 generated:
   by: okf-rs/0.3.0

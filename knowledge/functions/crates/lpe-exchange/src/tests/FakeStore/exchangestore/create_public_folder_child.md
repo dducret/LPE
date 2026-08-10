@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_public_folder_child
-resource: crates/lpe-exchange/src/tests/mod.rs#L6333-L6363
+resource: crates/lpe-exchange/src/tests/mod.rs#L6334-L6364
 visibility: private
 generated:
   by: okf-rs/0.3.0

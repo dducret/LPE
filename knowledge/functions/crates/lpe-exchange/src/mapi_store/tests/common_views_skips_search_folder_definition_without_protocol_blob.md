@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_skips_search_folder_definition_without_protocol_blob
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1582-L1602
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1584-L1604
 visibility: private
 generated:
   by: okf-rs/0.3.0

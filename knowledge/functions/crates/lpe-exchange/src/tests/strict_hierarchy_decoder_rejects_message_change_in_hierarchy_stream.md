@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_decoder_rejects_message_change_in_hierarchy_stream
-resource: crates/lpe-exchange/src/tests/mod.rs#L14901-L14909
+resource: crates/lpe-exchange/src/tests/mod.rs#L14906-L14914
 visibility: private
 generated:
   by: okf-rs/0.3.0

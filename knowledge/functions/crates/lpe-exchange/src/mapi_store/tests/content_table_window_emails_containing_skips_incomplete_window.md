@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_table_window_emails_containing_skips_incomplete_window
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L378-L442
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L380-L444
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_sort_table_response
-resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L581-L699
+resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L582-L700
 generated:
   by: okf-rs/0.3.0
 relationships:

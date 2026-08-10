@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: predecessor_change_list
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L332-L338
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L333-L339
 generated:
   by: okf-rs/0.3.0
 relationships:

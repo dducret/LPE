@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_items_content_row_is_unread
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L243-L245
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L251-L253
 visibility: private
 generated:
   by: okf-rs/0.3.0

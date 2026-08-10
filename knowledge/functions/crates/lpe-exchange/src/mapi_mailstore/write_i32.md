@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_i32
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1264-L1266
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1267-L1269
 visibility: private
 generated:
   by: okf-rs/0.3.0

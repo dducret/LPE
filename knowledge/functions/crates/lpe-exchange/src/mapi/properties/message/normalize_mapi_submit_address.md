@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: normalize_mapi_submit_address
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L606-L615
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L754-L763
 generated:
   by: okf-rs/0.3.0
 ---

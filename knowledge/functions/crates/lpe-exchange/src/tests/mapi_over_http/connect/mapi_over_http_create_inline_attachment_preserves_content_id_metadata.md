@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_create_inline_attachment_preserves_content_id_metadata
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1549-L1632
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L1468-L1551
 visibility: private
 generated:
   by: okf-rs/0.3.0

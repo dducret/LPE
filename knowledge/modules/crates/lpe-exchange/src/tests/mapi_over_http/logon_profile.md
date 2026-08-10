@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: logon_profile
-resource: crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs#L1-L1254
+resource: crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs#L1-L1182
 generated:
   by: okf-rs/0.3.0
 relationships:

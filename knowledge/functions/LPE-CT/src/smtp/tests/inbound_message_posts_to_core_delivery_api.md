@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbound_message_posts_to_core_delivery_api
-resource: LPE-CT/src/smtp/tests.rs#L2259-L2292
+resource: LPE-CT/src/smtp/tests.rs#L2286-L2319
 visibility: private
 generated:
   by: okf-rs/0.3.0

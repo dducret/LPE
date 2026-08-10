@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: visible_inbox_query_position_wire_summary_reports_compact_response_shape
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1995-L2032
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L2012-L2049
 visibility: private
 generated:
   by: okf-rs/0.3.0

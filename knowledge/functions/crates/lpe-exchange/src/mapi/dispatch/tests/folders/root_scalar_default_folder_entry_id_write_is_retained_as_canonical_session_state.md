@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: root_scalar_default_folder_entry_id_write_is_retained_as_canonical_session_state
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L1997-L2025
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L2010-L2038
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: EventIdentityVersion
-resource: crates/lpe-storage/src/mapi_events.rs#L115-L120
+resource: crates/lpe-storage/src/mapi_events.rs#L116-L121
 generated:
   by: okf-rs/0.3.0
 ---

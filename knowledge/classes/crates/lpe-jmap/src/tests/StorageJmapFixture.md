@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: StorageJmapFixture
-resource: crates/lpe-jmap/src/tests.rs#L8673-L8680
+resource: crates/lpe-jmap/src/tests.rs#L8676-L8683
 visibility: private
 generated:
   by: okf-rs/0.3.0

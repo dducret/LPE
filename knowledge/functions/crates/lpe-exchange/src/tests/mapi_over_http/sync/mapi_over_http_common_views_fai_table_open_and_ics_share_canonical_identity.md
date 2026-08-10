@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_common_views_fai_table_open_and_ics_share_canonical_identity
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L3638-L3886
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L3512-L3760
 visibility: private
 generated:
   by: okf-rs/0.3.0

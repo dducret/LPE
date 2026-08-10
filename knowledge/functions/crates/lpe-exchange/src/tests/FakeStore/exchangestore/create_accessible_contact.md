@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_accessible_contact
-resource: crates/lpe-exchange/src/tests/mod.rs#L8934-L8969
+resource: crates/lpe-exchange/src/tests/mod.rs#L8938-L8973
 visibility: private
 generated:
   by: okf-rs/0.3.0

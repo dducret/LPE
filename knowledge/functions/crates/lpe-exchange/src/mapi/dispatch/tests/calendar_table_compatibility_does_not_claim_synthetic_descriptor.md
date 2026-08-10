@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_table_compatibility_does_not_claim_synthetic_descriptor
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L884-L910
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L888-L914
 visibility: private
 generated:
   by: okf-rs/0.3.0

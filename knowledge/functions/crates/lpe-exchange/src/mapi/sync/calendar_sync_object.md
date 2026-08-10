@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_sync_object
-resource: crates/lpe-exchange/src/mapi/sync.rs#L959-L1036
+resource: crates/lpe-exchange/src/mapi/sync.rs#L959-L1041
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/versioned_event_property_value_with_reminder
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_text_for_mapi
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_rfc3339_utc
   - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/event_size
   called_by:
@@ -24,6 +25,7 @@ relationships:
 
 - [versioned_event_property_value_with_reminder](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/versioned_event_property_value_with_reminder.md)
 - [push](../../../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
+- [calendar_body_text_for_mapi](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_text_for_mapi.md)
 - [filetime_from_rfc3339_utc](../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_rfc3339_utc.md)
 - [event_size](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/event_size.md)
 

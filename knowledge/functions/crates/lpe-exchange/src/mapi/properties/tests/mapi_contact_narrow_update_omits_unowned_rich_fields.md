@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_contact_narrow_update_omits_unowned_rich_fields
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2435-L2470
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L2492-L2527
 visibility: private
 generated:
   by: okf-rs/0.3.0

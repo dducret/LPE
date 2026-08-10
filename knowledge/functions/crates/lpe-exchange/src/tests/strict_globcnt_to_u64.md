@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_globcnt_to_u64
-resource: crates/lpe-exchange/src/tests/mod.rs#L13820-L13827
+resource: crates/lpe-exchange/src/tests/mod.rs#L13825-L13832
 visibility: private
 generated:
   by: okf-rs/0.3.0

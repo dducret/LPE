@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_shared_task_list_push_change_wakes_former_grantee_principal
-resource: crates/lpe-jmap/src/tests.rs#L12199-L12246
+resource: crates/lpe-jmap/src/tests.rs#L12202-L12249
 visibility: private
 generated:
   by: okf-rs/0.3.0

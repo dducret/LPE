@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: SenderDelegationGrantRow
-resource: crates/lpe-storage/src/models.rs#L217-L228
+resource: crates/lpe-storage/src/models.rs#L218-L229
 generated:
   by: okf-rs/0.3.0
 ---

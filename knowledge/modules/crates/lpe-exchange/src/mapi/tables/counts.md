@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: counts
-resource: crates/lpe-exchange/src/mapi/tables/counts.rs#L1-L529
+resource: crates/lpe-exchange/src/mapi/tables/counts.rs#L1-L547
 generated:
   by: okf-rs/0.3.0
 relationships:

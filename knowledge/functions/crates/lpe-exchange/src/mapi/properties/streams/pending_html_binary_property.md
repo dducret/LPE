@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pending_html_binary_property
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L538-L548
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L539-L549
 generated:
   by: okf-rs/0.3.0
 relationships:

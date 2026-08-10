@@ -1120,6 +1120,7 @@
 - [UpdateStoragePool](../classes/crates/lpe-storage/src/types/UpdateStoragePool.md) — Rust Struct
 - [ClientContact](../classes/crates/lpe-storage/src/workspace/ClientContact.md) — Rust Struct
 - [ClientEvent](../classes/crates/lpe-storage/src/workspace/ClientEvent.md) — Rust Struct
+- [ClientMailbox](../classes/crates/lpe-storage/src/workspace/ClientMailbox.md) — Rust Struct
 - [ClientMessage](../classes/crates/lpe-storage/src/workspace/ClientMessage.md) — Rust Struct
 - [ClientWorkspace](../classes/crates/lpe-storage/src/workspace/ClientWorkspace.md) — Rust Struct
 - [RecipientSuggestion](../classes/crates/lpe-storage/src/workspace/RecipientSuggestion.md) — Rust Struct
@@ -1136,5 +1137,7 @@
 - [Measurement](../classes/tools/operations_benchmark/Measurement.md) — Python Class
 - [HttpResponse](../classes/tools/rca_outlook/http/HttpResponse.md) — Python Class
 - [NoRedirectHandler](../classes/tools/rca_outlook/http/NoRedirectHandler.md) — Python Class
+- [MapiHttpEndpoints](../classes/tools/rca_outlook/mapi/MapiHttpEndpoints.md) — Python Class
+- [MapiGate1ReadinessTests](../classes/tools/test_rca_outlook_connectivity_check/MapiGate1ReadinessTests.md) — Python Class
 - [FakePath](../classes/tools/test_rca_outlook_trace_summary/FakePath.md) — Python Class
 - [RcaOutlookTraceSummaryTests](../classes/tools/test_rca_outlook_trace_summary/RcaOutlookTraceSummaryTests.md) — Python Class

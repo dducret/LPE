@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id
   - functions/crates/lpe-storage/src/activesync/normalized_device_type
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -20,3 +21,4 @@ relationships:
 - [tenant_id_for_account_id](../../../../../../functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id.md)
 - [normalized_device_type](../../../../../../functions/crates/lpe-storage/src/activesync/normalized_device_type.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

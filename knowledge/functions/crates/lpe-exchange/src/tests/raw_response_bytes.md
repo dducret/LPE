@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: raw_response_bytes
-resource: crates/lpe-exchange/src/tests/mod.rs#L12699-L12704
+resource: crates/lpe-exchange/src/tests/mod.rs#L12704-L12709
 visibility: private
 generated:
   by: okf-rs/0.3.0

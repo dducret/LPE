@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: event_size
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L14-L21
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L14-L22
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_unread_message_idset_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L13931-L13940
+resource: crates/lpe-exchange/src/tests/mod.rs#L13936-L13945
 visibility: private
 generated:
   by: okf-rs/0.3.0

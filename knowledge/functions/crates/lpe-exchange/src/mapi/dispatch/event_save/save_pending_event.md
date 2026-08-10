@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: save_pending_event
-resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L3-L143
+resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L3-L152
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/properties/reminders/split_reminder_property_values
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_input_from_mapi
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_for_mapping
+  - functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients
   - functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/mapi_event_custom_property_values_from_map
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_created_event
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_event_version
@@ -32,7 +33,7 @@ relationships:
 
 # Signature
 
-`pub(super) async fn save_pending_event<S: ExchangeStore>( store: &S, principal: &AccountPrincipal, session: &mut MapiSession, handle_slots: &mut Vec<u32>, request: &RopRequest, snapshot: &mut MapiMailStoreSnapshot, responses: &mut Vec<u8>, handle: u32, folder_id: u64, properties: HashMap<u32, MapiValue>, )`
+`pub(super) async fn save_pending_event<S: ExchangeStore>( store: &S, principal: &AccountPrincipal, session: &mut MapiSession, handle_slots: &mut Vec<u32>, request: &RopRequest, snapshot: &mut MapiMailStoreSnapshot, responses: &mut Vec<u8>, handle: u32, folder_id: u64, properties: HashMap<u32, MapiValue>, recipients: Vec<PendingRecipient>, recipients_modified: bool, )`
 
 # Calls
 
@@ -44,6 +45,7 @@ relationships:
 - [split_reminder_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/reminders/split_reminder_property_values.md)
 - [event_input_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_input_from_mapi.md)
 - [default_event_for_mapping](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_for_mapping.md)
+- [apply_calendar_pending_recipients](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients.md)
 - [mapi_event_custom_property_values_from_map](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/custom_properties/mapi_event_custom_property_values_from_map.md)
 - [remember_created_event](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_created_event.md)
 - [remember_event_version](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/remember_event_version.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_category_header_row
-resource: crates/lpe-exchange/src/mapi/tables/contents.rs#L480-L514
+resource: crates/lpe-exchange/src/mapi/tables/contents.rs#L482-L516
 generated:
   by: okf-rs/0.3.0
 relationships:

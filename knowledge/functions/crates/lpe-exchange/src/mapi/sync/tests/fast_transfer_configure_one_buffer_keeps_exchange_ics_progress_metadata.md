@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_configure_one_buffer_keeps_exchange_ics_progress_metadata
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L856-L887
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L884-L915
 visibility: private
 generated:
   by: okf-rs/0.3.0

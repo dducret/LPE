@@ -1,7 +1,7 @@
 ---
 type: Rust Enum
 title: MapiObject
-resource: crates/lpe-exchange/src/mapi/session/types.rs#L379-L626
+resource: crates/lpe-exchange/src/mapi/session/types.rs#L381-L630
 generated:
   by: okf-rs/0.3.0
 ---

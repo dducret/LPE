@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: inbox_email
-resource: crates/lpe-jmap/src/tests.rs#L481-L531
+resource: crates/lpe-jmap/src/tests.rs#L482-L533
 visibility: private
 generated:
   by: okf-rs/0.3.0

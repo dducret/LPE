@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_findrow_rejects_invalid_microsoft_find_row_flags
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L200-L250
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L182-L232
 visibility: private
 generated:
   by: okf-rs/0.3.0

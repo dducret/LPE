@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: days_in_month
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L395-L403
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L396-L404
 visibility: private
 generated:
   by: okf-rs/0.3.0

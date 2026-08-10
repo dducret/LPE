@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6938-L7083
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6731-L6876
 visibility: private
 generated:
   by: okf-rs/0.3.0

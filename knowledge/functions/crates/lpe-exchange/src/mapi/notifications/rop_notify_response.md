@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/notifications/append_notification_data
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops
+  - functions/crates/lpe-exchange/src/mapi/dispatch/append_preexisting_notification_responses
   - functions/crates/lpe-exchange/src/mapi/identity/scoped_codec_maps_logical_default_folder_ids_to_durable_ids
   - functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags
   - functions/crates/lpe-exchange/src/mapi/notifications/folder_modified_notification_with_total_count_encodes_t_flag
@@ -34,6 +35,7 @@ relationships:
 # Called by
 
 - [execute_rops](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/execute_rops.md)
+- [append_preexisting_notification_responses](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/append_preexisting_notification_responses.md)
 - [scoped_codec_maps_logical_default_folder_ids_to_durable_ids](../../../../../../functions/crates/lpe-exchange/src/mapi/identity/scoped_codec_maps_logical_default_folder_ids_to_durable_ids.md)
 - [new_mail_notification_with_message_id_encodes_exchange_zero_message_flags](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/new_mail_notification_with_message_id_encodes_exchange_zero_message_flags.md)
 - [folder_modified_notification_with_total_count_encodes_t_flag](../../../../../../functions/crates/lpe-exchange/src/mapi/notifications/folder_modified_notification_with_total_count_encodes_t_flag.md)

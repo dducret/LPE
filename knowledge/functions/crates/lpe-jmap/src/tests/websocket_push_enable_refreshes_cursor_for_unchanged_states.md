@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: websocket_push_enable_refreshes_cursor_for_unchanged_states
-resource: crates/lpe-jmap/src/tests.rs#L11545-L11573
+resource: crates/lpe-jmap/src/tests.rs#L11548-L11576
 visibility: private
 generated:
   by: okf-rs/0.3.0

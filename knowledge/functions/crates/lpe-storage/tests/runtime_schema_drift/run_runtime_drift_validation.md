@@ -7,6 +7,7 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-core/src/sieve/context
   - functions/crates/lpe-storage/tests/runtime_schema_drift/assert_schema_metadata
   - functions/crates/lpe-storage/tests/runtime_schema_drift/seed_platform_tenant
@@ -51,6 +52,7 @@ relationships:
 
 # Calls
 
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [context](../../../../../functions/crates/lpe-core/src/sieve/context.md)
 - [assert_schema_metadata](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/assert_schema_metadata.md)
 - [seed_platform_tenant](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/seed_platform_tenant.md)

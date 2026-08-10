@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_getprops_captured_unpersisted_folder_values_are_absent
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3719-L3855
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3725-L3861
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_versioned_event_row_with_reminder_and_attachments
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L153-L171
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L154-L185
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -17,7 +17,7 @@ relationships:
 
 # Signature
 
-`pub(in crate::mapi) fn serialize_versioned_event_row_with_reminder_and_attachments( event: &crate::mapi_store::MapiEvent, reminder: Option<&lpe_storage::ClientReminder>, has_attachments: bool, columns: &[u32], ) -> Vec<u8>`
+`pub(in crate::mapi) fn serialize_versioned_event_row_with_reminder_and_attachments( event: &crate::mapi_store::MapiEvent, reminder: Option<&lpe_storage::ClientReminder>, has_attachments: bool, mailbox_guid: Uuid, columns: &[u32], ) -> Vec<u8>`
 
 # Calls
 

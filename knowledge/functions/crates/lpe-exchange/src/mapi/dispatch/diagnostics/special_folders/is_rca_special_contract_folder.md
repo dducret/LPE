@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_rca_special_contract_folder
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L404-L421
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L565-L582
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_mapi_event_fields
-resource: crates/lpe-storage/src/mapi_events.rs#L822-L827
+resource: crates/lpe-storage/src/mapi_events.rs#L831-L836
 visibility: private
 generated:
   by: okf-rs/0.3.0

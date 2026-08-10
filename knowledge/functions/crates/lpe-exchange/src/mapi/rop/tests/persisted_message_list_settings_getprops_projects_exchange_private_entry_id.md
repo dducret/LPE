@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: persisted_message_list_settings_getprops_projects_exchange_private_entry_id
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2178-L2243
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2180-L2245
 visibility: private
 generated:
   by: okf-rs/0.3.0

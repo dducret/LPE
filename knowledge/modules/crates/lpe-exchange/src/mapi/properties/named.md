@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: named
-resource: crates/lpe-exchange/src/mapi/properties/named.rs#L1-L384
+resource: crates/lpe-exchange/src/mapi/properties/named.rs#L1-L390
 generated:
   by: okf-rs/0.3.0
 relationships:

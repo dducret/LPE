@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: ActiveSyncDeviceRow
-resource: crates/lpe-storage/src/models.rs#L388-L398
+resource: crates/lpe-storage/src/models.rs#L390-L400
 generated:
   by: okf-rs/0.3.0
 ---

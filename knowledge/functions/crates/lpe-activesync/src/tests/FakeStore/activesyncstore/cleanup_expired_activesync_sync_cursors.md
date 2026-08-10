@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: cleanup_expired_activesync_sync_cursors
-resource: crates/lpe-activesync/src/tests.rs#L1290-L1302
+resource: crates/lpe-activesync/src/tests.rs#L1291-L1303
 visibility: private
 generated:
   by: okf-rs/0.3.0

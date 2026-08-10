@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxosrch_search_definition_message_properties_are_exposed
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4156-L4369
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L3880-L4093
 visibility: private
 generated:
   by: okf-rs/0.3.0

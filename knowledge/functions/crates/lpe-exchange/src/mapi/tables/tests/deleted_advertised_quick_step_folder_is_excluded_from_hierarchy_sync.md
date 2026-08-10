@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: deleted_advertised_quick_step_folder_is_excluded_from_hierarchy_sync
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4081-L4109
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L4115-L4143
 visibility: private
 generated:
   by: okf-rs/0.3.0

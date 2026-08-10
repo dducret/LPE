@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_message_property_is_ics_identity
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L205-L216
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L216-L227
 generated:
   by: okf-rs/0.3.0
 relationships:

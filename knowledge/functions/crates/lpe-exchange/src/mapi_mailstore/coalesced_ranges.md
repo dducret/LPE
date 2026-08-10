@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: coalesced_ranges
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1456-L1474
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1459-L1477
 visibility: private
 generated:
   by: okf-rs/0.3.0

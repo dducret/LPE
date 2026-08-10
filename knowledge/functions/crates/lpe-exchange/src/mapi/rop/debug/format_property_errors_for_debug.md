@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_property_errors_for_debug
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L376-L394
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L377-L395
 generated:
   by: okf-rs/0.3.0
 relationships:

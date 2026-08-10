@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_default_ipm_entry_ids_open_expected_folders
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2805-L2936
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L2710-L2841
 visibility: private
 generated:
   by: okf-rs/0.3.0

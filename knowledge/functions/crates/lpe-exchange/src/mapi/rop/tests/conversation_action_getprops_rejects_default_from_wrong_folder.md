@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: conversation_action_getprops_rejects_default_from_wrong_folder
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2626-L2664
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2628-L2666
 visibility: private
 generated:
   by: okf-rs/0.3.0

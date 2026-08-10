@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_sync_state_u32
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L704-L709
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L707-L712
 visibility: private
 generated:
   by: okf-rs/0.3.0

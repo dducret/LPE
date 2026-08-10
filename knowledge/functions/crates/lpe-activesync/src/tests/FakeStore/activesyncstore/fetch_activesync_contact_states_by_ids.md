@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_activesync_contact_states_by_ids
-resource: crates/lpe-activesync/src/tests.rs#L1162-L1187
+resource: crates/lpe-activesync/src/tests.rs#L1163-L1188
 visibility: private
 generated:
   by: okf-rs/0.3.0

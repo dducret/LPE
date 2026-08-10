@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: special_message
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L1-L521
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L1-L533
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -23,6 +23,7 @@ relationships:
 - [special_message_source_key](../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_source_key.md)
 - [special_message_sync_source_key](../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_source_key.md)
 - [special_message_parent_source_key](../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_parent_source_key.md)
+- [special_message_sync_parent_source_key](../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_parent_source_key.md)
 - [special_message_search_key](../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_search_key.md)
 - [special_message_change_key](../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_change_key.md)
 - [special_message_predecessor_change_list](../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_predecessor_change_list.md)

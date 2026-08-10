@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reserved_rop_is_terminal_and_uses_common_unsupported_response
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5865-L5877
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5871-L5883
 generated:
   by: okf-rs/0.3.0
 relationships:

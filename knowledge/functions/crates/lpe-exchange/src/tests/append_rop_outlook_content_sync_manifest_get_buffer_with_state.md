@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_rop_outlook_content_sync_manifest_get_buffer_with_state
-resource: crates/lpe-exchange/src/tests/mod.rs#L15452-L15504
+resource: crates/lpe-exchange/src/tests/mod.rs#L15457-L15509
 visibility: private
 generated:
   by: okf-rs/0.3.0

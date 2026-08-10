@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_empty_extended_execute_returns_success
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L45-L75
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L36-L66
 visibility: private
 generated:
   by: okf-rs/0.3.0

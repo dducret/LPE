@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: categorized_deleted_items_content_rows
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L136-L222
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L144-L230
 generated:
   by: okf-rs/0.3.0
 relationships:

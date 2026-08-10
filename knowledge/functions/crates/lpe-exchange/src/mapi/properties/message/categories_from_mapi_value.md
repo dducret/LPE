@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: categories_from_mapi_value
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L899-L912
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L1047-L1060
 generated:
   by: okf-rs/0.3.0
 relationships:

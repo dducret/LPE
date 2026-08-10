@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxcfold_create_delete_and_move_use_canonical_mailboxes
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L668-L784
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L681-L797
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_item_id_matches
-resource: crates/lpe-exchange/src/mapi/sync.rs#L1395-L1397
+resource: crates/lpe-exchange/src/mapi/sync.rs#L1400-L1402
 generated:
   by: okf-rs/0.3.0
 relationships:

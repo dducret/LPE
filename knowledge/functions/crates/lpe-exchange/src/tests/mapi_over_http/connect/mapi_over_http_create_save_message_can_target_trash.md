@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_create_save_message_can_target_trash
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L130-L183
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L112-L165
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -7,6 +7,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/storage_backend/s3_put_object
   called_by:
   - functions/crates/lpe-storage/src/blob_store/PostgresBlobStore/copy_and_verify_one_blob_migration_job
@@ -19,6 +20,7 @@ relationships:
 # Calls
 
 - [query](../../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [s3_put_object](../../../../../../../functions/crates/lpe-storage/src/storage_backend/s3_put_object.md)
 
 # Called by

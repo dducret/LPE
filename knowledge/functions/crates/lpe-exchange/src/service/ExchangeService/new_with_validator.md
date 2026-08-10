@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: new_with_validator
-resource: crates/lpe-exchange/src/service.rs#L174-L176
+resource: crates/lpe-exchange/src/service.rs#L176-L178
 generated:
   by: okf-rs/0.3.0
 ---

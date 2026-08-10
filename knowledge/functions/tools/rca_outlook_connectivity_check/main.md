@@ -1,12 +1,13 @@
 ---
 type: Python Function
 title: main
-resource: tools/rca_outlook_connectivity_check.py#L1330-L1450
+resource: tools/rca_outlook_connectivity_check.py#L1579-L1715
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
   - functions/tools/rca_outlook/http/require
+  - functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness
   - functions/tools/rca_outlook_connectivity_check/check_pox_autodiscover
   - functions/tools/rca_outlook_connectivity_check/check_json_autodiscover
   - functions/tools/rca_outlook_connectivity_check/check_jmap_publication_headers
@@ -31,6 +32,7 @@ relationships:
 # Calls
 
 - [require](../../../functions/tools/rca_outlook/http/require.md)
+- [check_mapi_gate1_readiness](../../../functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness.md)
 - [check_pox_autodiscover](../../../functions/tools/rca_outlook_connectivity_check/check_pox_autodiscover.md)
 - [check_json_autodiscover](../../../functions/tools/rca_outlook_connectivity_check/check_json_autodiscover.md)
 - [check_jmap_publication_headers](../../../functions/tools/rca_outlook_connectivity_check/check_jmap_publication_headers.md)

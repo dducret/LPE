@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/allocate_next_mapi_global_counter
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_identity_material_for_store_replica
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -23,3 +24,4 @@ relationships:
 - [allocate_next_mapi_global_counter](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/allocate_next_mapi_global_counter.md)
 - [mapi_identity_material_for_store_replica](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_helpers/mapi_identity_material_for_store_replica.md)
 - [query](../../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

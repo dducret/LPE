@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sort_table_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1384-L1386
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1386-L1388
 generated:
   by: okf-rs/0.3.0
 relationships:

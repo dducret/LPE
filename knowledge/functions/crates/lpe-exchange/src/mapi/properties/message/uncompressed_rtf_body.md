@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: uncompressed_rtf_body
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L315-L320
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L325-L330
 generated:
   by: okf-rs/0.3.0
 relationships:

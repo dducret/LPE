@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: shared_account
-resource: crates/lpe-jmap/src/tests.rs#L748-L756
+resource: crates/lpe-jmap/src/tests.rs#L750-L758
 visibility: private
 generated:
   by: okf-rs/0.3.0

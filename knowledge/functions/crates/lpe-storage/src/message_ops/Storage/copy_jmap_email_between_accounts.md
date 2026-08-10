@@ -9,6 +9,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/src/shared/Storage/allocate_mailbox_membership_in_tx
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/shared/Storage/insert_audit
   - functions/crates/lpe-storage/src/change/Storage/emit_mail_change
   - functions/crates/lpe-core/src/sieve/Parser/next
@@ -23,6 +24,7 @@ relationships:
 - [tenant_id_for_account_id](../../../../../../functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [allocate_mailbox_membership_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/allocate_mailbox_membership_in_tx.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [insert_audit](../../../../../../functions/crates/lpe-storage/src/shared/Storage/insert_audit.md)
 - [emit_mail_change](../../../../../../functions/crates/lpe-storage/src/change/Storage/emit_mail_change.md)
 - [next](../../../../../../functions/crates/lpe-core/src/sieve/Parser/next.md)

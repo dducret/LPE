@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_same_folder_move_is_idempotent
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L26-L147
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L48-L169
 visibility: private
 generated:
   by: okf-rs/0.3.0

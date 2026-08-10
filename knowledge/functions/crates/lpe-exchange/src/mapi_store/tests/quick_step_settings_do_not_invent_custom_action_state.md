@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: quick_step_settings_do_not_invent_custom_action_state
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1025-L1069
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1027-L1071
 visibility: private
 generated:
   by: okf-rs/0.3.0

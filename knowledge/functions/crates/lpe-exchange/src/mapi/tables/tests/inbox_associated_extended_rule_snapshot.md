@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_extended_rule_snapshot
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8717-L8739
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8752-L8774
 visibility: private
 generated:
   by: okf-rs/0.3.0

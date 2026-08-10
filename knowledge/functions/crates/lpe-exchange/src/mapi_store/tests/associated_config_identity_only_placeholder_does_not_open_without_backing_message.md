@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: associated_config_identity_only_placeholder_does_not_open_without_backing_message
-resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1264-L1291
+resource: crates/lpe-exchange/src/mapi_store/tests.rs#L1266-L1293
 visibility: private
 generated:
   by: okf-rs/0.3.0

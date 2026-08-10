@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_get_returns_nfc_unicode_names_as_json_strings
-resource: crates/lpe-jmap/src/tests.rs#L6658-L6699
+resource: crates/lpe-jmap/src/tests.rs#L6661-L6702
 visibility: private
 generated:
   by: okf-rs/0.3.0

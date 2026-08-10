@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rop_response_framing_summary_marks_multi_rop_boundaries
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L1156-L1200
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L1249-L1297
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bayespam_requires_enough_content_evidence_before_contributing
-resource: LPE-CT/src/smtp/tests.rs#L2599-L2635
+resource: LPE-CT/src/smtp/tests.rs#L2575-L2611
 visibility: private
 generated:
   by: okf-rs/0.3.0

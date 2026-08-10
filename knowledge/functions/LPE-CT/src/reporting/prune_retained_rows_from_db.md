@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/LPE-CT/src/reporting/history_cutoff
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/LPE-CT/src/reporting/enforce_retention
 ---
@@ -21,6 +22,7 @@ relationships:
 
 - [query](../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [history_cutoff](../../../../functions/LPE-CT/src/reporting/history_cutoff.md)
+- [execute](../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

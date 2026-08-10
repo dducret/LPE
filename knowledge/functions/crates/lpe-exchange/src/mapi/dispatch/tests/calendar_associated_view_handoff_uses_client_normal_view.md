@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_associated_view_handoff_uses_client_normal_view
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L746-L765
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L750-L769
 visibility: private
 generated:
   by: okf-rs/0.3.0

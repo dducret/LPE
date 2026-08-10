@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: decide_auth_policy
-resource: LPE-CT/src/smtp/tests.rs#L3258-L3275
+resource: LPE-CT/src/smtp/tests.rs#L3234-L3251
 visibility: private
 generated:
   by: okf-rs/0.3.0

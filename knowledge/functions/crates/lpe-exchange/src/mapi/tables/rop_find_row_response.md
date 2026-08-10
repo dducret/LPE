@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rop_find_row_response
-resource: crates/lpe-exchange/src/mapi/tables.rs#L90-L825
+resource: crates/lpe-exchange/src/mapi/tables.rs#L90-L849
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -48,9 +48,9 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/sort_deleted_items_content_rows
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/deleted_items_content_row_matches
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/serialize_deleted_items_content_row
-  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid
   - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_events
-  - functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event_with_mailbox_guid
   - functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_versioned_event_row
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_for_folder
@@ -178,9 +178,9 @@ relationships:
 - [sort_deleted_items_content_rows](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/sort_deleted_items_content_rows.md)
 - [deleted_items_content_row_matches](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/deleted_items_content_row_matches.md)
 - [serialize_deleted_items_content_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/serialize_deleted_items_content_row.md)
-- [calendar_content_rows](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows.md)
+- [calendar_content_rows_with_mailbox_guid](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid.md)
 - [sort_events](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_events.md)
-- [restriction_matches_event](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event.md)
+- [restriction_matches_event_with_mailbox_guid](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event_with_mailbox_guid.md)
 - [serialize_versioned_event_row](../../../../../../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/serialize_versioned_event_row.md)
 - [collaboration_folder_for_id](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id.md)
 - [contacts_for_folder](../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_for_folder.md)

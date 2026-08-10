@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxosrch_large_messages_template_projects_text_and_numerical_search
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1163-L1212
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1219-L1268
 visibility: private
 generated:
   by: okf-rs/0.3.0

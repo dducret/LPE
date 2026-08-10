@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_public_folder_permissions
-resource: crates/lpe-exchange/src/tests/mod.rs#L6495-L6509
+resource: crates/lpe-exchange/src/tests/mod.rs#L6496-L6510
 visibility: private
 generated:
   by: okf-rs/0.3.0

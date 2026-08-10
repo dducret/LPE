@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_stream_target
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L664-L799
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L665-L800
 generated:
   by: okf-rs/0.3.0
 relationships:

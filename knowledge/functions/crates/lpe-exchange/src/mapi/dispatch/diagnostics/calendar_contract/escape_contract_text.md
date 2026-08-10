@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: escape_contract_text
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L383-L390
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L384-L391
 visibility: private
 generated:
   by: okf-rs/0.3.0

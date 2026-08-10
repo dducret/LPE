@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_delete_messages_response
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L951-L1228
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L955-L1232
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_default_named_view_getprops_rejects_unpersisted_message
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2302-L2341
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2304-L2343
 visibility: private
 generated:
   by: okf-rs/0.3.0

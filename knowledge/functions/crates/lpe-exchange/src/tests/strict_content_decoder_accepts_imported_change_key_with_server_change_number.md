@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_content_decoder_accepts_imported_change_key_with_server_change_number
-resource: crates/lpe-exchange/src/tests/mod.rs#L14728-L14802
+resource: crates/lpe-exchange/src/tests/mod.rs#L14733-L14807
 visibility: private
 generated:
   by: okf-rs/0.3.0

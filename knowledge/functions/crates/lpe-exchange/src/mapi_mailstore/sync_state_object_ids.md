@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_state_object_ids
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L413-L431
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L416-L434
 visibility: private
 generated:
   by: okf-rs/0.3.0

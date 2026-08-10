@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_nspi_get_matches_ranks_distribution_list_exact_smtp_first
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1573-L1615
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1569-L1611
 visibility: private
 generated:
   by: okf-rs/0.3.0

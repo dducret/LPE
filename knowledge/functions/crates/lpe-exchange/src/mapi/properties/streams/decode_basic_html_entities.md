@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: decode_basic_html_entities
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L955-L964
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L956-L965
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_message_status_response
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L1230-L1285
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L1234-L1289
 generated:
   by: okf-rs/0.3.0
 relationships:

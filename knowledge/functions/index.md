@@ -196,6 +196,8 @@
 - [render_metrics](../functions/LPE-CT/src/observability/render_metrics.md) — Rust Function
 - [set_active_smtp_sessions](../functions/LPE-CT/src/observability/set_active_smtp_sessions.md) — Rust Function
 - [trace_id_from_headers](../functions/LPE-CT/src/observability/trace_id_from_headers.md) — Rust Function
+- [outbound_handoff_body_limit](../functions/LPE-CT/src/outbound_handoff_body_limit.md) — Rust Function
+- [outbound_handoff_body_limit_accepts_base64_encoded_maximum_message](../functions/LPE-CT/src/outbound_handoff_body_limit_accepts_base64_encoded_maximum_message.md) — Rust Function
 - [classify_smtp_message](../functions/LPE-CT/src/outlook_test_message/classify_smtp_message.md) — Rust Function
 - [detects_outlook_account_test_message](../functions/LPE-CT/src/outlook_test_message/detects_outlook_account_test_message.md) — Rust Function
 - [ignores_unrelated_messages](../functions/LPE-CT/src/outlook_test_message/ignores_unrelated_messages.md) — Rust Function
@@ -353,9 +355,6 @@
 - [initialize_spool](../functions/LPE-CT/src/smtp/initialize_spool.md) — Rust Function
 - [message_id](../functions/LPE-CT/src/smtp/message_id.md) — Rust Function
 - [normalize_smtp_target](../functions/LPE-CT/src/smtp/normalize_smtp_target.md) — Rust Function
-- [compose_rfc822_message](../functions/LPE-CT/src/smtp/outbound/compose_rfc822_message.md) — Rust Function
-- [encode_quoted_printable](../functions/LPE-CT/src/smtp/outbound/encode_quoted_printable.md) — Rust Function
-- [format_address](../functions/LPE-CT/src/smtp/outbound/format_address.md) — Rust Function
 - [deliver_outbound_to_local_recipients](../functions/LPE-CT/src/smtp/outbound_delivery/deliver_outbound_to_local_recipients.md) — Rust Function
 - [direct_mx_targets](../functions/LPE-CT/src/smtp/outbound_delivery/direct_mx_targets.md) — Rust Function
 - [is_valid_ehlo_hostname](../functions/LPE-CT/src/smtp/outbound_delivery/is_valid_ehlo_hostname.md) — Rust Function
@@ -465,10 +464,8 @@
 - [inbound_mismatch_is_rejected_before_delivery](../functions/LPE-CT/src/smtp/tests/inbound_mismatch_is_rejected_before_delivery.md) — Rust Function
 - [inbound_test_message](../functions/LPE-CT/src/smtp/tests/inbound_test_message.md) — Rust Function
 - [outbound_handoff_bounces_on_permanent_rcpt_failure](../functions/LPE-CT/src/smtp/tests/outbound_handoff_bounces_on_permanent_rcpt_failure.md) — Rust Function
-- [outbound_handoff_builds_multipart_alternative_when_html_is_present](../functions/LPE-CT/src/smtp/tests/outbound_handoff_builds_multipart_alternative_when_html_is_present.md) — Rust Function
 - [outbound_handoff_defers_when_local_throttle_hits](../functions/LPE-CT/src/smtp/tests/outbound_handoff_defers_when_local_throttle_hits.md) — Rust Function
 - [outbound_handoff_delivers_accepted_domain_locally_without_direct_mx](../functions/LPE-CT/src/smtp/tests/outbound_handoff_delivers_accepted_domain_locally_without_direct_mx.md) — Rust Function
-- [outbound_handoff_emits_sender_header_for_delegated_sender](../functions/LPE-CT/src/smtp/tests/outbound_handoff_emits_sender_header_for_delegated_sender.md) — Rust Function
 - [outbound_handoff_quarantines_message](../functions/LPE-CT/src/smtp/tests/outbound_handoff_quarantines_message.md) — Rust Function
 - [outbound_handoff_quarantines_on_bayespam_score](../functions/LPE-CT/src/smtp/tests/outbound_handoff_quarantines_on_bayespam_score.md) — Rust Function
 - [outbound_handoff_rejects_blocked_delegated_sender](../functions/LPE-CT/src/smtp/tests/outbound_handoff_rejects_blocked_delegated_sender.md) — Rust Function
@@ -483,7 +480,6 @@
 - [plaintext_inbound_store](../functions/LPE-CT/src/smtp/tests/plaintext_inbound_store.md) — Rust Function
 - [postfix_style_mail_log_line_keeps_operator_correlation_fields](../functions/LPE-CT/src/smtp/tests/postfix_style_mail_log_line_keeps_operator_correlation_fields.md) — Rust Function
 - [quarantine_release_reject_delete_recovers_across_node_replacement](../functions/LPE-CT/src/smtp/tests/quarantine_release_reject_delete_recovers_across_node_replacement.md) — Rust Function
-- [quoted_printable_encoder_handles_utf8_and_line_breaks](../functions/LPE-CT/src/smtp/tests/quoted_printable_encoder_handles_utf8_and_line_breaks.md) — Rust Function
 - [read_test_smtp_reply](../functions/LPE-CT/src/smtp/tests/read_test_smtp_reply.md) — Rust Function
 - [recipient_domain_acceptance_is_exact_case_insensitive_and_verified](../functions/LPE-CT/src/smtp/tests/recipient_domain_acceptance_is_exact_case_insensitive_and_verified.md) — Rust Function
 - [rejected_quarantine_trace_recovers_from_spool_until_operator_delete](../functions/LPE-CT/src/smtp/tests/rejected_quarantine_trace_recovers_from_spool_until_operator_delete.md) — Rust Function
@@ -2509,6 +2505,7 @@
 - [rrule_day](../functions/crates/lpe-exchange/src/ews_types/EwsWeekday/rrule_day.md) — Rust Method
 - [ews_simple_type_enums_accept_documented_mvp_values](../functions/crates/lpe-exchange/src/ews_types/ews_simple_type_enums_accept_documented_mvp_values.md) — Rust Function
 - [normalized](../functions/crates/lpe-exchange/src/ews_types/normalized.md) — Rust Function
+- [append_preexisting_notification_responses](../functions/crates/lpe-exchange/src/mapi/dispatch/append_preexisting_notification_responses.md) — Rust Function
 - [append_existing_associated_config_save_response](../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/append_existing_associated_config_save_response.md) — Rust Function
 - [append_pending_associated_config_save_response](../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/append_pending_associated_config_save_response.md) — Rust Function
 - [associated_config_class_and_subject](../functions/crates/lpe-exchange/src/mapi/dispatch/associated_config/associated_config_class_and_subject.md) — Rust Function
@@ -2806,6 +2803,7 @@
 - [rop_ids_csv](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/rop_ids_csv.md) — Rust Function
 - [rop_name](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/rop_name.md) — Rust Function
 - [rop_names_csv](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/rop_names_csv.md) — Rust Function
+- [calendar_global_object_id_contract](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/calendar_global_object_id_contract.md) — Rust Function
 - [calendar_sync_object_start_end_order_ok](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/calendar_sync_object_start_end_order_ok.md) — Rust Function
 - [expected_special_folder_item_message_class](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/expected_special_folder_item_message_class.md) — Rust Function
 - [expected_special_folder_parent_id](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/expected_special_folder_parent_id.md) — Rust Function
@@ -2817,6 +2815,8 @@
 - [special_binary_property_len](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/special_binary_property_len.md) — Rust Function
 - [special_i64_property](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/special_i64_property.md) — Rust Function
 - [special_property_shape](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/special_property_shape.md) — Rust Function
+- [third_party_global_object_id_contract](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/third_party_global_object_id_contract.md) — Rust Function
+- [third_party_global_object_id_contract_flags_nonzero_creation_time](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders/third_party_global_object_id_contract_flags_nonzero_creation_time.md) — Rust Function
 - [summarize_handle_table](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_handle_table.md) — Rust Function
 - [summarize_logon_response_rop](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_logon_response_rop.md) — Rust Function
 - [summarize_non_release_request_rops](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/summarize_non_release_request_rops.md) — Rust Function
@@ -3492,6 +3492,7 @@
 - [execute_max_rop_out_returns_buffer_too_small_response](../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_max_rop_out_returns_buffer_too_small_response.md) — Rust Function
 - [execute_overflow_does_not_restore_unmatched_notification](../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_does_not_restore_unmatched_notification.md) — Rust Function
 - [execute_overflow_restores_deliverable_notification_batch](../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_overflow_restores_deliverable_notification_batch.md) — Rust Function
+- [execute_preserves_pending_table_notification_after_releasing_its_table](../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_preserves_pending_table_notification_after_releasing_its_table.md) — Rust Function
 - [execute_response_budget_reserves_extended_framing_and_handle_table](../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_response_budget_reserves_extended_framing_and_handle_table.md) — Rust Function
 - [execute_response_framing_context_includes_bootstrap_getprops_batches](../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_response_framing_context_includes_bootstrap_getprops_batches.md) — Rust Function
 - [execute_rop_debug_summary_decodes_ids_and_return_codes](../functions/crates/lpe-exchange/src/mapi/dispatch/tests/execute/execute_rop_debug_summary_decodes_ids_and_return_codes.md) — Rust Function
@@ -4000,12 +4001,17 @@
 - [pending_attachment_media_type](../functions/crates/lpe-exchange/src/mapi/properties/attachments/pending_attachment_media_type.md) — Rust Function
 - [pending_attachment_upload](../functions/crates/lpe-exchange/src/mapi/properties/attachments/pending_attachment_upload.md) — Rust Function
 - [zero](../functions/crates/lpe-exchange/src/mapi/properties/calendar/CalendarSystemTime/zero.md) — Rust Method
+- [apply_calendar_pending_recipients](../functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients.md) — Rust Function
 - [apply_canonical_event_property_values](../functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_canonical_event_property_values.md) — Rust Function
 - [appointment_busy_status](../functions/crates/lpe-exchange/src/mapi/properties/calendar/appointment_busy_status.md) — Rust Function
 - [appointment_duration](../functions/crates/lpe-exchange/src/mapi/properties/calendar/appointment_duration.md) — Rust Function
 - [attendees_from_mapi](../functions/crates/lpe-exchange/src/mapi/properties/calendar/attendees_from_mapi.md) — Rust Function
 - [bounded_meeting_cancellation_from_mapi](../functions/crates/lpe-exchange/src/mapi/properties/calendar/bounded_meeting_cancellation_from_mapi.md) — Rust Function
 - [calendar_all_attendees](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_all_attendees.md) — Rust Function
+- [calendar_body_html_for_mapi](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_html_for_mapi.md) — Rust Function
+- [calendar_body_html_omits_dangling_outlook_file_list_link](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_html_omits_dangling_outlook_file_list_link.md) — Rust Function
+- [calendar_body_text_converts_html_when_plain_text_is_absent](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_text_converts_html_when_plain_text_is_absent.md) — Rust Function
+- [calendar_body_text_for_mapi](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_body_text_for_mapi.md) — Rust Function
 - [calendar_display_to](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_display_to.md) — Rust Function
 - [calendar_global_object_id](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_global_object_id.md) — Rust Function
 - [calendar_item_access_follows_canonical_grant](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_item_access_follows_canonical_grant.md) — Rust Function
@@ -4015,6 +4021,7 @@
 - [calendar_organizer_name](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_organizer_name.md) — Rust Function
 - [calendar_participant_labels](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_participant_labels.md) — Rust Function
 - [calendar_participants_from_display_string](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_participants_from_display_string.md) — Rust Function
+- [calendar_pending_recipients](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_pending_recipients.md) — Rust Function
 - [calendar_required_attendees](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_required_attendees.md) — Rust Function
 - [calendar_status_from_mapi](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_status_from_mapi.md) — Rust Function
 - [calendar_status_from_mapi_busy_status](../functions/crates/lpe-exchange/src/mapi/properties/calendar/calendar_status_from_mapi_busy_status.md) — Rust Function
@@ -4035,10 +4042,12 @@
 - [event_property_value](../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value.md) — Rust Function
 - [event_property_value_with_optional_version](../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version.md) — Rust Function
 - [event_property_value_with_reminder](../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder.md) — Rust Function
+- [event_property_value_with_reminder_and_mailbox_guid](../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_reminder_and_mailbox_guid.md) — Rust Function
 - [event_reminder_property_value](../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_reminder_property_value.md) — Rust Function
 - [appointment_state_flags](../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/appointment_state_flags.md) — Rust Function
 - [event_is_meeting](../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/event_is_meeting.md) — Rust Function
 - [organizer_json_from_mapi](../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/organizer_json_from_mapi.md) — Rust Function
+- [response_status](../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting/response_status.md) — Rust Function
 - [meeting_response_event_input_from_mapi](../functions/crates/lpe-exchange/src/mapi/properties/calendar/meeting_response_event_input_from_mapi.md) — Rust Function
 - [organizer_from_mapi](../functions/crates/lpe-exchange/src/mapi/properties/calendar/organizer_from_mapi.md) — Rust Function
 - [push_system_time](../functions/crates/lpe-exchange/src/mapi/properties/calendar/push_system_time.md) — Rust Function
@@ -4121,6 +4130,7 @@
 - [apply_canonical_message_property_values](../functions/crates/lpe-exchange/src/mapi/properties/message/apply_canonical_message_property_values.md) — Rust Function
 - [apply_pending_recipient_changes](../functions/crates/lpe-exchange/src/mapi/properties/message/apply_pending_recipient_changes.md) — Rust Function
 - [categories_from_mapi_value](../functions/crates/lpe-exchange/src/mapi/properties/message/categories_from_mapi_value.md) — Rust Function
+- [content_class_for_email](../functions/crates/lpe-exchange/src/mapi/properties/message/content_class_for_email.md) — Rust Function
 - [conversation_action_size](../functions/crates/lpe-exchange/src/mapi/properties/message/conversation_action_size.md) — Rust Function
 - [conversation_action_subject](../functions/crates/lpe-exchange/src/mapi/properties/message/conversation_action_subject.md) — Rust Function
 - [conversation_id_from_index](../functions/crates/lpe-exchange/src/mapi/properties/message/conversation_id_from_index.md) — Rust Function
@@ -4135,11 +4145,15 @@
 - [email_sent_representing_name](../functions/crates/lpe-exchange/src/mapi/properties/message/email_sent_representing_name.md) — Rust Function
 - [filetime_to_rfc3339_utc](../functions/crates/lpe-exchange/src/mapi/properties/message/filetime_to_rfc3339_utc.md) — Rust Function
 - [html_body_from_plain_text](../functions/crates/lpe-exchange/src/mapi/properties/message/html_body_from_plain_text.md) — Rust Function
+- [ical_parameter_escape](../functions/crates/lpe-exchange/src/mapi/properties/message/ical_parameter_escape.md) — Rust Function
+- [ical_text_escape](../functions/crates/lpe-exchange/src/mapi/properties/message/ical_text_escape.md) — Rust Function
+- [ical_utc_filetime](../functions/crates/lpe-exchange/src/mapi/properties/message/ical_utc_filetime.md) — Rust Function
 - [jmap_import_from_pending_message](../functions/crates/lpe-exchange/src/mapi/properties/message/jmap_import_from_pending_message.md) — Rust Function
 - [mapi_message_size_extended_value](../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_message_size_extended_value.md) — Rust Function
 - [mapi_message_size_value](../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_message_size_value.md) — Rust Function
 - [mapi_submit_from_email](../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_submit_from_email.md) — Rust Function
 - [mapi_submit_from_pending_message](../functions/crates/lpe-exchange/src/mapi/properties/message/mapi_submit_from_pending_message.md) — Rust Function
+- [meeting_request_attachment](../functions/crates/lpe-exchange/src/mapi/properties/message/meeting_request_attachment.md) — Rust Function
 - [message_class_for_email](../functions/crates/lpe-exchange/src/mapi/properties/message/message_class_for_email.md) — Rust Function
 - [message_followup_update_from_mapi_values](../functions/crates/lpe-exchange/src/mapi/properties/message/message_followup_update_from_mapi_values.md) — Rust Function
 - [message_followup_update_is_empty](../functions/crates/lpe-exchange/src/mapi/properties/message/message_followup_update_is_empty.md) — Rust Function
@@ -4331,6 +4345,7 @@
 - [associated_fai_identity_properties_do_not_reuse_source_key_for_change_keys](../functions/crates/lpe-exchange/src/mapi/properties/tests/associated_fai_identity_properties_do_not_reuse_source_key_for_change_keys.md) — Rust Function
 - [auxiliary_contact_folders_do_not_advertise_folder_default_views](../functions/crates/lpe-exchange/src/mapi/properties/tests/auxiliary_contact_folders_do_not_advertise_folder_default_views.md) — Rust Function
 - [binary_property_uses_rop_u16_length_prefix](../functions/crates/lpe-exchange/src/mapi/properties/tests/binary_property_uses_rop_u16_length_prefix.md) — Rust Function
+- [calendar_fallback_global_object_id_uses_zero_creation_time](../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_fallback_global_object_id_uses_zero_creation_time.md) — Rust Function
 - [calendar_named_view_projects_registered_calendar_view_clsid](../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_named_view_projects_registered_calendar_view_clsid.md) — Rust Function
 - [calendar_projection_backs_outlook_table_identity_and_status_columns](../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_backs_outlook_table_identity_and_status_columns.md) — Rust Function
 - [calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting](../functions/crates/lpe-exchange/src/mapi/properties/tests/calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeting.md) — Rust Function
@@ -4355,6 +4370,7 @@
 - [contact_secondary_email_named_property_uses_emails_json](../functions/crates/lpe-exchange/src/mapi/properties/tests/contact_secondary_email_named_property_uses_emails_json.md) — Rust Function
 - [content_restriction_uses_microsoft_fuzzy_prefix_semantics](../functions/crates/lpe-exchange/src/mapi/properties/tests/content_restriction_uses_microsoft_fuzzy_prefix_semantics.md) — Rust Function
 - [descriptor_column_property_tags](../functions/crates/lpe-exchange/src/mapi/properties/tests/descriptor_column_property_tags.md) — Rust Function
+- [email_message_class_and_content_class_follow_canonical_projection](../functions/crates/lpe-exchange/src/mapi/properties/tests/email_message_class_and_content_class_follow_canonical_projection.md) — Rust Function
 - [folder_default_view_definitions_use_type_specific_columns](../functions/crates/lpe-exchange/src/mapi/properties/tests/folder_default_view_definitions_use_type_specific_columns.md) — Rust Function
 - [folder_properties_report_deleted_count_total](../functions/crates/lpe-exchange/src/mapi/properties/tests/folder_properties_report_deleted_count_total.md) — Rust Function
 - [followup_mail_projects_outlook_flag_properties](../functions/crates/lpe-exchange/src/mapi/properties/tests/followup_mail_projects_outlook_flag_properties.md) — Rust Function
@@ -4403,6 +4419,7 @@
 - [mapi_over_http_w_europe_all_day_import_preserves_canonical_local_midnight](../functions/crates/lpe-exchange/src/mapi/properties/tests/mapi_over_http_w_europe_all_day_import_preserves_canonical_local_midnight.md) — Rust Function
 - [mapi_over_http_w_europe_all_day_projection_emits_utc_filetimes](../functions/crates/lpe-exchange/src/mapi/properties/tests/mapi_over_http_w_europe_all_day_projection_emits_utc_filetimes.md) — Rust Function
 - [mapi_over_http_w_europe_time_conversion_observes_standard_and_daylight_biases](../functions/crates/lpe-exchange/src/mapi/properties/tests/mapi_over_http_w_europe_time_conversion_observes_standard_and_daylight_biases.md) — Rust Function
+- [meeting_request_submit_includes_calendar_request_attachment](../functions/crates/lpe-exchange/src/mapi/properties/tests/meeting_request_submit_includes_calendar_request_attachment.md) — Rust Function
 - [message_list_settings_private_binary_stream_is_projected_without_widening_other_classes](../functions/crates/lpe-exchange/src/mapi/properties/tests/message_list_settings_private_binary_stream_is_projected_without_widening_other_classes.md) — Rust Function
 - [messages_view_definition_matches_outlook_visible_inbox_projection](../functions/crates/lpe-exchange/src/mapi/properties/tests/messages_view_definition_matches_outlook_visible_inbox_projection.md) — Rust Function
 - [microsoft_inline_image_html_body_preserves_cid_for_save_and_submit](../functions/crates/lpe-exchange/src/mapi/properties/tests/microsoft_inline_image_html_body_preserves_cid_for_save_and_submit.md) — Rust Function
@@ -4465,7 +4482,6 @@
 - [reminder_named_properties_project_from_canonical_reminder_links](../functions/crates/lpe-exchange/src/mapi/properties/tests/reminder_named_properties_project_from_canonical_reminder_links.md) — Rust Function
 - [reminder_signal_time_wins_independently_of_property_order](../functions/crates/lpe-exchange/src/mapi/properties/tests/reminder_signal_time_wins_independently_of_property_order.md) — Rust Function
 - [round_trip](../functions/crates/lpe-exchange/src/mapi/properties/tests/round_trip.md) — Rust Function
-- [rss_feed_messages_project_rss_message_class_and_named_properties](../functions/crates/lpe-exchange/src/mapi/properties/tests/rss_feed_messages_project_rss_message_class_and_named_properties.md) — Rust Function
 - [sent_mailbox_properties_do_not_advertise_unpersisted_common_view](../functions/crates/lpe-exchange/src/mapi/properties/tests/sent_mailbox_properties_do_not_advertise_unpersisted_common_view.md) — Rust Function
 - [sharing_local_folder_id_named_property_maps_to_outlook_id](../functions/crates/lpe-exchange/src/mapi/properties/tests/sharing_local_folder_id_named_property_maps_to_outlook_id.md) — Rust Function
 - [special_folder_identification_properties_project_store_folder_ids](../functions/crates/lpe-exchange/src/mapi/properties/tests/special_folder_identification_properties_project_store_folder_ids.md) — Rust Function
@@ -5479,7 +5495,8 @@
 - [serialize_pending_attachment_row](../functions/crates/lpe-exchange/src/mapi/tables/attachments/serialize_pending_attachment_row.md) — Rust Function
 - [serialize_saved_attachment_row](../functions/crates/lpe-exchange/src/mapi/tables/attachments/serialize_saved_attachment_row.md) — Rust Function
 - [calendar_content_rows](../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows.md) — Rust Function
-- [restriction_matches_event](../functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event.md) — Rust Function
+- [calendar_content_rows_with_mailbox_guid](../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid.md) — Rust Function
+- [restriction_matches_event_with_mailbox_guid](../functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event_with_mailbox_guid.md) — Rust Function
 - [contact_size](../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/contact_size.md) — Rust Function
 - [contact_table_property_value](../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/contact_table_property_value.md) — Rust Function
 - [event_size](../functions/crates/lpe-exchange/src/mapi/tables/collaboration_items/event_size.md) — Rust Function
@@ -5775,6 +5792,7 @@
 - [calendar_associated_query_rows_do_not_inject_synthetic_default_named_view](../functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_associated_query_rows_do_not_inject_synthetic_default_named_view.md) — Rust Function
 - [calendar_associated_query_rows_prefix_configuration_returns_calendar_config](../functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_associated_query_rows_prefix_configuration_returns_calendar_config.md) — Rust Function
 - [calendar_contents_find_row_matches_outlook_date_window](../functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_contents_find_row_matches_outlook_date_window.md) — Rust Function
+- [calendar_invitation_contents_row_projects_meeting_request_class](../functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_invitation_contents_row_projects_meeting_request_class.md) — Rust Function
 - [calendar_sort_uses_only_backed_calendar_values](../functions/crates/lpe-exchange/src/mapi/tables/tests/calendar_sort_uses_only_backed_calendar_values.md) — Rust Function
 - [captured_calendar_fai_terminal_window_contains_only_canonical_configs](../functions/crates/lpe-exchange/src/mapi/tables/tests/captured_calendar_fai_terminal_window_contains_only_canonical_configs.md) — Rust Function
 - [captured_calendar_table_query_rows_projects_exact_requested_property_row](../functions/crates/lpe-exchange/src/mapi/tables/tests/captured_calendar_table_query_rows_projects_exact_requested_property_row.md) — Rust Function
@@ -6372,6 +6390,7 @@
 - [special_message_search_key](../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_search_key.md) — Rust Function
 - [special_message_source_key](../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_source_key.md) — Rust Function
 - [special_message_status](../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_status.md) — Rust Function
+- [special_message_sync_parent_source_key](../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_parent_source_key.md) — Rust Function
 - [special_message_sync_source_key](../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_sync_source_key.md) — Rust Function
 - [special_message_u32_property](../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/special_message_u32_property.md) — Rust Function
 - [write_fast_transfer_property_info](../functions/crates/lpe-exchange/src/mapi_mailstore/special_message/write_fast_transfer_property_info.md) — Rust Function
@@ -8141,6 +8160,7 @@
 - [mapi_over_http_calendar_meeting_response_updates_canonical_attendee_status](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_meeting_response_updates_canonical_attendee_status.md) — Rust Function
 - [mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect.md) — Rust Function
 - [mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canonical_event.md) — Rust Function
+- [mapi_over_http_calendar_pending_event_modify_recipients_succeeds](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_pending_event_modify_recipients_succeeds.md) — Rust Function
 - [mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_read_only_handle_rejects_every_save_disposition.md) — Rust Function
 - [mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection.md) — Rust Function
 - [mapi_over_http_calendar_same_folder_move_is_idempotent](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_calendar_same_folder_move_is_idempotent.md) — Rust Function
@@ -8201,6 +8221,8 @@
 - [mapi_over_http_task_crud_uses_canonical_tasks](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_task_crud_uses_canonical_tasks.md) — Rust Function
 - [mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint.md) — Rust Function
 - [save_staged_calendar_event](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/save_staged_calendar_event.md) — Rust Function
+- [with_default_scoped_mapi_identity](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_default_scoped_mapi_identity.md) — Rust Function
+- [with_scoped_mapi_identity](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar/with_scoped_mapi_identity.md) — Rust Function
 - [insert_calendar_identity_account](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar_identity_scope/insert_calendar_identity_account.md) — Rust Function
 - [mapi_calendar_snapshot_identity_is_principal_scoped_in_postgresql](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar_identity_scope/mapi_calendar_snapshot_identity_is_principal_scoped_in_postgresql.md) — Rust Function
 - [mapi_identity_repair_preserves_rotated_calendar_change_key](../functions/crates/lpe-exchange/src/tests/mapi_over_http/calendar_identity_scope/mapi_identity_repair_preserves_rotated_calendar_change_key.md) — Rust Function
@@ -10264,7 +10286,6 @@
 - [split_headers_and_body_bytes](../functions/crates/lpe-magika/src/mime/split_headers_and_body_bytes.md) — Rust Function
 - [split_lines_inclusive](../functions/crates/lpe-magika/src/mime/split_lines_inclusive.md) — Rust Function
 - [split_multipart_parts](../functions/crates/lpe-magika/src/mime/split_multipart_parts.md) — Rust Function
-- [strip_content_type_parameters](../functions/crates/lpe-magika/src/mime/strip_content_type_parameters.md) — Rust Function
 - [trim_ascii_line_end](../functions/crates/lpe-magika/src/mime/trim_ascii_line_end.md) — Rust Function
 - [read_validation_record](../functions/crates/lpe-magika/src/record/read_validation_record.md) — Rust Function
 - [unix_timestamp](../functions/crates/lpe-magika/src/record/unix_timestamp.md) — Rust Function
@@ -10760,6 +10781,7 @@
 - [parse_headers_map](../functions/crates/lpe-storage/src/mail/parse_headers_map.md) — Rust Function
 - [parse_mail_datetime](../functions/crates/lpe-storage/src/mail/parse_mail_datetime.md) — Rust Function
 - [parse_message_attachments](../functions/crates/lpe-storage/src/mail/parse_message_attachments.md) — Rust Function
+- [parse_message_attachments_preserves_calendar_request_media_type](../functions/crates/lpe-storage/src/mail/parse_message_attachments_preserves_calendar_request_media_type.md) — Rust Function
 - [parse_message_attachments_preserves_inline_content_id_metadata](../functions/crates/lpe-storage/src/mail/parse_message_attachments_preserves_inline_content_id_metadata.md) — Rust Function
 - [parse_message_attachments_trims_structural_boundary_crlf](../functions/crates/lpe-storage/src/mail/parse_message_attachments_trims_structural_boundary_crlf.md) — Rust Function
 - [parse_message_date_header](../functions/crates/lpe-storage/src/mail/parse_message_date_header.md) — Rust Function
@@ -10846,7 +10868,7 @@
 - [move_calendar_events_to_collection_in_tx](../functions/crates/lpe-storage/src/mapi_events/Storage/move_calendar_events_to_collection_in_tx.md) — Rust Method
 - [apply_mapi_event_custom_properties_in_tx](../functions/crates/lpe-storage/src/mapi_events/apply_mapi_event_custom_properties_in_tx.md) — Rust Function
 - [fetch_created_accessible_event_in_tx](../functions/crates/lpe-storage/src/mapi_events/fetch_created_accessible_event_in_tx.md) — Rust Function
-- [fetch_event_updated_at_in_tx](../functions/crates/lpe-storage/src/mapi_events/fetch_event_updated_at_in_tx.md) — Rust Function
+- [fetch_event_timestamps_in_tx](../functions/crates/lpe-storage/src/mapi_events/fetch_event_timestamps_in_tx.md) — Rust Function
 - [fetch_mapi_event_reminder_state_in_tx](../functions/crates/lpe-storage/src/mapi_events/fetch_mapi_event_reminder_state_in_tx.md) — Rust Function
 - [allocate_mapi_event_identity_in_tx](../functions/crates/lpe-storage/src/mapi_events/imported_identity/allocate_mapi_event_identity_in_tx.md) — Rust Function
 - [imported_identity_accepts_a_canonical_multi_replica_pcl_containing_its_change_key](../functions/crates/lpe-storage/src/mapi_events/imported_identity/imported_identity_accepts_a_canonical_multi_replica_pcl_containing_its_change_key.md) — Rust Function
@@ -11330,6 +11352,10 @@
 - [upsert_mailbox_delegation_grant](../functions/crates/lpe-storage/src/submission/delegation/Storage/upsert_mailbox_delegation_grant.md) — Rust Method
 - [upsert_sender_delegation_grant](../functions/crates/lpe-storage/src/submission/delegation/Storage/upsert_sender_delegation_grant.md) — Rust Method
 - [insert_visible_recipient](../functions/crates/lpe-storage/src/submission/insert_visible_recipient.md) — Rust Function
+- [calendar_invitation_renders_calendar_mime_without_bcc](../functions/crates/lpe-storage/src/submission/mime/calendar_invitation_renders_calendar_mime_without_bcc.md) — Rust Function
+- [input](../functions/crates/lpe-storage/src/submission/mime/input.md) — Rust Function
+- [recipient_header](../functions/crates/lpe-storage/src/submission/mime/recipient_header.md) — Rust Function
+- [render_submission_raw_message](../functions/crates/lpe-storage/src/submission/mime/render_submission_raw_message.md) — Rust Function
 - [as_str](../functions/crates/lpe-storage/src/submission/types/SenderAuthorizationKind/as_str.md) — Rust Method
 - [as_str](../functions/crates/lpe-storage/src/submission/types/SenderDelegationRight/as_str.md) — Rust Method
 - [canonical_submission_persists_sent_before_queue_handoff](../functions/crates/lpe-storage/src/submission/types/canonical_submission_persists_sent_before_queue_handoff.md) — Rust Function
@@ -11401,6 +11427,7 @@
 - [display_name](../functions/crates/lpe-storage/src/workspace/ClientContact/display_name.md) — Rust Method
 - [primary_email](../functions/crates/lpe-storage/src/workspace/ClientContact/primary_email.md) — Rust Method
 - [primary_phone](../functions/crates/lpe-storage/src/workspace/ClientContact/primary_phone.md) — Rust Method
+- [from](../functions/crates/lpe-storage/src/workspace/ClientMailbox/from-jmapmailbox/from.md) — Rust Method
 - [dismiss_recipient_suggestion](../functions/crates/lpe-storage/src/workspace/Storage/dismiss_recipient_suggestion.md) — Rust Method
 - [fetch_client_contacts](../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_contacts.md) — Rust Method
 - [fetch_client_contacts_by_ids](../functions/crates/lpe-storage/src/workspace/Storage/fetch_client_contacts_by_ids.md) — Rust Method
@@ -11420,6 +11447,7 @@
 - [client_contact_from_accessible](../functions/crates/lpe-storage/src/workspace/client_workspace/client_contact_from_accessible.md) — Rust Function
 - [client_event_from_accessible](../functions/crates/lpe-storage/src/workspace/client_workspace/client_event_from_accessible.md) — Rust Function
 - [client_folder](../functions/crates/lpe-storage/src/workspace/client_workspace/client_folder.md) — Rust Function
+- [client_folder_keeps_custom_mailboxes_distinct](../functions/crates/lpe-storage/src/workspace/client_workspace/client_folder_keeps_custom_mailboxes_distinct.md) — Rust Function
 - [client_message_tags](../functions/crates/lpe-storage/src/workspace/client_workspace/client_message_tags.md) — Rust Function
 - [format_size](../functions/crates/lpe-storage/src/workspace/client_workspace/format_size.md) — Rust Function
 - [contact_array_json](../functions/crates/lpe-storage/src/workspace/contact_array_json.md) — Rust Function
@@ -11686,12 +11714,18 @@
 - [mapi_rop_buffer](../functions/tools/rca_outlook/mapi/mapi_rop_buffer.md) — Python Function
 - [mapi_sent_content_sync_rops](../functions/tools/rca_outlook/mapi/mapi_sent_content_sync_rops.md) — Python Function
 - [mapi_sent_subject_table_rops](../functions/tools/rca_outlook/mapi/mapi_sent_subject_table_rops.md) — Python Function
+- [mapi_session_cookie_state](../functions/tools/rca_outlook/mapi/mapi_session_cookie_state.md) — Python Function
+- [mapi_wire_folder_id](../functions/tools/rca_outlook/mapi/mapi_wire_folder_id.md) — Python Function
 - [nspi_first_minimal_id](../functions/tools/rca_outlook/mapi/nspi_first_minimal_id.md) — Python Function
 - [nspi_get_props_request](../functions/tools/rca_outlook/mapi/nspi_get_props_request.md) — Python Function
+- [parse_pox_mapi_http_endpoints](../functions/tools/rca_outlook/mapi/parse_pox_mapi_http_endpoints.md) — Python Function
+- [require_published_mapi_url](../functions/tools/rca_outlook/mapi/require_published_mapi_url.md) — Python Function
 - [resolve_names_request](../functions/tools/rca_outlook/mapi/resolve_names_request.md) — Python Function
 - [rpc_rts_conn_a1_body](../functions/tools/rca_outlook/mapi/rpc_rts_conn_a1_body.md) — Python Function
 - [rpc_rts_conn_b1_body](../functions/tools/rca_outlook/mapi/rpc_rts_conn_b1_body.md) — Python Function
 - [utf16z](../functions/tools/rca_outlook/mapi/utf16z.md) — Python Function
+- [xml_child_text](../functions/tools/rca_outlook/mapi/xml_child_text.md) — Python Function
+- [xml_local_name](../functions/tools/rca_outlook/mapi/xml_local_name.md) — Python Function
 - [check_ews_basic](../functions/tools/rca_outlook_connectivity_check/check_ews_basic.md) — Python Function
 - [check_ews_contact_calendar_and_mapi_fixture](../functions/tools/rca_outlook_connectivity_check/check_ews_contact_calendar_and_mapi_fixture.md) — Python Function
 - [check_ews_mailbox_access](../functions/tools/rca_outlook_connectivity_check/check_ews_mailbox_access.md) — Python Function
@@ -11703,6 +11737,7 @@
 - [check_mapi_empty_deleted_items_fixture](../functions/tools/rca_outlook_connectivity_check/check_mapi_empty_deleted_items_fixture.md) — Python Function
 - [check_mapi_emsmdb_sent_message](../functions/tools/rca_outlook_connectivity_check/check_mapi_emsmdb_sent_message.md) — Python Function
 - [check_mapi_emsmdb_sent_sync_manifest](../functions/tools/rca_outlook_connectivity_check/check_mapi_emsmdb_sent_sync_manifest.md) — Python Function
+- [check_mapi_gate1_readiness](../functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness.md) — Python Function
 - [check_mapi_nspi_address_book](../functions/tools/rca_outlook_connectivity_check/check_mapi_nspi_address_book.md) — Python Function
 - [check_mapi_nspi_bind_octet_stream](../functions/tools/rca_outlook_connectivity_check/check_mapi_nspi_bind_octet_stream.md) — Python Function
 - [check_mapi_nspi_resolve_authenticated_mailbox](../functions/tools/rca_outlook_connectivity_check/check_mapi_nspi_resolve_authenticated_mailbox.md) — Python Function
@@ -11711,8 +11746,15 @@
 - [check_rpc_proxy_auth](../functions/tools/rca_outlook_connectivity_check/check_rpc_proxy_auth.md) — Python Function
 - [check_rpc_proxy_mailstore_ping](../functions/tools/rca_outlook_connectivity_check/check_rpc_proxy_mailstore_ping.md) — Python Function
 - [delete_ews_item](../functions/tools/rca_outlook_connectivity_check/delete_ews_item.md) — Python Function
+- [execute](../functions/tools/rca_outlook_connectivity_check/execute.md) — Python Function
+- [gate1_diagnostic](../functions/tools/rca_outlook_connectivity_check/gate1_diagnostic.md) — Python Function
 - [main](../functions/tools/rca_outlook_connectivity_check/main.md) — Python Function
+- [mapi_gate1_bootstrap_rops](../functions/tools/rca_outlook_connectivity_check/mapi_gate1_bootstrap_rops.md) — Python Function
+- [mapi_gate1_execute_response_rops](../functions/tools/rca_outlook_connectivity_check/mapi_gate1_execute_response_rops.md) — Python Function
+- [mapi_gate1_hierarchy_rows](../functions/tools/rca_outlook_connectivity_check/mapi_gate1_hierarchy_rows.md) — Python Function
 - [mapi_nspi_bind_cookie](../functions/tools/rca_outlook_connectivity_check/mapi_nspi_bind_cookie.md) — Python Function
+- [read_string_cell](../functions/tools/rca_outlook_connectivity_check/read_string_cell.md) — Python Function
+- [read_utf16z](../functions/tools/rca_outlook_connectivity_check/read_utf16z.md) — Python Function
 - [require_deleted_ews_item](../functions/tools/rca_outlook_connectivity_check/require_deleted_ews_item.md) — Python Function
 - [xml_escape](../functions/tools/rca_outlook_connectivity_check/xml_escape.md) — Python Function
 - [actionable_descriptor_gap_counts](../functions/tools/rca_outlook_trace_summary/actionable_descriptor_gap_counts.md) — Python Function
@@ -11824,6 +11866,14 @@
 - [visible_release_classification_is_actionable](../functions/tools/rca_outlook_trace_summary/visible_release_classification_is_actionable.md) — Python Function
 - [visible_release_descriptor_contract_issue_is_actionable](../functions/tools/rca_outlook_trace_summary/visible_release_descriptor_contract_issue_is_actionable.md) — Python Function
 - [visible_release_needs_action](../functions/tools/rca_outlook_trace_summary/visible_release_needs_action.md) — Python Function
+- [test_cookie_updates_keep_context_and_sequence](../functions/tools/test_rca_outlook_connectivity_check/MapiGate1ReadinessTests/test_cookie_updates_keep_context_and_sequence.md) — Python Method
+- [test_gate1_uses_discovered_urls_and_carries_emsmdb_cookies](../functions/tools/test_rca_outlook_connectivity_check/MapiGate1ReadinessTests/test_gate1_uses_discovered_urls_and_carries_emsmdb_cookies.md) — Python Method
+- [test_parse_pox_mapi_http_uses_exactly_one_publication](../functions/tools/test_rca_outlook_connectivity_check/MapiGate1ReadinessTests/test_parse_pox_mapi_http_uses_exactly_one_publication.md) — Python Method
+- [test_published_url_must_stay_on_public_edge_and_mailbox](../functions/tools/test_rca_outlook_connectivity_check/MapiGate1ReadinessTests/test_published_url_must_stay_on_public_edge_and_mailbox.md) — Python Method
+- [execute_response](../functions/tools/test_rca_outlook_connectivity_check/execute_response.md) — Python Function
+- [fake_request](../functions/tools/test_rca_outlook_connectivity_check/fake_request.md) — Python Function
+- [hierarchy_rops](../functions/tools/test_rca_outlook_connectivity_check/hierarchy_rops.md) — Python Function
+- [pox_response](../functions/tools/test_rca_outlook_connectivity_check/pox_response.md) — Python Function
 - [open](../functions/tools/test_rca_outlook_trace_summary/FakePath/open.md) — Python Method
 - [test_actionable_descriptor_gap_counts_filters_backed_columns](../functions/tools/test_rca_outlook_trace_summary/RcaOutlookTraceSummaryTests/test_actionable_descriptor_gap_counts_filters_backed_columns.md) — Python Method
 - [test_associated_findrow_rowset_violation_is_actionable](../functions/tools/test_rca_outlook_trace_summary/RcaOutlookTraceSummaryTests/test_associated_findrow_rowset_violation_is_actionable.md) — Python Method

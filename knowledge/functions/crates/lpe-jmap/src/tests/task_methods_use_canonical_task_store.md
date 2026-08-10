@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: task_methods_use_canonical_task_store
-resource: crates/lpe-jmap/src/tests.rs#L13460-L13527
+resource: crates/lpe-jmap/src/tests.rs#L13463-L13530
 visibility: private
 generated:
   by: okf-rs/0.3.0

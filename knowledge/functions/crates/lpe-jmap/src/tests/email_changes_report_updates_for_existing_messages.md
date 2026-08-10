@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_changes_report_updates_for_existing_messages
-resource: crates/lpe-jmap/src/tests.rs#L4222-L4274
+resource: crates/lpe-jmap/src/tests.rs#L4225-L4277
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_contact_sync_versions
-resource: crates/lpe-exchange/src/tests/mod.rs#L7799-L7819
+resource: crates/lpe-exchange/src/tests/mod.rs#L7800-L7820
 visibility: private
 generated:
   by: okf-rs/0.3.0

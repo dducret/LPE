@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_import_deletes_prevalidates_common_views_batch_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L14873-L15013
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L14624-L14764
 visibility: private
 generated:
   by: okf-rs/0.3.0

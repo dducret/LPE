@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: seek_row_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1903-L1912
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1910-L1919
 generated:
   by: okf-rs/0.3.0
 relationships:

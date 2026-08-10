@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: calendar_event_affected_principals_in_tx
-resource: crates/lpe-storage/src/mapi_events.rs#L1341-L1371
+resource: crates/lpe-storage/src/mapi_events.rs#L1350-L1380
 generated:
   by: okf-rs/0.3.0
 relationships:

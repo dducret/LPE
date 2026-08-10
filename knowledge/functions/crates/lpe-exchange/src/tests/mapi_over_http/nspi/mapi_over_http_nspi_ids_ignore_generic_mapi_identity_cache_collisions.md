@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_nspi_ids_ignore_generic_mapi_identity_cache_collisions
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1361-L1403
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L1356-L1398
 visibility: private
 generated:
   by: okf-rs/0.3.0

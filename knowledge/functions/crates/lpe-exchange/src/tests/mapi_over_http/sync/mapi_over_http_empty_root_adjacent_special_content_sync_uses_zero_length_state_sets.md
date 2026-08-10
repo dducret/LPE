@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_empty_root_adjacent_special_content_sync_uses_zero_length_state_sets
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L1828-L1847
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L1702-L1721
 visibility: private
 generated:
   by: okf-rs/0.3.0

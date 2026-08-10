@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: only_sync_collection
-resource: crates/lpe-activesync/src/tests.rs#L2038-L2050
+resource: crates/lpe-activesync/src/tests.rs#L2039-L2051
 visibility: private
 generated:
   by: okf-rs/0.3.0

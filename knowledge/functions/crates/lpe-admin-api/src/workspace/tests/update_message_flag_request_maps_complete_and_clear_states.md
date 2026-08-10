@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_message_flag_request_maps_complete_and_clear_states
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L893-L919
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L894-L920
 visibility: private
 generated:
   by: okf-rs/0.3.0

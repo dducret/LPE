@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_property_ids_from_names_returns_registered_well_known_property_id
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1215-L1230
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1224-L1239
 visibility: private
 generated:
   by: okf-rs/0.3.0

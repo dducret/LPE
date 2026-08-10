@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: meeting_response_event_input_from_mapi
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L739-L835
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L906-L1002
 generated:
   by: okf-rs/0.3.0
 relationships:

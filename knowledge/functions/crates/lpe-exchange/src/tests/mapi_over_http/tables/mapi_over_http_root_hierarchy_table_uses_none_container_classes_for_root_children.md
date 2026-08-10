@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_root_hierarchy_table_uses_none_container_classes_for_root_children
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L3459-L3553
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L3295-L3389
 visibility: private
 generated:
   by: okf-rs/0.3.0

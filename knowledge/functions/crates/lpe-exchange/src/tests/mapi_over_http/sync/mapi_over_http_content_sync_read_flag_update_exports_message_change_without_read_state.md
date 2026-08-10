@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_content_sync_read_flag_update_exports_message_change_without_read_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6166-L6235
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6004-L6073
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: reputation_score_penalizes_quarantine_and_rejects
-resource: LPE-CT/src/smtp/tests.rs#L2502-L2552
+resource: LPE-CT/src/smtp/tests.rs#L2478-L2528
 visibility: private
 generated:
   by: okf-rs/0.3.0

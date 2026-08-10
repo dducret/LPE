@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_copy_folder_is_not_supported_without_side_effects
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1689-L1761
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1639-L1711
 visibility: private
 generated:
   by: okf-rs/0.3.0

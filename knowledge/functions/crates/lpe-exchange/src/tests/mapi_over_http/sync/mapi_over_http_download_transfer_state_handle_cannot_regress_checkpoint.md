@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_download_transfer_state_handle_cannot_regress_checkpoint
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8622-L8702
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8415-L8495
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_create_creates_nested_custom_mail_folder
-resource: crates/lpe-activesync/src/tests.rs#L3362-L3401
+resource: crates/lpe-activesync/src/tests.rs#L3363-L3402
 visibility: private
 generated:
   by: okf-rs/0.3.0

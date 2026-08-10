@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: hierarchy_sync_mailboxes_deduplicate_fixed_special_folder_ids
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L890-L908
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L918-L936
 visibility: private
 generated:
   by: okf-rs/0.3.0

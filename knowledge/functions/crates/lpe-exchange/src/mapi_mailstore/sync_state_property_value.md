@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_state_property_value
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L677-L702
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L680-L705
 visibility: private
 generated:
   by: okf-rs/0.3.0

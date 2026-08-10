@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: benchmark_relay_hot_path
-resource: LPE-CT/src/smtp/tests.rs#L3626-L3654
+resource: LPE-CT/src/smtp/tests.rs#L3603-L3631
 visibility: private
 generated:
   by: okf-rs/0.3.0

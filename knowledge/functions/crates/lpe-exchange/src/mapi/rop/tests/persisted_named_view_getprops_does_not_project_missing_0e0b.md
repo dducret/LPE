@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: persisted_named_view_getprops_does_not_project_missing_0e0b
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2115-L2175
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L2117-L2177
 visibility: private
 generated:
   by: okf-rs/0.3.0

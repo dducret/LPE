@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: jmap_tester_style_big_three_batch_has_stable_json_shapes
-resource: crates/lpe-jmap/src/tests.rs#L10322-L10432
+resource: crates/lpe-jmap/src/tests.rs#L10325-L10435
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_rules_table_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1329-L1331
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1331-L1333
 generated:
   by: okf-rs/0.3.0
 relationships:

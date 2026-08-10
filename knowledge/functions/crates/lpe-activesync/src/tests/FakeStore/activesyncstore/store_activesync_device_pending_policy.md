@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: store_activesync_device_pending_policy
-resource: crates/lpe-activesync/src/tests.rs#L544-L567
+resource: crates/lpe-activesync/src/tests.rs#L545-L568
 visibility: private
 generated:
   by: okf-rs/0.3.0

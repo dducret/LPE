@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_get_returns_canonical_system_names_and_roles
-resource: crates/lpe-jmap/src/tests.rs#L6702-L6750
+resource: crates/lpe-jmap/src/tests.rs#L6705-L6753
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upload_rejects_unknown_type
-resource: crates/lpe-jmap/src/tests.rs#L15343-L15376
+resource: crates/lpe-jmap/src/tests.rs#L15346-L15379
 visibility: private
 generated:
   by: okf-rs/0.3.0

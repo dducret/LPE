@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: string8z_bytes
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L529-L536
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L530-L537
 generated:
   by: okf-rs/0.3.0
 relationships:

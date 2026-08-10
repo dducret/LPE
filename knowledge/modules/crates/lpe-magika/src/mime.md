@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mime
-resource: crates/lpe-magika/src/mime.rs#L1-L444
+resource: crates/lpe-magika/src/mime.rs#L1-L435
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -24,7 +24,6 @@ relationships:
 - [collect_attachment_parts](../../../../functions/crates/lpe-magika/src/mime/collect_attachment_parts.md)
 - [parse_visible_part](../../../../functions/crates/lpe-magika/src/mime/parse_visible_part.md)
 - [first_html_part](../../../../functions/crates/lpe-magika/src/mime/first_html_part.md)
-- [strip_content_type_parameters](../../../../functions/crates/lpe-magika/src/mime/strip_content_type_parameters.md)
 - [split_headers_and_body_bytes](../../../../functions/crates/lpe-magika/src/mime/split_headers_and_body_bytes.md)
 - [parse_rfc822_headers_bytes](../../../../functions/crates/lpe-magika/src/mime/parse_rfc822_headers_bytes.md)
 - [parse_rfc822_headers](../../../../functions/crates/lpe-magika/src/mime/parse_rfc822_headers.md)

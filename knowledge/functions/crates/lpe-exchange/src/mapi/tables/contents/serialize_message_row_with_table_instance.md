@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_message_row_with_table_instance
-resource: crates/lpe-exchange/src/mapi/tables/contents.rs#L258-L378
+resource: crates/lpe-exchange/src/mapi/tables/contents.rs#L258-L380
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -28,6 +28,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/recipients/display_bcc
   - functions/crates/lpe-exchange/src/mapi/properties/message/uncompressed_rtf_body
   - functions/crates/lpe-exchange/src/mapi/properties/message/native_body_format
+  - functions/crates/lpe-exchange/src/mapi/properties/message/content_class_for_email
   - functions/crates/lpe-exchange/src/mapi/properties/message/email_property_value_with_durable_identity
   - functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value
   - functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_property_default
@@ -67,6 +68,7 @@ relationships:
 - [display_bcc](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/recipients/display_bcc.md)
 - [uncompressed_rtf_body](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/uncompressed_rtf_body.md)
 - [native_body_format](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/native_body_format.md)
+- [content_class_for_email](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/content_class_for_email.md)
 - [email_property_value_with_durable_identity](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/email_property_value_with_durable_identity.md)
 - [write_mapi_value](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/values/write_mapi_value.md)
 - [write_property_default](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_codecs/write_property_default.md)

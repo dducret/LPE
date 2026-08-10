@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_inline_image_html_body_preserves_cid_for_save_and_submit
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L138-L180
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L194-L236
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: pending_message_size
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L867-L877
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L868-L878
 generated:
   by: okf-rs/0.3.0
 relationships:

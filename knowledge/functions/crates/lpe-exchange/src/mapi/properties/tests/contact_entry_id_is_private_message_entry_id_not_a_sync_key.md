@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_entry_id_is_private_message_entry_id_not_a_sync_key
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1548-L1603
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1604-L1659
 visibility: private
 generated:
   by: okf-rs/0.3.0

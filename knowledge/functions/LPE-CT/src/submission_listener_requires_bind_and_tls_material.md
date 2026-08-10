@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: submission_listener_requires_bind_and_tls_material
-resource: LPE-CT/src/main.rs#L1383-L1403
+resource: LPE-CT/src/main.rs#L1403-L1423
 visibility: private
 generated:
   by: okf-rs/0.3.0

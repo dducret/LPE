@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_row_keys
-resource: crates/lpe-exchange/src/mapi/tables/row_keys.rs#L3-L254
+resource: crates/lpe-exchange/src/mapi/tables/row_keys.rs#L3-L271
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,7 +12,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/deleted_items_content_rows
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/sort_deleted_items_content_rows
   - functions/crates/lpe-exchange/src/mapi/tables/deleted_items/deleted_items_content_row_id
-  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid
   - functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_events
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_for_folder
@@ -73,7 +73,7 @@ relationships:
 - [deleted_items_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/deleted_items_content_rows.md)
 - [sort_deleted_items_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/sort_deleted_items_content_rows.md)
 - [deleted_items_content_row_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/deleted_items/deleted_items_content_row_id.md)
-- [calendar_content_rows](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows.md)
+- [calendar_content_rows_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid.md)
 - [sort_events](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/sorting/sort_events.md)
 - [collaboration_folder_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id.md)
 - [contacts_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contacts_for_folder.md)

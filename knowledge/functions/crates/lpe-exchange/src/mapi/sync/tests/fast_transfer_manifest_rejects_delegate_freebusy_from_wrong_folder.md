@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_manifest_rejects_delegate_freebusy_from_wrong_folder
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2286-L2328
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L2346-L2388
 visibility: private
 generated:
   by: okf-rs/0.3.0

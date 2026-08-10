@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_body_stream_data
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L339-L511
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L340-L512
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: copy_stream
-resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L642-L662
+resource: crates/lpe-exchange/src/mapi/properties/streams.rs#L643-L663
 generated:
   by: okf-rs/0.3.0
 relationships:

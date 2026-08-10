@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_set_search_criteria_reuses_previous_scope_and_restriction
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L3807-L3924
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L3634-L3751
 visibility: private
 generated:
   by: okf-rs/0.3.0

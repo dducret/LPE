@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: table_columns_normalize_outlook_visible_inbox_view_property
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1129-L1143
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1134-L1148
 visibility: private
 generated:
   by: okf-rs/0.3.0

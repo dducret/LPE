@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_percent_complete
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L439-L445
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L449-L455
 visibility: private
 generated:
   by: okf-rs/0.3.0

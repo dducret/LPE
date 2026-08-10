@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outlook_special_folder_debug_classifiers_cover_configuration_folders
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L823-L852
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L824-L853
 visibility: private
 generated:
   by: okf-rs/0.3.0

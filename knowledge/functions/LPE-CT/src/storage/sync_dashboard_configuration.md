@@ -8,6 +8,7 @@ relationships:
   calls:
   - functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/LPE-CT/src/storage/delete_stale_policy_address_rules
   - functions/LPE-CT/src/storage/delete_stale_attachment_policy_rules
   - functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from
@@ -23,6 +24,7 @@ relationships:
 
 - [push](../../../../functions/crates/lpe-activesync/src/wbxml/WbxmlNode/push.md)
 - [query](../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [delete_stale_policy_address_rules](../../../../functions/LPE-CT/src/storage/delete_stale_policy_address_rules.md)
 - [delete_stale_attachment_policy_rules](../../../../functions/LPE-CT/src/storage/delete_stale_attachment_policy_rules.md)
 - [try_from](../../../../functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from.md)

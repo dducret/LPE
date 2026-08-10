@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_property_value_shapes_for_debug
-resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L773-L816
+resource: crates/lpe-exchange/src/mapi/rop/debug.rs#L774-L817
 generated:
   by: okf-rs/0.3.0
 relationships:

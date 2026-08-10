@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: umolk_associated_config_property_burst_reports_absent_values_not_found
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3411-L3479
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3417-L3485
 visibility: private
 generated:
   by: okf-rs/0.3.0

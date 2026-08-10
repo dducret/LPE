@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: identity_shared_account_reads_use_the_same_authorization_model
-resource: crates/lpe-jmap/src/tests.rs#L5768-L5852
+resource: crates/lpe-jmap/src/tests.rs#L5771-L5855
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: outbound
-resource: crates/lpe-storage/src/outbound.rs#L1-L575
+resource: crates/lpe-storage/src/outbound.rs#L1-L582
 generated:
   by: okf-rs/0.3.0
 relationships:

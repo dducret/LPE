@@ -9,6 +9,7 @@ relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-storage/tests/runtime_schema_drift/hex64
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -19,3 +20,4 @@ relationships:
 
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [hex64](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/hex64.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

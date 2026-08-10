@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_reload_cached_information_response
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L669-L693
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L673-L697
 generated:
   by: okf-rs/0.3.0
 relationships:

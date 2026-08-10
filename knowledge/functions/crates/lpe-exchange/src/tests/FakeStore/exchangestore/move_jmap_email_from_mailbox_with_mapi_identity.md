@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: move_jmap_email_from_mailbox_with_mapi_identity
-resource: crates/lpe-exchange/src/tests/mod.rs#L11544-L11688
+resource: crates/lpe-exchange/src/tests/mod.rs#L11549-L11693
 visibility: private
 generated:
   by: okf-rs/0.3.0

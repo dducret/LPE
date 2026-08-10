@@ -12,6 +12,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/store_message_blob_in_tx
   - functions/crates/lpe-activesync/src/tests/query
   - functions/crates/lpe-domain/src/crypto/sha256_hex
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/attachments/Storage/ingest_message_attachments_in_tx
   - functions/crates/lpe-storage/src/shared/Storage/assign_message_attachments_membership_in_tx
   called_by:
@@ -31,6 +32,7 @@ relationships:
 - [store_message_blob_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/store_message_blob_in_tx.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 - [sha256_hex](../../../../../../functions/crates/lpe-domain/src/crypto/sha256_hex.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [ingest_message_attachments_in_tx](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/ingest_message_attachments_in_tx.md)
 - [assign_message_attachments_membership_in_tx](../../../../../../functions/crates/lpe-storage/src/shared/Storage/assign_message_attachments_membership_in_tx.md)
 

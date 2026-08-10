@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5835-L5918
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L5673-L5756
 visibility: private
 generated:
   by: okf-rs/0.3.0

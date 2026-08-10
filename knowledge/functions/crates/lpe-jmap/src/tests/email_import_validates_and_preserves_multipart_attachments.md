@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_import_validates_and_preserves_multipart_attachments
-resource: crates/lpe-jmap/src/tests.rs#L7602-L7691
+resource: crates/lpe-jmap/src/tests.rs#L7605-L7694
 visibility: private
 generated:
   by: okf-rs/0.3.0

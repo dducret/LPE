@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: html_body_from_plain_text
-resource: crates/lpe-exchange/src/mapi/properties/message.rs#L294-L313
+resource: crates/lpe-exchange/src/mapi/properties/message.rs#L304-L323
 generated:
   by: okf-rs/0.3.0
 relationships:

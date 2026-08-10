@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_folder_move_copy_reject_system_mailbox_sources
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1932-L1998
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1882-L1948
 visibility: private
 generated:
   by: okf-rs/0.3.0

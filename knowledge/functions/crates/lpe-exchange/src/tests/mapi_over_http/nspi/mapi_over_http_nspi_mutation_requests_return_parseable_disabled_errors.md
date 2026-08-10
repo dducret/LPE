@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_nspi_mutation_requests_return_parseable_disabled_errors
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2401-L2452
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L2417-L2468
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_attachment_facts_for
-resource: crates/lpe-exchange/src/mapi/sync.rs#L1038-L1097
+resource: crates/lpe-exchange/src/mapi/sync.rs#L1043-L1102
 generated:
   by: okf-rs/0.3.0
 relationships:

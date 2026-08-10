@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: should_quarantine
-resource: LPE-CT/src/smtp.rs#L1228-L1233
+resource: LPE-CT/src/smtp.rs#L1231-L1236
 visibility: private
 generated:
   by: okf-rs/0.3.0

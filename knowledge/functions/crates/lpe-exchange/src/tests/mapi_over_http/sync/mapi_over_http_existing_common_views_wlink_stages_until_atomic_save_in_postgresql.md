@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L2619-L2828
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L2493-L2702
 visibility: private
 generated:
   by: okf-rs/0.3.0

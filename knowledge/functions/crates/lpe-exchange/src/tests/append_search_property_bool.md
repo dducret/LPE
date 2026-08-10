@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_search_property_bool
-resource: crates/lpe-exchange/src/tests/mod.rs#L15198-L15208
+resource: crates/lpe-exchange/src/tests/mod.rs#L15203-L15213
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_sort_snapshot
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8741-L8787
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L8776-L8822
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_collection
-resource: crates/lpe-activesync/src/tests.rs#L2010-L2036
+resource: crates/lpe-activesync/src/tests.rs#L2011-L2037
 visibility: private
 generated:
   by: okf-rs/0.3.0

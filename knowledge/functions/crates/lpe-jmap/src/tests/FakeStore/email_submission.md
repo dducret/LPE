@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: email_submission
-resource: crates/lpe-jmap/src/tests.rs#L820-L833
+resource: crates/lpe-jmap/src/tests.rs#L822-L835
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_nspi_bootstrap_requests_handle_stale_cleanup_and_reject_stateful_cookies
-resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L759-L851
+resource: crates/lpe-exchange/src/tests/mapi_over_http/nspi.rs#L752-L844
 visibility: private
 generated:
   by: okf-rs/0.3.0

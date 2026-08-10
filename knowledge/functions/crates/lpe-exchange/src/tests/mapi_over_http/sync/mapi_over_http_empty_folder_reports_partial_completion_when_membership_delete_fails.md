@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_empty_folder_reports_partial_completion_when_membership_delete_fails
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8459-L8524
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8252-L8317
 visibility: private
 generated:
   by: okf-rs/0.3.0

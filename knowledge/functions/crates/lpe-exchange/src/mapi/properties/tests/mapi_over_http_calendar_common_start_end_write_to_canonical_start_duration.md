@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_common_start_end_write_to_canonical_start_duration
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4301-L4324
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L4430-L4453
 visibility: private
 generated:
   by: okf-rs/0.3.0

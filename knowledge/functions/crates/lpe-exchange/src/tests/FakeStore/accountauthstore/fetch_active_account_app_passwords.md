@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_active_account_app_passwords
-resource: crates/lpe-exchange/src/tests/mod.rs#L4772-L4777
+resource: crates/lpe-exchange/src/tests/mod.rs#L4773-L4778
 visibility: private
 generated:
   by: okf-rs/0.3.0

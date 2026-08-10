@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: assert_nspi_fixture_payload
-resource: tools/rca_outlook/mapi.py#L198-L206
+resource: tools/rca_outlook/mapi.py#L290-L298
 generated:
   by: okf-rs/0.3.0
 relationships:

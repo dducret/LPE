@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_mapi_nspi_resolve_authenticated_mailbox
-resource: tools/rca_outlook_connectivity_check.py#L929-L961
+resource: tools/rca_outlook_connectivity_check.py#L1178-L1210
 generated:
   by: okf-rs/0.3.0
 relationships:

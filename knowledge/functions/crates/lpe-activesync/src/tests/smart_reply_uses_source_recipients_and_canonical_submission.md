@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: smart_reply_uses_source_recipients_and_canonical_submission
-resource: crates/lpe-activesync/src/tests.rs#L5535-L5593
+resource: crates/lpe-activesync/src/tests.rs#L5536-L5594
 visibility: private
 generated:
   by: okf-rs/0.3.0

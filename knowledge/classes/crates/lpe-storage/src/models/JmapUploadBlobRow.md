@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: JmapUploadBlobRow
-resource: crates/lpe-storage/src/models.rs#L282-L288
+resource: crates/lpe-storage/src/models.rs#L284-L290
 generated:
   by: okf-rs/0.3.0
 ---

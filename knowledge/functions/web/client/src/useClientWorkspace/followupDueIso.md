@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: followupDueIso
-resource: web/client/src/useClientWorkspace.ts#L143-L148
+resource: web/client/src/useClientWorkspace.ts#L144-L149
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contact_email_named_property_restriction_matches_primary_email
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1269-L1313
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1325-L1369
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_contents_table_rejects_invalid_microsoft_table_flags_without_batch_drift
-resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L2558-L2604
+resource: crates/lpe-exchange/src/tests/mapi_over_http/tables.rs#L2423-L2469
 visibility: private
 generated:
   by: okf-rs/0.3.0

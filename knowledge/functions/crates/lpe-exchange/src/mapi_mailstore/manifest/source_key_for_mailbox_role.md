@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: source_key_for_mailbox_role
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L287-L304
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L288-L305
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_fast_transfer_property_info
-resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L477-L521
+resource: crates/lpe-exchange/src/mapi_mailstore/special_message.rs#L489-L533
 visibility: private
 generated:
   by: okf-rs/0.3.0

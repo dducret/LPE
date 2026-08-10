@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_activesync_sync_state
-resource: crates/lpe-activesync/src/tests.rs#L1274-L1288
+resource: crates/lpe-activesync/src/tests.rs#L1275-L1289
 visibility: private
 generated:
   by: okf-rs/0.3.0

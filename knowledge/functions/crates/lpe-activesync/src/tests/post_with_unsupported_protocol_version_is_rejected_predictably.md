@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_with_unsupported_protocol_version_is_rejected_predictably
-resource: crates/lpe-activesync/src/tests.rs#L1476-L1502
+resource: crates/lpe-activesync/src/tests.rs#L1477-L1503
 visibility: private
 generated:
   by: okf-rs/0.3.0

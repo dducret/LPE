@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_update_moves_custom_mail_folder
-resource: crates/lpe-activesync/src/tests.rs#L3441-L3485
+resource: crates/lpe-activesync/src/tests.rs#L3442-L3486
 visibility: private
 generated:
   by: okf-rs/0.3.0

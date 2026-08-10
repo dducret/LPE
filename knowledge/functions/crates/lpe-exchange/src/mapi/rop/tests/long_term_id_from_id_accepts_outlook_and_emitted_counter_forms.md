@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: long_term_id_from_id_accepts_outlook_and_emitted_counter_forms
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5185-L5272
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5191-L5278
 generated:
   by: okf-rs/0.3.0
 relationships:

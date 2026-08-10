@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_query_states_are_bound_to_the_requested_account
-resource: crates/lpe-jmap/src/tests.rs#L5418-L5452
+resource: crates/lpe-jmap/src/tests.rs#L5421-L5455
 visibility: private
 generated:
   by: okf-rs/0.3.0

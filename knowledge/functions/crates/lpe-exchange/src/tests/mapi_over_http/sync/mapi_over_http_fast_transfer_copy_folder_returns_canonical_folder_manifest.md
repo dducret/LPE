@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manifest
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L8003-L8087
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7796-L7880
 visibility: private
 generated:
   by: okf-rs/0.3.0

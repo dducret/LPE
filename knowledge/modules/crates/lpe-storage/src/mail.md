@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: mail
-resource: crates/lpe-storage/src/mail.rs#L1-L465
+resource: crates/lpe-storage/src/mail.rs#L1-L488
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -37,6 +37,7 @@ relationships:
 - [parse_message_date_header_normalizes_rfc2822_date_to_utc](../../../../functions/crates/lpe-storage/src/mail/parse_message_date_header_normalizes_rfc2822_date_to_utc.md)
 - [parse_message_date_header_unfolds_before_parsing](../../../../functions/crates/lpe-storage/src/mail/parse_message_date_header_unfolds_before_parsing.md)
 - [parse_message_attachments_trims_structural_boundary_crlf](../../../../functions/crates/lpe-storage/src/mail/parse_message_attachments_trims_structural_boundary_crlf.md)
+- [parse_message_attachments_preserves_calendar_request_media_type](../../../../functions/crates/lpe-storage/src/mail/parse_message_attachments_preserves_calendar_request_media_type.md)
 - [parse_message_attachments_preserves_inline_content_id_metadata](../../../../functions/crates/lpe-storage/src/mail/parse_message_attachments_preserves_inline_content_id_metadata.md)
 - [parse_rfc822_message_collects_headers_body_and_attachments](../../../../functions/crates/lpe-storage/src/mail/parse_rfc822_message_collects_headers_body_and_attachments.md)
 - [parse_rfc822_message_prefers_plaintext_but_keeps_html_body](../../../../functions/crates/lpe-storage/src/mail/parse_rfc822_message_prefers_plaintext_but_keeps_html_body.md)

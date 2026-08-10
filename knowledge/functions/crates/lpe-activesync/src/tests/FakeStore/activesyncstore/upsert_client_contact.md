@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: upsert_client_contact
-resource: crates/lpe-activesync/src/tests.rs#L1017-L1055
+resource: crates/lpe-activesync/src/tests.rs#L1018-L1056
 visibility: private
 generated:
   by: okf-rs/0.3.0

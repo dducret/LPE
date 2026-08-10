@@ -8,6 +8,7 @@ relationships:
   calls:
   - functions/LPE-CT/src/smtp/quarantine/quarantine_metadata
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   called_by:
   - functions/LPE-CT/src/smtp/reindex_quarantine_spool
   - functions/LPE-CT/src/smtp/quarantine/persist_quarantine_metadata_or_warn
@@ -21,6 +22,7 @@ relationships:
 
 - [quarantine_metadata](../../../../../functions/LPE-CT/src/smtp/quarantine/quarantine_metadata.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 
 # Called by
 

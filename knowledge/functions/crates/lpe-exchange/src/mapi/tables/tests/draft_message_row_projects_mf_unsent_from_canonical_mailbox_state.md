@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: draft_message_row_projects_mf_unsent_from_canonical_mailbox_state
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9084-L9124
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9147-L9187
 visibility: private
 generated:
   by: okf-rs/0.3.0

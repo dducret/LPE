@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: deleted_items
-resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L1-L326
+resource: crates/lpe-exchange/src/mapi/tables/deleted_items.rs#L1-L334
 generated:
   by: okf-rs/0.3.0
 relationships:

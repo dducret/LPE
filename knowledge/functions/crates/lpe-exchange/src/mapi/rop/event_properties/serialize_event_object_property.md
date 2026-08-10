@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_event_object_property
-resource: crates/lpe-exchange/src/mapi/rop/event_properties.rs#L16-L55
+resource: crates/lpe-exchange/src/mapi/rop/event_properties.rs#L16-L57
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -19,7 +19,7 @@ relationships:
 
 # Signature
 
-`pub(in crate::mapi) fn serialize_event_object_property( object: &MapiObject, snapshot: &MapiMailStoreSnapshot, property_tag: u32, ) -> Vec<u8>`
+`pub(in crate::mapi) fn serialize_event_object_property( object: &MapiObject, mailbox_guid: Uuid, snapshot: &MapiMailStoreSnapshot, property_tag: u32, ) -> Vec<u8>`
 
 # Calls
 

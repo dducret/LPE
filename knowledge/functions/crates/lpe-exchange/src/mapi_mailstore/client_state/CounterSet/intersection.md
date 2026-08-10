@@ -11,6 +11,8 @@ relationships:
   called_by:
   - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/select_download_manifest_for_client_state
   - functions/crates/lpe-exchange/src/mapi_mailstore/client_state/parse_read_state_section
+  - functions/tools/rca_outlook/mapi/parse_pox_mapi_http_endpoints
+  - functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness
 ---
 
 # Signature
@@ -25,3 +27,5 @@ relationships:
 
 - [select_download_manifest_for_client_state](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/select_download_manifest_for_client_state.md)
 - [parse_read_state_section](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/client_state/parse_read_state_section.md)
+- [parse_pox_mapi_http_endpoints](../../../../../../../functions/tools/rca_outlook/mapi/parse_pox_mapi_http_endpoints.md)
+- [check_mapi_gate1_readiness](../../../../../../../functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness.md)

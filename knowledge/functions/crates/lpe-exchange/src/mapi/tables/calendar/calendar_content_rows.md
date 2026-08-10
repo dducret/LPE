@@ -1,19 +1,14 @@
 ---
 type: Rust Function
 title: calendar_content_rows
-resource: crates/lpe-exchange/src/mapi/tables/calendar.rs#L3-L11
+resource: crates/lpe-exchange/src/mapi/tables/calendar.rs#L3-L9
 generated:
   by: okf-rs/0.3.0
 relationships:
   calls:
-  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/events_for_folder
-  - functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event
+  - functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_calendar_event_query_position_summary
-  - functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response
-  - functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count
-  - functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner
-  - functions/crates/lpe-exchange/src/mapi/tables/row_keys/table_row_keys
 ---
 
 # Signature
@@ -22,13 +17,8 @@ relationships:
 
 # Calls
 
-- [events_for_folder](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/events_for_folder.md)
-- [restriction_matches_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/restriction_matches_event.md)
+- [calendar_content_rows_with_mailbox_guid](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/calendar/calendar_content_rows_with_mailbox_guid.md)
 
 # Called by
 
 - [format_calendar_event_query_position_summary](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/tables/format_calendar_event_query_position_summary.md)
-- [rop_find_row_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/rop_find_row_response.md)
-- [table_position_and_count](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/counts/table_position_and_count.md)
-- [rop_query_rows_response_inner](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/query_rows/rop_query_rows_response_inner.md)
-- [table_row_keys](../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/row_keys/table_row_keys.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: create_mapi_event
-resource: crates/lpe-storage/src/mapi_events.rs#L221-L465
+resource: crates/lpe-storage/src/mapi_events.rs#L222-L468
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -10,6 +10,7 @@ relationships:
   - functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id
   - functions/crates/lpe-storage/src/collaboration/Storage/ensure_default_calendar_in_tx
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/mapi_events/update_mapi_event_reminder_in_tx
   - functions/crates/lpe-storage/src/mapi_events/apply_mapi_event_custom_properties_in_tx
   - functions/crates/lpe-storage/src/attachments/Storage/apply_mapi_event_attachment_changes_in_tx
@@ -21,7 +22,7 @@ relationships:
   - functions/crates/lpe-storage/src/change/Storage/emit_collaboration_change
   - functions/crates/lpe-storage/src/mapi_events/fetch_created_accessible_event_in_tx
   - functions/crates/lpe-storage/src/mapi_events/fetch_mapi_event_reminder_state_in_tx
-  - functions/crates/lpe-storage/src/mapi_events/fetch_event_updated_at_in_tx
+  - functions/crates/lpe-storage/src/mapi_events/fetch_event_timestamps_in_tx
 ---
 
 # Signature
@@ -34,6 +35,7 @@ relationships:
 - [tenant_id_for_account_id](../../../../../../functions/crates/lpe-storage/src/shared/Storage/tenant_id_for_account_id.md)
 - [ensure_default_calendar_in_tx](../../../../../../functions/crates/lpe-storage/src/collaboration/Storage/ensure_default_calendar_in_tx.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [update_mapi_event_reminder_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/update_mapi_event_reminder_in_tx.md)
 - [apply_mapi_event_custom_properties_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/apply_mapi_event_custom_properties_in_tx.md)
 - [apply_mapi_event_attachment_changes_in_tx](../../../../../../functions/crates/lpe-storage/src/attachments/Storage/apply_mapi_event_attachment_changes_in_tx.md)
@@ -45,4 +47,4 @@ relationships:
 - [emit_collaboration_change](../../../../../../functions/crates/lpe-storage/src/change/Storage/emit_collaboration_change.md)
 - [fetch_created_accessible_event_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/fetch_created_accessible_event_in_tx.md)
 - [fetch_mapi_event_reminder_state_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/fetch_mapi_event_reminder_state_in_tx.md)
-- [fetch_event_updated_at_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/fetch_event_updated_at_in_tx.md)
+- [fetch_event_timestamps_in_tx](../../../../../../functions/crates/lpe-storage/src/mapi_events/fetch_event_timestamps_in_tx.md)

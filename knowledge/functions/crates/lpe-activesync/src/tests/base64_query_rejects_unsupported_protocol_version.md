@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: base64_query_rejects_unsupported_protocol_version
-resource: crates/lpe-activesync/src/tests.rs#L1990-L2008
+resource: crates/lpe-activesync/src/tests.rs#L1991-L2009
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_recipient_dispatch_response
-resource: crates/lpe-exchange/src/mapi/dispatch/recipients.rs#L46-L89
+resource: crates/lpe-exchange/src/mapi/dispatch/recipients.rs#L46-L96
 generated:
   by: okf-rs/0.3.0
 relationships:

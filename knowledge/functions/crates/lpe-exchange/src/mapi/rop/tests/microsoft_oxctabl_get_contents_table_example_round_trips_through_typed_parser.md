@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxctabl_get_contents_table_example_round_trips_through_typed_parser
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5415-L5431
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L5421-L5437
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: get_hierarchy_table_response
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1257-L1259
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1259-L1261
 generated:
   by: okf-rs/0.3.0
 relationships:

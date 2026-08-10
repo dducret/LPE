@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: requested_mailbox_folder_ids
-resource: crates/lpe-exchange/src/service.rs#L358-L384
+resource: crates/lpe-exchange/src/service.rs#L360-L386
 visibility: private
 generated:
   by: okf-rs/0.3.0

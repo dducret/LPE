@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_mapi_event_reminder
-resource: crates/lpe-storage/src/mapi_events.rs#L829-L842
+resource: crates/lpe-storage/src/mapi_events.rs#L838-L851
 visibility: private
 generated:
   by: okf-rs/0.3.0

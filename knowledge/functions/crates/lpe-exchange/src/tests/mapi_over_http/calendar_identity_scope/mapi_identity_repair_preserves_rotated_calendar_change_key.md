@@ -13,6 +13,7 @@ relationships:
   - functions/LPE-CT/web/app/smoke/test/MockClassList/remove
   - functions/crates/lpe-exchange/src/mapi/identity/global_counter_from_store_id
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/core/Storage/pool
 ---
 
@@ -28,4 +29,5 @@ relationships:
 - [remove](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockClassList/remove.md)
 - [global_counter_from_store_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/identity/global_counter_from_store_id.md)
 - [query](../../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [pool](../../../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)

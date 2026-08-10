@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: for_rop
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L245-L253
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L248-L256
 generated:
   by: okf-rs/0.3.0
 relationships:

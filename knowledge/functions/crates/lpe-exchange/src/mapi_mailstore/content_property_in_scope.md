@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: content_property_in_scope
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L300-L314
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L303-L317
 visibility: private
 generated:
   by: okf-rs/0.3.0

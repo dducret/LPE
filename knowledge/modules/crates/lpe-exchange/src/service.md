@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: service
-resource: crates/lpe-exchange/src/service.rs#L1-L1087
+resource: crates/lpe-exchange/src/service.rs#L1-L1089
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -18,6 +18,7 @@ relationships:
   - external/std-time-instant
   - external/uuid-uuid
   - external/crate-build-info-ews-types-ewsdeletetype-ewsdistinguishedfolderidname-ewsoofstate-ewstaskstatus-mapi-self-mapiendpoint-store-ewsdelegate-ewsdelegatepreferences-ewsdiscoverysearchconfig-ewsdiscoverysearchresult-ewsholdmailbox-ewsimgroup-ewsimgroupmember-ewsimlist-ewsimmemberinput-ewsmailappmanifest-ewsmailapptokenevent-ewsmessagetrackingreport-ewsmessagetrackingreportdetail-ewsnonindexablereport-ewsretentionpolicytag-ewssearchablemailbox-ewstransferjob-ewsunifiedmessagingcall-ewsuserconfiguration-ewsuserconfigurationkey-exchangeaddressbookdirectorykind-exchangeaddressbookentry-exchangeaddressbookentrydetails-exchangeaddressbookentrykind-exchangestore-upsertewsdelegateinput-upsertewsuserconfigurationinput
+  - external/pub-crate-use-ews-xml-html-to-text
   - external/ews-availability
   - external/ews-calendar
   - external/ews-contacts
@@ -130,6 +131,7 @@ relationships:
         UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 }`
+- `pub(crate) use ews::xml::html_to_text`
 - `ews::availability::*`
 - `ews::calendar::*`
 - `ews::contacts::*`

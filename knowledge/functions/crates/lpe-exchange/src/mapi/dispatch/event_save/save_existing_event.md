@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: save_existing_event
-resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L146-L332
+resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L155-L343
 generated:
   by: okf-rs/0.3.0
 relationships:

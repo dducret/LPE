@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: is_calendar_configuration_object
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L465-L479
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/special_folders.rs#L626-L640
 generated:
   by: okf-rs/0.3.0
 relationships:

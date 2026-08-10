@@ -11,6 +11,7 @@ relationships:
   - functions/crates/lpe-storage/src/search_folders/Storage/ensure_exchange_search_folders
   - functions/crates/lpe-storage/src/shared/Storage/ensure_mailbox
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
 ---
 
 # Signature
@@ -24,3 +25,4 @@ relationships:
 - [ensure_exchange_search_folders](../../../../../../functions/crates/lpe-storage/src/search_folders/Storage/ensure_exchange_search_folders.md)
 - [ensure_mailbox](../../../../../../functions/crates/lpe-storage/src/shared/Storage/ensure_mailbox.md)
 - [query](../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)

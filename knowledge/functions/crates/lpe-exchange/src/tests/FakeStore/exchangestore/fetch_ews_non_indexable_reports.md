@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_ews_non_indexable_reports
-resource: crates/lpe-exchange/src/tests/mod.rs#L5535-L5559
+resource: crates/lpe-exchange/src/tests/mod.rs#L5536-L5560
 visibility: private
 generated:
   by: okf-rs/0.3.0

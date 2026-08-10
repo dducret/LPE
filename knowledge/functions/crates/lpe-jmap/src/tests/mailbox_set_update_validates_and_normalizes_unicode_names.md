@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_set_update_validates_and_normalizes_unicode_names
-resource: crates/lpe-jmap/src/tests.rs#L6425-L6468
+resource: crates/lpe-jmap/src/tests.rs#L6428-L6471
 visibility: private
 generated:
   by: okf-rs/0.3.0

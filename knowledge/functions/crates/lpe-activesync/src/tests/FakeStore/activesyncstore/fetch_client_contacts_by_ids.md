@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_client_contacts_by_ids
-resource: crates/lpe-activesync/src/tests.rs#L1001-L1015
+resource: crates/lpe-activesync/src/tests.rs#L1002-L1016
 visibility: private
 generated:
   by: okf-rs/0.3.0

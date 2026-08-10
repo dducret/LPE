@@ -7,6 +7,7 @@ generated:
 relationships:
   called_by:
   - functions/tools/rca_outlook/ews/ews_call
+  - functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness
   - functions/tools/rca_outlook_connectivity_check/check_pox_autodiscover
   - functions/tools/rca_outlook_connectivity_check/check_json_autodiscover
   - functions/tools/rca_outlook_connectivity_check/check_jmap_publication_headers
@@ -31,6 +32,7 @@ relationships:
 # Called by
 
 - [ews_call](../../../../functions/tools/rca_outlook/ews/ews_call.md)
+- [check_mapi_gate1_readiness](../../../../functions/tools/rca_outlook_connectivity_check/check_mapi_gate1_readiness.md)
 - [check_pox_autodiscover](../../../../functions/tools/rca_outlook_connectivity_check/check_pox_autodiscover.md)
 - [check_json_autodiscover](../../../../functions/tools/rca_outlook_connectivity_check/check_json_autodiscover.md)
 - [check_jmap_publication_headers](../../../../functions/tools/rca_outlook_connectivity_check/check_jmap_publication_headers.md)

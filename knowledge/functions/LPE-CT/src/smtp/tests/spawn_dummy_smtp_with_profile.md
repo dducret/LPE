@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: spawn_dummy_smtp_with_profile
-resource: LPE-CT/src/smtp/tests.rs#L3397-L3405
+resource: LPE-CT/src/smtp/tests.rs#L3373-L3381
 visibility: private
 generated:
   by: okf-rs/0.3.0

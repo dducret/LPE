@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_change_key
-resource: crates/lpe-storage/src/mapi_events.rs#L1413-L1418
+resource: crates/lpe-storage/src/mapi_events.rs#L1428-L1433
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: microsoft_oxosrch_stored_definition_blob_projects_storage_type
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1052-L1160
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L1108-L1216
 visibility: private
 generated:
   by: okf-rs/0.3.0

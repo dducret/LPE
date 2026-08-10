@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: navigation_shortcut_group_header_does_not_project_group_name
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7288-L7311
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7418-L7441
 visibility: private
 generated:
   by: okf-rs/0.3.0

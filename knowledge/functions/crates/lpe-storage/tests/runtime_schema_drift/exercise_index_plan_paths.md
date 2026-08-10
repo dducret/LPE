@@ -8,6 +8,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-core/src/sieve/context
   - functions/crates/lpe-storage/tests/runtime_schema_drift/explain_rows
   - functions/crates/lpe-storage/tests/runtime_schema_drift/assert_plan_uses_index
@@ -22,6 +23,7 @@ relationships:
 # Calls
 
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [context](../../../../../functions/crates/lpe-core/src/sieve/context.md)
 - [explain_rows](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/explain_rows.md)
 - [assert_plan_uses_index](../../../../../functions/crates/lpe-storage/tests/runtime_schema_drift/assert_plan_uses_index.md)

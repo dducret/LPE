@@ -21,6 +21,7 @@ relationships:
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/merge_mapi_predecessors
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/merge_mapi_predecessor_change_key
   - functions/crates/lpe-exchange/src/store/storage_impl/fai_identity_import/imported_fai_version_wins_last_writer
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_replica_ids/mapi_local_replica_counter_is_deleted_in_folder_in_tx
   - functions/crates/lpe-exchange/src/store/storage_impl/mapi_replica_ids/mapi_local_replica_counter_is_reserved_in_tx
 ---
@@ -45,5 +46,6 @@ relationships:
 - [merge_mapi_predecessors](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/merge_mapi_predecessors.md)
 - [merge_mapi_predecessor_change_key](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_hierarchy_versions/merge_mapi_predecessor_change_key.md)
 - [imported_fai_version_wins_last_writer](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/fai_identity_import/imported_fai_version_wins_last_writer.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [mapi_local_replica_counter_is_deleted_in_folder_in_tx](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_replica_ids/mapi_local_replica_counter_is_deleted_in_folder_in_tx.md)
 - [mapi_local_replica_counter_is_reserved_in_tx](../../../../../../../functions/crates/lpe-exchange/src/store/storage_impl/mapi_replica_ids/mapi_local_replica_counter_is_reserved_in_tx.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: delete_trace_rejects_sent_history_items
-resource: LPE-CT/src/smtp/tests.rs#L3031-L3075
+resource: LPE-CT/src/smtp/tests.rs#L3007-L3051
 visibility: private
 generated:
   by: okf-rs/0.3.0

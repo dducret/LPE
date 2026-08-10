@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: delete_accessible_task
-resource: crates/lpe-exchange/src/tests/mod.rs#L9645-L9653
+resource: crates/lpe-exchange/src/tests/mod.rs#L9650-L9658
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: filetime_from_change_number
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L344-L346
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L345-L347
 generated:
   by: okf-rs/0.3.0
 relationships:

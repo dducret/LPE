@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_get_properties_specific_allows_known_unsupported_types
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1628-L1686
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L1532-L1590
 visibility: private
 generated:
   by: okf-rs/0.3.0

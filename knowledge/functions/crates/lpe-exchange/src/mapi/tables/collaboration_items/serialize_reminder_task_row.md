@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: serialize_reminder_task_row
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L201-L220
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L217-L236
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: ClientContactRow
-resource: crates/lpe-storage/src/models.rs#L460-L490
+resource: crates/lpe-storage/src/models.rs#L463-L493
 generated:
   by: okf-rs/0.3.0
 ---

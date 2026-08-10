@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_for_id
-resource: crates/lpe-exchange/src/mapi/sync.rs#L1383-L1393
+resource: crates/lpe-exchange/src/mapi/sync.rs#L1388-L1398
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_hierarchy_sync_projects_outlook_special_folder_display_names
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7086-L7131
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L6879-L6924
 visibility: private
 generated:
   by: okf-rs/0.3.0

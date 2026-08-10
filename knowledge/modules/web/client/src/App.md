@@ -1,7 +1,7 @@
 ---
 type: TypeScript Module
 title: App
-resource: web/client/src/App.tsx#L1-L557
+resource: web/client/src/App.tsx#L1-L561
 generated:
   by: okf-rs/0.3.0
 relationships:

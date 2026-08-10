@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_calendar_contract_invariant_issues
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L333-L381
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L334-L382
 visibility: private
 generated:
   by: okf-rs/0.3.0

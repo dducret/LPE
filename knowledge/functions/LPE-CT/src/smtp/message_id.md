@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_id
-resource: LPE-CT/src/smtp.rs#L1243-L1249
+resource: LPE-CT/src/smtp.rs#L1246-L1252
 visibility: private
 generated:
   by: okf-rs/0.3.0

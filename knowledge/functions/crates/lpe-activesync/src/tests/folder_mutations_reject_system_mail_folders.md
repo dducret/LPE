@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_mutations_reject_system_mail_folders
-resource: crates/lpe-activesync/src/tests.rs#L3524-L3570
+resource: crates/lpe-activesync/src/tests.rs#L3525-L3571
 visibility: private
 generated:
   by: okf-rs/0.3.0

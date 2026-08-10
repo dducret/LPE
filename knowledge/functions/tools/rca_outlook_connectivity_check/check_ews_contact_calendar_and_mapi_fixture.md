@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_ews_contact_calendar_and_mapi_fixture
-resource: tools/rca_outlook_connectivity_check.py#L557-L678
+resource: tools/rca_outlook_connectivity_check.py#L806-L927
 generated:
   by: okf-rs/0.3.0
 relationships:

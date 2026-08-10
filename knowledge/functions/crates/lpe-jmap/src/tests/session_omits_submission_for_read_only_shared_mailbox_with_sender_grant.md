@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: session_omits_submission_for_read_only_shared_mailbox_with_sender_grant
-resource: crates/lpe-jmap/src/tests.rs#L2788-L2852
+resource: crates/lpe-jmap/src/tests.rs#L2791-L2855
 visibility: private
 generated:
   by: okf-rs/0.3.0

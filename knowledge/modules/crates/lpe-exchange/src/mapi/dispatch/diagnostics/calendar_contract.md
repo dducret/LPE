@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: calendar_contract
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L1-L390
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L1-L391
 generated:
   by: okf-rs/0.3.0
 relationships:

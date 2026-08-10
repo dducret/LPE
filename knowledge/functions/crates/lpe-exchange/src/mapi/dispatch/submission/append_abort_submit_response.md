@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_abort_submit_response
-resource: crates/lpe-exchange/src/mapi/dispatch/submission.rs#L789-L851
+resource: crates/lpe-exchange/src/mapi/dispatch/submission.rs#L796-L858
 generated:
   by: okf-rs/0.3.0
 relationships:

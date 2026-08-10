@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_find_row_does_not_invent_a_default_for_a_broad_startup_lookup
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5627-L5687
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5662-L5722
 visibility: private
 generated:
   by: okf-rs/0.3.0

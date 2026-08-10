@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: calendar_change_key_from_get_properties_response
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L2584-L2601
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L2591-L2608
 visibility: private
 generated:
   by: okf-rs/0.3.0

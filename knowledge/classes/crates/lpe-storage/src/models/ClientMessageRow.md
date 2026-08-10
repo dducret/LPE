@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: ClientMessageRow
-resource: crates/lpe-storage/src/models.rs#L401-L423
+resource: crates/lpe-storage/src/models.rs#L403-L426
 generated:
   by: okf-rs/0.3.0
 ---

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fast_transfer_sender_address
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L89-L94
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L90-L95
 visibility: private
 generated:
   by: okf-rs/0.3.0

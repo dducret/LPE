@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: well_known_named_property_mappings_are_bijective
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L6910-L6943
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L7040-L7073
 visibility: private
 generated:
   by: okf-rs/0.3.0

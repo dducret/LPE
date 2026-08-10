@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_rop_debug_summary_decodes_ids_and_return_codes
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L535-L566
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L590-L621
 visibility: private
 generated:
   by: okf-rs/0.3.0

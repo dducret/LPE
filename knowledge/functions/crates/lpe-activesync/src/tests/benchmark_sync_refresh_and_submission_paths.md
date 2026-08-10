@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: benchmark_sync_refresh_and_submission_paths
-resource: crates/lpe-activesync/src/tests.rs#L6119-L6257
+resource: crates/lpe-activesync/src/tests.rs#L6120-L6258
 visibility: private
 generated:
   by: okf-rs/0.3.0

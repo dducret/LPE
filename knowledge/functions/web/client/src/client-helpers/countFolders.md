@@ -1,7 +1,7 @@
 ---
 type: TypeScript Function
 title: countFolders
-resource: web/client/src/client-helpers.ts#L62-L82
+resource: web/client/src/client-helpers.ts#L62-L84
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -11,7 +11,7 @@ relationships:
 
 # Signature
 
-`function countFolders(messages: Message[]): Record<Folder, number>`
+`function countFolders(messages: Message[]): Record<SystemFolder, number>`
 
 # Called by
 

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: outbound_handoff_bounces_on_permanent_rcpt_failure
-resource: LPE-CT/src/smtp/tests.rs#L2050-L2083
+resource: LPE-CT/src/smtp/tests.rs#L2077-L2110
 visibility: private
 generated:
   by: okf-rs/0.3.0

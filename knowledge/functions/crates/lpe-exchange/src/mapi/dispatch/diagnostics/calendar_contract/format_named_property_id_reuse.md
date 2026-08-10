@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: format_named_property_id_reuse
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L275-L317
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/calendar_contract.rs#L276-L318
 visibility: private
 generated:
   by: okf-rs/0.3.0

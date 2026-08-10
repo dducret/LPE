@@ -1,7 +1,7 @@
 ---
 type: Python Function
 title: check_mapi_nspi_bind_octet_stream
-resource: tools/rca_outlook_connectivity_check.py#L837-L839
+resource: tools/rca_outlook_connectivity_check.py#L1086-L1088
 generated:
   by: okf-rs/0.3.0
 relationships:

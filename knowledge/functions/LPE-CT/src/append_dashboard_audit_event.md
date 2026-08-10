@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_dashboard_audit_event
-resource: LPE-CT/src/main.rs#L963-L974
+resource: LPE-CT/src/main.rs#L978-L989
 visibility: private
 generated:
   by: okf-rs/0.3.0

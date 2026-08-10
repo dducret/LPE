@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_sync_projects_postgresql_custom_calendar_collection
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7551-L7621
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L7621-L7691
 visibility: private
 generated:
   by: okf-rs/0.3.0

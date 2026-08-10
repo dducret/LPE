@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: commit_mapi_contact_update
-resource: crates/lpe-exchange/src/tests/mod.rs#L8524-L8623
+resource: crates/lpe-exchange/src/tests/mod.rs#L8527-L8626
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: restore_save_changes_containing_folder_response_handle
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L241-L270
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L245-L274
 generated:
   by: okf-rs/0.3.0
 relationships:

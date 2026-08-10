@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_set_columns_response
-resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L218-L579
+resource: crates/lpe-exchange/src/mapi/dispatch/table_controls.rs#L218-L580
 generated:
   by: okf-rs/0.3.0
 relationships:

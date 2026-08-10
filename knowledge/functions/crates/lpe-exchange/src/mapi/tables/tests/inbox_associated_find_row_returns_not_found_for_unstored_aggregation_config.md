@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_associated_find_row_returns_not_found_for_unstored_aggregation_config
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5553-L5615
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L5588-L5650
 visibility: private
 generated:
   by: okf-rs/0.3.0

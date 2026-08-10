@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: common_views_shortcut_sync_does_not_emit_materialized_mail_header
-resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1353-L1397
+resource: crates/lpe-exchange/src/mapi/sync/tests.rs#L1413-L1457
 visibility: private
 generated:
   by: okf-rs/0.3.0

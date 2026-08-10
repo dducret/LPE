@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: query_position_counts_categorized_content_rows
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2799-L2868
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L2833-L2902
 visibility: private
 generated:
   by: okf-rs/0.3.0

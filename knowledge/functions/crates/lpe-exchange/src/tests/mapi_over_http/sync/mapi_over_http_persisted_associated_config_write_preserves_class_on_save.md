@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_persisted_associated_config_write_preserves_class_on_save
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L12453-L12551
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L12210-L12308
 visibility: private
 generated:
   by: okf-rs/0.3.0

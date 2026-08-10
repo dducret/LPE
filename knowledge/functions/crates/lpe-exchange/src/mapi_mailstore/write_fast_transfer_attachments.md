@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_fast_transfer_attachments
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1119-L1159
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L1122-L1162
 visibility: private
 generated:
   by: okf-rs/0.3.0

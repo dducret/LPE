@@ -11,7 +11,7 @@ relationships:
 
 # Signature
 
-`pub(in crate::service) fn html_to_text(value: &str) -> String`
+`pub(crate) fn html_to_text(value: &str) -> String`
 
 # Calls
 

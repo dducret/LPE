@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_message_cnset_property
-resource: crates/lpe-exchange/src/tests/mod.rs#L13908-L13910
+resource: crates/lpe-exchange/src/tests/mod.rs#L13913-L13915
 visibility: private
 generated:
   by: okf-rs/0.3.0

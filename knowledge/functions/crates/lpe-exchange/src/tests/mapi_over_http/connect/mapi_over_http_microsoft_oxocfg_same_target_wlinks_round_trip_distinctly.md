@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_microsoft_oxocfg_same_target_wlinks_round_trip_distinctly
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2675-L2875
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L2558-L2758
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_delete_staged_search_folder_succeeds_without_persistence
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1034-L1112
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1047-L1125
 visibility: private
 generated:
   by: okf-rs/0.3.0

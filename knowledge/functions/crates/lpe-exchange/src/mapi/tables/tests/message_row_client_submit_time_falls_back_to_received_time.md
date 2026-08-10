@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: message_row_client_submit_time_falls_back_to_received_time
-resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9127-L9143
+resource: crates/lpe-exchange/src/mapi/tables/tests.rs#L9190-L9206
 visibility: private
 generated:
   by: okf-rs/0.3.0

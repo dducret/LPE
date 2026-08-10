@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: final_sync_state_stream_with_cnsets
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L647-L675
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L650-L678
 visibility: private
 generated:
   by: okf-rs/0.3.0

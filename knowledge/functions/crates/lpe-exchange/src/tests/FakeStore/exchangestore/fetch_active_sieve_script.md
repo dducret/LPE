@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: fetch_active_sieve_script
-resource: crates/lpe-exchange/src/tests/mod.rs#L9445-L9458
+resource: crates/lpe-exchange/src/tests/mod.rs#L9450-L9463
 visibility: private
 generated:
   by: okf-rs/0.3.0

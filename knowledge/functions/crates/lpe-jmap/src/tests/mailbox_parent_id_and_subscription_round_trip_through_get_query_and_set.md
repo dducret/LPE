@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_parent_id_and_subscription_round_trip_through_get_query_and_set
-resource: crates/lpe-jmap/src/tests.rs#L7056-L7138
+resource: crates/lpe-jmap/src/tests.rs#L7059-L7141
 visibility: private
 generated:
   by: okf-rs/0.3.0

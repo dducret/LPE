@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_hierarchy_sync_uses_baseline_for_stale_root_checkpoint_with_client_state
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7685-L7759
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L7478-L7552
 visibility: private
 generated:
   by: okf-rs/0.3.0

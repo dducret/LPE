@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: view_descriptor_named_string_column_matches_microsoft_example
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5706-L5741
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5835-L5870
 visibility: private
 generated:
   by: okf-rs/0.3.0

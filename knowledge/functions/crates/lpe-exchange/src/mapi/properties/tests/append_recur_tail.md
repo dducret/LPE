@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_recur_tail
-resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5033-L5055
+resource: crates/lpe-exchange/src/mapi/properties/tests.rs#L5162-L5184
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_delete_persisted_search_folder_removes_definition
-resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1115-L1177
+resource: crates/lpe-exchange/src/tests/mapi_over_http/hierarchy.rs#L1128-L1190
 visibility: private
 generated:
   by: okf-rs/0.3.0

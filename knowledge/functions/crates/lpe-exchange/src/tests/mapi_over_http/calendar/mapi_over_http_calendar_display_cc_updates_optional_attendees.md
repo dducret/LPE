@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_display_cc_updates_optional_attendees
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4573-L4671
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L4620-L4718
 visibility: private
 generated:
   by: okf-rs/0.3.0

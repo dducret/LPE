@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: sync_key_stays_usable_for_new_changes_after_a_stable_round
-resource: crates/lpe-activesync/src/tests.rs#L4182-L4308
+resource: crates/lpe-activesync/src/tests.rs#L4183-L4309
 visibility: private
 generated:
   by: okf-rs/0.3.0

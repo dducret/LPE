@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_calendar_default_save_closes_created_updated_and_noop_handles
-resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1720-L1863
+resource: crates/lpe-exchange/src/tests/mapi_over_http/calendar.rs#L1727-L1870
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Struct
 title: CollaborationCollectionRow
-resource: crates/lpe-storage/src/models.rs#L493-L504
+resource: crates/lpe-storage/src/models.rs#L496-L507
 generated:
   by: okf-rs/0.3.0
 ---

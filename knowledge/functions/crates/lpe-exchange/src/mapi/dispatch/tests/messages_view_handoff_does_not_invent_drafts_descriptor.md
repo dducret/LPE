@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: messages_view_handoff_does_not_invent_drafts_descriptor
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L792-L816
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L796-L820
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: initial_sync_state_stream
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L487-L489
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L490-L492
 generated:
   by: okf-rs/0.3.0
 relationships:

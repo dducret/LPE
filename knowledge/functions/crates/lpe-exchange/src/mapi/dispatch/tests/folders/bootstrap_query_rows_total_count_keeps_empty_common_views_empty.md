@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: bootstrap_query_rows_total_count_keeps_empty_common_views_empty
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L1819-L1845
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/folders.rs#L1832-L1858
 visibility: private
 generated:
   by: okf-rs/0.3.0

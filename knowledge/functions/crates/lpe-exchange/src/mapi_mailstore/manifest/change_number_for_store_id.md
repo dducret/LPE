@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: change_number_for_store_id
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L326-L330
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L327-L331
 generated:
   by: okf-rs/0.3.0
 relationships:

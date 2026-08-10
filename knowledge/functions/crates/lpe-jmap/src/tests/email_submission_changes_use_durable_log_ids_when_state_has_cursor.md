@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_submission_changes_use_durable_log_ids_when_state_has_cursor
-resource: crates/lpe-jmap/src/tests.rs#L6008-L6055
+resource: crates/lpe-jmap/src/tests.rs#L6011-L6058
 visibility: private
 generated:
   by: okf-rs/0.3.0

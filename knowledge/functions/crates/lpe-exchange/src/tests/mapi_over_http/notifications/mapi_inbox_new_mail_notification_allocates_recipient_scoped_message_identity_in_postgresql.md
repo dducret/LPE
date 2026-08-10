@@ -14,6 +14,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_notification_cursor
   - functions/crates/lpe-exchange/src/tests/postgres_mapi_audit
   - functions/crates/lpe-activesync/src/tests/query
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-storage/src/core/Storage/pool
   - functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_or_allocate_mapi_identities
   - functions/LPE-CT/web/app/smoke/test/MockClassList/remove
@@ -33,6 +34,7 @@ relationships:
 - [fetch_mapi_notification_cursor](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_mapi_notification_cursor.md)
 - [postgres_mapi_audit](../../../../../../../functions/crates/lpe-exchange/src/tests/postgres_mapi_audit.md)
 - [query](../../../../../../../functions/crates/lpe-activesync/src/tests/query.md)
+- [execute](../../../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [pool](../../../../../../../functions/crates/lpe-storage/src/core/Storage/pool.md)
 - [fetch_or_allocate_mapi_identities](../../../../../../../functions/crates/lpe-exchange/src/tests/FakeStore/exchangestore/fetch_or_allocate_mapi_identities.md)
 - [remove](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockClassList/remove.md)

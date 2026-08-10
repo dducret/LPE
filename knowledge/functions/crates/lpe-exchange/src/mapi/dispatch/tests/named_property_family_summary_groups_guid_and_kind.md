@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: named_property_family_summary_groups_guid_and_kind
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1351-L1378
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L1360-L1387
 visibility: private
 generated:
   by: okf-rs/0.3.0

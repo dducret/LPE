@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: inbox_view_descriptor_set_columns_contract_requires_persisted_view
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L819-L836
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L823-L840
 visibility: private
 generated:
   by: okf-rs/0.3.0

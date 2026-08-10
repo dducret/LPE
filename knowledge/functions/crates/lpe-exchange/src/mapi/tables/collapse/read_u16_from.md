@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: read_u16_from
-resource: crates/lpe-exchange/src/mapi/tables/collapse.rs#L279-L283
+resource: crates/lpe-exchange/src/mapi/tables/collapse.rs#L280-L284
 visibility: private
 generated:
   by: okf-rs/0.3.0

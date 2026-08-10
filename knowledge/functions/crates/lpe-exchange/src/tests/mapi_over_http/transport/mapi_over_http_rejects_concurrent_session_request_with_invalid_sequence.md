@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_rejects_concurrent_session_request_with_invalid_sequence
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1445-L1475
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1439-L1469
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: canonical_message_change_number_with_attachments
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L217-L230
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L218-L231
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_options_handler_reports_transport_session_ready
-resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1607-L1615
+resource: crates/lpe-exchange/src/tests/mapi_over_http/transport.rs#L1601-L1609
 visibility: private
 generated:
   by: okf-rs/0.3.0

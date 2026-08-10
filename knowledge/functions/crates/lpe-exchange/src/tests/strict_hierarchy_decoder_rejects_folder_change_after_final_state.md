@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: strict_hierarchy_decoder_rejects_folder_change_after_final_state
-resource: crates/lpe-exchange/src/tests/mod.rs#L14867-L14887
+resource: crates/lpe-exchange/src/tests/mod.rs#L14872-L14892
 visibility: private
 generated:
   by: okf-rs/0.3.0

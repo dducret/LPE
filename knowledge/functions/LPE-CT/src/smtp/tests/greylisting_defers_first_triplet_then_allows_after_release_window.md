@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: greylisting_defers_first_triplet_then_allows_after_release_window
-resource: LPE-CT/src/smtp/tests.rs#L2472-L2499
+resource: LPE-CT/src/smtp/tests.rs#L2448-L2475
 visibility: private
 generated:
   by: okf-rs/0.3.0

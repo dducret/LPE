@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: journal_api_helpers_cover_authenticated_crud_path
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L1025-L1072
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L1026-L1073
 visibility: private
 generated:
   by: okf-rs/0.3.0

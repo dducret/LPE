@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_copy_rejects_inaccessible_source_and_read_only_target
-resource: crates/lpe-jmap/src/tests.rs#L7456-L7532
+resource: crates/lpe-jmap/src/tests.rs#L7459-L7535
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mailbox_set_rejects_controls_and_delimiters_at_method_level
-resource: crates/lpe-jmap/src/tests.rs#L6518-L6577
+resource: crates/lpe-jmap/src/tests.rs#L6521-L6580
 visibility: private
 generated:
   by: okf-rs/0.3.0

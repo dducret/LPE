@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: upload_sync_state_stream_from_sets
-resource: crates/lpe-exchange/src/mapi_mailstore.rs#L580-L592
+resource: crates/lpe-exchange/src/mapi_mailstore.rs#L583-L595
 generated:
   by: okf-rs/0.3.0
 relationships:

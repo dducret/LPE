@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: tables
-resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1-L1992
+resource: crates/lpe-exchange/src/mapi/dispatch/tables.rs#L1-L1999
 generated:
   by: okf-rs/0.3.0
 relationships:

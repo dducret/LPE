@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: send_mail_uses_canonical_submission_model
-resource: crates/lpe-activesync/src/tests.rs#L4640-L4669
+resource: crates/lpe-activesync/src/tests.rs#L4641-L4670
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: rop_buffer
-resource: crates/lpe-exchange/src/tests/mod.rs#L12553-L12561
+resource: crates/lpe-exchange/src/tests/mod.rs#L12558-L12566
 visibility: private
 generated:
   by: okf-rs/0.3.0

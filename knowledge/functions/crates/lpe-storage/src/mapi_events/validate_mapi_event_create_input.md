@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: validate_mapi_event_create_input
-resource: crates/lpe-storage/src/mapi_events.rs#L786-L794
+resource: crates/lpe-storage/src/mapi_events.rs#L795-L803
 visibility: private
 generated:
   by: okf-rs/0.3.0

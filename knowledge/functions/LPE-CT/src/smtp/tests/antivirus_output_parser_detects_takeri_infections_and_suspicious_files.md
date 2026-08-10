@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: antivirus_output_parser_detects_takeri_infections_and_suspicious_files
-resource: LPE-CT/src/smtp/tests.rs#L3093-L3135
+resource: LPE-CT/src/smtp/tests.rs#L3069-L3111
 visibility: private
 generated:
   by: okf-rs/0.3.0

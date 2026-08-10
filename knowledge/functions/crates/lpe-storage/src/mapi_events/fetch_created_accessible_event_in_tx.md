@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: fetch_created_accessible_event_in_tx
-resource: crates/lpe-storage/src/mapi_events.rs#L1110-L1185
+resource: crates/lpe-storage/src/mapi_events.rs#L1119-L1194
 visibility: private
 generated:
   by: okf-rs/0.3.0

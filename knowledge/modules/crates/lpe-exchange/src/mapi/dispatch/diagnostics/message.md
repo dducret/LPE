@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: message
-resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/message.rs#L1-L389
+resource: crates/lpe-exchange/src/mapi/dispatch/diagnostics/message.rs#L1-L390
 generated:
   by: okf-rs/0.3.0
 relationships:

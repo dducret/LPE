@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: automatic_fast_transfer_buffer_uses_execute_residual_output_budget
-resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L187-L213
+resource: crates/lpe-exchange/src/mapi/dispatch/tests/execute.rs#L242-L268
 visibility: private
 generated:
   by: okf-rs/0.3.0

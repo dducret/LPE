@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: post_with_supported_protocol_version_succeeds
-resource: crates/lpe-activesync/src/tests.rs#L1448-L1473
+resource: crates/lpe-activesync/src/tests.rs#L1449-L1474
 visibility: private
 generated:
   by: okf-rs/0.3.0

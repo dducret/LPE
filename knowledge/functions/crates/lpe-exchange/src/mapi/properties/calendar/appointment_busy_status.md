@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: appointment_busy_status
-resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L246-L254
+resource: crates/lpe-exchange/src/mapi/properties/calendar.rs#L321-L329
 visibility: private
 generated:
   by: okf-rs/0.3.0

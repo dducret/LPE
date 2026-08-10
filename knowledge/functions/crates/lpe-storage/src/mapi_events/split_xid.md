@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: split_xid
-resource: crates/lpe-storage/src/mapi_events.rs#L1468-L1476
+resource: crates/lpe-storage/src/mapi_events.rs#L1483-L1491
 visibility: private
 generated:
   by: okf-rs/0.3.0

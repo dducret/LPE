@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: email_matches_folder
-resource: crates/lpe-exchange/src/mapi/sync.rs#L1440-L1460
+resource: crates/lpe-exchange/src/mapi/sync.rs#L1445-L1465
 generated:
   by: okf-rs/0.3.0
 relationships:

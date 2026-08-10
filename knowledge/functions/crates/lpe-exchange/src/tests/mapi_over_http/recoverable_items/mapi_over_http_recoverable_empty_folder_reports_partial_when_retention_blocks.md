@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_recoverable_empty_folder_reports_partial_when_retention_blocks
-resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L700-L743
+resource: crates/lpe-exchange/src/tests/mapi_over_http/recoverable_items.rs#L691-L734
 visibility: private
 generated:
   by: okf-rs/0.3.0

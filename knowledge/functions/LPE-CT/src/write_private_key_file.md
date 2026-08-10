@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: write_private_key_file
-resource: LPE-CT/src/main.rs#L1100-L1108
+resource: LPE-CT/src/main.rs#L1115-L1123
 visibility: private
 generated:
   by: okf-rs/0.3.0

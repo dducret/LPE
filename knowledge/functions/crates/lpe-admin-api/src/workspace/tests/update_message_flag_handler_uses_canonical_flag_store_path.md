@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: update_message_flag_handler_uses_canonical_flag_store_path
-resource: crates/lpe-admin-api/src/workspace/tests.rs#L851-L890
+resource: crates/lpe-admin-api/src/workspace/tests.rs#L852-L891
 visibility: private
 generated:
   by: okf-rs/0.3.0

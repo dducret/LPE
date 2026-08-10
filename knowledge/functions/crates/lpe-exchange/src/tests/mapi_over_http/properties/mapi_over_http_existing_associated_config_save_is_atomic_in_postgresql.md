@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_existing_associated_config_save_is_atomic_in_postgresql
-resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4977-L5254
+resource: crates/lpe-exchange/src/tests/mapi_over_http/properties.rs#L4701-L4978
 visibility: private
 generated:
   by: okf-rs/0.3.0

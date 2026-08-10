@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_release_response
-resource: crates/lpe-exchange/src/mapi/dispatch/release.rs#L44-L538
+resource: crates/lpe-exchange/src/mapi/dispatch/release.rs#L44-L531
 generated:
   by: okf-rs/0.3.0
 relationships:

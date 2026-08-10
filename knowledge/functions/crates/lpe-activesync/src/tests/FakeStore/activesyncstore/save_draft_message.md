@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: save_draft_message
-resource: crates/lpe-activesync/src/tests.rs#L945-L962
+resource: crates/lpe-activesync/src/tests.rs#L946-L963
 visibility: private
 generated:
   by: okf-rs/0.3.0

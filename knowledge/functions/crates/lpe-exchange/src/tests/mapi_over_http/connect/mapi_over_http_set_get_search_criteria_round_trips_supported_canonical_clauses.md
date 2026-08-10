@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_get_search_criteria_round_trips_supported_canonical_clauses
-resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5788-L5903
+resource: crates/lpe-exchange/src/tests/mapi_over_http/connect.rs#L5653-L5768
 visibility: private
 generated:
   by: okf-rs/0.3.0

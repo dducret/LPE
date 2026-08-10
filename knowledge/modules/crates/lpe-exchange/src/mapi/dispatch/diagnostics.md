@@ -12,16 +12,16 @@ relationships:
   - external/lpe-mail-auth-accountprincipal
   - external/std-collections-hashmap
   - external/uuid-uuid
-  - external/crate-mapi-identity-object-id-from-folder-identifier-bytes-object-id-from-source-key-object-id-from-wire-id-archive-folder-id-calendar-folder-id-common-views-folder-id-conflicts-folder-id-contacts-folder-id-contacts-search-folder-id-conversation-action-settings-folder-id-conversation-history-folder-id-deferred-action-folder-id-document-libraries-folder-id-drafts-folder-id-freebusy-data-folder-id-im-contact-list-folder-id-inbox-folder-id-ipm-subtree-folder-id-journal-folder-id-junk-folder-id-local-failures-folder-id-notes-folder-id-outbox-folder-id-quick-contacts-folder-id-quick-step-settings-folder-id-reminders-folder-id-root-folder-id-rss-feeds-folder-id-schedule-folder-id-search-folder-id-sent-folder-id-server-failures-folder-id-shortcuts-folder-id-spooler-queue-folder-id-suggested-contacts-folder-id-sync-issues-folder-id-tasks-folder-id-todo-search-folder-id-tracked-mail-processing-folder-id-trash-folder-id-views-folder-id
+  - external/crate-mapi-identity-archive-folder-id-calendar-folder-id-common-views-folder-id-conflicts-folder-id-contacts-folder-id-contacts-search-folder-id-conversation-action-settings-folder-id-conversation-history-folder-id-deferred-action-folder-id-document-libraries-folder-id-drafts-folder-id-freebusy-data-folder-id-im-contact-list-folder-id-inbox-folder-id-ipm-subtree-folder-id-journal-folder-id-junk-folder-id-local-failures-folder-id-notes-folder-id-outbox-folder-id-quick-contacts-folder-id-quick-step-settings-folder-id-reminders-folder-id-root-folder-id-rss-feeds-folder-id-schedule-folder-id-search-folder-id-sent-folder-id-server-failures-folder-id-shortcuts-folder-id-spooler-queue-folder-id-suggested-contacts-folder-id-sync-issues-folder-id-tasks-folder-id-todo-search-folder-id-tracked-mail-processing-folder-id-trash-folder-id-views-folder-id-object-id-from-folder-identifier-bytes-object-id-from-source-key-object-id-from-wire-id
   - external/crate-mapi-nspi-normalize-nspi-lookup-value-principal-legacy-dn-aliases
   - external/crate-mapi-properties-mapisortorder-mapivalue
-  - external/crate-mapi-rop-is-rpc-header-ext-rop-buffer-private-logon-response-logon-flags-public-folder-logon-response-logon-flags-read-rop-request-rpc-header-ext-payload-split-rop-buffer-cursor-roplogonrequest
+  - external/crate-mapi-rop-cursor-roplogonrequest-is-rpc-header-ext-rop-buffer-private-logon-response-logon-flags-public-folder-logon-response-logon-flags-read-rop-request-rpc-header-ext-payload-split-rop-buffer
   - external/crate-mapi-session-read-handle-table
   - external/crate-mapi-session-mapiobject-mapisession
   - external/crate-mapi-store-adapter-mapiaccessplan
   - external/crate-mapi-sync-private-logon-special-folder-ids
   - external/crate-mapi-tables-role-for-folder-id
-  - external/crate-mapi-transport-debug-payload-preview-hex-hex-preview-safe-header-mapiendpoint
+  - external/crate-mapi-transport-mapiendpoint-debug-payload-preview-hex-hex-preview-safe-header
   - external/crate-mapi-wire-ropid
   - external/super-max-rop-debug-entries
   - external/pub-super-use-associated-config
@@ -123,7 +123,6 @@ relationships:
 - `std::collections::HashMap`
 - `uuid::Uuid`
 - `crate::mapi::identity::{
-    object_id_from_folder_identifier_bytes, object_id_from_source_key, object_id_from_wire_id,
     ARCHIVE_FOLDER_ID, CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, CONFLICTS_FOLDER_ID,
     CONTACTS_FOLDER_ID, CONTACTS_SEARCH_FOLDER_ID, CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     CONVERSATION_HISTORY_FOLDER_ID, DEFERRED_ACTION_FOLDER_ID, DOCUMENT_LIBRARIES_FOLDER_ID,
@@ -134,20 +133,21 @@ relationships:
     SENT_FOLDER_ID, SERVER_FAILURES_FOLDER_ID, SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID,
     SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID,
     TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
+    object_id_from_folder_identifier_bytes, object_id_from_source_key, object_id_from_wire_id,
 }`
 - `crate::mapi::nspi::{normalize_nspi_lookup_value, principal_legacy_dn_aliases}`
 - `crate::mapi::properties::{MapiSortOrder, MapiValue}`
 - `crate::mapi::rop::{
-    is_rpc_header_ext_rop_buffer, private_logon_response_logon_flags,
+    Cursor, RopLogonRequest, is_rpc_header_ext_rop_buffer, private_logon_response_logon_flags,
     public_folder_logon_response_logon_flags, read_rop_request, rpc_header_ext_payload,
-    split_rop_buffer, Cursor, RopLogonRequest,
+    split_rop_buffer,
 }`
 - `crate::mapi::session::read_handle_table`
 - `crate::mapi::session::{MapiObject, MapiSession}`
 - `crate::mapi::store_adapter::MapiAccessPlan`
 - `crate::mapi::sync::PRIVATE_LOGON_SPECIAL_FOLDER_IDS`
 - `crate::mapi::tables::role_for_folder_id`
-- `crate::mapi::transport::{debug_payload_preview_hex, hex_preview, safe_header, MapiEndpoint}`
+- `crate::mapi::transport::{MapiEndpoint, debug_payload_preview_hex, hex_preview, safe_header}`
 - `crate::mapi::wire::RopId`
 - `super::MAX_ROP_DEBUG_ENTRIES`
 - `pub(super) use associated_config::*`

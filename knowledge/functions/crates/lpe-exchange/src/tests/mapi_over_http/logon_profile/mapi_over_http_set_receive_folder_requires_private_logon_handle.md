@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_set_receive_folder_requires_private_logon_handle
-resource: crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs#L1037-L1050
+resource: crates/lpe-exchange/src/tests/mapi_over_http/logon_profile.rs#L983-L996
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: saved_associated_config_getprops_uses_same_batch_saved_message
-resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3283-L3336
+resource: crates/lpe-exchange/src/mapi/rop/tests.rs#L3289-L3342
 visibility: private
 generated:
   by: okf-rs/0.3.0

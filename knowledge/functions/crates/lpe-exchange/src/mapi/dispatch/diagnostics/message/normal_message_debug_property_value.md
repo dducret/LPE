@@ -21,6 +21,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/tables/recipients/display_bcc
   - functions/crates/lpe-exchange/src/mapi/properties/message/uncompressed_rtf_body
   - functions/crates/lpe-exchange/src/mapi/properties/message/native_body_format
+  - functions/crates/lpe-exchange/src/mapi/properties/message/content_class_for_email
   - functions/crates/lpe-exchange/src/mapi/properties/message/email_property_value
   called_by:
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/common_views/format_inbox_view_descriptor_behavior_contract
@@ -52,6 +53,7 @@ relationships:
 - [display_bcc](../../../../../../../../functions/crates/lpe-exchange/src/mapi/tables/recipients/display_bcc.md)
 - [uncompressed_rtf_body](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/uncompressed_rtf_body.md)
 - [native_body_format](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/native_body_format.md)
+- [content_class_for_email](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/content_class_for_email.md)
 - [email_property_value](../../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/email_property_value.md)
 
 # Called by

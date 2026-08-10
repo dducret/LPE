@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: collaboration_items
-resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L1-L252
+resource: crates/lpe-exchange/src/mapi/tables/collaboration_items.rs#L1-L268
 generated:
   by: okf-rs/0.3.0
 relationships:

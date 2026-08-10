@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: contacts_view_handoff_table_contract_reports_no_unpersisted_default_view
-resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L681-L694
+resource: crates/lpe-exchange/src/mapi/dispatch/tests.rs#L685-L698
 visibility: private
 generated:
   by: okf-rs/0.3.0

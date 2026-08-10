@@ -8,6 +8,7 @@ generated:
 relationships:
   calls:
   - functions/crates/lpe-core/src/sieve/context
+  - functions/tools/rca_outlook_connectivity_check/execute
   - functions/crates/lpe-activesync/src/tests/query
   called_by:
   - functions/crates/lpe-storage/tests/outlook_cache_fidelity_update/run_update_scenarios
@@ -20,6 +21,7 @@ relationships:
 # Calls
 
 - [context](../../../../../functions/crates/lpe-core/src/sieve/context.md)
+- [execute](../../../../../functions/tools/rca_outlook_connectivity_check/execute.md)
 - [query](../../../../../functions/crates/lpe-activesync/src/tests/query.md)
 
 # Called by

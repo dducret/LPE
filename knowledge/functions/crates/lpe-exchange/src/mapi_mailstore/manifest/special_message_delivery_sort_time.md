@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: special_message_delivery_sort_time
-resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L182-L197
+resource: crates/lpe-exchange/src/mapi_mailstore/manifest.rs#L183-L198
 visibility: private
 generated:
   by: okf-rs/0.3.0
