@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_synchronization_import_message_change_response
-resource: crates/lpe-exchange/src/mapi/dispatch/sync_import_message.rs#L84-L641
+resource: crates/lpe-exchange/src/mapi/dispatch/sync_import_message.rs#L130-L631
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -24,9 +24,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_identity_from_properties
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_last_modification_filetime
-  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/merge_sync_predecessor_change_lists
-  - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_rfc3339_utc
-  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/imported_version_wins_last_writer
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction
   - functions/crates/lpe-exchange/src/mapi_mailstore/manifest/change_number_for_store_id
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/import_message_change_conflicts_with_current_pcl
   - functions/crates/lpe-exchange/src/mapi/properties/message/apply_canonical_message_property_values
@@ -67,9 +65,7 @@ relationships:
 - [event_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id.md)
 - [imported_event_identity_from_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_identity_from_properties.md)
 - [imported_event_last_modification_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_last_modification_filetime.md)
-- [merge_sync_predecessor_change_lists](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/merge_sync_predecessor_change_lists.md)
-- [filetime_from_rfc3339_utc](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/filetime_from_rfc3339_utc.md)
-- [imported_version_wins_last_writer](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/imported_version_wins_last_writer.md)
+- [imported_event_transaction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction.md)
 - [change_number_for_store_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_mailstore/manifest/change_number_for_store_id.md)
 - [import_message_change_conflicts_with_current_pcl](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/import_message_change_conflicts_with_current_pcl.md)
 - [apply_canonical_message_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/message/apply_canonical_message_property_values.md)

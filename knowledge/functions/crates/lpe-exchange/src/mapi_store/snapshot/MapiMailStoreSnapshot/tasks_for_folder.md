@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: tasks_for_folder
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1032-L1037
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1038-L1043
 generated:
   by: okf-rs/0.3.0
 relationships:

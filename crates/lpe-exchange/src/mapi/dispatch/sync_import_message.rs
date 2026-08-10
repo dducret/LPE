@@ -39,6 +39,52 @@ pub(super) fn imported_fai_identity(
     })
 }
 
+pub(super) fn imported_event_transaction(
+    event: &crate::mapi_store::MapiEvent,
+    mut imported_identity: MapiEventImportedIdentity,
+    imported_last_modification_time: u64,
+    fail_on_conflict: bool,
+) -> Result<MapiEventTransaction, u32> {
+    let relation = sync_import_version_relation(
+        &imported_identity.predecessor_change_list,
+        &event.version.predecessor_change_list,
+    )
+    .map_err(|_| 0x8004_0102u32)?;
+    let import_disposition = match relation {
+        SyncImportVersionRelation::Newer => MapiEventImportDisposition::Apply,
+        SyncImportVersionRelation::OlderOrSame => MapiEventImportDisposition::IgnoreOlderOrSame,
+        SyncImportVersionRelation::Conflict if fail_on_conflict => return Err(0x8004_0802),
+        SyncImportVersionRelation::Conflict => {
+            imported_identity.predecessor_change_list = merge_sync_predecessor_change_lists(
+                &event.version.predecessor_change_list,
+                &imported_identity.predecessor_change_list,
+            )
+            .map_err(|_| 0x8004_0102u32)?;
+            let current_last_modification_time =
+                mapi_mailstore::filetime_from_rfc3339_utc(&event.version.updated_at);
+            if imported_version_wins_last_writer(
+                imported_last_modification_time,
+                &imported_identity.change_key,
+                current_last_modification_time,
+                &event.version.change_key,
+            )
+            .map_err(|_| 0x8004_0102u32)?
+            {
+                MapiEventImportDisposition::Apply
+            } else {
+                imported_identity.change_key = event.version.change_key.clone();
+                MapiEventImportDisposition::KeepServerContent
+            }
+        }
+    };
+    let mut transaction = MapiEventTransaction::new(0x01, event.version.canonical_modseq);
+    transaction.import_disposition = import_disposition;
+    if import_disposition != MapiEventImportDisposition::IgnoreOlderOrSame {
+        transaction.imported_identity = Some(imported_identity);
+    }
+    Ok(transaction)
+}
+
 fn imported_contact_identity(
     properties: &HashMap<u32, MapiValue>,
     imported_message_id: u64,
@@ -263,7 +309,7 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
     if message_id != 0 {
         if let Some(event) = snapshot.event_for_id(folder_id, message_id) {
             let properties = property_values.into_iter().collect::<HashMap<_, _>>();
-            let mut imported_identity = match imported_event_identity_from_properties(&properties) {
+            let imported_identity = match imported_event_identity_from_properties(&properties) {
                 Ok(Some(identity)) => identity,
                 Ok(None) | Err(_) => {
                     responses.extend_from_slice(&rop_error_response(
@@ -294,80 +340,22 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                 ));
                 return;
             }
-            let relation = match sync_import_version_relation(
-                &imported_identity.predecessor_change_list,
-                &event.version.predecessor_change_list,
+            let transaction = match imported_event_transaction(
+                event,
+                imported_identity,
+                imported_last_modification_time,
+                import_flag & 0x40 != 0,
             ) {
-                Ok(relation) => relation,
-                Err(_) => {
+                Ok(transaction) => transaction,
+                Err(error) => {
                     responses.extend_from_slice(&rop_error_response(
                         0x72,
                         request.response_handle_index(),
-                        0x8004_0102,
+                        error,
                     ));
                     return;
                 }
             };
-            let import_disposition = match relation {
-                SyncImportVersionRelation::Newer => MapiEventImportDisposition::Apply,
-                SyncImportVersionRelation::OlderOrSame => {
-                    MapiEventImportDisposition::IgnoreOlderOrSame
-                }
-                SyncImportVersionRelation::Conflict if import_flag & 0x40 != 0 => {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x72,
-                        request.response_handle_index(),
-                        0x8004_0802,
-                    ));
-                    return;
-                }
-                SyncImportVersionRelation::Conflict => {
-                    let merged_pcl = match merge_sync_predecessor_change_lists(
-                        &event.version.predecessor_change_list,
-                        &imported_identity.predecessor_change_list,
-                    ) {
-                        Ok(pcl) => pcl,
-                        Err(_) => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x72,
-                                request.response_handle_index(),
-                                0x8004_0102,
-                            ));
-                            return;
-                        }
-                    };
-                    let current_last_modification_time =
-                        mapi_mailstore::filetime_from_rfc3339_utc(&event.version.updated_at);
-                    let imported_wins = match imported_version_wins_last_writer(
-                        imported_last_modification_time,
-                        &imported_identity.change_key,
-                        current_last_modification_time,
-                        &event.version.change_key,
-                    ) {
-                        Ok(imported_wins) => imported_wins,
-                        Err(_) => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x72,
-                                request.response_handle_index(),
-                                0x8004_0102,
-                            ));
-                            return;
-                        }
-                    };
-                    imported_identity.predecessor_change_list = merged_pcl;
-                    if imported_wins {
-                        MapiEventImportDisposition::Apply
-                    } else {
-                        imported_identity.change_key = event.version.change_key.clone();
-                        MapiEventImportDisposition::KeepServerContent
-                    }
-                }
-            };
-            let mut transaction = MapiEventTransaction::new(0x01, event.version.canonical_modseq);
-            transaction.import_disposition = import_disposition;
-            if import_disposition != MapiEventImportDisposition::IgnoreOlderOrSame {
-                transaction.imported_identity = Some(imported_identity);
-            }
             let handle = session.allocate_output_handle(
                 request.output_handle_index,
                 MapiObject::Event {
@@ -610,12 +598,14 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                 properties: property_values.into_iter().collect(),
                 recipients: Vec::new(),
                 recipients_modified: false,
+                fail_on_conflict: import_flag & 0x40 != 0,
             },
             None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
                 folder_id,
                 properties: property_values.into_iter().collect(),
                 recipients: Vec::new(),
                 recipients_modified: false,
+                fail_on_conflict: import_flag & 0x40 != 0,
             },
             _ if folder_id == NOTES_FOLDER_ID => MapiObject::PendingNote {
                 folder_id,

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_unknown_sync_type_terminates_current_buffer
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L17190-L17211
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L17264-L17285
 visibility: private
 generated:
   by: okf-rs/0.3.0

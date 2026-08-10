@@ -167,6 +167,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_binary_decode
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/format_inbox_folder_type_getprops_response_context
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/imported_event_global_object_id
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_identity_from_properties
   - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_last_modification_filetime
@@ -1001,6 +1002,7 @@ relationships:
 - [mapi_value_debug_binary_decode](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_binary_decode.md)
 - [format_inbox_folder_type_getprops_response_context](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/format_inbox_folder_type_getprops_response_context.md)
 - [save_pending_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event.md)
+- [imported_event_global_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/imported_event_global_object_id.md)
 - [save_existing_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event.md)
 - [imported_event_identity_from_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_identity_from_properties.md)
 - [imported_event_last_modification_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_last_modification_filetime.md)

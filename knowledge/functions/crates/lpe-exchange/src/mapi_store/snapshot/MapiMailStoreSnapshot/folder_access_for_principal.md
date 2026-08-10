@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: folder_access_for_principal
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1566-L1594
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1572-L1600
 generated:
   by: okf-rs/0.3.0
 relationships:

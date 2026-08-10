@@ -13,6 +13,7 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
     properties: HashMap<u32, MapiValue>,
     recipients: Vec<PendingRecipient>,
     recipients_modified: bool,
+    fail_on_conflict: bool,
 ) {
     let imported_identity = match imported_event_identity_from_properties(&properties) {
         Ok(identity) => identity,
@@ -54,6 +55,65 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
                 return;
             }
         };
+    if let (Some(mut imported_identity), Some(uid)) = (
+        imported_identity.clone(),
+        imported_event_global_object_id(&properties),
+    ) {
+        if let Some(event) = snapshot.event_for_uid(folder_id, &uid).cloned() {
+            let imported_last_modification_time =
+                match imported_event_last_modification_filetime(&properties) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x0C,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        return;
+                    }
+                };
+            // Outlook can upload an existing appointment under a remapped local
+            // MID. The Global Object ID identifies the appointment; its durable
+            // SourceKey remains the server's identity and CK/PCL still decide
+            // whether this imported version may change canonical content.
+            imported_identity.source_key = event.source_key.clone();
+            let mut transaction = match imported_event_transaction(
+                &event,
+                imported_identity,
+                imported_last_modification_time,
+                fail_on_conflict,
+            ) {
+                Ok(transaction) => transaction,
+                Err(error) => {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x0C,
+                        request.response_handle_index(),
+                        error,
+                    ));
+                    return;
+                }
+            };
+            transaction.pending_properties = imported_event_content_properties(&properties);
+            if recipients_modified {
+                transaction.pending_recipients = Some(recipients);
+            }
+            save_existing_event(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+                handle,
+                folder_id,
+                event.id,
+                transaction,
+            )
+            .await;
+            return;
+        }
+    }
     let mut input = match event_input_from_mapi(
         principal.account_id,
         None,
@@ -149,6 +209,37 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
             0x8000_4005,
         )),
     }
+}
+
+fn imported_event_global_object_id(properties: &HashMap<u32, MapiValue>) -> Option<String> {
+    properties
+        .get(&PID_LID_GLOBAL_OBJECT_ID_TAG)
+        .or_else(|| properties.get(&PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG))
+        .and_then(|value| match value {
+            MapiValue::Binary(value) => Some(format!(
+                "mapi-goid:{}",
+                lpe_domain::crypto::hex_lower(value)
+            )),
+            _ => None,
+        })
+}
+
+fn imported_event_content_properties(
+    properties: &HashMap<u32, MapiValue>,
+) -> HashMap<u32, MapiValue> {
+    properties
+        .iter()
+        .filter(|(tag, _)| {
+            !matches!(
+                **tag,
+                PID_TAG_SOURCE_KEY
+                    | PID_TAG_CHANGE_KEY
+                    | PID_TAG_PREDECESSOR_CHANGE_LIST
+                    | PID_TAG_LAST_MODIFICATION_TIME
+            )
+        })
+        .map(|(tag, value)| (*tag, value.clone()))
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]

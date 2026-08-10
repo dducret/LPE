@@ -9,6 +9,7 @@ relationships:
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   - functions/crates/lpe-activesync/src/protocol/WbxmlCodePage/tryfrom-u8/try_from
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response
 ---
 
@@ -23,4 +24,5 @@ relationships:
 
 # Called by
 
+- [save_pending_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event.md)
 - [append_synchronization_import_message_change_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: rules
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1272-L1274
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1278-L1280
 generated:
   by: okf-rs/0.3.0
 relationships:

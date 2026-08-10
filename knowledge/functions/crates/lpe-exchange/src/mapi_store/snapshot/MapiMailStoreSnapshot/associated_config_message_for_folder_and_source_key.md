@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: associated_config_message_for_folder_and_source_key
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1457-L1469
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1463-L1475
 generated:
   by: okf-rs/0.3.0
 relationships:

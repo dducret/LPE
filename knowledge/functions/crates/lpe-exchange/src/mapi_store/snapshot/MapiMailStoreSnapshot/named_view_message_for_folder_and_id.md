@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: named_view_message_for_folder_and_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1350-L1358
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1356-L1364
 generated:
   by: okf-rs/0.3.0
 relationships:

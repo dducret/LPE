@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: task_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1182-L1198
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1188-L1204
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -8,6 +8,7 @@ relationships:
   calls:
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_conflicts/predecessor_map_includes
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response
 ---
 
@@ -21,4 +22,5 @@ relationships:
 
 # Called by
 
+- [imported_event_transaction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction.md)
 - [append_synchronization_import_message_change_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response.md)

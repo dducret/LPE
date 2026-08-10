@@ -1029,6 +1029,12 @@ impl MapiMailStoreSnapshot {
             .find(|event| event.folder_id == folder_id && mapi_event_id_matches(event, item_id))
     }
 
+    pub(crate) fn event_for_uid(&self, folder_id: u64, uid: &str) -> Option<&MapiEvent> {
+        self.events
+            .iter()
+            .find(|event| event.folder_id == folder_id && event.event.uid == uid)
+    }
+
     pub(crate) fn tasks_for_folder(&self, folder_id: u64) -> Vec<&MapiTask> {
         self.tasks
             .iter()

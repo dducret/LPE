@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: stage_message_property_values
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L348-L383
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L350-L385
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: execute_existing_calendar_sync_import
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L13297-L13389
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L13297-L13398
 visibility: private
 generated:
   by: okf-rs/0.3.0
@@ -24,6 +24,7 @@ relationships:
   - functions/crates/lpe-exchange/src/tests/response_rops_from_execute_response
   called_by:
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subject
+  - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_save
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_fail_on_conflict_returns_sync_conflict
   - functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_lists
@@ -32,7 +33,7 @@ relationships:
 
 # Signature
 
-`async fn execute_existing_calendar_sync_import( store: FakeStore, source_key: &[u8], last_modification_time: i64, change_key: &[u8], predecessor_change_list: &[u8], import_flag: u8, subject: Option<&str>, request_transfer_state: bool, ) -> Vec<u8>`
+`async fn execute_existing_calendar_sync_import( store: FakeStore, source_key: &[u8], last_modification_time: i64, change_key: &[u8], predecessor_change_list: &[u8], import_flag: u8, global_object_id: Option<&[u8]>, subject: Option<&str>, request_transfer_state: bool, ) -> Vec<u8>`
 
 # Calls
 
@@ -55,6 +56,7 @@ relationships:
 # Called by
 
 - [mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subject](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subject.md)
+- [mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id.md)
 - [mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_save](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_save.md)
 - [mapi_over_http_calendar_sync_import_fail_on_conflict_returns_sync_conflict](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_fail_on_conflict_returns_sync_conflict.md)
 - [mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_lists](../../../../../../../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_lists.md)

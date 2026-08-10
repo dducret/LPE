@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_save_changes_message_response
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L214-L243
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L216-L245
 generated:
   by: okf-rs/0.3.0
 relationships:

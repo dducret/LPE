@@ -472,6 +472,7 @@ pub(in crate::mapi) enum MapiObject {
         properties: HashMap<u32, MapiValue>,
         recipients: Vec<PendingRecipient>,
         recipients_modified: bool,
+        fail_on_conflict: bool,
     },
     PendingTask {
         folder_id: u64,

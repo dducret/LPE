@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: todo_search_message_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1072-L1076
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1078-L1082
 generated:
   by: okf-rs/0.3.0
 relationships:

@@ -6,7 +6,7 @@ generated:
   by: okf-rs/0.3.0
 relationships:
   called_by:
-  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction
 ---
 
 # Signature
@@ -15,4 +15,4 @@ relationships:
 
 # Called by
 
-- [append_synchronization_import_message_change_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response.md)
+- [imported_event_transaction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction.md)

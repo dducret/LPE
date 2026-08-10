@@ -1,7 +1,7 @@
 ---
 type: Rust Module
 title: snapshot
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1-L1619
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1-L1625
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -77,6 +77,7 @@ relationships:
 - [contact_for_id](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/contact_for_id.md)
 - [events_for_folder](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/events_for_folder.md)
 - [event_for_id](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id.md)
+- [event_for_uid](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_uid.md)
 - [tasks_for_folder](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/tasks_for_folder.md)
 - [todo_search_results](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/todo_search_results.md)
 - [todo_search_messages](../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/todo_search_messages.md)

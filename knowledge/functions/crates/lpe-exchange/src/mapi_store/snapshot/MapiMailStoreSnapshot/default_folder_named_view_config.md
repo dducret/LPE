@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: default_folder_named_view_config
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1370-L1384
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1376-L1390
 generated:
   by: okf-rs/0.3.0
 relationships:

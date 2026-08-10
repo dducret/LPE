@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: append_set_read_flags_response
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L844-L953
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L846-L955
 generated:
   by: okf-rs/0.3.0
 relationships:

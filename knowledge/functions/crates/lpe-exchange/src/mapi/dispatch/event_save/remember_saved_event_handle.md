@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: remember_saved_event_handle
-resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L345-L366
+resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L436-L457
 visibility: private
 generated:
   by: okf-rs/0.3.0

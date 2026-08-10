@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: folder_handle_for_id
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L306-L346
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L308-L348
 visibility: private
 generated:
   by: okf-rs/0.3.0

@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: imported_contact_identity
-resource: crates/lpe-exchange/src/mapi/dispatch/sync_import_message.rs#L42-L56
+resource: crates/lpe-exchange/src/mapi/dispatch/sync_import_message.rs#L88-L102
 visibility: private
 generated:
   by: okf-rs/0.3.0

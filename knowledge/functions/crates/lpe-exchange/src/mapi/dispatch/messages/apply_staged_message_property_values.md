@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: apply_staged_message_property_values
-resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L385-L438
+resource: crates/lpe-exchange/src/mapi/dispatch/messages.rs#L387-L440
 generated:
   by: okf-rs/0.3.0
 relationships:

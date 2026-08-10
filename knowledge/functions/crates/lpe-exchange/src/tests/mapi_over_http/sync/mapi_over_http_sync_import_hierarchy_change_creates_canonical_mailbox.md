@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15252-L15429
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15326-L15503
 visibility: private
 generated:
   by: okf-rs/0.3.0

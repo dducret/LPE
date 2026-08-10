@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: current_common_views_fai_identity
-resource: crates/lpe-exchange/src/mapi/dispatch/sync_import_message.rs#L58-L82
+resource: crates/lpe-exchange/src/mapi/dispatch/sync_import_message.rs#L104-L128
 visibility: private
 generated:
   by: okf-rs/0.3.0

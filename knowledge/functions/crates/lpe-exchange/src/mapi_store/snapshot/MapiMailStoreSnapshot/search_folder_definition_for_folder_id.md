@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: search_folder_definition_for_folder_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1239-L1252
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1245-L1258
 generated:
   by: okf-rs/0.3.0
 relationships:

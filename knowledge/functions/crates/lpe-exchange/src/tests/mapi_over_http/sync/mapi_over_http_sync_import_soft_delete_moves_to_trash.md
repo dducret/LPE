@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_soft_delete_moves_to_trash
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L14998-L15098
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L15072-L15172
 visibility: private
 generated:
   by: okf-rs/0.3.0

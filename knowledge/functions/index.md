@@ -2850,6 +2850,8 @@
 - [mapi_value_debug_string](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_string.md) — Rust Function
 - [mapi_value_debug_u32](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_u32.md) — Rust Function
 - [mapi_value_debug_u32_from_value](../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/values/mapi_value_debug_u32_from_value.md) — Rust Function
+- [imported_event_content_properties](../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/imported_event_content_properties.md) — Rust Function
+- [imported_event_global_object_id](../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/imported_event_global_object_id.md) — Rust Function
 - [remember_saved_event_handle](../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/remember_saved_event_handle.md) — Rust Function
 - [save_existing_event](../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event.md) — Rust Function
 - [save_pending_event](../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event.md) — Rust Function
@@ -3229,6 +3231,7 @@
 - [append_synchronization_import_message_change_response](../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response.md) — Rust Function
 - [current_common_views_fai_identity](../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/current_common_views_fai_identity.md) — Rust Function
 - [imported_contact_identity](../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_contact_identity.md) — Rust Function
+- [imported_event_transaction](../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction.md) — Rust Function
 - [imported_fai_identity](../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_fai_identity.md) — Rust Function
 - [append_synchronization_import_message_move_response](../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message_move/append_synchronization_import_message_move_response.md) — Rust Function
 - [completed_message_move_replay_identity](../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message_move/completed_message_move_replay_identity.md) — Rust Function
@@ -6616,6 +6619,7 @@
 - [durable_identity_records](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/durable_identity_records.md) — Rust Method
 - [emails](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/emails.md) — Rust Method
 - [event_for_id](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_id.md) — Rust Method
+- [event_for_uid](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_uid.md) — Rust Method
 - [events_for_folder](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/events_for_folder.md) — Rust Method
 - [folder_access_for_principal](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/folder_access_for_principal.md) — Rust Method
 - [folder_change_number](../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/folder_change_number.md) — Rust Method
@@ -8671,6 +8675,7 @@
 - [mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_lists](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_lists.md) — Rust Function
 - [mapi_over_http_calendar_sync_import_fail_on_conflict_returns_sync_conflict](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_fail_on_conflict_returns_sync_conflict.md) — Rust Function
 - [mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_save](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_save.md) — Rust Function
+- [mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id.md) — Rust Function
 - [mapi_over_http_chain_packs_terminal_fast_transfer_get_buffer_until_done](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_chain_packs_terminal_fast_transfer_get_buffer_until_done.md) — Rust Function
 - [mapi_over_http_common_views_accepts_outlook_calendar_group_header_without_group_name](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_accepts_outlook_calendar_group_header_without_group_name.md) — Rust Function
 - [mapi_over_http_common_views_create_associated_navigation_shortcut_persists](../functions/crates/lpe-exchange/src/tests/mapi_over_http/sync/mapi_over_http_common_views_create_associated_navigation_shortcut_persists.md) — Rust Function

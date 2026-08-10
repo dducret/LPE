@@ -11,7 +11,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/conversation_action_properties
   - functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/normal_message_debug_property_value
   - functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/rop_property_restriction
-  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction
   - functions/crates/lpe-exchange/src/mapi/properties/conversation_action_property_value
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_reminder_property_value
@@ -94,7 +94,7 @@ relationships:
 - [conversation_action_properties](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/conversation_actions/conversation_action_properties.md)
 - [normal_message_debug_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/diagnostics/message/normal_message_debug_property_value.md)
 - [rop_property_restriction](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/search_folders/rop_property_restriction.md)
-- [append_synchronization_import_message_change_response](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/append_synchronization_import_message_change_response.md)
+- [imported_event_transaction](../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction.md)
 - [conversation_action_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/conversation_action_property_value.md)
 - [event_property_value_with_optional_version](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_property_value_with_optional_version.md)
 - [event_reminder_property_value](../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_reminder_property_value.md)

@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: reminder_tasks
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1122-L1138
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1128-L1144
 generated:
   by: okf-rs/0.3.0
 relationships:

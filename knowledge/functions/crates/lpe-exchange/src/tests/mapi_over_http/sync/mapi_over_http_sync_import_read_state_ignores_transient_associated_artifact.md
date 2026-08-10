@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_read_state_ignores_transient_associated_artifact
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L14767-L14810
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L14841-L14884
 visibility: private
 generated:
   by: okf-rs/0.3.0

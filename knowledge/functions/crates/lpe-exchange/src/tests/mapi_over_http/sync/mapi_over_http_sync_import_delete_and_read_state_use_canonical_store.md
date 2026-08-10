@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: mapi_over_http_sync_import_delete_and_read_state_use_canonical_store
-resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L13784-L13860
+resource: crates/lpe-exchange/src/tests/mapi_over_http/sync.rs#L13858-L13934
 visibility: private
 generated:
   by: okf-rs/0.3.0

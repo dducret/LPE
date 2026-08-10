@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: save_pending_event
-resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L3-L152
+resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L3-L212
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -12,6 +12,12 @@ relationships:
   - functions/LPE-CT/web/app/smoke/test/MockFormData/get
   - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id
   - functions/crates/lpe-exchange/src/mapi/properties/reminders/split_reminder_property_values
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/imported_event_global_object_id
+  - functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_uid
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_last_modification_filetime
+  - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/imported_event_content_properties
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/event_input_from_mapi
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_for_mapping
   - functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients
@@ -33,7 +39,7 @@ relationships:
 
 # Signature
 
-`pub(super) async fn save_pending_event<S: ExchangeStore>( store: &S, principal: &AccountPrincipal, session: &mut MapiSession, handle_slots: &mut Vec<u32>, request: &RopRequest, snapshot: &mut MapiMailStoreSnapshot, responses: &mut Vec<u8>, handle: u32, folder_id: u64, properties: HashMap<u32, MapiValue>, recipients: Vec<PendingRecipient>, recipients_modified: bool, )`
+`pub(super) async fn save_pending_event<S: ExchangeStore>( store: &S, principal: &AccountPrincipal, session: &mut MapiSession, handle_slots: &mut Vec<u32>, request: &RopRequest, snapshot: &mut MapiMailStoreSnapshot, responses: &mut Vec<u8>, handle: u32, folder_id: u64, properties: HashMap<u32, MapiValue>, recipients: Vec<PendingRecipient>, recipients_modified: bool, fail_on_conflict: bool, )`
 
 # Calls
 
@@ -43,6 +49,12 @@ relationships:
 - [get](../../../../../../../functions/LPE-CT/web/app/smoke/test/MockFormData/get.md)
 - [collaboration_folder_for_id](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/collaboration_folder_for_id.md)
 - [split_reminder_property_values](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/reminders/split_reminder_property_values.md)
+- [imported_event_global_object_id](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/imported_event_global_object_id.md)
+- [event_for_uid](../../../../../../../functions/crates/lpe-exchange/src/mapi_store/snapshot/MapiMailStoreSnapshot/event_for_uid.md)
+- [imported_event_last_modification_filetime](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_transactions/imported_event_last_modification_filetime.md)
+- [imported_event_transaction](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/sync_import_message/imported_event_transaction.md)
+- [imported_event_content_properties](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/imported_event_content_properties.md)
+- [save_existing_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_existing_event.md)
 - [event_input_from_mapi](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/event_input_from_mapi.md)
 - [default_event_for_mapping](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/default_event_for_mapping.md)
 - [apply_calendar_pending_recipients](../../../../../../../functions/crates/lpe-exchange/src/mapi/properties/calendar/apply_calendar_pending_recipients.md)

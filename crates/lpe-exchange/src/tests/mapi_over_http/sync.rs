@@ -13301,6 +13301,7 @@ async fn execute_existing_calendar_sync_import(
     change_key: &[u8],
     predecessor_change_list: &[u8],
     import_flag: u8,
+    global_object_id: Option<&[u8]>,
     subject: Option<&str>,
     request_transfer_state: bool,
 ) -> Vec<u8> {
@@ -13358,10 +13359,18 @@ async fn execute_existing_calendar_sync_import(
     ];
     rops.extend_from_slice(&4u16.to_le_bytes());
     rops.extend_from_slice(&import_values);
-    if let Some(subject) = subject {
+    if global_object_id.is_some() || subject.is_some() {
         let mut update_values = Vec::new();
-        append_mapi_utf16_property(&mut update_values, PID_TAG_SUBJECT_W, subject);
-        append_rop_set_properties(&mut rops, 2, 1, &update_values);
+        let mut update_property_count = 0;
+        if let Some(global_object_id) = global_object_id {
+            append_mapi_binary_property(&mut update_values, 0x8001_0102, global_object_id);
+            update_property_count += 1;
+        }
+        if let Some(subject) = subject {
+            append_mapi_utf16_property(&mut update_values, PID_TAG_SUBJECT_W, subject);
+            update_property_count += 1;
+        }
+        append_rop_set_properties(&mut rops, 2, update_property_count, &update_values);
         append_rop_save_changes_message_with_flags(&mut rops, 2, 2, 0x08);
     }
     if request_transfer_state {
@@ -13423,6 +13432,7 @@ async fn mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subje
         &client_change_key,
         &client_pcl,
         0,
+        None,
         Some("Café avec neuchatel"),
         false,
     )
@@ -13436,6 +13446,66 @@ async fn mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subje
     assert_eq!(version.predecessor_change_list, client_pcl);
     let metrics_after = crate::mapi::mapi_calendar_event_save_metrics();
     assert!(metrics_after.ics_applied_total >= metrics_before.ics_applied_total + 1);
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id() {
+    // Outlook can reimport a downloaded appointment under a different local MID.
+    // [MS-OXOCAL] section 2.2.1.3 identifies the appointment by its Global
+    // Object ID, while [MS-OXCFXICS] section 3.1.5.6.1 still governs CK/PCL.
+    let event_id = Uuid::parse_str("20260717-1012-4078-8000-000000000306").unwrap();
+    let message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8036);
+    let remapped_message_id = crate::mapi::identity::mapi_store_id(0x0df8_974b_8037);
+    let remapped_source_key = crate::mapi::identity::source_key_for_object_id(remapped_message_id);
+    let server_change_key = calendar_sync_conflict_xid(0x31, 20);
+    let client_change_key = calendar_sync_conflict_xid(0x31, 21);
+    let server_pcl = calendar_sync_conflict_pcl(&[&server_change_key]);
+    let client_pcl = calendar_sync_conflict_pcl(&[&client_change_key]);
+    let store = calendar_sync_conflict_store(
+        event_id,
+        message_id,
+        server_change_key,
+        server_pcl,
+        "2026-07-17T10:00:00Z",
+    );
+    let global_object_id = vec![0x04; 24];
+    store.events.lock().unwrap()[0].uid = format!(
+        "mapi-goid:{}",
+        lpe_domain::crypto::hex_lower(&global_object_id)
+    );
+    let events = store.events.clone();
+    let identities = store.mapi_identities.clone();
+    let source_keys = store.mapi_identity_source_keys.clone();
+    let versions = store.mapi_event_identity_versions.clone();
+
+    let response = execute_existing_calendar_sync_import(
+        store,
+        &remapped_source_key,
+        test_filetime("2026-07-17", "11:00"),
+        &client_change_key,
+        &client_pcl,
+        0,
+        Some(&global_object_id),
+        Some("Probe B - web update - outlook update"),
+        false,
+    )
+    .await;
+
+    assert!(contains_bytes(&response, &[0x72, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response, &[0x0c, 0x02, 0, 0, 0, 0]));
+    assert_eq!(events.lock().unwrap().as_slice().len(), 1);
+    assert_eq!(
+        events.lock().unwrap()[0].title,
+        "Probe B - web update - outlook update"
+    );
+    assert_eq!(identities.lock().unwrap()[&event_id], message_id);
+    assert_eq!(
+        source_keys.lock().unwrap()[&event_id],
+        crate::mapi::identity::source_key_for_object_id(message_id)
+    );
+    let version = versions.lock().unwrap()[&event_id].clone();
+    assert_eq!(version.change_key, client_change_key);
+    assert_eq!(version.predecessor_change_list, client_pcl);
 }
 
 #[tokio::test]
@@ -13467,6 +13537,7 @@ async fn mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_
         &client_change_key,
         &client_pcl,
         0,
+        None,
         Some("Older client version"),
         false,
     )
@@ -13513,6 +13584,7 @@ async fn mapi_over_http_calendar_sync_import_fail_on_conflict_returns_sync_confl
         &client_pcl,
         0x40,
         None,
+        None,
         false,
     )
     .await;
@@ -13554,6 +13626,7 @@ async fn mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_li
         &client_change_key,
         &client_pcl,
         0,
+        None,
         Some("Resolved client version"),
         true,
     )
@@ -13602,6 +13675,7 @@ async fn mapi_over_http_calendar_sync_import_conflict_keeps_the_newer_server_con
         &client_change_key,
         &client_pcl,
         0,
+        None,
         Some("Losing client version"),
         false,
     )

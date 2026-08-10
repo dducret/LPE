@@ -1,7 +1,7 @@
 ---
 type: Rust Function
 title: save_existing_event
-resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L155-L343
+resource: crates/lpe-exchange/src/mapi/dispatch/event_save.rs#L246-L434
 generated:
   by: okf-rs/0.3.0
 relationships:
@@ -26,6 +26,7 @@ relationships:
   - functions/crates/lpe-exchange/src/mapi/notifications/MapiNotificationEvent/content
   - functions/crates/lpe-exchange/src/mapi/dispatch/sync_import/record_sync_upload_content_change
   called_by:
+  - functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event
   - functions/crates/lpe-exchange/src/mapi/dispatch/message_save/append_save_changes_message_route_response
 ---
 
@@ -57,4 +58,5 @@ relationships:
 
 # Called by
 
+- [save_pending_event](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/event_save/save_pending_event.md)
 - [append_save_changes_message_route_response](../../../../../../../functions/crates/lpe-exchange/src/mapi/dispatch/message_save/append_save_changes_message_route_response.md)

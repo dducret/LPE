@@ -1,7 +1,7 @@
 ---
 type: Rust Method
 title: navigation_shortcut_table_message_for_id
-resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1336-L1341
+resource: crates/lpe-exchange/src/mapi_store/snapshot.rs#L1342-L1347
 generated:
   by: okf-rs/0.3.0
 relationships:
