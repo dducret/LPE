@@ -300,6 +300,7 @@ pub(in crate::service) fn parse_create_message_input(
         size_octets: message.len() as i64,
         unread: Some(false),
         flagged: Some(false),
+        replace_attachments: false,
         attachments: Vec::new(),
     })
 }

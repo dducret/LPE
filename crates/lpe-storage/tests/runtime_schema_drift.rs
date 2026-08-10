@@ -2401,6 +2401,7 @@ async fn exercise_submission_path(
                 size_octets: 128,
                 unread: Some(false),
                 flagged: Some(false),
+                replace_attachments: false,
                 attachments: Vec::new(),
             },
             audit(
@@ -3667,6 +3668,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
                 size_octets: 128,
                 unread: Some(false),
                 flagged: Some(true),
+                replace_attachments: false,
                 attachments: Vec::new(),
             },
             audit("alice@example.test", "mapi-save-draft", "MAPI draft gate"),
@@ -3799,6 +3801,7 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
                 size_octets: 256,
                 unread: Some(false),
                 flagged: Some(false),
+                replace_attachments: false,
                 attachments: vec![AttachmentUploadInput {
                     file_name: "mapi-gate.pdf".to_string(),
                     media_type: "application/pdf".to_string(),

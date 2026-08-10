@@ -383,6 +383,7 @@ pub(crate) fn build_smtp_submission_input_for_owner(
         size_octets: request.raw_message.len() as i64,
         unread: Some(false),
         flagged: Some(false),
+        replace_attachments: false,
         attachments: parsed.attachments,
     }
 }

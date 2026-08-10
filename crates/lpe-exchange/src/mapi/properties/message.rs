@@ -609,6 +609,7 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
         size_octets: pending_message_size(properties),
         unread: Some(false),
         flagged: Some(false),
+        replace_attachments: false,
         attachments,
     }
 }
@@ -787,6 +788,7 @@ pub(in crate::mapi) fn mapi_submit_from_email(
         size_octets: i64::try_from(email.size_octets).unwrap_or(i64::MAX),
         unread: Some(email.unread),
         flagged: Some(email.flagged),
+        replace_attachments: false,
         attachments,
     }
 }

@@ -86,6 +86,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     size_octets: mime_payload.len() as i64,
                     unread: Some(false),
                     flagged: Some(false),
+                    replace_attachments: false,
                     attachments: parsed.attachments,
                 },
                 AuditEntryInput {
@@ -208,6 +209,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     size_octets: mime_payload.len() as i64,
                     unread: Some(false),
                     flagged: Some(false),
+                    replace_attachments: false,
                     attachments,
                 },
                 AuditEntryInput {

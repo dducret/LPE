@@ -410,6 +410,7 @@ pub(crate) fn merged_draft_input(
         size_octets: existing.size_octets,
         unread: Some(existing.unread),
         flagged: Some(existing.flagged),
+        replace_attachments: false,
         attachments: Vec::new(),
     }
 }
@@ -457,6 +458,7 @@ pub(crate) fn draft_input_from_application_data(
         size_octets: 0,
         unread: Some(false),
         flagged: Some(false),
+        replace_attachments: false,
         attachments: Vec::new(),
     }
 }

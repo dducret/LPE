@@ -1196,6 +1196,7 @@ async fn mapi_message_mutations_rotate_durable_mapi_version_without_rekeying_ide
                 size_octets: 0,
                 unread: Some(false),
                 flagged: Some(false),
+                replace_attachments: false,
                 attachments: Vec::new(),
             },
             AuditEntryInput {

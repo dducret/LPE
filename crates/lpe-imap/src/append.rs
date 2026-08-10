@@ -121,6 +121,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                         size_octets: literal.len() as i64,
                         unread: Some(false),
                         flagged: Some(false),
+                        replace_attachments: false,
                         attachments: parsed.attachments,
                     },
                     AuditEntryInput {

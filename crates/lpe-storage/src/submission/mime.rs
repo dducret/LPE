@@ -95,6 +95,7 @@ mod tests {
             size_octets: 6,
             unread: None,
             flagged: None,
+            replace_attachments: false,
             attachments: Vec::new(),
         }
     }

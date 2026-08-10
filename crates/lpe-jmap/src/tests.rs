@@ -24,8 +24,9 @@ use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_storage::mail::parse_rfc822_message;
 use lpe_storage::{
     serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
-    AttachmentUploadInput, AuditEntryInput, CalendarOrganizerMetadata, CalendarParticipantMetadata,
-    CalendarParticipantsMetadata, CanonicalChangeCategory, CanonicalChangeReplay,
+    ActiveSyncAttachment, AttachmentUploadInput, AuditEntryInput, CalendarOrganizerMetadata,
+    CalendarParticipantMetadata, CalendarParticipantsMetadata, CanonicalChangeCategory,
+    CanonicalChangeReplay,
     CanonicalPushChangeSet, ClientContact, ClientEvent, ClientTaskList, CollaborationCollection,
     CollaborationRights, CreateTaskListInput, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapMailboxCreateInput,
@@ -68,12 +69,17 @@ struct FakeStore {
     shares: Arc<Mutex<Vec<Value>>>,
     uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
     raw_message_blobs: Arc<Mutex<HashMap<Uuid, JmapUploadBlob>>>,
+    message_attachments: Arc<Mutex<HashMap<Uuid, Vec<ActiveSyncAttachment>>>>,
+    message_attachment_blobs: Arc<Mutex<HashMap<String, JmapUploadBlob>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
     updated_mailboxes: Arc<Mutex<Vec<JmapMailboxUpdateInput>>>,
     active_sieve_script: Arc<Mutex<Option<String>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     copied_emails: Arc<Mutex<HashMap<Uuid, Vec<JmapEmail>>>>,
+    updated_email_flags: Arc<Mutex<Vec<(Uuid, Option<bool>, Option<bool>)>>>,
+    deleted_emails: Arc<Mutex<Vec<Uuid>>>,
+    deleted_email_memberships: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
     submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
     submitted_draft_actors: Arc<Mutex<Vec<Uuid>>>,
     submitted_draft_sources: Arc<Mutex<Vec<String>>>,
@@ -1397,6 +1403,34 @@ impl JmapStore for FakeStore {
             }))
     }
 
+    async fn fetch_jmap_message_attachments(
+        &self,
+        _account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Vec<ActiveSyncAttachment>> {
+        Ok(self
+            .message_attachments
+            .lock()
+            .unwrap()
+            .get(&message_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn fetch_jmap_message_attachment_blob(
+        &self,
+        account_id: Uuid,
+        file_reference: &str,
+    ) -> Result<Option<JmapUploadBlob>> {
+        Ok(self
+            .message_attachment_blobs
+            .lock()
+            .unwrap()
+            .get(file_reference)
+            .filter(|blob| blob.account_id == account_id)
+            .cloned())
+    }
+
     async fn save_draft_message(
         &self,
         input: SubmitMessageInput,
@@ -1520,6 +1554,57 @@ impl JmapStore for FakeStore {
             .or_default()
             .push(email.clone());
         Ok(email)
+    }
+
+    async fn update_jmap_email_flags(
+        &self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        unread: Option<bool>,
+        flagged: Option<bool>,
+        _audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
+        self.updated_email_flags
+            .lock()
+            .unwrap()
+            .push((message_id, unread, flagged));
+        let mut email = self
+            .emails
+            .iter()
+            .find(|email| email.id == message_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("email not found"))?;
+        if let Some(unread) = unread {
+            email.unread = unread;
+        }
+        if let Some(flagged) = flagged {
+            email.flagged = flagged;
+        }
+        Ok(email)
+    }
+
+    async fn delete_jmap_email(
+        &self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> Result<()> {
+        self.deleted_emails.lock().unwrap().push(message_id);
+        Ok(())
+    }
+
+    async fn delete_jmap_email_from_mailbox(
+        &self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        message_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> Result<()> {
+        self.deleted_email_memberships
+            .lock()
+            .unwrap()
+            .push((message_id, mailbox_id));
+        Ok(())
     }
 
     async fn import_jmap_email(
@@ -3399,6 +3484,298 @@ async fn email_set_maps_seen_and_flagged_keywords_to_draft_state() {
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0].unread, Some(false));
     assert_eq!(saved[0].flagged, Some(true));
+}
+
+#[tokio::test]
+async fn email_set_updates_delivered_flags_memberships_and_delete_through_canonical_store() {
+    let mut archive = FakeStore::inbox_mailbox();
+    archive.id = Uuid::parse_str("acacacac-acac-acac-acac-acacacacacac").unwrap();
+    archive.role = "archive".to_string();
+    archive.name = "Archive".to_string();
+    let email = FakeStore::inbox_email();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox(), archive.clone()],
+        emails: vec![email.clone()],
+        accessible_mailbox_accounts: vec![FakeStore::mailbox_access()],
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/set".to_string(),
+                    json!({
+                        "update": {
+                            email.id.to_string(): {
+                                "keywords": {"$seen": true, "$flagged": true},
+                                "mailboxIds": {
+                                    FakeStore::inbox_mailbox().id.to_string(): true,
+                                    archive.id.to_string(): true
+                                }
+                            }
+                        }
+                    }),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert!(response.method_responses[0].1["updated"][email.id.to_string()].is_object());
+    assert_eq!(
+        *store.updated_email_flags.lock().unwrap(),
+        vec![(email.id, Some(false), Some(true))]
+    );
+    assert_eq!(
+        store
+            .copied_emails
+            .lock()
+            .unwrap()
+            .get(&FakeStore::account().account_id)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/set".to_string(),
+                    json!({"update": {email.id.to_string(): {"mailboxIds": {archive.id.to_string(): true}}}}),
+                    "c2".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        *store.deleted_email_memberships.lock().unwrap(),
+        vec![(email.id, FakeStore::inbox_mailbox().id)]
+    );
+
+    service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/set".to_string(),
+                    json!({"destroy": [email.id.to_string()]}),
+                    "c3".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(*store.deleted_emails.lock().unwrap(), vec![email.id]);
+}
+
+#[tokio::test]
+async fn email_set_rejects_content_mutation_for_delivered_mail() {
+    let email = FakeStore::inbox_email();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        emails: vec![email.clone()],
+        accessible_mailbox_accounts: vec![FakeStore::mailbox_access()],
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/set".to_string(),
+                    json!({"update": {email.id.to_string(): {"subject": "rewritten"}}}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["notUpdated"][email.id.to_string()]["type"],
+        "invalidProperties"
+    );
+    assert!(store.updated_email_flags.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn email_set_creates_draft_with_validated_canonical_attachment() {
+    let upload_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::draft_mailbox()],
+        uploads: Arc::new(Mutex::new(vec![JmapUploadBlob {
+            id: upload_id,
+            account_id: FakeStore::account().account_id,
+            media_type: "text/plain".to_string(),
+            octet_size: 5,
+            blob_bytes: b"hello".to_vec(),
+        }])),
+        ..Default::default()
+    };
+    let service = JmapService::new_with_validator(
+        store.clone(),
+        validator_ok("text/plain", "text", "txt", 0.99),
+    );
+
+    service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/set".to_string(),
+                    json!({
+                        "create": {"draft": {
+                            "from": [{"email": "alice@example.test"}],
+                            "attachments": [{
+                                "blobId": format!("upload:{upload_id}"),
+                                "name": "note.txt",
+                                "type": "text/plain",
+                                "disposition": "inline",
+                                "cid": "note@example.test"
+                            }]
+                        }}
+                    }),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    let saved = store.saved_drafts.lock().unwrap();
+    assert!(saved[0].replace_attachments);
+    assert_eq!(saved[0].attachments.len(), 1);
+    assert_eq!(saved[0].attachments[0].file_name, "note.txt");
+    assert_eq!(
+        saved[0].attachments[0].disposition.as_deref(),
+        Some("inline")
+    );
+    assert_eq!(
+        saved[0].attachments[0].content_id.as_deref(),
+        Some("note@example.test")
+    );
+    assert_eq!(saved[0].attachments[0].blob_bytes, b"hello");
+}
+
+#[tokio::test]
+async fn email_set_replaces_or_removes_draft_attachments_only_when_specified() {
+    let upload_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let draft_id = FakeStore::draft_email().id;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::draft_mailbox()],
+        emails: vec![FakeStore::draft_email()],
+        uploads: Arc::new(Mutex::new(vec![JmapUploadBlob {
+            id: upload_id,
+            account_id: FakeStore::account().account_id,
+            media_type: "text/plain".to_string(),
+            octet_size: 7,
+            blob_bytes: b"updated".to_vec(),
+        }])),
+        ..Default::default()
+    };
+    let service = JmapService::new_with_validator(
+        store.clone(),
+        validator_ok("text/plain", "text", "txt", 0.99),
+    );
+
+    for value in [
+        json!({"attachments": [{
+            "blobId": format!("upload:{upload_id}"),
+            "name": "updated.txt"
+        }]}),
+        json!({"attachments": []}),
+        json!({"subject": "attachments omitted"}),
+    ] {
+        service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/set".to_string(),
+                        json!({"update": {draft_id.to_string(): value}}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    let saved = store.saved_drafts.lock().unwrap();
+    assert!(saved[0].replace_attachments);
+    assert_eq!(saved[0].attachments[0].file_name, "updated.txt");
+    assert!(saved[1].replace_attachments);
+    assert!(saved[1].attachments.is_empty());
+    assert!(!saved[2].replace_attachments);
+    assert!(saved[2].attachments.is_empty());
+}
+
+#[tokio::test]
+async fn email_set_rejects_draft_attachment_when_magika_rejects_it() {
+    let upload_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::draft_mailbox()],
+        uploads: Arc::new(Mutex::new(vec![JmapUploadBlob {
+            id: upload_id,
+            account_id: FakeStore::account().account_id,
+            media_type: "application/pdf".to_string(),
+            octet_size: 5,
+            blob_bytes: b"hello".to_vec(),
+        }])),
+        ..Default::default()
+    };
+    let service = JmapService::new_with_validator(
+        store.clone(),
+        validator_ok("text/plain", "text", "txt", 0.99),
+    );
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/set".to_string(),
+                    json!({"create": {"draft": {
+                        "from": [{"email": "alice@example.test"}],
+                        "attachments": [{
+                            "blobId": format!("upload:{upload_id}"),
+                            "name": "report.pdf"
+                        }]
+                    }}}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(store.saved_drafts.lock().unwrap().is_empty());
+    assert!(
+        response.method_responses[0].1["notCreated"]["draft"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("blocked by Magika validation")
+    );
 }
 
 #[tokio::test]

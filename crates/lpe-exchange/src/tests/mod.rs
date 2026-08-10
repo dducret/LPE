@@ -12065,6 +12065,7 @@ impl ExchangeStore for FakeStore {
             size_octets: draft.size_octets,
             unread: Some(draft.unread),
             flagged: Some(draft.flagged),
+            replace_attachments: false,
             attachments: Vec::new(),
         };
         self.submit_message(input, audit)

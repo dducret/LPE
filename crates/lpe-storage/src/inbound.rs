@@ -322,6 +322,7 @@ impl Storage {
                     ),
                     unread: Some(false),
                     flagged: Some(false),
+                    replace_attachments: false,
                     attachments: followup.attachments.clone(),
                 },
                 AuditEntryInput {
@@ -373,6 +374,7 @@ impl Storage {
                         size_octets: vacation.reason.len() as i64,
                         unread: Some(false),
                         flagged: Some(false),
+                        replace_attachments: false,
                         attachments: Vec::new(),
                     },
                     AuditEntryInput {

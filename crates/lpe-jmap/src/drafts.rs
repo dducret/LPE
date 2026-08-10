@@ -35,6 +35,10 @@ pub(crate) fn parse_draft_mutation(value: Value) -> Result<DraftMutation> {
         html_body: parse_optional_nullable_string(object.get("htmlBody"))?,
         unread: keywords.unread,
         flagged: keywords.flagged,
+        attachments: object
+            .get("attachments")
+            .map(|value| serde_json::from_value(value.clone()))
+            .transpose()?,
     })
 }
 
@@ -129,7 +133,7 @@ pub(crate) fn reject_unknown_email_properties(object: &Map<String, Value>) -> Re
     for key in object.keys() {
         match key.as_str() {
             "from" | "sender" | "to" | "cc" | "bcc" | "subject" | "textBody" | "htmlBody"
-            | "mailboxIds" | "keywords" => {}
+            | "mailboxIds" | "keywords" | "attachments" => {}
             _ => bail!("unsupported email property: {key}"),
         }
     }

@@ -1,7 +1,8 @@
 use anyhow::{anyhow, bail, Result};
+use lpe_magika::{IngressContext, PolicyDecision, ValidationRequest};
 use lpe_storage::{
-    AuditEntryInput, AuthenticatedAccount, MailboxAccountAccess, SavedDraftMessage,
-    SubmitMessageInput,
+    AttachmentUploadInput, AuditEntryInput, AuthenticatedAccount, MailboxAccountAccess,
+    SavedDraftMessage, SubmitMessageInput,
 };
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -13,12 +14,12 @@ use crate::{
     error::{method_error, set_error},
     parse::{parse_uuid, parse_uuid_list},
     protocol::{
-        ChangesArguments, EmailCopyArguments, EmailGetArguments, EmailImportArguments,
-        EmailQueryArguments, EmailQueryFilter, EmailQuerySort, EmailSetArguments,
-        EmailSubmissionGetArguments, EmailSubmissionQueryArguments, EmailSubmissionQueryFilter,
-        EmailSubmissionQuerySort, EmailSubmissionSetArguments, IdentityGetArguments,
-        QueryChangesArguments, QuotaGetArguments, SearchSnippetGetArguments, ThreadGetArguments,
-        ThreadQueryArguments,
+        ChangesArguments, DraftAttachmentInput, EmailCopyArguments, EmailGetArguments,
+        EmailImportArguments, EmailQueryArguments, EmailQueryFilter, EmailQuerySort,
+        EmailSetArguments, EmailSubmissionGetArguments, EmailSubmissionQueryArguments,
+        EmailSubmissionQueryFilter, EmailSubmissionQuerySort, EmailSubmissionSetArguments,
+        IdentityGetArguments, QueryChangesArguments, QuotaGetArguments, SearchSnippetGetArguments,
+        ThreadGetArguments, ThreadQueryArguments,
     },
     state::{
         changes_response, changes_response_from_durable_with_cursor, changes_response_with_cursor,
@@ -1400,6 +1401,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         creation_id: &str,
     ) -> Result<SavedDraftMessage> {
         let mutation = parse_draft_mutation(value)?;
+        let replace_attachments = mutation.attachments.is_some();
+        let attachments = self
+            .resolve_draft_attachment_uploads(account_access.account_id, mutation.attachments)
+            .await?;
         let (from, sender) =
             select_from_addresses(mutation.from, mutation.sender, account, account_access)?;
         let audit = AuditEntryInput {
@@ -1429,7 +1434,8 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     size_octets: 0,
                     unread: Some(mutation.unread.unwrap_or(false)),
                     flagged: Some(mutation.flagged.unwrap_or(false)),
-                    attachments: Vec::new(),
+                    replace_attachments,
+                    attachments,
                 },
                 audit,
             )
@@ -1457,6 +1463,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             })
             .ok_or_else(|| anyhow!("draft not found"))?;
         let mutation = parse_draft_mutation(value)?;
+        let replace_attachments = mutation.attachments.is_some();
+        let attachments = self
+            .resolve_draft_attachment_uploads(account_access.account_id, mutation.attachments)
+            .await?;
         let (from, sender) =
             select_from_addresses(mutation.from, mutation.sender, account, account_access)?;
         let audit = AuditEntryInput {
@@ -1506,10 +1516,70 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     size_octets: existing.size_octets,
                     unread: Some(mutation.unread.unwrap_or(existing.unread)),
                     flagged: Some(mutation.flagged.unwrap_or(existing.flagged)),
-                    attachments: Vec::new(),
+                    replace_attachments,
+                    attachments,
                 },
                 audit,
             )
             .await
+    }
+
+    async fn resolve_draft_attachment_uploads(
+        &self,
+        account_id: Uuid,
+        attachments: Option<Vec<DraftAttachmentInput>>,
+    ) -> Result<Vec<AttachmentUploadInput>> {
+        let Some(attachments) = attachments else {
+            return Ok(Vec::new());
+        };
+
+        let mut resolved = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            let name = attachment.name.trim();
+            if name.is_empty() {
+                bail!("draft attachment name is required");
+            }
+            let upload_id = crate::upload::parse_upload_blob_id(&attachment.blob_id)?;
+            let upload = self
+                .store
+                .fetch_jmap_upload_blob(account_id, upload_id)
+                .await?
+                .ok_or_else(|| anyhow!("draft attachment blob not found"))?;
+            let media_type = attachment
+                .media_type
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(upload.media_type);
+            let validation = self.validator.validate_bytes(
+                ValidationRequest {
+                    ingress_context: IngressContext::AttachmentParsing,
+                    declared_mime: Some(media_type.clone()),
+                    filename: Some(name.to_string()),
+                    expected_kind: crate::upload::expected_attachment_kind(&media_type, name),
+                },
+                &upload.blob_bytes,
+            )?;
+            if validation.policy_decision != PolicyDecision::Accept {
+                bail!(
+                    "draft attachment '{}' blocked by Magika validation: {}",
+                    name,
+                    validation.reason
+                );
+            }
+            let media_type = if media_type == "application/octet-stream"
+                && !validation.detected_mime.trim().is_empty()
+            {
+                validation.detected_mime
+            } else {
+                media_type
+            };
+            resolved.push(AttachmentUploadInput {
+                file_name: name.to_string(),
+                media_type,
+                disposition: attachment.disposition,
+                content_id: attachment.cid,
+                blob_bytes: upload.blob_bytes,
+            });
+        }
+        Ok(resolved)
     }
 }

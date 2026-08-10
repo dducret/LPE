@@ -1514,6 +1514,7 @@ fn map_submit_message_request(
         size_octets: request.size_octets.unwrap_or(0),
         unread: None,
         flagged: None,
+        replace_attachments: false,
         attachments: Vec::new(),
     }
 }

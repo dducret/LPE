@@ -624,6 +624,18 @@ pub struct DraftMutation {
     pub html_body: Option<Option<String>>,
     pub unread: Option<bool>,
     pub flagged: Option<bool>,
+    pub attachments: Option<Vec<DraftAttachmentInput>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftAttachmentInput {
+    pub blob_id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub media_type: Option<String>,
+    pub disposition: Option<String>,
+    pub cid: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

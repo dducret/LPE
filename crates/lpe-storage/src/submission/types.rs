@@ -25,6 +25,9 @@ pub struct SubmitMessageInput {
     pub size_octets: i64,
     pub unread: Option<bool>,
     pub flagged: Option<bool>,
+    /// Replaces draft attachments even when the replacement list is empty.
+    /// Other save paths retain their existing attachment set.
+    pub replace_attachments: bool,
     pub attachments: Vec<AttachmentUploadInput>,
 }
 

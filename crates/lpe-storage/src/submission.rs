@@ -316,7 +316,7 @@ impl Storage {
                     received_at = NOW(),
                     sent_at = NULL,
                     size_octets = $9,
-                    has_attachments = CASE WHEN $10 THEN has_attachments ELSE FALSE END
+                    has_attachments = CASE WHEN $10 THEN FALSE ELSE has_attachments END
                 WHERE tenant_id = $1
                   AND id = $3
                   AND EXISTS (
@@ -344,7 +344,7 @@ impl Storage {
             .bind(sha256_hex(raw_message.as_bytes()))
             .bind(&subject)
             .bind(input.size_octets.max(0))
-            .bind(input.attachments.is_empty())
+            .bind(input.replace_attachments)
             .execute(&mut *tx)
             .await?;
 
@@ -371,7 +371,7 @@ impl Storage {
             .bind(message_id)
             .execute(&mut *tx)
             .await?;
-            if !input.attachments.is_empty() {
+            if input.replace_attachments {
                 sqlx::query("DELETE FROM attachments WHERE tenant_id = $1 AND message_id = $2")
                     .bind(&tenant_id)
                     .bind(message_id)
@@ -1112,6 +1112,7 @@ impl Storage {
                 size_octets: draft.size_octets,
                 unread: Some(draft.unread),
                 flagged: Some(draft.flagged),
+                replace_attachments: false,
                 attachments: Vec::new(),
             },
             audit,
