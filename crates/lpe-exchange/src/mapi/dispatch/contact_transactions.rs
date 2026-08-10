@@ -1,5 +1,5 @@
 use super::*;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 const CONTACT_SUBJECT_ALIASES: &[u32] = &[
     PID_TAG_DISPLAY_NAME_W,

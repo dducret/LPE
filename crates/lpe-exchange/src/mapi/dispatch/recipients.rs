@@ -192,7 +192,8 @@ pub(super) fn append_remove_all_recipients_response(
                 ));
                 return;
             };
-            if !event_handle_is_writable(transaction.open_mode_flags, event.event.rights.may_write) {
+            if !event_handle_is_writable(transaction.open_mode_flags, event.event.rights.may_write)
+            {
                 responses.extend_from_slice(&rop_error_response(
                     0x0D,
                     request.response_handle_index(),
@@ -218,8 +219,7 @@ pub(super) fn append_remove_all_recipients_response(
                 recipients,
                 recipients_modified,
                 ..
-            }) =
-                input_object_mut(session, handle_slots, request)
+            }) = input_object_mut(session, handle_slots, request)
             else {
                 unreachable!();
             };
@@ -228,29 +228,29 @@ pub(super) fn append_remove_all_recipients_response(
             responses.extend_from_slice(&rop_simple_success_response(request));
         }
         _ => match input_object_mut(session, handle_slots, request) {
-        Some(MapiObject::PendingMessage { recipients, .. }) => {
-            recipients.clear();
-            responses.extend_from_slice(&rop_simple_success_response(request));
-        }
-        Some(MapiObject::Message { .. }) => {
-            if let Some(handle) = input_handle_value {
-                session
-                    .pending_message_recipient_replacements
-                    .insert(handle, Vec::new());
+            Some(MapiObject::PendingMessage { recipients, .. }) => {
+                recipients.clear();
                 responses.extend_from_slice(&rop_simple_success_response(request));
-            } else {
-                responses.extend_from_slice(&rop_error_response(
-                    0x0D,
-                    request.response_handle_index(),
-                    0x0000_04B9,
-                ));
             }
-        }
-        _ => responses.extend_from_slice(&rop_error_response(
-            0x0D,
-            request.response_handle_index(),
-            0x0000_04B9,
-        )),
+            Some(MapiObject::Message { .. }) => {
+                if let Some(handle) = input_handle_value {
+                    session
+                        .pending_message_recipient_replacements
+                        .insert(handle, Vec::new());
+                    responses.extend_from_slice(&rop_simple_success_response(request));
+                } else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x0D,
+                        request.response_handle_index(),
+                        0x0000_04B9,
+                    ));
+                }
+            }
+            _ => responses.extend_from_slice(&rop_error_response(
+                0x0D,
+                request.response_handle_index(),
+                0x0000_04B9,
+            )),
         },
     }
 }
@@ -336,10 +336,7 @@ pub(super) async fn append_modify_recipients_response<S>(
                 }
             }
         }
-        Some(MapiObject::PendingEvent {
-            recipients: _,
-            ..
-        }) => {
+        Some(MapiObject::PendingEvent { recipients: _, .. }) => {
             let address_book_entries = store
                 .fetch_address_book_entries(principal)
                 .await
@@ -350,8 +347,7 @@ pub(super) async fn append_modify_recipients_response<S>(
                         recipients,
                         recipients_modified,
                         ..
-                    }) =
-                        input_object_mut(session, handle_slots, request)
+                    }) = input_object_mut(session, handle_slots, request)
                     else {
                         responses.extend_from_slice(&rop_error_response(
                             0x0E,
@@ -384,7 +380,8 @@ pub(super) async fn append_modify_recipients_response<S>(
                 ));
                 return;
             };
-            if !event_handle_is_writable(transaction.open_mode_flags, event.event.rights.may_write) {
+            if !event_handle_is_writable(transaction.open_mode_flags, event.event.rights.may_write)
+            {
                 responses.extend_from_slice(&rop_error_response(
                     0x0E,
                     request.response_handle_index(),

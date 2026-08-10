@@ -230,12 +230,7 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
             format_debug_property_tags(columns),
             format_debug_sort_orders(sort_orders),
             format_debug_restriction_option(restriction.as_ref()),
-            format_outlook_view_handoff_table_contract(
-                *folder_id,
-                *associated,
-                columns,
-                snapshot,
-            )
+            format_outlook_view_handoff_table_contract(*folder_id, *associated, columns, snapshot,)
         )),
         _ => None,
     };
@@ -289,9 +284,7 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
                         principal.account_id,
                     )
                 ),
-                format_inbox_post_fai_handoff_context(
-                    &session.post_hierarchy_actions,
-                ),
+                format_inbox_post_fai_handoff_context(&session.post_hierarchy_actions),
                 format_live_handle_debug_summary(session),
             ))
         }

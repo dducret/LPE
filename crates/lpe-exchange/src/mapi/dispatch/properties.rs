@@ -183,17 +183,17 @@ pub(super) async fn append_get_properties_specific_response<S>(
     ) = (is_inbox_folder_type_probe, object.as_ref())
     {
         Some(format!(
-                "input_index={};input_handle={};requested_tags={};folder_type={};display_name={};container_class={};content_count={};unread_count={};associated_count={}",
-                request.input_handle_index().unwrap_or(0),
-                format_optional_debug_handle(input_handle(handle_slots, request)),
-                format_debug_property_tags(&request.property_tags()),
-                mapi_value_debug_u32(properties, PID_TAG_FOLDER_TYPE),
-                mapi_value_debug_string(properties, PID_TAG_DISPLAY_NAME_W),
-                mapi_value_debug_string(properties, PID_TAG_CONTAINER_CLASS_W),
-                mapi_value_debug_u32(properties, PID_TAG_CONTENT_COUNT),
-                mapi_value_debug_u32(properties, PID_TAG_CONTENT_UNREAD_COUNT),
-                mapi_value_debug_u32(properties, PID_TAG_ASSOCIATED_CONTENT_COUNT)
-            ))
+            "input_index={};input_handle={};requested_tags={};folder_type={};display_name={};container_class={};content_count={};unread_count={};associated_count={}",
+            request.input_handle_index().unwrap_or(0),
+            format_optional_debug_handle(input_handle(handle_slots, request)),
+            format_debug_property_tags(&request.property_tags()),
+            mapi_value_debug_u32(properties, PID_TAG_FOLDER_TYPE),
+            mapi_value_debug_string(properties, PID_TAG_DISPLAY_NAME_W),
+            mapi_value_debug_string(properties, PID_TAG_CONTAINER_CLASS_W),
+            mapi_value_debug_u32(properties, PID_TAG_CONTENT_COUNT),
+            mapi_value_debug_u32(properties, PID_TAG_CONTENT_UNREAD_COUNT),
+            mapi_value_debug_u32(properties, PID_TAG_ASSOCIATED_CONTENT_COUNT)
+        ))
     } else {
         None
     };

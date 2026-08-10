@@ -452,12 +452,16 @@ fn default_view_advertisement_state_marks_matching_open() {
         "Sent To",
     );
 
-    assert!(session
-        .default_view_advertisement_state()
-        .contains("owner_role=sent"));
-    assert!(session
-        .default_view_advertisement_state()
-        .contains("opened=false"));
+    assert!(
+        session
+            .default_view_advertisement_state()
+            .contains("owner_role=sent")
+    );
+    assert!(
+        session
+            .default_view_advertisement_state()
+            .contains("opened=false")
+    );
     assert!(session.advertised_default_view_pending_open());
 
     assert!(session.record_default_view_opened(
@@ -1204,12 +1208,16 @@ fn calendar_named_property_mapping_keeps_registered_database_ids() {
     assert_eq!(session.property_name_for_id(0x8020), appointment_color);
     assert_eq!(session.property_name_for_id(0x8005), side_effects);
     let mappings = session.named_properties_for_query(None);
-    assert!(mappings
-        .iter()
-        .any(|(property_id, _property)| *property_id == 0x8020));
-    assert!(mappings
-        .iter()
-        .any(|(property_id, _property)| *property_id == 0x8005));
+    assert!(
+        mappings
+            .iter()
+            .any(|(property_id, _property)| *property_id == 0x8020)
+    );
+    assert!(
+        mappings
+            .iter()
+            .any(|(property_id, _property)| *property_id == 0x8005)
+    );
 }
 
 #[test]
@@ -1899,8 +1907,11 @@ fn post_fai_hierarchy_release_context_reports_stop_before_inbox_contents() {
     assert!(context.contains("role=ipm_subtree"));
     assert!(context.contains("row_count=22"));
     assert!(context.contains("last_associated_query=window=returned=6"));
-    assert!(context
-        .contains("next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"));
+    assert!(
+        context.contains(
+            "next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"
+        )
+    );
 }
 
 #[test]
@@ -1930,8 +1941,11 @@ fn post_fai_folder_type_probe_loop_context_requires_reopen_and_repeated_probes()
     assert!(context.contains("last_folder_type_getprops=folder_type=1"));
     assert!(context.contains("last_associated_query=window=returned=6"));
     assert!(context.contains("last_inbox_related_release=handle=20;role=ipm_subtree"));
-    assert!(context
-        .contains("next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"));
+    assert!(
+        context.contains(
+            "next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"
+        )
+    );
 
     state.inbox_normal_contents_table_observed = true;
     assert!(format_post_fai_folder_type_probe_loop_context(&state).is_none());
@@ -2173,8 +2187,10 @@ fn calendar_associated_sort_trace_reports_missing_query_rows_handoff() {
         "columns=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x001a001f,0x30080040,0x685d0003"
     ));
     assert!(trace.contains("sort=0x001a001f:0"));
-    assert!(trace
-        .contains("next_expected_client_step=query_rows_on_calendar_associated_contents_table"));
+    assert!(
+        trace
+            .contains("next_expected_client_step=query_rows_on_calendar_associated_contents_table")
+    );
 }
 
 #[test]
@@ -2213,8 +2229,10 @@ fn normal_message_column_support_covers_visible_inbox_probe_columns() {
         PID_TAG_MESSAGE_DELIVERY_TIME,
     ]);
 
-    assert!(summary
-        .contains("backed=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040"));
+    assert!(
+        summary
+            .contains("backed=0x67480014,0x674a0014,0x674d0014,0x674e0003,0x0037001f,0x0e060040")
+    );
     assert!(summary.ends_with("defaulted=;named_or_dynamic="));
 }
 
@@ -2979,15 +2997,21 @@ fn logon_response_debug_summary_decodes_private_mailbox_fields() {
     assert_eq!(summary.output_handle_index, "1");
     assert_eq!(summary.error_code, "0x00000000");
     assert_eq!(summary.logon_flags, "0x01");
-    assert!(summary
-        .special_folder_ids
-        .starts_with(&format!("{ROOT_FOLDER_ID:#018x}")));
-    assert!(summary
-        .special_folder_contract
-        .contains(&format!("3:ipm_subtree=0x{IPM_SUBTREE_FOLDER_ID:016x}")));
-    assert!(summary
-        .special_folder_contract
-        .contains(&format!("4:inbox=0x{INBOX_FOLDER_ID:016x}")));
+    assert!(
+        summary
+            .special_folder_ids
+            .starts_with(&format!("{ROOT_FOLDER_ID:#018x}"))
+    );
+    assert!(
+        summary
+            .special_folder_contract
+            .contains(&format!("3:ipm_subtree=0x{IPM_SUBTREE_FOLDER_ID:016x}"))
+    );
+    assert!(
+        summary
+            .special_folder_contract
+            .contains(&format!("4:inbox=0x{INBOX_FOLDER_ID:016x}"))
+    );
     assert!(summary.special_folder_contract_issues.is_empty());
     assert_eq!(summary.response_flags, "0x07");
     assert_eq!(summary.mailbox_guid, principal.account_id.to_string());

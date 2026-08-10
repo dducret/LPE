@@ -448,22 +448,23 @@ pub(super) fn append_set_columns_response(
                 outlook_default_view_setcolumns_context = Some((
                     *folder_id,
                     format!(
-                    "handle={};input_index={};folder=0x{:016x};role={};row_count={};columns={};named_properties={};view_descriptor_named_properties={};view_handoff={}",
-                    format_optional_debug_handle(input_handle_value),
-                    request.input_handle_index().unwrap_or(0),
-                    *folder_id,
-                    debug_role_for_folder_id(*folder_id),
-                    row_count,
-                    format_debug_property_tags(columns),
-                    selected_named_property_context,
-                    outlook_view_descriptor_named_property_context,
-                    format_outlook_view_handoff_table_contract(
+                        "handle={};input_index={};folder=0x{:016x};role={};row_count={};columns={};named_properties={};view_descriptor_named_properties={};view_handoff={}",
+                        format_optional_debug_handle(input_handle_value),
+                        request.input_handle_index().unwrap_or(0),
                         *folder_id,
-                        *associated,
-                        columns,
-                        snapshot,
-                    )
-                )));
+                        debug_role_for_folder_id(*folder_id),
+                        row_count,
+                        format_debug_property_tags(columns),
+                        selected_named_property_context,
+                        outlook_view_descriptor_named_property_context,
+                        format_outlook_view_handoff_table_contract(
+                            *folder_id,
+                            *associated,
+                            columns,
+                            snapshot,
+                        )
+                    ),
+                ));
             }
             responses.extend_from_slice(&set_columns_response(request));
             TableControlFlow::Continue
@@ -605,15 +606,15 @@ pub(super) fn append_sort_table_response(
             associated,
             columns,
             ..
-        }) if *folder_id == CALENDAR_FOLDER_ID && *associated => Some(
-            format_calendar_associated_sort_trace(
+        }) if *folder_id == CALENDAR_FOLDER_ID && *associated => {
+            Some(format_calendar_associated_sort_trace(
                 request_id,
                 format_optional_debug_handle(input_handle(handle_slots, request)),
                 columns,
                 &request.sort_orders(),
                 snapshot,
-            ),
-        ),
+            ))
+        }
         _ => None,
     };
     let mut normalized_sort_orders = request.sort_orders();
@@ -765,9 +766,7 @@ pub(super) fn append_restrict_response(
                 .restriction()
                 .ok()
                 .and_then(|restriction| restriction)
-                .map(|restriction| {
-                    format_debug_restriction_property_tags(Some(&restriction))
-                })
+                .map(|restriction| { format_debug_restriction_property_tags(Some(&restriction)) })
                 .unwrap_or_default()
         )),
         _ => None,

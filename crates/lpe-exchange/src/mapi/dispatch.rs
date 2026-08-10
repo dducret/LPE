@@ -24,7 +24,7 @@ use crate::store::{
     MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
     UpsertMapiNavigationShortcutInput,
 };
-use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent};
+use lpe_core::outlook_trace::{OutlookTraceDirection, OutlookTraceEvent, write_outlook_trace};
 use lpe_domain::current_windows_filetime;
 use lpe_storage::{
     AuditEntryInput, CreatePublicFolderInput, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
@@ -35,7 +35,7 @@ use lpe_storage::{
     MapiMessageImportedMoveIdentity, PublicFolderPermissionInput, SearchFolderDefinition,
     SubmittedRecipientInput, UpdatePublicFolderInput, UpsertPublicFolderItemInput,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 
@@ -984,6 +984,13 @@ where
     let mut released_handle_indexes = Vec::new();
     let mut deferred_save_changes_response_handles = Vec::new();
     let mut chained_fast_transfer_get_buffer_request = None;
+    // [MS-OXCMAPIHTTP] section 2.2.4.4.2 reports EventPending before the
+    // client sends its next Execute. Preserve that delivery before processing
+    // this Execute because Outlook can release its table target in that
+    // request. The notification remains valid for the response that consumes
+    // the pending indication.
+    let (preexisting_notification_deliveries, mut delivered_notification_events) =
+        session.take_pending_notification_delivery_batch();
     record_execute_stream_batch_observation(
         principal,
         request_id,
@@ -1516,14 +1523,33 @@ where
             }
         }
     }
-    let (notification_deliveries, delivered_notification_events) =
+    let (notification_deliveries, mut newly_delivered_notification_events) =
         session.take_pending_notification_delivery_batch();
-    let new_mail_notification_delivery_count = notification_deliveries
+    delivered_notification_events.append(&mut newly_delivered_notification_events);
+    let new_mail_notification_delivery_count = preexisting_notification_deliveries
         .iter()
+        .chain(notification_deliveries.iter())
         .filter(|(_, _, event)| {
             event.event_mask & 0x0FFF == MapiNotificationEventMask::NewMail.as_u16()
         })
         .count();
+    let preexisting_notification_delivery_count = append_preexisting_notification_responses(
+        &mut responses,
+        snapshot.identity_codec(),
+        preexisting_notification_deliveries,
+    );
+    if preexisting_notification_delivery_count != 0 {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            operation = "Execute",
+            account_id = %principal.account_id,
+            mapi_request_id = request_id,
+            notification_count = preexisting_notification_delivery_count,
+            "mapi execute appended pending NotificationWait RopNotify responses"
+        );
+    }
     if !notification_deliveries.is_empty() {
         let notification_targets = notification_deliveries
             .iter()
@@ -1682,6 +1708,23 @@ where
         record_mapi_new_mail_notification_deliveries(new_mail_notification_delivery_count);
     }
     response_rop_buffer
+}
+
+fn append_preexisting_notification_responses(
+    responses: &mut Vec<u8>,
+    identity_codec: &crate::mapi::identity::MapiIdentityCodec,
+    deliveries: Vec<(u32, u8, MapiNotificationEvent)>,
+) -> usize {
+    let mut delivery_count = 0;
+    for (notification_handle, logon_id, event) in deliveries {
+        if let Some(response) =
+            rop_notify_response(identity_codec, notification_handle, logon_id, &event)
+        {
+            responses.extend_from_slice(&response);
+            delivery_count += 1;
+        }
+    }
+    delivery_count
 }
 
 #[cfg(test)]

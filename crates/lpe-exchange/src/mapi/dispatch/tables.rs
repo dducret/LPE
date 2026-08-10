@@ -1493,18 +1493,18 @@ pub(super) fn append_table_control_response(
                         snapshot,
                     );
                     Some(format!(
-                            "handle={};input_index={};position_before={};columns={};column_support={};sort={};restriction={};selected_row_projection={};view_descriptor_columns={};view_descriptor_row_projection={}",
-                            format_optional_debug_handle(input_handle(handle_slots, request)),
-                            request.input_handle_index().unwrap_or(0),
-                            position,
-                            format_debug_property_tags(columns),
-                            calendar_event_table_column_support_summary(columns),
-                            format_debug_sort_orders(sort_orders),
-                            format_debug_restriction_option(restriction.as_ref()),
-                            selected_projection,
-                            format_debug_property_tags(&descriptor_columns),
-                            descriptor_projection
-                        ))
+                        "handle={};input_index={};position_before={};columns={};column_support={};sort={};restriction={};selected_row_projection={};view_descriptor_columns={};view_descriptor_row_projection={}",
+                        format_optional_debug_handle(input_handle(handle_slots, request)),
+                        request.input_handle_index().unwrap_or(0),
+                        position,
+                        format_debug_property_tags(columns),
+                        calendar_event_table_column_support_summary(columns),
+                        format_debug_sort_orders(sort_orders),
+                        format_debug_restriction_option(restriction.as_ref()),
+                        selected_projection,
+                        format_debug_property_tags(&descriptor_columns),
+                        descriptor_projection
+                    ))
                 }
                 _ => None,
             };
@@ -1551,27 +1551,32 @@ pub(super) fn append_table_control_response(
                 }
                 _ => None,
             };
-            let hierarchy_query_position_context =
-                match input_object(session, handle_slots, request) {
-                    Some(MapiObject::HierarchyTable {
-                        folder_id,
-                        columns,
-                        position,
-                        ..
-                    }) => Some(format!(
-                        "request_id={request_id};request_rops={request_rop_names};handle={};input_index={};folder=0x{folder_id:016x};role={};position_before={};columns={};after_visible_inbox_release_without_query_rows={};default_view_query_rows_observed={}",
-                        format_optional_debug_handle(input_handle(handle_slots, request)),
-                        request.input_handle_index().unwrap_or(0),
-                        debug_role_for_folder_id(*folder_id),
-                        position,
-                        format_debug_property_tags(columns),
-                        visible_inbox_release_without_query_rows_observed(&session.post_hierarchy_actions),
-                        session
-                            .post_hierarchy_actions
-                            .default_view_normal_contents_table_query_rows_observed
-                    )),
-                    _ => None,
-                };
+            let hierarchy_query_position_context = match input_object(
+                session,
+                handle_slots,
+                request,
+            ) {
+                Some(MapiObject::HierarchyTable {
+                    folder_id,
+                    columns,
+                    position,
+                    ..
+                }) => Some(format!(
+                    "request_id={request_id};request_rops={request_rop_names};handle={};input_index={};folder=0x{folder_id:016x};role={};position_before={};columns={};after_visible_inbox_release_without_query_rows={};default_view_query_rows_observed={}",
+                    format_optional_debug_handle(input_handle(handle_slots, request)),
+                    request.input_handle_index().unwrap_or(0),
+                    debug_role_for_folder_id(*folder_id),
+                    position,
+                    format_debug_property_tags(columns),
+                    visible_inbox_release_without_query_rows_observed(
+                        &session.post_hierarchy_actions
+                    ),
+                    session
+                        .post_hierarchy_actions
+                        .default_view_normal_contents_table_query_rows_observed
+                )),
+                _ => None,
+            };
             let response = query_position_response(
                 request,
                 input_object(session, handle_slots, request),

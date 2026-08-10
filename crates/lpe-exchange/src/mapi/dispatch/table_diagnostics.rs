@@ -1366,9 +1366,15 @@ pub(super) fn format_inbox_related_release_context(
                 state.inbox_normal_contents_table_query_rows_observed,
                 state.inbox_normal_contents_table_find_row_observed,
                 release_without_query_rows,
-                format_optional_debug_handle(state.last_inbox_normal_contents_table_setcolumns_handle),
-                format_optional_debug_handle(state.last_inbox_normal_contents_table_query_rows_handle),
-                format_optional_debug_handle(state.last_inbox_normal_contents_table_find_row_handle)
+                format_optional_debug_handle(
+                    state.last_inbox_normal_contents_table_setcolumns_handle
+                ),
+                format_optional_debug_handle(
+                    state.last_inbox_normal_contents_table_query_rows_handle
+                ),
+                format_optional_debug_handle(
+                    state.last_inbox_normal_contents_table_find_row_handle
+                )
             ))
         }
         Some(MapiObject::Folder { folder_id, .. }) if *folder_id == INBOX_FOLDER_ID => {
@@ -1379,8 +1385,12 @@ pub(super) fn format_inbox_related_release_context(
                 state.inbox_normal_contents_table_observed,
                 state.inbox_normal_contents_table_setcolumns_observed,
                 state.inbox_normal_contents_table_query_rows_observed,
-                format_optional_debug_handle(state.last_inbox_normal_contents_table_setcolumns_handle),
-                format_optional_debug_handle(state.last_inbox_normal_contents_table_query_rows_handle)
+                format_optional_debug_handle(
+                    state.last_inbox_normal_contents_table_setcolumns_handle
+                ),
+                format_optional_debug_handle(
+                    state.last_inbox_normal_contents_table_query_rows_handle
+                )
             ))
         }
         _ => None,

@@ -558,7 +558,8 @@ fn record_visible_inbox_message_open(
         email.subject.chars().count(),
         message_class_for_email(email),
         email.body_text.len(),
-        email.body_html_sanitized
+        email
+            .body_html_sanitized
             .as_ref()
             .map(|body| body.len())
             .unwrap_or(0),

@@ -256,7 +256,9 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
     match store.commit_mapi_event_update(commit_input).await {
         Ok(MapiEventCommitOutcome::Saved(saved)) => {
             let metric_outcome = match transaction.import_disposition {
-                MapiEventImportDisposition::Apply if matches!(metric_flow, MapiCalendarEventSaveFlow::Ics) => {
+                MapiEventImportDisposition::Apply
+                    if matches!(metric_flow, MapiCalendarEventSaveFlow::Ics) =>
+                {
                     MapiCalendarEventSaveOutcome::IcsApplied
                 }
                 MapiEventImportDisposition::Apply => MapiCalendarEventSaveOutcome::Committed,

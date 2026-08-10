@@ -305,7 +305,10 @@ pub(super) fn append_open_folder_response(
             handle,
             request.payload.get(8).copied().unwrap_or(0),
             requested_folder_id != folder_id,
-            session.post_hierarchy_actions.recent_probe_actions.join(">")
+            session
+                .post_hierarchy_actions
+                .recent_probe_actions
+                .join(">")
         );
         if session.post_hierarchy_actions.inbox_open_folder_probe_count >= 1
             && !session

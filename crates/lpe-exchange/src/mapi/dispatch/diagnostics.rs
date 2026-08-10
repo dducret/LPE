@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::mapi::identity::{
-    object_id_from_folder_identifier_bytes, object_id_from_source_key, object_id_from_wire_id,
     ARCHIVE_FOLDER_ID, CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, CONFLICTS_FOLDER_ID,
     CONTACTS_FOLDER_ID, CONTACTS_SEARCH_FOLDER_ID, CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     CONVERSATION_HISTORY_FOLDER_ID, DEFERRED_ACTION_FOLDER_ID, DOCUMENT_LIBRARIES_FOLDER_ID,
@@ -17,20 +16,21 @@ use crate::mapi::identity::{
     SENT_FOLDER_ID, SERVER_FAILURES_FOLDER_ID, SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID,
     SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID,
     TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
+    object_id_from_folder_identifier_bytes, object_id_from_source_key, object_id_from_wire_id,
 };
 use crate::mapi::nspi::{normalize_nspi_lookup_value, principal_legacy_dn_aliases};
 use crate::mapi::properties::{MapiSortOrder, MapiValue};
 use crate::mapi::rop::{
-    is_rpc_header_ext_rop_buffer, private_logon_response_logon_flags,
+    Cursor, RopLogonRequest, is_rpc_header_ext_rop_buffer, private_logon_response_logon_flags,
     public_folder_logon_response_logon_flags, read_rop_request, rpc_header_ext_payload,
-    split_rop_buffer, Cursor, RopLogonRequest,
+    split_rop_buffer,
 };
 use crate::mapi::session::read_handle_table;
 use crate::mapi::session::{MapiObject, MapiSession};
 use crate::mapi::store_adapter::MapiAccessPlan;
 use crate::mapi::sync::PRIVATE_LOGON_SPECIAL_FOLDER_IDS;
 use crate::mapi::tables::role_for_folder_id;
-use crate::mapi::transport::{debug_payload_preview_hex, hex_preview, safe_header, MapiEndpoint};
+use crate::mapi::transport::{MapiEndpoint, debug_payload_preview_hex, hex_preview, safe_header};
 use crate::mapi::wire::RopId;
 
 use super::MAX_ROP_DEBUG_ENTRIES;

@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use crate::mapi::{
     identity::{
-        global_counter_from_store_id, object_ids_from_message_entry_id, source_key_for_object_id,
         FIRST_DYNAMIC_GLOBAL_COUNTER, OUTBOX_FOLDER_ID, SENT_FOLDER_ID,
+        global_counter_from_store_id, object_ids_from_message_entry_id, source_key_for_object_id,
     },
     properties::{MapiValue, PID_TAG_TARGET_ENTRY_ID},
 };
@@ -585,8 +585,15 @@ pub(super) async fn append_submit_message_response<S>(
         input.bcc.len(),
         input.attachments.len(),
         input.body_text.len(),
-        input.body_html_sanitized.as_deref().map(str::len).unwrap_or(0),
-        input.draft_message_id.map(|id| id.to_string()).unwrap_or_default(),
+        input
+            .body_html_sanitized
+            .as_deref()
+            .map(str::len)
+            .unwrap_or(0),
+        input
+            .draft_message_id
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
         input.source
     );
     tracing::info!(

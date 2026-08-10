@@ -197,7 +197,7 @@ fn validated_navigation_shortcut_from_mapi_properties(
             _ => {
                 return Err(anyhow!(
                     "required WLink folder EntryID is missing or malformed"
-                ))
+                ));
             }
         }
     }
