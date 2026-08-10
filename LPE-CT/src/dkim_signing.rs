@@ -195,6 +195,7 @@ mod tests {
             subject: "Signed".to_string(),
             body_text: "Body".to_string(),
             body_html_sanitized: None,
+            raw_message: b"Subject: Signed\r\n\r\nBody".to_vec(),
             internet_message_id: Some("<signed@example.test>".to_string()),
             attempt_count: 0,
             last_attempt_error: None,

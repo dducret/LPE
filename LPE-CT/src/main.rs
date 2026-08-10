@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use axum::{
-    extract::{Path as AxumPath, Query, State},
+    extract::{DefaultBodyLimit, Path as AxumPath, Query, State},
     http::{
         header::{CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderMap, HeaderValue, StatusCode,
@@ -708,6 +708,13 @@ fn install_rustls_crypto_provider() {
 }
 
 fn router(state: AppState) -> Router {
+    let max_message_size_mb = state
+        .store
+        .lock()
+        .expect("dashboard state lock poisoned")
+        .policies
+        .max_message_size_mb;
+    let outbound_handoff_body_limit = outbound_handoff_body_limit(max_message_size_mb);
     Router::new()
         .route("/health", get(health))
         .route("/health/live", get(health_live))
@@ -818,10 +825,18 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/updates", put(update_updates))
         .route(
             "/api/v1/integration/outbound-messages",
-            post(outbound_handoff),
+            post(outbound_handoff).layer(DefaultBodyLimit::max(outbound_handoff_body_limit)),
         )
         .layer(middleware::from_fn(observability::observe_http))
         .with_state(state)
+}
+
+fn outbound_handoff_body_limit(max_message_size_mb: u32) -> usize {
+    let raw_message_bytes = smtp::max_smtp_message_size_bytes(max_message_size_mb);
+    let encoded_bytes = raw_message_bytes.div_ceil(3).saturating_mul(4);
+    encoded_bytes
+        .saturating_add(1024 * 1024)
+        .min(usize::MAX as u64) as usize
 }
 
 async fn mutate_state<F>(
@@ -1168,7 +1183,7 @@ mod tests {
         address_binds_publicly, apply_env_overrides, default_state, env_test_lock,
         ha_activation_check, ha_non_active_role_for_traffic, integration_shared_secret,
         lpe_bridge_probe_url, lpe_health_probe_url, mark_accepted_domain_verified,
-        normalize_local_data_stores, persist_state, require_integration_request,
+        normalize_local_data_stores, outbound_handoff_body_limit, persist_state, require_integration_request,
         submission_listener_is_configured, AcceptedDomain, DashboardResponse,
         OUTBOUND_HANDOFF_PATH,
     };
@@ -1184,6 +1199,11 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
     use uuid::Uuid;
+
+    #[test]
+    fn outbound_handoff_body_limit_accepts_base64_encoded_maximum_message() {
+        assert!(outbound_handoff_body_limit(64) >= 64 * 1024 * 1024 * 4 / 3);
+    }
 
     fn temp_file(name: &str) -> PathBuf {
         let suffix = SystemTime::now()
@@ -1464,6 +1484,7 @@ mod tests {
             subject: "Signed".to_string(),
             body_text: "Body".to_string(),
             body_html_sanitized: None,
+            raw_message: b"Subject: Signed\r\n\r\nBody".to_vec(),
             internet_message_id: None,
             attempt_count: 0,
             last_attempt_error: None,

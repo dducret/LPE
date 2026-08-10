@@ -128,6 +128,7 @@ impl Storage {
                 q.id AS queue_id,
                 m.id AS message_id,
                 q.account_id,
+                b.blob_bytes AS raw_message,
                 q.attempts,
                 q.from_address,
                 fr.display_name AS from_display,
@@ -147,6 +148,11 @@ impl Storage {
             JOIN messages m
               ON m.tenant_id = mm.tenant_id
              AND m.id = mm.message_id
+            JOIN blobs b
+              ON b.tenant_id = m.tenant_id
+             AND b.domain_id = m.domain_id
+             AND b.id = m.blob_id
+             AND b.blob_kind = 'raw_message'
             LEFT JOIN message_recipients fr
               ON fr.tenant_id = m.tenant_id AND fr.message_id = m.id AND fr.role = 'from'
             LEFT JOIN message_recipients sr
@@ -247,6 +253,7 @@ impl Storage {
                 subject: row.subject,
                 body_text: row.body_text,
                 body_html_sanitized: row.body_html_sanitized,
+                raw_message: row.raw_message,
                 internet_message_id: row.internet_message_id,
                 attempt_count: row.attempts.max(0) as u32,
                 last_attempt_error: row.last_error,

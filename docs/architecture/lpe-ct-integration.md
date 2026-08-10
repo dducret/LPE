@@ -11,6 +11,11 @@
   - default `LPE-CT` port: `8380`
   - endpoint: `POST ${LPE_CT_API_BASE_URL}/api/v1/integration/outbound-messages`
   - `LPE` creates canonical `Sent` before handoff
+  - the signed handoff carries the canonical raw RFC 822/MIME message; `LPE-CT`
+    applies perimeter processing and DKIM signing to those exact bytes rather
+    than reconstructing a new message from body projections
+  - `Bcc` remains protected envelope metadata for SMTP recipients and is never
+    rendered into the handed-off RFC 822 headers
   - `LPE` updates `outbound_message_queue`, `messages.delivery_status`, `remote_message_ref`, `attempts`, `last_error`, `next_attempt_at`, and latest transport result
   - repeated results for the same queue item and `trace_id` are idempotent
   - repeated `LPE -> LPE-CT` handoffs for the same queue item reuse the existing `LPE-CT` spool custody record across `outbound`, `deferred`, `held`, `quarantine`, `bounces`, and `sent` instead of creating a second relay attempt

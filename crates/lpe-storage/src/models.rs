@@ -233,6 +233,7 @@ pub(crate) struct PendingOutboundQueueRow {
     pub(crate) queue_id: Uuid,
     pub(crate) message_id: Uuid,
     pub(crate) account_id: Uuid,
+    pub(crate) raw_message: Vec<u8>,
     pub(crate) attempts: i32,
     pub(crate) from_address: String,
     pub(crate) from_display: Option<String>,

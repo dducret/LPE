@@ -1,6 +1,6 @@
 use super::{
-    apply_authentication_scores, classify_inbound_message, compose_rfc822_message, delete_trace,
-    dkim_disposition, dnsbl_query_name, encode_quoted_printable, evaluate_greylisting,
+    apply_authentication_scores, classify_inbound_message, delete_trace, dkim_disposition,
+    dnsbl_query_name, evaluate_greylisting,
     finalize_policy_decision, handle_smtp_command, handle_smtp_session, initialize_spool,
     load_antivirus_providers, load_bayespam_corpus, load_reputation_score, load_trace_details,
     parse_antivirus_output, parse_peer_ip, persist_message, postfix_style_mail_log_line,
@@ -1788,10 +1788,27 @@ async fn outbound_handoff_relays_message() {
                 display_name: Some("Dest".to_string()),
             }],
             cc: Vec::new(),
-            bcc: Vec::new(),
+            bcc: vec![TransportRecipient {
+                address: "hidden@example.test".to_string(),
+                display_name: None,
+            }],
             subject: "Relay test".to_string(),
             body_text: "Body".to_string(),
             body_html_sanitized: None,
+            raw_message: concat!(
+                "From: Sender <sender@example.test>\r\n",
+                "To: Dest <dest@example.test>\r\n",
+                "Subject: Relay test\r\n",
+                "Content-Class: urn:content-classes:calendarmessage\r\n",
+                "MIME-Version: 1.0\r\n",
+                "Content-Type: multipart/alternative; boundary=calendar\r\n\r\n",
+                "--calendar\r\n",
+                "Content-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n\r\n",
+                "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nDTSTAMP:20260810T090000Z\r\nEND:VCALENDAR\r\n",
+                "--calendar--\r\n"
+            )
+            .as_bytes()
+            .to_vec(),
             internet_message_id: Some("<relay@test>".to_string()),
             attempt_count: 0,
             last_attempt_error: None,
@@ -1828,8 +1845,17 @@ async fn outbound_handoff_relays_message() {
         .exists());
     let raw = captured.lock().unwrap().clone();
     assert!(raw.contains("Subject: Relay test"));
-    assert!(raw.contains("Content-Type: text/plain; charset=utf-8"));
-    assert!(raw.contains("Content-Transfer-Encoding: quoted-printable"));
+    assert!(raw.contains("Content-Class: urn:content-classes:calendarmessage"));
+    assert!(raw.contains("Content-Type: text/calendar; method=REQUEST; charset=UTF-8"));
+    assert!(raw.contains("METHOD:REQUEST"));
+    assert!(raw.contains("DTSTAMP:20260810T090000Z"));
+    assert!(!raw.contains("Bcc:"));
+    assert!(!raw.contains("hidden@example.test"));
+    assert!(captured_commands
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|command| command.contains("hidden@example.test")));
     assert_eq!(
         captured_commands
             .lock()
@@ -2031,6 +2057,7 @@ async fn outbound_handoff_quarantines_message() {
             subject: "[quarantine] Test".to_string(),
             body_text: "Body".to_string(),
             body_html_sanitized: None,
+            raw_message: b"Subject: [quarantine] Test\r\n\r\nBody".to_vec(),
             internet_message_id: None,
             attempt_count: 0,
             last_attempt_error: None,
@@ -2366,57 +2393,6 @@ async fn inbound_magika_failure_is_quarantined() {
         .join("quarantine")
         .join(format!("{}.json", message.id))
         .exists());
-}
-
-#[test]
-fn outbound_handoff_builds_multipart_alternative_when_html_is_present() {
-    let raw = String::from_utf8(compose_rfc822_message(&OutboundMessageHandoffRequest {
-        queue_id: Uuid::nil(),
-        message_id: Uuid::nil(),
-        account_id: Uuid::nil(),
-        from_address: "sender@example.test".to_string(),
-        from_display: None,
-        sender_address: None,
-        sender_display: None,
-        sender_authorization_kind: "self".to_string(),
-        to: vec![TransportRecipient {
-            address: "dest@example.test".to_string(),
-            display_name: None,
-        }],
-        cc: Vec::new(),
-        bcc: Vec::new(),
-        subject: "HTML".to_string(),
-        body_text: "Plain body".to_string(),
-        body_html_sanitized: Some("<p>HTML body</p>".to_string()),
-        internet_message_id: None,
-        attempt_count: 0,
-        last_attempt_error: None,
-    }))
-    .unwrap();
-
-    assert!(raw.contains("Content-Type: multipart/alternative;"));
-    assert!(raw.contains("Content-Type: text/plain; charset=utf-8"));
-    assert!(raw.contains("Content-Type: text/html; charset=utf-8"));
-    assert!(!raw.contains("\r\nBcc:"));
-}
-
-#[test]
-fn outbound_handoff_emits_sender_header_for_delegated_sender() {
-    let mut request = outbound_request("Delegated");
-    request.sender_address = Some("delegate@other.test".to_string());
-    request.sender_display = Some("Delegate".to_string());
-
-    let raw = String::from_utf8(compose_rfc822_message(&request)).unwrap();
-
-    assert!(raw.contains("From: Sender <sender@example.test>"));
-    assert!(raw.contains("Sender: Delegate <delegate@other.test>"));
-}
-
-#[test]
-fn quoted_printable_encoder_handles_utf8_and_line_breaks() {
-    let encoded = encode_quoted_printable("Bonjour équipe\nHTML");
-    assert!(encoded.contains("=C3=A9"));
-    assert!(encoded.contains("\r\n"));
 }
 
 #[tokio::test]
@@ -3475,6 +3451,7 @@ fn outbound_request(subject: &str) -> OutboundMessageHandoffRequest {
         subject: subject.to_string(),
         body_text: "Body".to_string(),
         body_html_sanitized: None,
+        raw_message: b"Subject: test\r\n\r\nBody".to_vec(),
         internet_message_id: Some(format!("<{}@test>", subject.to_ascii_lowercase())),
         attempt_count: 0,
         last_attempt_error: None,

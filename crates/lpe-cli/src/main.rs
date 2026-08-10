@@ -528,6 +528,7 @@ mod tests {
             subject: "Subject".to_string(),
             body_text: "Body".to_string(),
             body_html_sanitized: None,
+            raw_message: b"Subject: Subject\r\n\r\nBody".to_vec(),
             internet_message_id: None,
             attempt_count: 0,
             last_attempt_error: None,

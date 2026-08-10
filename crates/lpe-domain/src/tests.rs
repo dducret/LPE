@@ -38,6 +38,7 @@ fn outbound_envelope_recipients_include_bcc() {
         subject: "subject".to_string(),
         body_text: "body".to_string(),
         body_html_sanitized: None,
+        raw_message: b"Subject: subject\r\n\r\nbody".to_vec(),
         internet_message_id: None,
         attempt_count: 0,
         last_attempt_error: None,
@@ -50,6 +51,10 @@ fn outbound_envelope_recipients_include_bcc() {
             "cc@example.test".to_string(),
             "bcc@example.test".to_string()
         ]
+    );
+    assert_eq!(
+        serde_json::to_value(&request).unwrap()["raw_message"],
+        "U3ViamVjdDogc3ViamVjdA0KDQpib2R5"
     );
 }
 

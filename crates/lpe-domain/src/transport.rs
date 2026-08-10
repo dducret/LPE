@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::encoding::base64_bytes;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TransportDeliveryStatus {
@@ -87,6 +89,8 @@ pub struct OutboundMessageHandoffRequest {
     pub subject: String,
     pub body_text: String,
     pub body_html_sanitized: Option<String>,
+    #[serde(with = "base64_bytes")]
+    pub raw_message: Vec<u8>,
     pub internet_message_id: Option<String>,
     pub attempt_count: u32,
     pub last_attempt_error: Option<String>,

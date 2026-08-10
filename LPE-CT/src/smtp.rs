@@ -114,12 +114,8 @@ pub(crate) use protocol::{
 pub(crate) use protocol::{ParsedSmtpPath, SmtpPathError};
 use reputation::{load_reputation_score, update_reputation};
 
-mod outbound;
 mod outbound_delivery;
 mod outbound_policy;
-pub(crate) use outbound::compose_rfc822_message;
-#[cfg(test)]
-pub(crate) use outbound::encode_quoted_printable;
 use outbound_delivery::{relay_message, sanitize_outbound_ehlo_name};
 use outbound_policy::{
     default_queue_for_status, evaluate_outbound_throttle, outbound_handoff_response_from_spool,
@@ -739,10 +735,17 @@ pub(crate) async fn process_outbound_handoff(
     let message_id = payload.message_id;
     let internet_message_id = payload.internet_message_id.clone();
     let route = resolve_outbound_route(config, &payload);
+    if payload.raw_message.is_empty() {
+        return Err(anyhow!("outbound handoff is missing its canonical RFC 822 message"));
+    }
+    if payload.raw_message.len() as u64 > max_smtp_message_size_bytes(config.max_message_size_mb)
+    {
+        return Err(anyhow!("outbound handoff RFC 822 message exceeds the configured size limit"));
+    }
     let dkim = dkim_signing::maybe_sign_outbound_message(
         &config.dkim,
         &payload,
-        &compose_rfc822_message(&payload),
+        &payload.raw_message,
     )?;
     let mut message = QueuedMessage {
         id: trace_id,
