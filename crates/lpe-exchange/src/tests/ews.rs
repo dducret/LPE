@@ -8949,6 +8949,16 @@ async fn get_item_returns_recipients_html_and_owner_sent_bcc_only() {
         display_name: Some("Owner Bcc".to_string()),
     });
     sent.body_html_sanitized = Some("<p>Canonical <b>HTML</b></p>".to_string());
+    let mut draft = FakeStore::email(
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "44444444-4444-4444-4444-444444444444",
+        "drafts",
+        "Owner draft item",
+    );
+    draft.bcc.push(JmapEmailAddress {
+        address: "draft-bcc@example.test".to_string(),
+        display_name: None,
+    });
     let mut ordinary = FakeStore::email(
         "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         "44444444-4444-4444-4444-444444444444",
@@ -8961,7 +8971,7 @@ async fn get_item_returns_recipients_html_and_owner_sent_bcc_only() {
     });
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        emails: Arc::new(Mutex::new(vec![sent, ordinary])),
+        emails: Arc::new(Mutex::new(vec![sent, draft, ordinary])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -8969,7 +8979,7 @@ async fn get_item_returns_recipients_html_and_owner_sent_bcc_only() {
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:GetItem><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape><t:BodyType>HTML</t:BodyType></m:ItemShape><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/><t:ItemId Id="message:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape><t:BodyType>HTML</t:BodyType></m:ItemShape><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/><t:ItemId Id="message:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/><t:ItemId Id="message:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
         )
         .await
         .unwrap();
@@ -8981,6 +8991,7 @@ async fn get_item_returns_recipients_html_and_owner_sent_bcc_only() {
     assert!(body.contains("<t:EmailAddress>carol@example.test</t:EmailAddress>"));
     assert!(body.contains("<t:BccRecipients>"));
     assert!(body.contains("<t:EmailAddress>owner-bcc@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:EmailAddress>draft-bcc@example.test</t:EmailAddress>"));
     assert!(body.contains(
         "<t:Body BodyType=\"HTML\">&lt;p&gt;Canonical &lt;b&gt;HTML&lt;/b&gt;&lt;/p&gt;</t:Body>"
     ));
