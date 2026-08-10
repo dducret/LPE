@@ -114,12 +114,9 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
             return;
         }
     }
-    let mut input = match event_input_from_mapi(
-        principal.account_id,
-        None,
-        &default_event_for_mapping(principal.account_id, &collection_id),
-        &properties,
-    ) {
+    let existing = default_event_for_mapping(principal.account_id, &collection_id);
+    let mut input = match event_input_from_mapi(principal.account_id, None, &existing, &properties)
+    {
         Ok(input) => input,
         Err(_) => {
             responses.extend_from_slice(&rop_error_response(
@@ -131,11 +128,7 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
         }
     };
     if recipients_modified {
-        apply_calendar_pending_recipients(
-            &mut input,
-            &default_event_for_mapping(principal.account_id, &collection_id),
-            &recipients,
-        );
+        apply_calendar_pending_recipients(&mut input, &existing, &properties, &recipients);
     }
     let create_input = MapiEventCreateInput {
         principal_account_id: principal.account_id,

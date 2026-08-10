@@ -3729,6 +3729,97 @@ async fn mapi_over_http_calendar_pending_event_modify_recipients_succeeds() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_plain_appointment_keeps_organizer_out_of_attendees() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        FakeStore::account().account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap();
+
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, calendar_folder_id);
+    let mut properties = Vec::new();
+    append_mapi_utf16_property(&mut properties, 0x0037_001F, "Plain appointment");
+    append_mapi_i64_property(
+        &mut properties,
+        0x0060_0040,
+        test_filetime("2026-06-01", "08:00"),
+    );
+    append_mapi_i64_property(
+        &mut properties,
+        0x0061_0040,
+        test_filetime("2026-06-01", "08:30"),
+    );
+    append_mapi_i32_property(&mut properties, 0x8217_0003, 0);
+    append_mapi_i32_property(&mut properties, 0x8218_0003, 0);
+    append_mapi_utf16_property(&mut properties, 0x0E04_001F, "test");
+    append_mapi_utf16_property(&mut properties, 0x8238_001F, "test");
+    append_mapi_utf16_property(&mut properties, 0x823B_001F, "test");
+    append_rop_set_properties(&mut rops, 1, 8, &properties);
+
+    let mut organizer = Vec::new();
+    organizer.extend_from_slice(&utf16z("test"));
+    organizer.extend_from_slice(&utf16z("test@l-p-e.ch"));
+    organizer.extend_from_slice(&1i32.to_le_bytes());
+    organizer.extend_from_slice(&3u32.to_le_bytes());
+    append_rop_modify_recipients_with_columns(
+        &mut rops,
+        1,
+        &[0x3001_001F, 0x3003_001F, 0x0C15_0003, 0x5FFD_0003],
+        &[(0, 0x01, &organizer)],
+    );
+    append_rop_save_changes_message(&mut rops, 1, 1);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+            && !response_rops
+                .windows(4)
+                .any(|window| window == 0x8004_010Fu32.to_le_bytes()),
+        "plain appointment create returned an error: {response_rops:02x?}"
+    );
+
+    let stored = events.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert!(stored[0].attendees.is_empty());
+    let participants = lpe_storage::parse_calendar_participants_metadata(&stored[0].attendees_json);
+    assert!(participants.attendees.is_empty());
+    assert_eq!(
+        participants
+            .organizer
+            .as_ref()
+            .map(|value| value.email.as_str()),
+        Some("test@l-p-e.ch")
+    );
+    let organizer: serde_json::Value = serde_json::from_str(&stored[0].organizer_json).unwrap();
+    assert_eq!(organizer["is_meeting"], false);
+}
+
+#[tokio::test]
 async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccc0001").unwrap();

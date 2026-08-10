@@ -489,7 +489,8 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
         .len()
         .saturating_add(body_text.len())
         .min(i64::MAX as usize) as i64;
-    let (to, cc, bcc) = pending_recipients_for_import(recipients);
+    let (to, cc, bcc) =
+        pending_recipients_for_import(recipients, is_mapi_meeting_request(properties));
 
     JmapImportedEmailInput {
         account_id: principal.account_id,
@@ -518,6 +519,7 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
 
 pub(in crate::mapi) fn pending_recipients_for_import(
     recipients: &[PendingRecipient],
+    exclude_calendar_organizers: bool,
 ) -> (
     Vec<SubmittedRecipientInput>,
     Vec<SubmittedRecipientInput>,
@@ -527,6 +529,11 @@ pub(in crate::mapi) fn pending_recipients_for_import(
     let mut cc = Vec::new();
     let mut bcc = Vec::new();
     for recipient in recipients {
+        if recipient.is_originator()
+            || exclude_calendar_organizers && recipient.is_calendar_organizer()
+        {
+            continue;
+        }
         let input = SubmittedRecipientInput {
             address: recipient.address.clone(),
             display_name: recipient.display_name.clone(),
@@ -580,7 +587,8 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
         .and_then(|_| optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W]));
     let internet_message_id =
         optional_pending_text_property(properties, &[PID_TAG_INTERNET_MESSAGE_ID_W]);
-    let (to, cc, bcc) = pending_recipients_for_import(recipients);
+    let (to, cc, bcc) =
+        pending_recipients_for_import(recipients, is_mapi_meeting_request(properties));
 
     let attachments = meeting_request_attachment(
         properties,
@@ -620,17 +628,7 @@ fn meeting_request_attachment(
     organizer_address: &str,
     organizer_name: Option<&str>,
 ) -> Vec<AttachmentUploadInput> {
-    let message_class = optional_pending_text_property(properties, &[PID_TAG_MESSAGE_CLASS_W]);
-    let appointment_state = properties
-        .get(&PID_LID_APPOINTMENT_STATE_FLAGS_TAG)
-        .and_then(MapiValue::as_i64)
-        .unwrap_or_default();
-    if !message_class.is_some_and(|value| {
-        value
-            .trim()
-            .eq_ignore_ascii_case("IPM.Schedule.Meeting.Request")
-    }) && appointment_state & 0x0000_0001 == 0
-    {
+    if !is_mapi_meeting_request(properties) {
         return Vec::new();
     }
 
@@ -697,7 +695,10 @@ fn meeting_request_attachment(
         lines.push(format!("DESCRIPTION:{}", ical_text_escape(&body)));
     }
     for recipient in recipients {
-        if matches!(recipient.recipient_type & 0x0F, 0x03) || recipient.address.trim().is_empty() {
+        if recipient.is_calendar_organizer()
+            || matches!(recipient.recipient_type & 0x0F, 0x03)
+            || recipient.address.trim().is_empty()
+        {
             continue;
         }
         let role = if recipient.recipient_type & 0x0F == 0x02 {
@@ -724,6 +725,17 @@ fn meeting_request_attachment(
         content_id: None,
         blob_bytes: lines.join("\r\n").into_bytes(),
     }]
+}
+
+fn is_mapi_meeting_request(properties: &HashMap<u32, MapiValue>) -> bool {
+    optional_pending_text_property(properties, &[PID_TAG_MESSAGE_CLASS_W]).is_some_and(|value| {
+        value
+            .trim()
+            .eq_ignore_ascii_case("IPM.Schedule.Meeting.Request")
+    }) || properties
+        .get(&PID_LID_APPOINTMENT_STATE_FLAGS_TAG)
+        .and_then(MapiValue::as_i64)
+        .is_some_and(|flags| flags & 0x0000_0001 != 0)
 }
 
 fn ical_utc_filetime(value: i64) -> Option<String> {

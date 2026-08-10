@@ -8,8 +8,8 @@ use crate::{
         properties::{
             canonical_property_storage_tag, normalize_mapi_submit_address, MapiValue,
             PID_TAG_ADDRESS_BOOK_DISPLAY_NAME_PRINTABLE_W, PID_TAG_DISPLAY_NAME_W,
-            PID_TAG_EMAIL_ADDRESS_W, PID_TAG_RECIPIENT_DISPLAY_NAME_W, PID_TAG_RECIPIENT_TYPE,
-            PID_TAG_SMTP_ADDRESS_W,
+            PID_TAG_EMAIL_ADDRESS_W, PID_TAG_RECIPIENT_DISPLAY_NAME_W, PID_TAG_RECIPIENT_FLAGS,
+            PID_TAG_RECIPIENT_TYPE, PID_TAG_SMTP_ADDRESS_W,
         },
         session::PendingRecipient,
         session::PendingRecipientChange,
@@ -107,12 +107,7 @@ fn parse_simple_pending_recipient_row(
             parse_property_value_for_tag(&mut cursor, *column)?,
         );
     }
-    let recipient_type = values
-        .get(&PID_TAG_RECIPIENT_TYPE)
-        .and_then(MapiValue::as_i64)
-        .and_then(|value| u8::try_from(value).ok())
-        .unwrap_or(fallback_recipient_type);
-    let recipient_type = normalize_recipient_type(recipient_type)?;
+    let recipient_type = pending_recipient_type(&values, fallback_recipient_type)?;
     let address =
         optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
             .and_then(normalize_mapi_submit_address)
@@ -124,10 +119,16 @@ fn parse_simple_pending_recipient_row(
             })?;
     let display_name = recipient_display_name_from_values(&values)
         .filter(|value| !value.eq_ignore_ascii_case(&address));
+    let recipient_flags = values
+        .get(&PID_TAG_RECIPIENT_FLAGS)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or_default();
 
     Ok(PendingRecipient {
         row_id,
         recipient_type,
+        recipient_flags,
         address,
         display_name,
     })
@@ -142,9 +143,9 @@ fn parse_wrapped_pending_recipient_row(
     address_book_entries: &[ExchangeAddressBookEntry],
 ) -> Result<PendingRecipient> {
     let mut cursor = Cursor::new(row);
-    let recipient_flags = cursor.read_u16()?;
-    let address_type = recipient_flags & 0x0007;
-    let unicode_strings = recipient_flags & 0x0200 != 0;
+    let row_flags = cursor.read_u16()?;
+    let address_type = row_flags & 0x0007;
+    let unicode_strings = row_flags & 0x0200 != 0;
 
     let x500_dn = if address_type == 0x01 {
         let _address_prefix_used = cursor.read_u8()?;
@@ -160,24 +161,24 @@ fn parse_wrapped_pending_recipient_row(
         None
     };
 
-    if address_type == 0x00 && recipient_flags & 0x8000 != 0 {
+    if address_type == 0x00 && row_flags & 0x8000 != 0 {
         let _address_type = cursor.read_ascii_z()?;
     }
 
-    let email_address = if recipient_flags & 0x0008 != 0 {
+    let email_address = if row_flags & 0x0008 != 0 {
         Some(read_recipient_string(&mut cursor, unicode_strings)?)
     } else {
         None
     };
-    let display_name = if recipient_flags & 0x0010 != 0 {
+    let display_name = if row_flags & 0x0010 != 0 {
         Some(read_recipient_string(&mut cursor, unicode_strings)?)
     } else {
         None
     };
-    if recipient_flags & 0x0400 != 0 {
+    if row_flags & 0x0400 != 0 {
         let _simple_display_name = read_recipient_string(&mut cursor, unicode_strings)?;
     }
-    if recipient_flags & 0x0020 != 0 {
+    if row_flags & 0x0020 != 0 {
         let _transmittable_display_name = read_recipient_string(&mut cursor, unicode_strings)?;
     }
 
@@ -221,12 +222,7 @@ fn parse_wrapped_pending_recipient_row(
         }
     }
 
-    let recipient_type = values
-        .get(&PID_TAG_RECIPIENT_TYPE)
-        .and_then(MapiValue::as_i64)
-        .and_then(|value| u8::try_from(value).ok())
-        .unwrap_or(fallback_recipient_type);
-    let recipient_type = normalize_recipient_type(recipient_type)?;
+    let recipient_type = pending_recipient_type(&values, fallback_recipient_type)?;
     let address =
         optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
             .or(email_address)
@@ -238,17 +234,23 @@ fn parse_wrapped_pending_recipient_row(
             })
             .ok_or_else(|| {
                 anyhow!(
-                    "recipient address is required;row_format=wrapped;recipient_flags={recipient_flags:#06x};address_type={address_type:#04x};recipient_column_count={recipient_column_count};columns={}",
+                    "recipient address is required;row_format=wrapped;row_flags={row_flags:#06x};address_type={address_type:#04x};recipient_column_count={recipient_column_count};columns={}",
                     format_property_tags_for_debug(columns)
                 )
             })?;
     let display_name = recipient_display_name_from_values(&values)
         .or(display_name)
         .filter(|value| !value.eq_ignore_ascii_case(&address));
+    let recipient_flags = values
+        .get(&PID_TAG_RECIPIENT_FLAGS)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or_default();
 
     Ok(PendingRecipient {
         row_id,
         recipient_type,
+        recipient_flags,
         address,
         display_name,
     })
@@ -272,10 +274,27 @@ fn optional_mapi_value_text(values: &HashMap<u32, MapiValue>, tags: &[u32]) -> O
         .filter(|value| !value.is_empty())
 }
 
-fn normalize_recipient_type(recipient_type: u8) -> Result<u8> {
+fn pending_recipient_type(
+    values: &HashMap<u32, MapiValue>,
+    fallback_recipient_type: u8,
+) -> Result<u8> {
+    if let Some(recipient_type) = values
+        .get(&PID_TAG_RECIPIENT_TYPE)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u8::try_from(value).ok())
+    {
+        normalize_recipient_type(recipient_type, true)
+    } else {
+        normalize_recipient_type(fallback_recipient_type, false)
+    }
+}
+
+fn normalize_recipient_type(recipient_type: u8, allow_originator: bool) -> Result<u8> {
     let base_type = recipient_type & 0x0F;
     let flags = recipient_type & !0x0F;
-    if matches!(base_type, 0x01..=0x03) && flags & !0x90 == 0 {
+    if matches!(base_type, 0x01..=0x03) && flags & !0x90 == 0
+        || allow_originator && base_type == 0 && flags == 0
+    {
         Ok(base_type)
     } else {
         Err(anyhow!("invalid recipient type {recipient_type:#04x}"))

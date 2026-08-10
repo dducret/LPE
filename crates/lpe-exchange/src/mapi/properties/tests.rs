@@ -104,11 +104,13 @@ fn pending_html_only_message_derives_plain_body_for_save_and_submit() {
         PID_TAG_HTML_BINARY,
         MapiValue::Binary(b"<html><body>Hello<br>World &amp; team</body></html>".to_vec()),
     );
+    // recipOrganizer is a Calendar semantic; a normal type-1 mail row remains To.
     let recipients = vec![PendingRecipient {
         row_id: 1,
         address: "to@example.test".to_string(),
         display_name: Some("To".to_string()),
         recipient_type: 0x01,
+        recipient_flags: 0x0000_0003,
     }];
 
     let imported = jmap_import_from_pending_message(
@@ -124,6 +126,7 @@ fn pending_html_only_message_derives_plain_body_for_save_and_submit() {
         Some("<html><body>Hello<br>World &amp; team</body></html>")
     );
     assert_eq!(imported.size_octets, "HTML draft".len() as i64 + 18);
+    assert_eq!(imported.to.len(), 1);
 
     let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients);
     assert_eq!(submitted.body_text, "Hello\nWorld & team");
@@ -132,6 +135,7 @@ fn pending_html_only_message_derives_plain_body_for_save_and_submit() {
         Some("<html><body>Hello<br>World &amp; team</body></html>")
     );
     assert_eq!(submitted.size_octets, "HTML draft".len() as i64 + 18);
+    assert_eq!(submitted.to.len(), 1);
 }
 
 #[test]
@@ -167,12 +171,22 @@ fn meeting_request_submit_includes_calendar_request_attachment() {
         PID_LID_GLOBAL_OBJECT_ID_TAG,
         MapiValue::Binary(vec![0x04, 0x00, 0x00, 0x00]),
     );
-    let recipients = vec![PendingRecipient {
-        row_id: 0,
-        address: "attendee@example.test".to_string(),
-        display_name: Some("Attendee".to_string()),
-        recipient_type: 0x01,
-    }];
+    let recipients = vec![
+        PendingRecipient {
+            row_id: 0,
+            address: "organizer@example.test".to_string(),
+            display_name: Some("Organizer".to_string()),
+            recipient_type: 0x01,
+            recipient_flags: 0x0000_0003,
+        },
+        PendingRecipient {
+            row_id: 1,
+            address: "attendee@example.test".to_string(),
+            display_name: Some("Attendee".to_string()),
+            recipient_type: 0x01,
+            recipient_flags: 0x0000_0001,
+        },
+    ];
 
     let submitted = mapi_submit_from_pending_message(&principal, &properties, &recipients);
 
@@ -188,6 +202,8 @@ fn meeting_request_submit_includes_calendar_request_attachment() {
     assert!(calendar.contains("DTEND:20260601T083000Z"));
     assert!(calendar.contains("ORGANIZER;CN=Organizer:mailto:organizer@example.test"));
     assert!(calendar.contains("ATTENDEE;CN=Attendee;ROLE=REQ-PARTICIPANT"));
+    assert_eq!(submitted.to.len(), 1);
+    assert_eq!(submitted.to[0].address, "attendee@example.test");
 }
 
 #[test]
@@ -218,6 +234,7 @@ fn microsoft_inline_image_html_body_preserves_cid_for_save_and_submit() {
         address: "to@example.test".to_string(),
         display_name: Some("To".to_string()),
         recipient_type: 0x01,
+        recipient_flags: 0x0000_0001,
     }];
 
     let imported = jmap_import_from_pending_message(
@@ -252,12 +269,14 @@ fn read_recipients_success_response_includes_row_count() {
                 address: "bob@example.test".to_string(),
                 display_name: Some("Bob".to_string()),
                 recipient_type: 0x01,
+                recipient_flags: 0x0000_0001,
             },
             PendingRecipient {
                 row_id: 1,
                 address: "carol@example.test".to_string(),
                 display_name: Some("Carol".to_string()),
                 recipient_type: 0x02,
+                recipient_flags: 0x0000_0001,
             },
         ],
     };
@@ -298,18 +317,21 @@ fn read_recipients_uses_row_id_value_not_vector_index() {
                 address: "alice@example.test".to_string(),
                 display_name: Some("Alice".to_string()),
                 recipient_type: 0x01,
+                recipient_flags: 0x0000_0001,
             },
             PendingRecipient {
                 row_id: 20,
                 address: "bob@example.test".to_string(),
                 display_name: Some("Bob".to_string()),
                 recipient_type: 0x01,
+                recipient_flags: 0x0000_0001,
             },
             PendingRecipient {
                 row_id: 30,
                 address: "carol@example.test".to_string(),
                 display_name: Some("Carol".to_string()),
                 recipient_type: 0x02,
+                recipient_flags: 0x0000_0001,
             },
         ],
     };
@@ -4041,6 +4063,120 @@ fn calendar_projection_does_not_mark_an_appointment_without_attendees_as_a_meeti
 }
 
 #[test]
+fn calendar_pending_originator_does_not_convert_appointment_to_meeting() {
+    let existing = default_event_for_mapping(Uuid::nil(), "default");
+    let mut properties = HashMap::new();
+    properties.insert(PID_LID_APPOINTMENT_STATE_FLAGS_TAG, MapiValue::I32(0));
+    properties.insert(PID_LID_RESPONSE_STATUS_TAG, MapiValue::I32(0));
+    properties.insert(PID_TAG_DISPLAY_TO_W, MapiValue::String("Owner".to_string()));
+    properties.insert(
+        PID_LID_TO_ATTENDEES_STRING_W_TAG,
+        MapiValue::String("Owner".to_string()),
+    );
+    properties.insert(
+        PID_LID_ALL_ATTENDEES_STRING_W_TAG,
+        MapiValue::String("Owner".to_string()),
+    );
+    let mut input =
+        event_input_from_mapi(Uuid::nil(), Some(existing.id), &existing, &properties).unwrap();
+
+    apply_calendar_pending_recipients(
+        &mut input,
+        &existing,
+        &properties,
+        &[PendingRecipient {
+            row_id: 0,
+            recipient_type: 0,
+            recipient_flags: 0,
+            address: "owner@example.test".to_string(),
+            display_name: Some("Owner".to_string()),
+        }],
+    );
+
+    let participants = parse_calendar_participants_metadata(&input.attendees_json);
+    assert!(participants.attendees.is_empty());
+    assert_eq!(
+        participants
+            .organizer
+            .as_ref()
+            .map(|value| value.email.as_str()),
+        Some("owner@example.test")
+    );
+    let organizer: serde_json::Value = serde_json::from_str(&input.organizer_json).unwrap();
+    assert_eq!(organizer["is_meeting"], false);
+
+    let mut projected = existing;
+    projected.organizer_json = input.organizer_json;
+    projected.attendees = input.attendees;
+    projected.attendees_json = input.attendees_json;
+    assert_eq!(
+        event_property_value(
+            &projected,
+            1,
+            CALENDAR_FOLDER_ID,
+            PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
+        ),
+        Some(MapiValue::I32(0)),
+    );
+    assert_eq!(
+        event_property_value(
+            &projected,
+            1,
+            CALENDAR_FOLDER_ID,
+            PID_LID_RESPONSE_STATUS_TAG,
+        ),
+        Some(MapiValue::I32(0)),
+    );
+}
+
+#[test]
+fn calendar_pending_meeting_separates_organizer_from_attendees() {
+    let existing = default_event_for_mapping(Uuid::nil(), "default");
+    let mut properties = HashMap::new();
+    properties.insert(
+        PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
+        MapiValue::I32(0x0000_0001),
+    );
+    let mut input =
+        event_input_from_mapi(Uuid::nil(), Some(existing.id), &existing, &properties).unwrap();
+
+    apply_calendar_pending_recipients(
+        &mut input,
+        &existing,
+        &properties,
+        &[
+            PendingRecipient {
+                row_id: 0,
+                recipient_type: 1,
+                recipient_flags: 0x0000_0003,
+                address: "owner@example.test".to_string(),
+                display_name: Some("Owner".to_string()),
+            },
+            PendingRecipient {
+                row_id: 1,
+                recipient_type: 1,
+                recipient_flags: 0x0000_0001,
+                address: "attendee@example.test".to_string(),
+                display_name: Some("Attendee".to_string()),
+            },
+        ],
+    );
+
+    let participants = parse_calendar_participants_metadata(&input.attendees_json);
+    assert_eq!(participants.attendees.len(), 1);
+    assert_eq!(participants.attendees[0].email, "attendee@example.test");
+    assert_eq!(
+        participants
+            .organizer
+            .as_ref()
+            .map(|value| value.email.as_str()),
+        Some("owner@example.test")
+    );
+    let organizer: serde_json::Value = serde_json::from_str(&input.organizer_json).unwrap();
+    assert_eq!(organizer["is_meeting"], true);
+}
+
+#[test]
 fn calendar_projection_keeps_a_named_exchange_recipient_as_a_meeting() {
     let existing = default_event_for_mapping(Uuid::nil(), "default");
     let mut properties = HashMap::new();
@@ -4104,8 +4240,9 @@ fn calendar_projection_keeps_meeting_state_after_all_attendees_are_removed() {
         PID_LID_CC_ATTENDEES_STRING_W_TAG,
         MapiValue::String(String::new()),
     );
-    let input =
+    let mut input =
         event_input_from_mapi(Uuid::nil(), Some(existing.id), &existing, &properties).unwrap();
+    apply_calendar_pending_recipients(&mut input, &existing, &properties, &[]);
     let organizer: serde_json::Value = serde_json::from_str(&input.organizer_json).unwrap();
     let mut projected = existing;
     projected.organizer_json = input.organizer_json;

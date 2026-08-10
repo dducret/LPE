@@ -786,6 +786,7 @@ pub(in crate::mapi) fn calendar_pending_recipients(
                 PendingRecipient {
                     row_id: row_id.min(u32::MAX as usize) as u32,
                     recipient_type,
+                    recipient_flags: 0x0000_0001,
                     address: attendee.email,
                     display_name: (!attendee.common_name.is_empty())
                         .then_some(attendee.common_name),
@@ -798,11 +799,25 @@ pub(in crate::mapi) fn calendar_pending_recipients(
 pub(in crate::mapi) fn apply_calendar_pending_recipients(
     input: &mut UpsertClientEventInput,
     existing: &AccessibleEvent,
+    properties: &HashMap<u32, MapiValue>,
     recipients: &[PendingRecipient],
 ) {
-    let mut metadata = parse_calendar_participants_metadata(&existing.attendees_json);
+    let mut metadata = parse_calendar_participants_metadata(&input.attendees_json);
+    if let Some(organizer) = recipients
+        .iter()
+        .find(|recipient| recipient.is_calendar_organizer())
+    {
+        metadata.organizer = Some(CalendarOrganizerMetadata {
+            email: normalize_calendar_email(&organizer.address),
+            common_name: organizer
+                .display_name
+                .clone()
+                .unwrap_or_else(|| organizer.address.clone()),
+        });
+    }
     metadata.attendees = recipients
         .iter()
+        .filter(|recipient| !recipient.is_calendar_organizer())
         .map(|recipient| CalendarParticipantMetadata {
             email: normalize_calendar_email(&recipient.address),
             common_name: recipient
@@ -825,7 +840,7 @@ pub(in crate::mapi) fn apply_calendar_pending_recipients(
         existing,
         metadata.organizer.as_ref(),
         !metadata.attendees.is_empty(),
-        &HashMap::new(),
+        properties,
     );
 }
 

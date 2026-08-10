@@ -264,8 +264,22 @@ pub(in crate::mapi) struct PostHierarchyExecuteObservation {
 pub(in crate::mapi) struct PendingRecipient {
     pub(in crate::mapi) row_id: u32,
     pub(in crate::mapi) recipient_type: u8,
+    pub(in crate::mapi) recipient_flags: u32,
     pub(in crate::mapi) address: String,
     pub(in crate::mapi) display_name: Option<String>,
+}
+
+impl PendingRecipient {
+    pub(in crate::mapi) fn is_originator(&self) -> bool {
+        self.recipient_type & 0x0F == 0
+    }
+
+    pub(in crate::mapi) fn is_calendar_organizer(&self) -> bool {
+        // [MS-OXOCAL] section 2.2.4.10.1 marks organizer rows with
+        // recipOrganizer; [MS-OXOMSG] section 2.2.3.1 also defines type zero
+        // as the originator row.
+        self.is_originator() || self.recipient_flags & 0x0000_0002 != 0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

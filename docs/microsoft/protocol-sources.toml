@@ -455,6 +455,7 @@ used_for = [
   "RopFastTransferSourceCopyTo and CopyProperties ROP IDs 0x4D and 0x69",
   "Exchange 2016 RopGetAddressTypes EX, SMTP, and X400 list/count/size response",
   "Stable GWART marker while LPE advertises a static address-type configuration",
+  "RopModifyRecipients outer RecipientType validation distinct from the PidTagRecipientType property carried in RecipientRow",
 ]
 sections = [
   "1.3 Overview",
@@ -471,6 +472,8 @@ sections = [
   "2.2.6.1.2 RopOpenMessage ROP Success Response Buffer",
   "2.2.6.1.3 RopOpenMessage ROP Failure Response Buffer",
   "2.2.6.2.1 RopCreateMessage ROP Request Buffer",
+  "2.2.6.5.1 RopModifyRecipients ROP Request Buffer",
+  "2.2.6.5.1.1 ModifyRecipientRow Structure",
   "2.2.4.13 RopGetHierarchyTable ROP",
   "2.2.4.13.1 RopGetHierarchyTable ROP Request Buffer",
   "2.2.4.13.2 RopGetHierarchyTable ROP Success Response Buffer",
@@ -869,6 +872,7 @@ used_for = [
   "Computed PidTagHasAttachments and effective PidTagMessageStatus projection for configuration FAI FastTransfer",
   "Exchange 2010 through 2019 product behavior that does not support PidTagRecordKey",
   "RopOpenMessage HasNamedProperties advertisement and named-property availability through RopGetPropertiesAll",
+  "RopModifyRecipients RecipientType values and RecipientRow property columns",
 ]
 sections = [
   "1.3.2 Folder Associated Information Messages",
@@ -894,6 +898,7 @@ sections = [
   "2.2.3.1 RopOpenMessage ROP",
   "2.2.3.1.1 RopOpenMessage ROP Request Buffer",
   "2.2.3.1.2 RopOpenMessage ROP Response Buffer",
+  "2.2.3.5.1 RopModifyRecipients ROP Request Buffer",
   "2.2.3.2 RopCreateMessage ROP",
   "2.2.3.3 RopSaveChangesMessage ROP",
   "2.2.3.3.1 RopSaveChangesMessage ROP Request Buffer",
@@ -1771,6 +1776,7 @@ used_for = [
   "PidTagReplyRecipientEntries relationship to PidTagReplyRecipientNames",
   "PidTagMessageDeliveryTime primary key for OrderByDeliveryTime content synchronization",
   "PidTagTargetEntryId optimizing send: server Outbox copy/mirror and later Sent Items move without a second content upload",
+  "PidTagRecipientType originator rows when classifying Outlook calendar organizer and attendee recipients",
 ]
 sections = [
   "2.2.1 E-Mail Object Properties",
@@ -1792,6 +1798,7 @@ sections = [
   "2.2.1.71 Reminders",
   "2.2.1.72 Recipients",
   "2.2.1.76 PidTagTargetEntryId Property",
+  "2.2.3.1 PidTagRecipientType Property",
   "2.2.3.9 PidTagMessageDeliveryTime Property",
   "3.2.4.4 Optimizing Send",
   "3.3.5.1.3 Properties Read and/or Set Upon Submission",
@@ -1871,6 +1878,7 @@ used_for = [
   "Existing appointment update property set including start, end, ClipStart, ClipEnd, and common start/end values",
   "Validation of the exact empty Outlook LocalFreebusy appointment-tombstone stream and rejection of nonempty records without a canonical calendar mapping",
   "AppointmentStateFlags distinction between a standalone appointment and a Meeting object with recipients",
+  "Calendar RecipientRow organizer flags and separation of organizer identity from attendees",
   "Separation of BusyStatus availability from AppointmentStateFlags cancellation state during Outlook appointment import",
   "UTC PtypTime conversion to and from canonical civil time for the bounded UTC and W. Europe calendar time zones",
 ]
@@ -1883,6 +1891,7 @@ sections = [
   "2.2.1.7 PidLidAppointmentDuration Property",
   "2.2.1.9 PidLidAppointmentSubType Property",
   "2.2.1.10 PidLidAppointmentStateFlags Property",
+  "2.2.1.11 PidLidResponseStatus Property",
   "2.2.1.14 PidLidClipStart Property",
   "2.2.1.15 PidLidClipEnd Property",
   "2.2.1.27 PidLidGlobalObjectId Property",
@@ -1902,6 +1911,8 @@ sections = [
   "2.2.1.44.5 AppointmentRecurrencePattern Structure",
   "2.2.2 Calendar Object",
   "2.2.3 Appointment Object",
+  "2.2.4.10 RecipientRow Properties",
+  "2.2.4.10.1 PidTagRecipientFlags Property",
   "2.2.12.5 PidTagScheduleInfoAppointmentTombstone Property",
   "2.2.12.5.1 Record Structure",
   "3.1.4.2 Converting an Appointment Object to a Meeting Object",

@@ -580,7 +580,7 @@ pub(super) fn staged_event_commit_input(
                 )
                 .expect("empty Calendar property projection is valid")
             });
-            apply_calendar_pending_recipients(input, &event.event, recipients);
+            apply_calendar_pending_recipients(input, &event.event, &canonical_values, recipients);
         }
     }
     let mut custom_property_upserts = custom_values

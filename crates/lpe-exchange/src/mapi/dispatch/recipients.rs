@@ -11,6 +11,9 @@ pub(super) fn submitted_recipients_from_pending(
     let mut cc = Vec::new();
     let mut bcc = Vec::new();
     for recipient in recipients {
+        if recipient.is_originator() {
+            continue;
+        }
         let value = SubmittedRecipientInput {
             address: recipient.address.clone(),
             display_name: recipient.display_name.clone(),
@@ -30,6 +33,7 @@ pub(super) fn pending_recipients_from_email(email: &JmapEmail) -> Vec<PendingRec
         .map(|recipient| PendingRecipient {
             row_id: recipient.order,
             recipient_type: recipient.recipient_type,
+            recipient_flags: 0x0000_0001,
             address: recipient.address.address.clone(),
             display_name: recipient.address.display_name.clone(),
         })

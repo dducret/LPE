@@ -327,6 +327,41 @@ fn modify_recipients_parses_outlook_flagged_recipient_property_row() {
 }
 
 #[test]
+fn modify_recipients_preserves_wrapped_calendar_organizer_flag() {
+    let columns = [
+        PID_TAG_SMTP_ADDRESS_W,
+        PID_TAG_RECIPIENT_DISPLAY_NAME_W,
+        PID_TAG_RECIPIENT_TYPE,
+        PID_TAG_RECIPIENT_FLAGS,
+    ];
+    let mut row = Vec::new();
+    write_u16(&mut row, 0x0218);
+    write_utf16z(&mut row, "test@l-p-e.ch");
+    write_utf16z(&mut row, "test");
+    write_u16(&mut row, columns.len() as u16);
+    row.push(0);
+    write_utf16z(&mut row, "test@l-p-e.ch");
+    write_utf16z(&mut row, "test");
+    write_u32(&mut row, 1);
+    write_u32(&mut row, 3);
+
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "test@l-p-e.ch".to_string(),
+        display_name: "test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let recipient = parse_pending_recipient_row(0, 1, &columns, &row, &principal, &[]).unwrap();
+
+    assert_eq!(recipient.recipient_type, 1);
+    assert_eq!(recipient.recipient_flags, 3);
+    assert!(!recipient.is_originator());
+    assert!(recipient.is_calendar_organizer());
+}
+
+#[test]
 fn folder_create_and_hierarchy_table_responses_match_microsoft_folder_examples() {
     let create = RopRequest {
         rop_id: RopId::CreateFolder.as_u8(),
@@ -1502,6 +1537,7 @@ fn microsoft_reload_cached_information_matches_open_message_shape() {
         recipients: vec![PendingRecipient {
             row_id: 0,
             recipient_type: 1,
+            recipient_flags: 0x0000_0001,
             address: "alice@example.test".into(),
             display_name: Some("Alice".into()),
         }],
@@ -1584,8 +1620,39 @@ fn modify_recipients_accepts_microsoft_message_example_columns() {
 
     assert_eq!(recipient.row_id, 0);
     assert_eq!(recipient.recipient_type, 1);
+    assert_eq!(recipient.recipient_flags, 1);
     assert_eq!(recipient.address, "user2@szfkuk-dom.extest.microsoft.com");
     assert_eq!(recipient.display_name.as_deref(), Some("user2"));
+}
+
+#[test]
+fn modify_recipients_accepts_originator_recipient_type() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "owner@example.test".to_string(),
+        display_name: "Owner".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let columns = [PID_TAG_SMTP_ADDRESS_W, PID_TAG_RECIPIENT_TYPE];
+    let mut row = Vec::new();
+    write_utf16z(&mut row, "owner@example.test");
+    write_u32(&mut row, 0);
+
+    let recipient = parse_pending_recipient_row(0, 1, &columns, &row, &principal, &[]).unwrap();
+
+    assert_eq!(recipient.recipient_type, 0);
+    assert!(recipient.is_originator());
+    assert!(recipient.is_calendar_organizer());
+
+    let fallback_columns = [PID_TAG_SMTP_ADDRESS_W];
+    let mut fallback_row = Vec::new();
+    write_utf16z(&mut fallback_row, "owner@example.test");
+    assert!(
+        parse_pending_recipient_row(0, 0, &fallback_columns, &fallback_row, &principal, &[],)
+            .is_err()
+    );
 }
 
 #[test]
