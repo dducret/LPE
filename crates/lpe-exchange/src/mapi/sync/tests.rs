@@ -765,6 +765,10 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
                 PID_LID_RECURRING_TAG,
                 mapi_mailstore::SpecialMessagePropertyValue::Bool(false),
             ),
+            (
+                PID_TAG_LAST_MODIFIER_NAME_W,
+                mapi_mailstore::SpecialMessagePropertyValue::String("Alice".to_string()),
+            ),
         ],
         named_property_definitions: Default::default(),
     };
@@ -791,6 +795,16 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
             "0x{property_tag:08x} is missing its FastTransfer LID definition"
         );
     }
+    let last_modifier = utf16z("Alice");
+    let mut expected_last_modifier = PID_TAG_LAST_MODIFIER_NAME_W.to_le_bytes().to_vec();
+    expected_last_modifier.extend_from_slice(&(last_modifier.len() as u32).to_le_bytes());
+    expected_last_modifier.extend_from_slice(&last_modifier);
+    assert!(
+        buffer
+            .windows(expected_last_modifier.len())
+            .any(|window| window == expected_last_modifier),
+        "PidTagLastModifierName is missing its FastTransfer value"
+    );
 }
 
 #[test]
@@ -1030,6 +1044,10 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_TAG_CHANGE_NUMBER
             && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::U64(124))
+    }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_TAG_LAST_MODIFIER_NAME_W
+            && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::String(name) if name == "Alice")
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_LID_RESPONSE_STATUS_TAG

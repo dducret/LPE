@@ -124,6 +124,7 @@ fn event_property_value_with_optional_version(
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(event_size(event))),
         PID_TAG_MESSAGE_SIZE_EXTENDED => Some(mapi_message_size_extended_value(event_size(event))),
+        PID_TAG_LAST_MODIFIER_NAME_W => Some(MapiValue::String(event.owner_display_name.clone())),
         PID_TAG_SENDER_NAME_W => Some(MapiValue::String(calendar_organizer_name(event))),
         PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(calendar_organizer_email(event))),
         PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(calendar_display_to(event))),

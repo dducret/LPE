@@ -966,6 +966,7 @@ fn calendar_sync_object(
         PID_TAG_START_DATE,
         PID_TAG_END_DATE,
         PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_LAST_MODIFIER_NAME_W,
         PID_LID_COMMON_START_TAG,
         PID_LID_COMMON_END_TAG,
         PID_LID_BUSY_STATUS_TAG,
