@@ -8,6 +8,7 @@ use super::special_message::{
 };
 use super::*;
 use crate::mapi::properties::message_class_for_email;
+use sha2::{Digest, Sha256};
 
 const OWNER_INBOX_SPECIAL_FOLDER_ENTRY_IDS: [(u32, u64); 7] = [
     (0x36D0_0102, crate::mapi::identity::CALENDAR_FOLDER_ID),
@@ -1246,6 +1247,14 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         let parent_source_key = special_message_sync_parent_source_key(object, sync_flags);
         let change_key = special_message_change_key(object);
         let predecessor_change_list = special_message_predecessor_change_list(object);
+        let mut serialized_property_tags = vec![
+            PID_TAG_SOURCE_KEY,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_ASSOCIATED,
+            PID_TAG_PARENT_SOURCE_KEY,
+        ];
         if sync_type == SYNC_TYPE_CONTENTS && sync_flags & SYNC_FLAG_PROGRESS != 0 {
             write_content_sync_progress_per_message(
                 &mut buffer,
@@ -1267,6 +1276,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
             write_u32(&mut buffer, PID_TAG_MID);
             write_object_id(&mut buffer, object.item_id);
+            serialized_property_tags.push(PID_TAG_MID);
         }
         if sync_extra_flags & SYNC_EXTRA_FLAG_MESSAGE_SIZE != 0 {
             write_i32_property(
@@ -1274,10 +1284,12 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 PID_TAG_MESSAGE_SIZE,
                 object.message_size as i32,
             );
+            serialized_property_tags.push(PID_TAG_MESSAGE_SIZE);
         }
         if sync_extra_flags & SYNC_EXTRA_FLAG_CHANGE_NUMBER != 0 {
             write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
             write_change_number(&mut buffer, change_number);
+            serialized_property_tags.push(PID_TAG_CHANGE_NUMBER);
         }
         write_u32(&mut buffer, INCR_SYNC_MESSAGE);
         write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
@@ -1288,6 +1300,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 object.item_id,
             ) {
                 write_binary_property(&mut buffer, PID_TAG_ENTRY_ID, &entry_id);
+                serialized_property_tags.push(PID_TAG_ENTRY_ID);
             }
         }
         if content_property_in_scope(
@@ -1301,6 +1314,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 object.folder_id,
             ) {
                 write_binary_property(&mut buffer, PID_TAG_PARENT_ENTRY_ID, &parent_entry_id);
+                serialized_property_tags.push(PID_TAG_PARENT_ENTRY_ID);
             }
         }
         if content_property_in_scope(
@@ -1314,6 +1328,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 PID_TAG_INSTANCE_KEY,
                 &crate::mapi::identity::instance_key_for_object_id(object.item_id),
             );
+            serialized_property_tags.push(PID_TAG_INSTANCE_KEY);
         }
         // [MS-OXCMSG] v20250520 section 2.2.1.1 product note <3>:
         // Exchange 2010 through Exchange 2019 do not expose
@@ -1325,6 +1340,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 PID_TAG_SEARCH_KEY,
                 &special_message_search_key(object),
             );
+            serialized_property_tags.push(PID_TAG_SEARCH_KEY);
         }
         if content_property_in_scope(
             sync_type,
@@ -1334,6 +1350,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         ) {
             write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
             write_i64(&mut buffer, object.last_modified_filetime as i64);
+            serialized_property_tags.push(PID_TAG_LAST_MODIFICATION_TIME);
         }
         // [MS-OXCMSG] section 2.2.1.1 requires these server-owned
         // properties on every Message object. [MS-OXCFXICS] section 4.5
@@ -1344,6 +1361,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 PID_TAG_ACCESS,
                 special_message_access(object) as i32,
             );
+            serialized_property_tags.push(PID_TAG_ACCESS);
         }
         if content_property_in_scope(
             sync_type,
@@ -1356,6 +1374,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 PID_TAG_ACCESS_LEVEL,
                 special_message_access_level(object) as i32,
             );
+            serialized_property_tags.push(PID_TAG_ACCESS_LEVEL);
         }
         if content_property_in_scope(
             sync_type,
@@ -1368,6 +1387,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 PID_TAG_HAS_ATTACHMENTS,
                 special_message_has_attachments(object),
             );
+            serialized_property_tags.push(PID_TAG_HAS_ATTACHMENTS);
         }
         if content_property_in_scope(
             sync_type,
@@ -1380,6 +1400,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 PID_TAG_MESSAGE_STATUS,
                 special_message_status(object) as i32,
             );
+            serialized_property_tags.push(PID_TAG_MESSAGE_STATUS);
         }
         if content_property_in_scope(
             sync_type,
@@ -1390,11 +1411,13 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             // [MS-OXCMSG] section 2.2.1.6: mfFAI identifies an FAI message.
             let message_flags = special_message_flags(object);
             write_i32_property(&mut buffer, PID_TAG_MESSAGE_FLAGS, message_flags as i32);
+            serialized_property_tags.push(PID_TAG_MESSAGE_FLAGS);
         }
         let subject_in_scope =
             content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SUBJECT_W);
         if subject_in_scope {
             write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &object.subject);
+            serialized_property_tags.push(PID_TAG_SUBJECT_W);
         }
         let normalized_subject_tag = normalized_subject_tag(sync_flags);
         if content_property_in_scope(
@@ -1404,6 +1427,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             normalized_subject_tag,
         ) {
             write_normalized_subject_property(&mut buffer, normalized_subject_tag, &object.subject);
+            serialized_property_tags.push(normalized_subject_tag);
         }
         if content_property_in_scope(
             sync_type,
@@ -1412,10 +1436,12 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             PID_TAG_MESSAGE_CLASS_W,
         ) {
             write_utf16_property(&mut buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
+            serialized_property_tags.push(PID_TAG_MESSAGE_CLASS_W);
         }
         if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_BODY_W) {
             if let Some(body_text) = &object.body_text {
                 write_utf16_property(&mut buffer, PID_TAG_BODY_W, body_text);
+                serialized_property_tags.push(PID_TAG_BODY_W);
             }
         }
         if content_property_in_scope(
@@ -1429,6 +1455,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 PID_TAG_MESSAGE_SIZE,
                 object.message_size as i32,
             );
+            serialized_property_tags.push(PID_TAG_MESSAGE_SIZE);
         }
         for (tag, value) in &object.named_properties {
             if !special_message_property_is_ics_identity(*tag)
@@ -1436,7 +1463,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                 && *tag != PID_TAG_MESSAGE_FLAGS
                 && content_property_in_scope(sync_type, sync_flags, sync_property_tags, *tag)
             {
-                write_special_message_property(&mut buffer, object, *tag, value);
+                if write_special_message_property(&mut buffer, object, *tag, value) {
+                    serialized_property_tags.push(*tag);
+                }
             }
         }
         write_fast_transfer_message_children(
@@ -1445,6 +1474,29 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             None,
             attachments,
         );
+        if object.message_class.eq_ignore_ascii_case("IPM.Appointment") {
+            let serialized_property_tags = serialized_property_tags
+                .iter()
+                .map(|tag| format!("0x{tag:08x}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let serialized_sha256 = format!("{:x}", Sha256::digest(&buffer));
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                sync_type = format_args!("0x{sync_type:02x}"),
+                folder_id = format_args!("0x{:016x}", object.folder_id),
+                calendar_item_id = format_args!("0x{:016x}", object.item_id),
+                calendar_canonical_id = %object.canonical_id,
+                calendar_sync_flags = format_args!("0x{sync_flags:04x}"),
+                calendar_sync_extra_flags = format_args!("0x{sync_extra_flags:08x}"),
+                calendar_fast_transfer_bytes = buffer.len(),
+                calendar_fast_transfer_sha256 = %serialized_sha256,
+                calendar_fast_transfer_serialized_property_tags = %serialized_property_tags,
+                message = "rca debug mapi calendar FastTransfer serialized appointment"
+            );
+        }
         let original_order = message_changes.len();
         message_changes.push((delivery_sort_time, original_order, buffer));
     }

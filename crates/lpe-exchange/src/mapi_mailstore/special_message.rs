@@ -441,9 +441,9 @@ pub(super) fn write_special_message_property(
     object: &SpecialMessageSyncFact,
     property_tag: u32,
     value: &SpecialMessagePropertyValue,
-) {
+) -> bool {
     if !write_fast_transfer_property_info(buffer, object, property_tag) {
-        return;
+        return false;
     }
     match value {
         SpecialMessagePropertyValue::Binary(value) => {
@@ -483,6 +483,7 @@ pub(super) fn write_special_message_property(
             write_i64(buffer, filetime_from_rfc3339_utc(value) as i64)
         }
     }
+    true
 }
 
 fn write_fast_transfer_property_info(
