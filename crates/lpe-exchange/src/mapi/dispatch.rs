@@ -991,6 +991,16 @@ where
     // the pending indication.
     let (preexisting_notification_deliveries, mut delivered_notification_events) =
         session.take_pending_notification_delivery_batch();
+    let preexisting_notification_targets = preexisting_notification_deliveries
+        .iter()
+        .filter_map(|(notification_handle, _, _)| {
+            session
+                .handles
+                .get(notification_handle)
+                .cloned()
+                .map(|target| (*notification_handle, target))
+        })
+        .collect::<Vec<_>>();
     record_execute_stream_batch_observation(
         principal,
         request_id,
@@ -1537,6 +1547,10 @@ where
         &mut responses,
         snapshot.identity_codec(),
         preexisting_notification_deliveries,
+        &preexisting_notification_targets,
+        mailboxes,
+        snapshot,
+        principal.account_id,
     );
     if preexisting_notification_delivery_count != 0 {
         tracing::info!(
@@ -1547,7 +1561,7 @@ where
             account_id = %principal.account_id,
             mapi_request_id = request_id,
             notification_count = preexisting_notification_delivery_count,
-            "mapi execute appended pending NotificationWait RopNotify responses"
+            "mapi execute appended pending NotificationWait notification responses"
         );
     }
     if !notification_deliveries.is_empty() {
@@ -1708,23 +1722,6 @@ where
         record_mapi_new_mail_notification_deliveries(new_mail_notification_delivery_count);
     }
     response_rop_buffer
-}
-
-fn append_preexisting_notification_responses(
-    responses: &mut Vec<u8>,
-    identity_codec: &crate::mapi::identity::MapiIdentityCodec,
-    deliveries: Vec<(u32, u8, MapiNotificationEvent)>,
-) -> usize {
-    let mut delivery_count = 0;
-    for (notification_handle, logon_id, event) in deliveries {
-        if let Some(response) =
-            rop_notify_response(identity_codec, notification_handle, logon_id, &event)
-        {
-            responses.extend_from_slice(&response);
-            delivery_count += 1;
-        }
-    }
-    delivery_count
 }
 
 #[cfg(test)]

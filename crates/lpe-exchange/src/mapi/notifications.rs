@@ -1,9 +1,14 @@
 #[cfg(test)]
 use super::identity::wire_id_bytes_from_object_id;
 use super::rop::*;
+use super::session::MapiObject;
+use super::store_adapter::MapiMailStoreSnapshot;
+use super::tables::hierarchy_table_row_modified;
 use super::wire::{
     MapiNotificationEventMask, MAPI_CONTENT_NOTIFICATION_MASK, MAPI_HIERARCHY_NOTIFICATION_MASK,
 };
+use lpe_storage::JmapMailbox;
+use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiNotificationRegistration {
@@ -757,6 +762,44 @@ pub(in crate::mapi) fn rop_hierarchy_table_row_modified_response(
     write_u16(&mut response, row_data_size);
     response.extend_from_slice(row_data);
     Some(response)
+}
+
+pub(in crate::mapi) fn append_preexisting_notification_responses(
+    responses: &mut Vec<u8>,
+    identity_codec: &crate::mapi::identity::MapiIdentityCodec,
+    deliveries: Vec<(u32, u8, MapiNotificationEvent)>,
+    notification_targets: &[(u32, MapiObject)],
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
+) -> usize {
+    let mut delivery_count = 0;
+    for (notification_handle, logon_id, event) in deliveries {
+        let detailed_response = notification_targets
+            .iter()
+            .find_map(|(handle, target)| (*handle == notification_handle).then_some(target))
+            .and_then(|table| {
+                hierarchy_table_row_modified(table, &event, mailboxes, snapshot, mailbox_guid)
+            })
+            .and_then(|row| {
+                rop_hierarchy_table_row_modified_response(
+                    identity_codec,
+                    notification_handle,
+                    logon_id,
+                    event.event_mask,
+                    row.folder_id,
+                    row.insert_after_folder_id,
+                    &row.row_data,
+                )
+            });
+        let response = detailed_response
+            .or_else(|| rop_notify_response(identity_codec, notification_handle, logon_id, &event));
+        if let Some(response) = response {
+            responses.extend_from_slice(&response);
+            delivery_count += 1;
+        }
+    }
+    delivery_count
 }
 
 fn append_notification_data(
