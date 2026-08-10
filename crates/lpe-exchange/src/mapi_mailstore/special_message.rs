@@ -83,7 +83,7 @@ pub(crate) fn special_message_source_key(object: &SpecialMessageSyncFact) -> Vec
         .unwrap_or_else(|| source_key_for_store_id(object.item_id))
 }
 
-pub(super) fn special_message_sync_source_key(
+pub(crate) fn special_message_sync_source_key(
     object: &SpecialMessageSyncFact,
     sync_flags: u16,
 ) -> Vec<u8> {
@@ -100,6 +100,17 @@ pub(super) fn special_message_parent_source_key(object: &SpecialMessageSyncFact)
         .unwrap_or_else(|| source_key_for_store_id(object.folder_id))
 }
 
+pub(crate) fn special_message_sync_parent_source_key(
+    object: &SpecialMessageSyncFact,
+    sync_flags: u16,
+) -> Vec<u8> {
+    if sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0 {
+        source_key_for_store_id(object.folder_id)
+    } else {
+        special_message_parent_source_key(object)
+    }
+}
+
 pub(super) fn special_message_search_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
     // [MS-OXCPRPT] section 2.2.1.9: SearchKey is a read-only search identity.
     special_message_binary_property(object, PID_TAG_SEARCH_KEY)
@@ -109,19 +120,19 @@ pub(super) fn special_message_search_key(object: &SpecialMessageSyncFact) -> Vec
         })
 }
 
-pub(super) fn special_message_change_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
+pub(crate) fn special_message_change_key(object: &SpecialMessageSyncFact) -> Vec<u8> {
     special_message_binary_property(object, PID_TAG_CHANGE_KEY)
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| change_key_for_change_number(change_number_for_store_id(object.item_id)))
 }
 
-pub(super) fn special_message_predecessor_change_list(object: &SpecialMessageSyncFact) -> Vec<u8> {
+pub(crate) fn special_message_predecessor_change_list(object: &SpecialMessageSyncFact) -> Vec<u8> {
     special_message_binary_property(object, PID_TAG_PREDECESSOR_CHANGE_LIST)
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| predecessor_change_list(change_number_for_store_id(object.item_id)))
 }
 
-pub(super) fn special_message_change_number(object: &SpecialMessageSyncFact) -> u64 {
+pub(crate) fn special_message_change_number(object: &SpecialMessageSyncFact) -> u64 {
     object
         .named_properties
         .iter()

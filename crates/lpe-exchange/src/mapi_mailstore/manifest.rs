@@ -1,7 +1,7 @@
 use super::special_message::{
     special_message_access, special_message_access_level, special_message_change_key,
     special_message_change_number, special_message_flags, special_message_has_attachments,
-    special_message_parent_source_key, special_message_predecessor_change_list,
+    special_message_predecessor_change_list, special_message_sync_parent_source_key,
     special_message_property_is_ics_identity, special_message_property_is_server_projected,
     special_message_search_key, special_message_status, special_message_sync_source_key,
     write_special_message_property, PID_TAG_HAS_ATTACHMENTS, PID_TAG_MESSAGE_STATUS,
@@ -1242,13 +1242,8 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         // [MS-OXCFXICS] section 3.2.5.9.1.1: NoForeignIdentifiers requires
         // local replica identifiers even when the canonical object retains an
         // imported SourceKey for a synchronization without that flag.
-        let no_foreign_identifiers = sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0;
         let source_key = special_message_sync_source_key(object, sync_flags);
-        let parent_source_key = if no_foreign_identifiers {
-            source_key_for_store_id(object.folder_id)
-        } else {
-            special_message_parent_source_key(object)
-        };
+        let parent_source_key = special_message_sync_parent_source_key(object, sync_flags);
         let change_key = special_message_change_key(object);
         let predecessor_change_list = special_message_predecessor_change_list(object);
         if sync_type == SYNC_TYPE_CONTENTS && sync_flags & SYNC_FLAG_PROGRESS != 0 {

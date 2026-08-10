@@ -202,7 +202,16 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     };
     resident_hierarchy_alias_counters.sort_unstable();
     resident_hierarchy_alias_counters.dedup();
-    log_calendar_special_sync_objects(principal, folder_id, sync_type, &all_special_sync_objects);
+    log_calendar_special_sync_objects(
+        principal,
+        request_id,
+        folder_id,
+        sync_type,
+        sync_flags,
+        sync_extra_flags,
+        &sync_property_tags,
+        &all_special_sync_objects,
+    );
     log_special_sync_objects(principal, folder_id, sync_type, &all_special_sync_objects);
     let available_sync_mailbox_count = all_sync_mailboxes.len();
     let available_sync_email_count = all_sync_emails.len();

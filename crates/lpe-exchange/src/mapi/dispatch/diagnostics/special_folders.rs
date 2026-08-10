@@ -73,8 +73,12 @@ pub(in crate::mapi::dispatch) fn log_special_folder_contract(
 
 pub(in crate::mapi::dispatch) fn log_calendar_special_sync_objects(
     principal: &AccountPrincipal,
+    request_id: &str,
     folder_id: u64,
     sync_type: u8,
+    sync_flags: u16,
+    sync_extra_flags: u32,
+    sync_property_tags: &[u32],
     objects: &[mapi_mailstore::SpecialMessageSyncFact],
 ) {
     if folder_id != CALENDAR_FOLDER_ID || sync_type != 0x01 {
@@ -181,6 +185,133 @@ pub(in crate::mapi::dispatch) fn log_calendar_special_sync_objects(
         PID_LID_GLOBAL_OBJECT_ID_TAG,
         PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
     ];
+    let sync_property_tags = format_debug_property_tags(sync_property_tags);
+    let sync_property_filter_mode = if sync_property_tags.is_empty() {
+        "all-properties"
+    } else if sync_flags & 0x0080 != 0 {
+        "only-specified-properties"
+    } else {
+        "except-specified-properties"
+    };
+    for object in &appointment_objects {
+        let source_key = mapi_mailstore::special_message_sync_source_key(object, sync_flags);
+        let parent_source_key =
+            mapi_mailstore::special_message_sync_parent_source_key(object, sync_flags);
+        let change_key = mapi_mailstore::special_message_change_key(object);
+        let predecessor_change_list =
+            mapi_mailstore::special_message_predecessor_change_list(object);
+        let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            principal.account_id,
+            object.folder_id,
+            object.item_id,
+        );
+        let entry_id_target = entry_id.as_deref().and_then(|entry_id| {
+            crate::mapi::identity::object_ids_from_message_entry_id(principal.account_id, entry_id)
+        });
+        let parent_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+            principal.account_id,
+            object.folder_id,
+        );
+        let parent_entry_id_target = parent_entry_id
+            .as_deref()
+            .and_then(crate::mapi::identity::object_id_from_folder_entry_id);
+        let property_tags = object
+            .named_properties
+            .iter()
+            .map(|(tag, _)| format!("0x{tag:08x}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let property_shapes = object
+            .named_properties
+            .iter()
+            .map(|(tag, value)| format!("0x{tag:08x}:{}", special_property_shape(value)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut named_property_definitions = object
+            .named_property_definitions
+            .iter()
+            .map(|(property_id, property)| match &property.kind {
+                crate::mapi::properties::MapiNamedPropertyKind::Lid(lid) => format!(
+                    "0x{property_id:04x}:guid={},lid=0x{lid:08x}",
+                    bytes_to_hex(&property.guid),
+                ),
+                crate::mapi::properties::MapiNamedPropertyKind::Name(_) => format!(
+                    "0x{property_id:04x}:guid={},name=redacted",
+                    bytes_to_hex(&property.guid),
+                ),
+            })
+            .collect::<Vec<_>>();
+        named_property_definitions.sort_unstable();
+        let named_property_definitions = named_property_definitions.join(",");
+        let missing_required_property_tags = appointment_required_tags
+            .iter()
+            .filter(|tag| {
+                !object
+                    .named_properties
+                    .iter()
+                    .any(|(present, _)| present == *tag)
+            })
+            .map(|tag| format!("0x{tag:08x}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let (global_object_id_contract, global_object_id_contract_ok) =
+            calendar_global_object_id_contract(object, PID_LID_GLOBAL_OBJECT_ID_TAG);
+        let (clean_global_object_id_contract, clean_global_object_id_contract_ok) =
+            calendar_global_object_id_contract(object, PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG);
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            request_rop_id = "0x70",
+            folder_id = %format!("0x{folder_id:016x}"),
+            sync_type = "0x01",
+            calendar_item_id = %format!("0x{:016x}", object.item_id),
+            calendar_canonical_id = %object.canonical_id,
+            calendar_message_class = %object.message_class,
+            calendar_subject_char_count = object.subject.chars().count(),
+            calendar_body_char_count = object.body_text.as_deref().map(str::chars).map(Iterator::count),
+            calendar_message_size = object.message_size,
+            calendar_last_modified_filetime = object.last_modified_filetime,
+            calendar_sync_flags = %format!("0x{sync_flags:04x}"),
+            calendar_sync_extra_flags = %format!("0x{sync_extra_flags:08x}"),
+            calendar_sync_property_filter_mode = sync_property_filter_mode,
+            calendar_sync_property_tags = %sync_property_tags,
+            calendar_projected_source_key = %bytes_to_hex(&source_key),
+            calendar_projected_parent_source_key = %bytes_to_hex(&parent_source_key),
+            calendar_projected_change_number = mapi_mailstore::special_message_change_number(object),
+            calendar_projected_change_key_bytes = change_key.len(),
+            calendar_projected_change_key_preview = %hex_preview(&change_key, 48),
+            calendar_projected_predecessor_change_list_bytes = predecessor_change_list.len(),
+            calendar_projected_predecessor_change_list_preview = %hex_preview(&predecessor_change_list, 48),
+            calendar_projected_entry_id_bytes = entry_id.as_ref().map_or(0, Vec::len),
+            calendar_projected_entry_id_preview = %entry_id.as_deref().map(|value| hex_preview(value, 48)).unwrap_or_default(),
+            calendar_projected_entry_id_target_folder_id = %entry_id_target.map(|(folder_id, _)| format!("0x{folder_id:016x}")).unwrap_or_default(),
+            calendar_projected_entry_id_target_item_id = %entry_id_target.map(|(_, item_id)| format!("0x{item_id:016x}")).unwrap_or_default(),
+            calendar_projected_entry_id_round_trip_matches = entry_id_target == Some((object.folder_id, object.item_id)),
+            calendar_projected_parent_entry_id_bytes = parent_entry_id.as_ref().map_or(0, Vec::len),
+            calendar_projected_parent_entry_id_preview = %parent_entry_id.as_deref().map(|value| hex_preview(value, 48)).unwrap_or_default(),
+            calendar_projected_parent_entry_id_target_folder_id = %parent_entry_id_target.map(|folder_id| format!("0x{folder_id:016x}")).unwrap_or_default(),
+            calendar_projected_parent_entry_id_matches = parent_entry_id_target == Some(object.folder_id),
+            calendar_projected_instance_key = %bytes_to_hex(&crate::mapi::identity::instance_key_for_object_id(object.item_id)),
+            calendar_property_count = object.named_properties.len(),
+            calendar_property_tags = %property_tags,
+            calendar_property_shapes = %property_shapes,
+            calendar_named_property_definitions = %named_property_definitions,
+            calendar_missing_required_property_tags = %missing_required_property_tags,
+            calendar_required_properties_complete = missing_required_property_tags.is_empty(),
+            calendar_start_end_order_ok = calendar_sync_object_start_end_order_ok(object),
+            calendar_global_object_id_bytes = special_binary_property_len(object, PID_LID_GLOBAL_OBJECT_ID_TAG).unwrap_or_default(),
+            calendar_global_object_id_third_party_contract = global_object_id_contract,
+            calendar_global_object_id_third_party_contract_ok = global_object_id_contract_ok,
+            calendar_clean_global_object_id_bytes = special_binary_property_len(object, PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG).unwrap_or_default(),
+            calendar_clean_global_object_id_third_party_contract = clean_global_object_id_contract,
+            calendar_clean_global_object_id_third_party_contract_ok = clean_global_object_id_contract_ok,
+            message = "rca debug mapi calendar FastTransfer appointment projection"
+        );
+    }
     let missing_configuration_tags = if configuration_objects.is_empty() {
         String::new()
     } else {

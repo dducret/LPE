@@ -45,8 +45,10 @@ pub(crate) use manifest::{
     sync_manifest_buffer_with_special_objects_and_final_state_with_folder_versions,
 };
 pub(crate) use special_message::{
-    fast_transfer_message_content_buffer_with_special_object, special_message_source_key,
-    SpecialMessagePropertyValue, SpecialMessageSyncFact,
+    fast_transfer_message_content_buffer_with_special_object, special_message_change_key,
+    special_message_change_number, special_message_predecessor_change_list,
+    special_message_source_key, special_message_sync_parent_source_key,
+    special_message_sync_source_key, SpecialMessagePropertyValue, SpecialMessageSyncFact,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
