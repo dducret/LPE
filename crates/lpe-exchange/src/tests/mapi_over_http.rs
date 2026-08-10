@@ -233,6 +233,9 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
         reminders: reminders.clone(),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -271,24 +274,46 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
     );
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .unwrap(),
+    );
     append_rop_open_message_with_flags(
         &mut rops,
         1,
         2,
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-        crate::mapi::identity::legacy_migration_object_id(&event_id),
+        identity_codec
+            .actual_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .unwrap(),
+        identity_codec
+            .actual_object_id(crate::mapi::identity::legacy_migration_object_id(&event_id))
+            .unwrap(),
         0x01,
     );
     append_rop_set_properties(&mut rops, 2, 2, &event_values);
     append_rop_save_changes_message(&mut rops, 1, 2);
-    append_rop_open_folder(&mut rops, 0, 3, crate::mapi::identity::TASKS_FOLDER_ID);
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        3,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::TASKS_FOLDER_ID)
+            .unwrap(),
+    );
     append_rop_open_message_with_flags(
         &mut rops,
         3,
         4,
-        crate::mapi::identity::TASKS_FOLDER_ID,
-        test_mapi_uuid_id(&task_id),
+        identity_codec
+            .actual_object_id(crate::mapi::identity::TASKS_FOLDER_ID)
+            .unwrap(),
+        identity_codec
+            .actual_object_id(test_mapi_uuid_id(&task_id))
+            .unwrap(),
         0x01,
     );
     append_rop_set_properties(&mut rops, 4, 2, &task_values);
@@ -388,6 +413,10 @@ async fn mapi_over_http_reminders_folder_open_uses_canonical_search_projection()
         session: Some(FakeStore::account()),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -407,7 +436,12 @@ async fn mapi_over_http_reminders_folder_open_uses_canonical_search_projection()
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut rops, crate::mapi::identity::REMINDERS_FOLDER_ID);
+    append_mapi_wire_id(
+        &mut rops,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
+            .unwrap(),
+    );
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -440,6 +474,9 @@ async fn mapi_over_http_root_rem_online_entry_id_projects_reminders_folder() {
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -459,7 +496,12 @@ async fn mapi_over_http_root_rem_online_entry_id_projects_reminders_folder() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
+    append_mapi_wire_id(
+        &mut rops,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::ROOT_FOLDER_ID)
+            .unwrap(),
+    );
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -481,11 +523,10 @@ async fn mapi_over_http_root_rem_online_entry_id_projects_reminders_folder() {
     let response_rops = response_rops_from_execute_response(response).await;
     let get_props_offset = 8;
     assert_eq!(response_rops[get_props_offset], 0x07);
-    let entry_id = crate::mapi::identity::long_term_id_from_object_id(
-        crate::mapi::identity::REMINDERS_FOLDER_ID,
-    )
-    .unwrap()
-    .to_vec();
+    let entry_id = identity_codec
+        .long_term_id_from_object_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
+        .unwrap()
+        .to_vec();
     assert!(contains_bytes(&response_rops, &entry_id));
 }
 
@@ -595,6 +636,9 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
         ])),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -612,7 +656,12 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
         .to_string();
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    append_mapi_wire_id(&mut rops, crate::mapi::identity::REMINDERS_FOLDER_ID);
+    append_mapi_wire_id(
+        &mut rops,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
+            .unwrap(),
+    );
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -638,8 +687,12 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
         &mut rops,
         0,
         3,
-        crate::mapi::identity::REMINDERS_FOLDER_ID,
-        crate::mapi::identity::legacy_migration_object_id(&mail_id),
+        identity_codec
+            .actual_object_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
+            .unwrap(),
+        identity_codec
+            .actual_object_id(crate::mapi::identity::legacy_migration_object_id(&mail_id))
+            .unwrap(),
     );
 
     let mut execute_headers = mapi_headers("Execute");

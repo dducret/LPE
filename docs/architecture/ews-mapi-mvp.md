@@ -338,6 +338,27 @@ The existing dispatch modules remain the registration hubs; the extracted
 helpers must preserve the current ROP tests and canonical-store calls without
 introducing table-local state.
 
+The following splits are triggered only by a failing-test repair or another
+necessary behavior change in the named file; they are not standalone
+refactoring work. Keep the current entry module as a declaration and routing
+hub, move one existing responsibility at a time, and run the directly affected
+tests before the `lpe-exchange` package gate:
+
+| Trigger file | First split boundary | Entry-module rule |
+| --- | --- | --- |
+| `mapi/transport/diagnostics.rs` | request decoding, ROP/frame summaries, and session/error diagnostics | `transport/diagnostics.rs` retains only public diagnostic routing and re-exports |
+| `service/ews/items.rs` | item XML parsing, canonical item projection, and item mutation response rendering | `items.rs` retains operation dispatch; object-family helpers own their XML details |
+| `mapi/rop.rs` | ROP request parsing, response encoding, and shared wire primitives | `rop.rs` remains the protocol registry and shared type boundary |
+| `mapi/nspi.rs` | Bind/session setup, address-book rows, and property manifest/projection | `nspi.rs` remains the EMSMDB/NSPI endpoint dispatcher |
+| `lpe-storage/src/mapi_contacts.rs` | imported identity validation, causality, and atomic contact commit | the existing storage trait and provider entry points retain transaction ownership |
+| `lpe-storage/src/submission.rs` | submission acceptance, canonical message persistence, and outbound handoff | the storage entry point retains the canonical submission transaction boundary |
+
+`mapi/nspi.rs` is just below the line threshold at the current audit, but it
+shares the same reasoning-cost risk and must not grow past the threshold without
+starting its listed split. `lpe-storage` modules that exceed the threshold are
+handled by the same rule: split only when a failing MAPI, contact, or submission
+repair requires a change, and keep storage transaction boundaries explicit.
+
 Before adding further `SaveChangesMessage` behavior, split
 `mapi/dispatch/message_save.rs` by canonical object family (mail, Calendar,
 collaboration items, and FAI/configuration), keeping only routing in the current

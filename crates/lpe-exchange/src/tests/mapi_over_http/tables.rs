@@ -1160,7 +1160,6 @@ async fn mapi_over_http_deleted_items_mixed_offset_page_keeps_global_sort_order(
     let account = FakeStore::account();
     let trash_id = Uuid::parse_str("73737373-7373-4373-8373-737373737373").unwrap();
     let event_id = Uuid::parse_str("74747474-7474-4474-8474-747474747474").unwrap();
-    let event_mapi_id = 0x0000_0000_0051_0001;
     let mut trash = FakeStore::mailbox(&trash_id.to_string(), "trash", "Deleted Items");
     trash.total_emails = 3;
     let emails = [
@@ -1201,7 +1200,6 @@ async fn mapi_over_http_deleted_items_mixed_offset_page_keeps_global_sort_order(
             notes: String::new(),
             body_html: String::new(),
         }])),
-        mapi_identities: Arc::new(Mutex::new(HashMap::from([(event_id, event_mapi_id)]))),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -2367,11 +2365,13 @@ async fn mapi_over_http_expand_row_on_folder_cannot_delete_messages() {
     ));
     assert!(moved_emails.lock().unwrap().is_empty());
     assert!(deleted_emails.lock().unwrap().is_empty());
-    assert!(canonical_emails
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|email| email.id == message_id));
+    assert!(
+        canonical_emails
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|email| email.id == message_id)
+    );
 }
 
 #[tokio::test]
@@ -2420,8 +2420,8 @@ async fn mapi_over_http_get_contents_table_rejects_soft_deletes_flag() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_get_contents_table_rejects_invalid_microsoft_table_flags_without_batch_drift(
-) {
+async fn mapi_over_http_get_contents_table_rejects_invalid_microsoft_table_flags_without_batch_drift()
+ {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -2531,8 +2531,8 @@ async fn mapi_over_http_get_contents_table_requires_microsoft_folder_handle_with
 }
 
 #[tokio::test]
-async fn mapi_over_http_get_hierarchy_table_rejects_invalid_microsoft_table_flags_without_batch_drift(
-) {
+async fn mapi_over_http_get_hierarchy_table_rejects_invalid_microsoft_table_flags_without_batch_drift()
+ {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -3457,9 +3457,11 @@ async fn mapi_over_http_get_rules_table_projects_canonical_sieve_rules() {
         .encode_utf16()
         .flat_map(u16::to_le_bytes)
         .collect::<Vec<_>>();
-    assert!(response_rops
-        .windows(rule_name.len())
-        .any(|window| window == rule_name));
+    assert!(
+        response_rops
+            .windows(rule_name.len())
+            .any(|window| window == rule_name)
+    );
     assert!(contains_bytes(&response_rops, &[0x41, 0x01, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,

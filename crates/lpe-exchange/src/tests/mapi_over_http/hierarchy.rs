@@ -31,10 +31,6 @@ async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_
     ];
     let mut imported_predecessor_change_list = vec![imported_change_key.len() as u8];
     imported_predecessor_change_list.extend_from_slice(&imported_change_key);
-    store.mapi_identities.lock().unwrap().insert(
-        contacts_identity_id,
-        crate::mapi::identity::CONTACTS_FOLDER_ID,
-    );
     store
         .mapi_identity_change_numbers
         .lock()
@@ -53,24 +49,33 @@ async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_
             contacts_identity_id,
             imported_predecessor_change_list.clone(),
         );
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store.clone());
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
 
-    let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CONTACTS_FOLDER_ID);
-    append_rop_get_properties_specific(
-        &mut rops,
-        1,
-        &[
-            PID_TAG_CHANGE_NUMBER,
-            PID_TAG_CHANGE_KEY,
-            PID_TAG_PREDECESSOR_CHANGE_LIST,
-            PID_TAG_LOCAL_COMMIT_TIME_MAX,
-        ],
-    );
+    let rops =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec.clone(), async {
+            let mut rops = Vec::new();
+            append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CONTACTS_FOLDER_ID);
+            append_rop_get_properties_specific(
+                &mut rops,
+                1,
+                &[
+                    PID_TAG_CHANGE_NUMBER,
+                    PID_TAG_CHANGE_KEY,
+                    PID_TAG_PREDECESSOR_CHANGE_LIST,
+                    PID_TAG_LOCAL_COMMIT_TIME_MAX,
+                ],
+            );
+            rops
+        })
+        .await;
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert(
@@ -90,10 +95,10 @@ async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_
     let response_rops = response_rops_from_execute_response(response).await;
     let mut row_offset =
         mapi_get_properties_specific_standard_row_offset(&response_rops, 1).unwrap() + 1;
-    let advertised_change_number =
-        crate::mapi::identity::object_id_from_wire_id(&response_rops[row_offset..row_offset + 8])
-            .and_then(crate::mapi::identity::global_counter_from_store_id)
-            .unwrap();
+    let advertised_change_number = identity_codec
+        .object_id_from_wire_id(&response_rops[row_offset..row_offset + 8])
+        .and_then(crate::mapi::identity::global_counter_from_store_id)
+        .unwrap();
     row_offset += 8;
     let advertised_change_key = read_rop_binary_u16(&response_rops, &mut row_offset).unwrap();
     let advertised_predecessor_change_list =
@@ -1190,6 +1195,10 @@ async fn mapi_over_http_create_folder_advertised_special_folder_opens_existing_e
         created_mailboxes: created_mailboxes.clone(),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -1226,9 +1235,11 @@ async fn mapi_over_http_create_folder_advertised_special_folder_opens_existing_e
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let mut expected = vec![0x1C, 0x02, 0, 0, 0, 0];
-    expected.extend_from_slice(&mapi_wire_id_bytes(
-        crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
-    ));
+    expected.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(crate::mapi::identity::SYNC_ISSUES_FOLDER_ID)
+            .unwrap(),
+    );
     expected.extend_from_slice(&[1, 0]);
     assert!(contains_bytes(&response_rops, &expected));
     assert!(created_mailboxes.lock().unwrap().is_empty());
@@ -1247,6 +1258,10 @@ async fn mapi_over_http_create_folder_quick_step_settings_opens_advertised_speci
         created_mailboxes: created_mailboxes.clone(),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -1283,9 +1298,11 @@ async fn mapi_over_http_create_folder_quick_step_settings_opens_advertised_speci
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let mut expected = vec![0x1C, 0x02, 0, 0, 0, 0];
-    expected.extend_from_slice(&mapi_wire_id_bytes(
-        crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
-    ));
+    expected.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID)
+            .unwrap(),
+    );
     expected.extend_from_slice(&[1, 0]);
     assert!(contains_bytes(&response_rops, &expected));
     assert!(created_mailboxes.lock().unwrap().is_empty());
@@ -2308,11 +2325,13 @@ async fn mapi_over_http_folder_extended_flags_survive_reconnect() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(stored_folder_profile_values
-        .lock()
-        .unwrap()
-        .values()
-        .any(|value| value == &client_flags));
+    assert!(
+        stored_folder_profile_values
+            .lock()
+            .unwrap()
+            .values()
+            .any(|value| value == &client_flags)
+    );
 
     let reconnect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -2486,11 +2505,13 @@ async fn mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_acr
         &root_set_response_rops,
         &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
     ));
-    assert!(stored_folder_profile_values
-        .lock()
-        .unwrap()
-        .values()
-        .any(|value| value == &expected_profile_value));
+    assert!(
+        stored_folder_profile_values
+            .lock()
+            .unwrap()
+            .values()
+            .any(|value| value == &expected_profile_value)
+    );
 
     // Outlook trace 202607291055 later writes only the first four documented
     // entries. That must not erase the Junk entry or the opaque move stamp.
@@ -2523,11 +2544,13 @@ async fn mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_acr
         &truncated_set_response_rops,
         &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
     ));
-    assert!(stored_folder_profile_values
-        .lock()
-        .unwrap()
-        .values()
-        .any(|value| value == &expected_profile_value));
+    assert!(
+        stored_folder_profile_values
+            .lock()
+            .unwrap()
+            .values()
+            .any(|value| value == &expected_profile_value)
+    );
 
     let reconnect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -2589,7 +2612,10 @@ async fn mapi_over_http_reopens_legacy_partial_additional_ren_entry_ids_with_jun
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         ..Default::default()
     };
-    let entries = [
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
+    let legacy_entries = [
         crate::mapi::identity::CONFLICTS_FOLDER_ID,
         crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
         crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
@@ -2599,13 +2625,22 @@ async fn mapi_over_http_reopens_legacy_partial_additional_ren_entry_ids_with_jun
         crate::mapi::identity::folder_entry_id_from_object_id(account.account_id, folder_id)
             .unwrap()
     });
-    let junk_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::JUNK_FOLDER_ID,
-    )
-    .unwrap();
+    let expected_entries = [
+        crate::mapi::identity::CONFLICTS_FOLDER_ID,
+        crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+        crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
+        crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
+    ]
+    .map(|folder_id| {
+        identity_codec
+            .folder_entry_id_from_object_id(account.account_id, folder_id)
+            .unwrap()
+    });
+    let expected_junk_entry_id = identity_codec
+        .folder_entry_id_from_object_id(account.account_id, crate::mapi::identity::JUNK_FOLDER_ID)
+        .unwrap();
     let mut legacy_profile_value = 4u32.to_le_bytes().to_vec();
-    for entry in &entries {
+    for entry in &legacy_entries {
         legacy_profile_value.extend_from_slice(&(entry.len() as u16).to_le_bytes());
         legacy_profile_value.extend_from_slice(entry);
     }
@@ -2649,7 +2684,10 @@ async fn mapi_over_http_reopens_legacy_partial_additional_ren_entry_ids_with_jun
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
     let mut expected_profile_value = 5u32.to_le_bytes().to_vec();
-    for entry in entries.iter().chain(std::iter::once(&junk_entry_id)) {
+    for entry in expected_entries
+        .iter()
+        .chain(std::iter::once(&expected_junk_entry_id))
+    {
         expected_profile_value.extend_from_slice(&(entry.len() as u16).to_le_bytes());
         expected_profile_value.extend_from_slice(entry);
     }
@@ -2710,6 +2748,10 @@ async fn mapi_over_http_default_ipm_entry_ids_open_expected_folders() {
         )])),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -2795,7 +2837,7 @@ async fn mapi_over_http_default_ipm_entry_ids_open_expected_folders() {
         values_offset += len;
         assert!(!entry_id.is_empty());
         assert_eq!(
-            crate::mapi::identity::object_id_from_folder_identifier_bytes(&entry_id),
+            identity_codec.object_id_from_folder_identifier_bytes(&entry_id),
             Some(folder_id)
         );
         entry_ids.push(entry_id);
@@ -2828,7 +2870,7 @@ async fn mapi_over_http_default_ipm_entry_ids_open_expected_folders() {
         assert!(contains_bytes(&response_rops, &utf16z(container_class)));
         assert!(contains_bytes(
             &response_rops,
-            &mapi_mailstore::source_key_for_store_id(folder_id)
+            &identity_codec.source_key_for_object_id(folder_id).unwrap()
         ));
     }
 }
@@ -3288,12 +3330,16 @@ async fn mapi_over_http_empty_folder_reports_partial_when_retention_blocks_one_m
         &[deletable_message_id]
     );
     let canonical = canonical_emails.lock().unwrap();
-    assert!(canonical
-        .iter()
-        .all(|email| email.id != deletable_message_id));
-    assert!(canonical
-        .iter()
-        .any(|email| email.id == retained_message_id));
+    assert!(
+        canonical
+            .iter()
+            .all(|email| email.id != deletable_message_id)
+    );
+    assert!(
+        canonical
+            .iter()
+            .any(|email| email.id == retained_message_id)
+    );
 }
 
 #[tokio::test]

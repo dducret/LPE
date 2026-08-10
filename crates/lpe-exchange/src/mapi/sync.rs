@@ -471,7 +471,6 @@ fn contact_sync_object(
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_CHANGE_NUMBER,
-        PID_TAG_LAST_MODIFICATION_TIME,
     ] {
         if let Some(value) = contact_property_value_with_identity(
             &contact.contact,

@@ -168,8 +168,8 @@ async fn mapi_over_http_sharing_8aa6_named_property_no_create_is_well_known() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_grant(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_grant()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -429,18 +429,24 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 2)));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 2);
-    assert!(stream
-        .message_changes
-        .iter()
-        .all(|message| message.associated));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Delegate access for alice@example.test"));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "alice@example.test: busy"));
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .all(|message| message.associated)
+    );
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .any(|message| message.subject == "Delegate access for alice@example.test")
+    );
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .any(|message| message.subject == "alice@example.test: busy")
+    );
     assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.Delegate")
@@ -589,7 +595,7 @@ async fn mapi_over_http_modify_permissions_maps_acl_rows_to_canonical_grants() {
         display_name: "Bob Delegate".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
-    let delegate_member_id = crate::mapi::identity::mapi_store_id(80);
+    let delegate_member_id = crate::mapi::identity::mapi_store_id(0x150);
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -667,7 +673,7 @@ async fn mapi_over_http_calendar_modify_permissions_maps_acl_rows_to_calendar_gr
         display_name: "Bob Delegate".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
-    let delegate_member_id = crate::mapi::identity::mapi_store_id(81);
+    let delegate_member_id = crate::mapi::identity::mapi_store_id(0x151);
     let store = FakeStore {
         session: Some(FakeStore::account()),
         directory_accounts: Arc::new(Mutex::new(vec![delegate.clone()])),
@@ -740,7 +746,7 @@ async fn mapi_over_http_custom_calendar_modify_permissions_maps_acl_rows_to_cale
         display_name: "Bob Delegate".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
-    let delegate_member_id = crate::mapi::identity::mapi_store_id(82);
+    let delegate_member_id = crate::mapi::identity::mapi_store_id(0x152);
     let store = FakeStore {
         session: Some(account.clone()),
         directory_accounts: Arc::new(Mutex::new(vec![delegate.clone()])),
@@ -815,14 +821,16 @@ async fn mapi_over_http_custom_calendar_modify_permissions_maps_acl_rows_to_cale
     );
     let audits = observed_audits.lock().unwrap();
     assert_eq!(audits[0].action, "mapi-modify-calendar-permissions");
-    assert!(audits[0]
-        .subject
-        .contains(&calendar_collection_id.to_string()));
+    assert!(
+        audits[0]
+            .subject
+            .contains(&calendar_collection_id.to_string())
+    );
 }
 
 #[tokio::test]
-async fn mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps_acl_rows_to_calendar_grants(
-) {
+async fn mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps_acl_rows_to_calendar_grants()
+ {
     let account = FakeStore::account();
     let owner_account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
     let calendar_collection_id = Uuid::parse_str("cccccccc-cccc-4ccc-8ccc-cccccccccccd").unwrap();
@@ -833,7 +841,7 @@ async fn mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps
         display_name: "Bob Delegate".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
-    let delegate_member_id = crate::mapi::identity::mapi_store_id(83);
+    let delegate_member_id = crate::mapi::identity::mapi_store_id(0x153);
     let mut shared_calendar = FakeStore::collection(
         &calendar_collection_id.to_string(),
         "calendar",
@@ -928,7 +936,7 @@ async fn mapi_over_http_custom_calendar_modify_permissions_remove_deletes_calend
         display_name: "Bob Delegate".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
-    let delegate_member_id = crate::mapi::identity::mapi_store_id(84);
+    let delegate_member_id = crate::mapi::identity::mapi_store_id(0x154);
     let store = FakeStore {
         session: Some(account.clone()),
         directory_accounts: Arc::new(Mutex::new(vec![delegate.clone()])),
@@ -1011,7 +1019,7 @@ async fn mapi_over_http_shared_calendar_without_share_right_rejects_modify_permi
         display_name: "Bob Delegate".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
-    let delegate_member_id = crate::mapi::identity::mapi_store_id(85);
+    let delegate_member_id = crate::mapi::identity::mapi_store_id(0x155);
     let mut shared_calendar = FakeStore::collection(
         &calendar_collection_id.to_string(),
         "calendar",

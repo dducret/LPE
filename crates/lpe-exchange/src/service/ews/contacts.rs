@@ -300,10 +300,14 @@ pub(in crate::service) fn parse_update_contact_input(
             request, contact, existing, &email,
         )),
         phones_json: Some(ews_updated_contact_phones_json(request, contact, existing)),
-        addresses_json: Some(ews_updated_contact_addresses_json(
-            request, contact, existing,
-        )),
-        urls_json: Some(ews_updated_contact_urls_json(request, contact, existing)),
+        addresses_json: (request.contains("contacts:PhysicalAddress:")
+            || element_content(contact, "PhysicalAddresses").is_some())
+        .then(|| ews_updated_contact_addresses_json(request, contact, existing)),
+        urls_json: (field_deleted(request, "contacts:BusinessHomePage")
+            || field_deleted(request, "contacts:PersonalHomePage")
+            || element_text(contact, "BusinessHomePage").is_some()
+            || element_text(contact, "PersonalHomePage").is_some())
+        .then(|| ews_updated_contact_urls_json(request, contact, existing)),
         organization_name: deleted_or_updated_text(
             request,
             contact,

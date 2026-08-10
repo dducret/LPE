@@ -314,7 +314,13 @@ impl MapiIdentityCodec {
         let global_counter = global_counter_from_globcnt(source_key.get(16..22)?)?;
         (global_counter <= MAX_PERSISTED_GLOBAL_COUNTER)
             .then_some(mapi_store_id(global_counter))
-            .and_then(|object_id| self.logical_object_id(object_id))
+            .and_then(|object_id| {
+                self.logical_object_id(object_id)
+                    // Low special-folder IDs are accepted only as legacy
+                    // input aliases. Durable IDs remain the sole emitted
+                    // SourceKey identity for an authenticated store.
+                    .or_else(|| is_advertised_special_folder_id(object_id).then_some(object_id))
+            })
     }
 
     pub(crate) fn long_term_id_from_object_id(&self, object_id: u64) -> Option<[u8; 24]> {
@@ -335,7 +341,10 @@ impl MapiIdentityCodec {
         }
         global_counter_from_globcnt(&long_term_id[16..22])
             .map(mapi_store_id)
-            .and_then(|object_id| self.logical_object_id(object_id))
+            .and_then(|object_id| {
+                self.logical_object_id(object_id)
+                    .or_else(|| is_advertised_special_folder_id(object_id).then_some(object_id))
+            })
     }
 
     pub(crate) fn folder_entry_id_from_object_id(

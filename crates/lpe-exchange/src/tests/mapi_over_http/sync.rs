@@ -1,5 +1,27 @@
 use super::*;
 
+async fn loaded_mapi_identity_codec(store: &FakeStore) -> crate::mapi::identity::MapiIdentityCodec {
+    crate::mapi::load_mapi_identity_codec_for_test(store, FakeStore::account().account_id)
+        .await
+        .unwrap()
+}
+
+async fn loaded_message_identity(
+    store: &FakeStore,
+    message_id: Uuid,
+) -> crate::store::MapiIdentityRecord {
+    store
+        .load_mapi_mail_store(FakeStore::account().account_id, 500)
+        .await
+        .unwrap()
+        .messages()
+        .iter()
+        .find(|message| message.canonical_id == message_id)
+        .and_then(|message| message.durable_identity.as_ref())
+        .cloned()
+        .unwrap()
+}
+
 fn append_rop_sync_import_deletes(
     rops: &mut Vec<u8>,
     input_handle_index: u8,
@@ -556,6 +578,7 @@ async fn mapi_over_http_conversation_action_fai_persists_and_moves_existing_conv
     let moved_emails = store.moved_emails.clone();
     let conversation_actions = store.conversation_actions.clone();
     let emails_state = store.emails.clone();
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -563,11 +586,12 @@ async fn mapi_over_http_conversation_action_fai_persists_and_moves_existing_conv
         .unwrap();
     let cookie = mapi_cookie_header(&connect);
 
-    let target_folder_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        FakeStore::account().account_id,
-        crate::mapi::identity::TRASH_FOLDER_ID,
-    )
-    .unwrap();
+    let target_folder_entry_id = identity_codec
+        .folder_entry_id_from_object_id(
+            FakeStore::account().account_id,
+            crate::mapi::identity::TRASH_FOLDER_ID,
+        )
+        .unwrap();
     let mut property_values = Vec::new();
     append_mapi_binary_property(
         &mut property_values,
@@ -589,7 +613,9 @@ async fn mapi_over_http_conversation_action_fai_persists_and_moves_existing_conv
         &mut rops,
         0,
         1,
-        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID)
+            .unwrap(),
     );
     append_rop_create_associated_message(
         &mut rops,
@@ -943,11 +969,13 @@ async fn mapi_over_http_microsoft_oxcmsg_insert_html_embedded_image_is_imported_
         imported[0].body_html_sanitized.as_deref(),
         Some(microsoft_html)
     );
-    assert!(imported[0]
-        .body_html_sanitized
-        .as_deref()
-        .unwrap()
-        .contains("cid:image001.png@01C86E1C.F1954390"));
+    assert!(
+        imported[0]
+            .body_html_sanitized
+            .as_deref()
+            .unwrap()
+            .contains("cid:image001.png@01C86E1C.F1954390")
+    );
     assert_eq!(imported[0].attachments.len(), 1);
     assert_eq!(imported[0].attachments[0].file_name, "image001.PNG");
     assert_eq!(imported[0].attachments[0].media_type, "image/PNG");
@@ -1201,9 +1229,11 @@ async fn mapi_over_http_chain_packs_terminal_fast_transfer_get_buffer_until_done
         frame_flags.len() >= 3,
         "expected packed frames, got flags={frame_flags:?}, response={response_rop_buffer:02x?}",
     );
-    assert!(frame_flags[..frame_flags.len() - 1]
-        .iter()
-        .all(|flags| *flags == 0));
+    assert!(
+        frame_flags[..frame_flags.len() - 1]
+            .iter()
+            .all(|flags| *flags == 0)
+    );
     assert_eq!(frame_flags.last(), Some(&0x0004));
     assert!(synthetic_get_buffer_statuses.len() >= 2);
     assert!(
@@ -1728,6 +1758,7 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
         ..Default::default()
     };
     let shortcuts = store.navigation_shortcuts.clone();
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -1739,11 +1770,9 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let inbox_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::INBOX_FOLDER_ID,
-    )
-    .unwrap();
+    let inbox_entry_id = identity_codec
+        .folder_entry_id_from_object_id(account.account_id, crate::mapi::identity::INBOX_FOLDER_ID)
+        .unwrap();
     let mail_folder_type = [
         0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x46,
@@ -1942,8 +1971,8 @@ async fn mapi_over_http_common_views_accepts_outlook_calendar_group_header_witho
 }
 
 #[tokio::test]
-async fn mapi_over_http_common_views_online_create_ignores_client_source_key_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_common_views_online_create_ignores_client_source_key_in_postgresql()
+-> anyhow::Result<()> {
     // [MS-OXCFXICS] section 3.3.5.2.1 reserves client-chosen local IDs for
     // ImportMessageChange, while section 3.3.5.2.2 requires the server to
     // allocate the identity for an online ROP create. The SourceKey below is
@@ -2092,8 +2121,8 @@ async fn mapi_over_http_common_views_online_create_ignores_client_source_key_in_
 }
 
 #[tokio::test]
-async fn mapi_over_http_online_common_views_wlink_accepts_later_ics_update_without_local_reservation(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_online_common_views_wlink_accepts_later_ics_update_without_local_reservation()
+-> anyhow::Result<()> {
     // [MS-OXCFXICS] sections 3.3.5.2.1 and 3.3.5.2.2 distinguish an
     // imported client-chosen local ID from the server-assigned identity of an
     // online RopCreateMessage. Section 3.2.5.9.4.2 then permits a later
@@ -2490,8 +2519,8 @@ async fn mapi_over_http_online_common_views_wlink_accepts_later_ics_update_witho
 }
 
 #[tokio::test]
-async fn mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_postgresql()
+-> anyhow::Result<()> {
     // [MS-OXOCFG] section 3.1.4.10 requires the existing WLink sequence
     // RopOpenMessage(ReadWrite), RopSetProperties, then RopSaveChangesMessage.
     // [MS-OXCROPS] sections 2.2.6.1, 2.2.8.6, and 2.2.6.3 define those
@@ -2702,8 +2731,8 @@ async fn mapi_over_http_existing_common_views_wlink_stages_until_atomic_save_in_
 }
 
 #[tokio::test]
-async fn mapi_over_http_existing_common_views_wlink_entry_id_replacement_is_staged_until_atomic_save_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_existing_common_views_wlink_entry_id_replacement_is_staged_until_atomic_save_in_postgresql()
+-> anyhow::Result<()> {
     // [MS-OXCROPS] sections 2.2.8.8 and 2.2.6.3 require property deletion
     // on the open Message to remain pending until SaveChangesMessage.
     // [MS-OXOCFG] sections 2.2.9.8 and 3.1.4.10.2 require a shortcut
@@ -3156,8 +3185,8 @@ async fn mapi_over_http_common_views_keeps_identical_online_fai_messages_distinc
 }
 
 #[tokio::test]
-async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ics_identity_in_postgresql()
+-> anyhow::Result<()> {
     // [MS-OXCFOLD] section 2.2.1.14 and [MS-OXCFXICS] sections
     // 2.2.3.2.4.2.1, 3.1.5.6.2.2, 3.2.5.9.4.2, and 3.3.5.8.7:
     // Common Views contains FAI messages, and ImportMessageChange returns an
@@ -3428,16 +3457,20 @@ async fn mapi_over_http_common_views_non_wlink_fai_import_round_trips_durable_ic
         downloaded.last_modification_time,
         Some(imported_last_modification_time as u64)
     );
-    assert!(strict_replguid_globset_contains_counter(
-        &sync.cnset_seen_fai,
-        &globcnt_bytes(server_change_number),
-    )
-    .map_err(anyhow::Error::msg)?);
-    assert!(!strict_replguid_globset_contains_counter(
-        &sync.cnset_seen_fai,
-        &globcnt_bytes(source_counter),
-    )
-    .map_err(anyhow::Error::msg)?);
+    assert!(
+        strict_replguid_globset_contains_counter(
+            &sync.cnset_seen_fai,
+            &globcnt_bytes(server_change_number),
+        )
+        .map_err(anyhow::Error::msg)?
+    );
+    assert!(
+        !strict_replguid_globset_contains_counter(
+            &sync.cnset_seen_fai,
+            &globcnt_bytes(source_counter),
+        )
+        .map_err(anyhow::Error::msg)?
+    );
 
     let created = reader
         .poll_mapi_notifications(account_id, baseline_cursor)
@@ -3777,6 +3810,7 @@ async fn mapi_over_http_outlook_mail_favorite_import_without_group_properties_pe
         .await
         .unwrap();
     let shortcuts = store.navigation_shortcuts.clone();
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store.clone());
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -3854,11 +3888,9 @@ async fn mapi_over_http_outlook_mail_favorite_import_without_group_properties_pe
     assert!(contains_bytes(&import_response, &[0x72, 0x01, 0, 0, 0, 0]));
     assert!(shortcuts.lock().unwrap().is_empty());
 
-    let inbox_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::INBOX_FOLDER_ID,
-    )
-    .unwrap();
+    let inbox_entry_id = identity_codec
+        .folder_entry_id_from_object_id(account.account_id, crate::mapi::identity::INBOX_FOLDER_ID)
+        .unwrap();
     let mail_folder_type = [
         0x00, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x46,
@@ -3911,12 +3943,6 @@ async fn mapi_over_http_outlook_mail_favorite_import_without_group_properties_pe
         .await
         .unwrap();
     let save_response = response_rops_from_execute_response(response).await;
-    let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
-    expected_save.extend_from_slice(&mapi_wire_id_bytes(message_id));
-    assert!(
-        contains_bytes(&save_response, &expected_save),
-        "Outlook's group-less Mail favorite must retain its imported MID: {save_response:02x?}"
-    );
 
     let stored = shortcuts.lock().unwrap();
     assert_eq!(stored.len(), 1);
@@ -3931,6 +3957,18 @@ async fn mapi_over_http_outlook_mail_favorite_import_without_group_properties_pe
     assert_eq!(stored[0].group_header_id, None);
     let canonical_id = stored[0].id;
     drop(stored);
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
+    let durable_identity = loaded_message_identity(&store, canonical_id).await;
+    let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
+    expected_save.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(durable_identity.object_id)
+            .unwrap(),
+    );
+    assert!(
+        contains_bytes(&save_response, &expected_save),
+        "Outlook's group-less Mail favorite must return its durable MID: {save_response:02x?}"
+    );
 
     let snapshot = store
         .load_mapi_mail_store(account.account_id, 500)
@@ -3989,6 +4027,7 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
     );
     let shortcuts = store.navigation_shortcuts.clone();
     let identities = store.mapi_identities.clone();
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store.clone());
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4027,11 +4066,12 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
     ));
 
     let group_id = Uuid::parse_str("b7f00600-0000-0000-c000-000000000046").unwrap();
-    let suggested_contacts_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
-    )
-    .unwrap();
+    let suggested_contacts_entry_id = identity_codec
+        .folder_entry_id_from_object_id(
+            account.account_id,
+            crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+        )
+        .unwrap();
     let imported_shortcuts = [
         (
             crate::mapi::identity::mapi_store_id(0x0206_B4),
@@ -4186,12 +4226,6 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
             3,
             "the three SetProperties calls must be processed"
         );
-        let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
-        expected_save.extend_from_slice(&mapi_wire_id_bytes(*message_id));
-        assert!(
-            contains_bytes(&save_response, &expected_save),
-            "SaveChangesMessage must preserve the imported WLink MID: {save_response:02x?}"
-        );
         let mut expected_get_properties = vec![0x07, 0x01, 0, 0, 0, 0, 0];
         expected_get_properties.extend_from_slice(&(change_key.len() as u16).to_le_bytes());
         expected_get_properties.extend_from_slice(&change_key);
@@ -4200,6 +4234,18 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
             "GetPropertiesSpecific after Save must return the imported WLink ChangeKey"
         );
         let canonical_id = shortcuts.lock().unwrap()[index].id;
+        let identity_codec = loaded_mapi_identity_codec(&store).await;
+        let durable_identity = loaded_message_identity(&store, canonical_id).await;
+        let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
+        expected_save.extend_from_slice(
+            &identity_codec
+                .wire_id_bytes_from_object_id(durable_identity.object_id)
+                .unwrap(),
+        );
+        assert!(
+            contains_bytes(&save_response, &expected_save),
+            "SaveChangesMessage must return the durable WLink MID: {save_response:02x?}"
+        );
         assert_eq!(
             store.mapi_identity_change_keys.lock().unwrap()[&canonical_id],
             change_key
@@ -4339,11 +4385,13 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
     ));
     assert_eq!(reserved_handles[1], u32::MAX);
     assert_eq!(shortcuts.lock().unwrap().len(), 2);
-    assert!(shortcuts
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|shortcut| shortcut.subject == "My Contacts"));
+    assert!(
+        shortcuts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|shortcut| shortcut.subject == "My Contacts")
+    );
 
     // [MS-OXCFXICS] sections 3.1.5.6.2.2 and 3.2.5.9.4.2: an older
     // conflicting FAI import is accepted without FailOnConflict, but the
@@ -4480,16 +4528,20 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
         contains_bytes(&older_conflict_save_response, &[0x0C, 0x00, 0, 0, 0, 0]),
         "older conflicting WLink Save response: {older_conflict_save_response:02x?}"
     );
-    assert!(shortcuts
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|shortcut| shortcut.id == my_contacts_id && shortcut.subject == "My Contacts"));
-    assert!(!shortcuts
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|shortcut| shortcut.subject == "Older client copy must not replace server"));
+    assert!(
+        shortcuts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|shortcut| shortcut.id == my_contacts_id && shortcut.subject == "My Contacts")
+    );
+    assert!(
+        !shortcuts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|shortcut| shortcut.subject == "Older client copy must not replace server")
+    );
     let resolved_server_change_number =
         store.mapi_identity_change_numbers.lock().unwrap()[&my_contacts_id];
     assert_ne!(
@@ -4663,9 +4715,11 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
         .values()
         .copied()
         .collect::<Vec<_>>();
-    assert!(imported_shortcuts
-        .iter()
-        .all(|(message_id, ..)| mapped_ids.contains(message_id)));
+    assert!(
+        imported_shortcuts
+            .iter()
+            .all(|(message_id, ..)| mapped_ids.contains(message_id))
+    );
 
     let mut sync_rops = Vec::new();
     append_rop_open_folder(
@@ -4715,7 +4769,8 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    for (message_id, subject, ..) in imported_shortcuts {
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
+    for (_message_id, subject, ..) in imported_shortcuts {
         let change = stream
             .message_changes
             .iter()
@@ -4734,11 +4789,14 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
             store.mapi_identity_predecessor_change_lists.lock().unwrap()[&canonical_id].clone();
         let expected_last_modification_time =
             store.mapi_identity_last_modification_times.lock().unwrap()[&canonical_id];
+        let durable_identity = loaded_message_identity(&store, canonical_id).await;
         assert!(change.associated);
-        assert_eq!(change.mid, Some(message_id));
+        assert_eq!(change.mid, Some(durable_identity.object_id));
         assert_eq!(
             change.source_key,
-            crate::mapi::identity::source_key_for_object_id(message_id)
+            identity_codec
+                .source_key_for_object_id(durable_identity.object_id)
+                .unwrap()
         );
         assert_eq!(change.change_number, Some(expected_change_number));
         assert_eq!(change.change_key, expected_change_key);
@@ -4777,6 +4835,7 @@ async fn mapi_over_http_conversation_action_content_sync_exports_fai_rows() {
         conversation_actions: Arc::new(Mutex::new(vec![action])),
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4820,9 +4879,9 @@ async fn mapi_over_http_conversation_action_content_sync_exports_fai_rows() {
     assert_eq!(message.subject, "Conv.Action: Sync conversation action");
     assert_eq!(
         message.parent_source_key,
-        mapi_mailstore::source_key_for_store_id(
-            crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID
-        )
+        identity_codec
+            .source_key_for_object_id(crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID)
+            .unwrap()
     );
     assert!(message.body_tags.contains(&0x0071_0102));
     assert!(message.body_tags.contains(&0x85CB_0003));
@@ -4844,6 +4903,7 @@ async fn mapi_over_http_empty_conversation_action_sync_is_state_only() {
         session: Some(FakeStore::account()),
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4860,7 +4920,9 @@ async fn mapi_over_http_empty_conversation_action_sync_is_state_only() {
         &mut rops,
         0,
         1,
-        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID)
+            .unwrap(),
     );
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
@@ -5012,11 +5074,13 @@ async fn mapi_over_http_associated_config_content_sync_exports_deletes() {
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert!(stream.message_changes.is_empty());
     assert!(stream.deleted_idset.is_some());
-    assert!(strict_replid_globset_contains_counter(
-        stream.deleted_idset.as_deref().unwrap(),
-        &globcnt_bytes(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 44)
-    )
-    .unwrap());
+    assert!(
+        strict_replid_globset_contains_counter(
+            stream.deleted_idset.as_deref().unwrap(),
+            &globcnt_bytes(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 44)
+        )
+        .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -5063,11 +5127,13 @@ async fn mapi_over_http_associated_config_delete_does_not_allocate_identity() {
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert!(stream.message_changes.is_empty());
     assert!(stream.deleted_idset.is_none());
-    assert!(!store
-        .mapi_identities
-        .lock()
-        .unwrap()
-        .contains_key(&config_id));
+    assert!(
+        !store
+            .mapi_identities
+            .lock()
+            .unwrap()
+            .contains_key(&config_id)
+    );
 }
 
 #[tokio::test]
@@ -5453,11 +5519,13 @@ async fn mapi_over_http_content_sync_uses_retired_move_mid_for_source_tombstone(
     assert_eq!(mapi_sync_manifest_counts(&response_rops), None);
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert!(stream.message_changes.is_empty());
-    assert!(strict_replid_globset_contains_counter(
-        stream.deleted_idset.as_deref().unwrap(),
-        &globcnt_bytes(old_mapi_object_id >> 16),
-    )
-    .unwrap());
+    assert!(
+        strict_replid_globset_contains_counter(
+            stream.deleted_idset.as_deref().unwrap(),
+            &globcnt_bytes(old_mapi_object_id >> 16),
+        )
+        .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -5487,6 +5555,8 @@ async fn mapi_over_http_content_sync_first_baseline_exports_all_current_messages
         ])),
         ..Default::default()
     };
+    let first_identity = loaded_message_identity(&store, first_id).await;
+    let second_identity = loaded_message_identity(&store, second_id).await;
     *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
         current_change_sequence: 55,
         current_modseq: 41,
@@ -5507,7 +5577,14 @@ async fn mapi_over_http_content_sync_first_baseline_exports_all_current_messages
         &response_rops,
         &META_TAG_IDSET_DELETED.to_le_bytes()
     ));
-    assert_content_final_state_includes(&response_rops, &[first_id, second_id], &[41]);
+    assert_content_final_state_includes_counters(
+        &response_rops,
+        &[
+            first_identity.object_id >> 16,
+            second_identity.object_id >> 16,
+        ],
+        &[first_identity.change_number, second_identity.change_number],
+    );
 }
 
 #[tokio::test]
@@ -5546,6 +5623,7 @@ async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_change
         ..Default::default()
     };
 
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let response_rops = content_sync_response_rops(store, 5, &[]).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
 
@@ -5559,7 +5637,9 @@ async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_change
     assert!(!stream.cnset_seen.is_empty());
     assert!(stream.cnset_seen_fai.is_empty());
     assert!(stream.cnset_read.is_empty());
-    let inbox_source_key = mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(5));
+    let inbox_source_key = identity_codec
+        .source_key_for_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+        .unwrap();
     for message in &stream.message_changes {
         assert!(message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS));
         assert_eq!(message.parent_source_key, inbox_source_key);
@@ -5568,7 +5648,9 @@ async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_change
         assert!(!message.associated);
         let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
             account.account_id,
-            test_mapi_folder_id(5),
+            identity_codec
+                .actual_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+                .unwrap(),
             message.mid.unwrap(),
         )
         .expect("message EntryID");
@@ -5579,14 +5661,18 @@ async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_change
             mapi_mailstore::predecessor_change_list(message.change_number.unwrap())
         );
     }
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Outlook first folder read"));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Outlook first folder unread"));
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .any(|message| message.subject == "Outlook first folder read")
+    );
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .any(|message| message.subject == "Outlook first folder unread")
+    );
 }
 
 #[tokio::test]
@@ -5606,6 +5692,7 @@ async fn mapi_over_http_ics_final_and_transfer_state_use_replguid_state_encoding
         )])),
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
 
     let response_rops = content_sync_response_rops(store.clone(), 5, &[]).await;
     let final_state = strict_content_sync_transfer_from_response(&response_rops).unwrap();
@@ -5618,11 +5705,13 @@ async fn mapi_over_http_ics_final_and_transfer_state_use_replguid_state_encoding
         assert!(strict_validate_replid_globset(value).is_err());
     }
     assert!(final_state.cnset_seen_fai.is_empty());
-    assert!(strict_replguid_globset_contains_counter(
-        &final_state.idset_given,
-        &globcnt_bytes(mapi_message_global_counter(&message_id))
-    )
-    .unwrap());
+    assert!(
+        strict_replguid_globset_contains_counter(
+            &final_state.idset_given,
+            &globcnt_bytes(mapi_message_global_counter(&message_id))
+        )
+        .unwrap()
+    );
 
     let service = ExchangeService::new(store);
     let connect = service
@@ -5635,7 +5724,14 @@ async fn mapi_over_http_ics_final_and_transfer_state_use_replguid_state_encoding
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+            .unwrap(),
+    );
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x01, 0x00, 0x28, 0x00, // content sync, ReadState | Normal
@@ -5690,6 +5786,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape() {
         emails: Arc::new(Mutex::new(vec![email])),
         ..Default::default()
     };
+    let message_identity = loaded_message_identity(&store, message_id).await;
     store
         .store_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -5710,7 +5807,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape() {
     };
     let client_state = outlook_content_sync_state_properties(
         &[
-            mapi_message_global_counter(&message_id),
+            message_identity.object_id >> 16,
             mapi_message_global_counter(&deleted_id),
         ],
         &[60],
@@ -5727,9 +5824,12 @@ async fn mapi_over_http_microsoft_oxcfxics_4_5_content_sync_stream_shape() {
     assert_eq!(stream.message_changes.len(), 1);
     assert_eq!(
         stream.message_changes[0].mid.unwrap() >> 16,
-        mapi_message_global_counter(&message_id)
+        message_identity.object_id >> 16
     );
-    assert_eq!(stream.message_changes[0].change_number, Some(61));
+    assert_eq!(
+        stream.message_changes[0].change_number,
+        Some(message_identity.change_number)
+    );
     assert!(stream.deleted_idset.is_some());
     // [MS-OXCFXICS] section 3.2.5.3: an object exported as a
     // messageChange cannot also appear in readStateChanges.
@@ -5866,8 +5966,8 @@ async fn mapi_over_http_content_sync_incremental_after_client_state_exports_delt
 }
 
 #[tokio::test]
-async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombstone_and_target_change(
-) {
+async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombstone_and_target_change()
+ {
     let inbox_id = Uuid::parse_str("53535353-5353-5353-5353-535353535353").unwrap();
     let archive_id = Uuid::parse_str("54545454-5454-5454-5454-545454545454").unwrap();
     let moved_id = Uuid::parse_str("66666666-6666-6666-8666-666666666666").unwrap();
@@ -5886,6 +5986,7 @@ async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombston
         emails: Arc::new(Mutex::new(vec![moved])),
         ..Default::default()
     };
+    let moved_identity = loaded_message_identity(&store, moved_id).await;
     for mailbox_id in [inbox_id, archive_id] {
         store
             .store_mapi_sync_checkpoint(
@@ -5907,7 +6008,7 @@ async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombston
         ..Default::default()
     };
 
-    let moved_counter = mapi_message_global_counter(&moved_id);
+    let moved_counter = moved_identity.object_id >> 16;
     let source_state = outlook_content_sync_state_properties(&[moved_counter], &[], &[], &[]);
     let target_state = outlook_content_sync_state_properties(&[], &[], &[], &[]);
     let source_rops = outlook_content_sync_response_rops_for_store(
@@ -5936,10 +6037,17 @@ async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombston
         target_stream.message_changes[0].mid.unwrap() >> 16,
         moved_counter
     );
-    assert_eq!(target_stream.message_changes[0].change_number, Some(41));
+    assert_eq!(
+        target_stream.message_changes[0].change_number,
+        Some(moved_identity.change_number)
+    );
     assert!(target_stream.read_idset.is_none());
     assert!(target_stream.unread_idset.is_none());
-    assert_content_final_state_includes_counters(&target_rops, &[moved_counter], &[41]);
+    assert_content_final_state_includes_counters(
+        &target_rops,
+        &[moved_counter],
+        &[moved_identity.change_number],
+    );
 }
 
 #[tokio::test]
@@ -5993,11 +6101,13 @@ async fn mapi_over_http_content_sync_hard_delete_exports_tombstone_and_empty_fin
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert!(stream.message_changes.is_empty());
     assert!(stream.deleted_idset.is_some());
-    assert!(strict_replid_globset_contains_counter(
-        stream.deleted_idset.as_deref().unwrap(),
-        &globcnt_bytes(mapi_message_global_counter(&deleted_id))
-    )
-    .unwrap());
+    assert!(
+        strict_replid_globset_contains_counter(
+            stream.deleted_idset.as_deref().unwrap(),
+            &globcnt_bytes(mapi_message_global_counter(&deleted_id))
+        )
+        .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -6022,6 +6132,7 @@ async fn mapi_over_http_content_sync_read_flag_update_exports_message_change_wit
         emails: Arc::new(Mutex::new(vec![email])),
         ..Default::default()
     };
+    let message_identity = loaded_message_identity(&store, message_id).await;
     store
         .store_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -6041,7 +6152,7 @@ async fn mapi_over_http_content_sync_read_flag_update_exports_message_change_wit
     };
 
     let client_state = outlook_content_sync_state_properties(
-        &[mapi_message_global_counter(&message_id)],
+        &[message_identity.object_id >> 16],
         &[46],
         &[],
         &[46],
@@ -6058,14 +6169,21 @@ async fn mapi_over_http_content_sync_read_flag_update_exports_message_change_wit
     assert_eq!(stream.message_changes.len(), 1);
     assert_eq!(
         stream.message_changes[0].mid.unwrap() >> 16,
-        mapi_message_global_counter(&message_id)
+        message_identity.object_id >> 16
     );
-    assert_eq!(stream.message_changes[0].change_number, Some(47));
+    assert_eq!(
+        stream.message_changes[0].change_number,
+        Some(message_identity.change_number)
+    );
     // [MS-OXCFXICS] section 3.2.5.3: the canonical read transition is
     // represented by this new object CN, not a duplicate IncrSyncRead row.
     assert!(stream.read_idset.is_none());
     assert!(stream.unread_idset.is_none());
-    assert_content_final_state_includes(&response_rops, &[message_id], &[47]);
+    assert_content_final_state_includes(
+        &response_rops,
+        &[message_id],
+        &[message_identity.change_number],
+    );
     assert!(contains_bytes(
         &response_rops,
         &mapi_message_cnset_property(META_TAG_CNSET_READ, &[46])
@@ -6094,6 +6212,7 @@ async fn mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc() {
         emails: Arc::new(Mutex::new(vec![email])),
         ..Default::default()
     };
+    let message_identity = loaded_message_identity(&store, message_id).await;
     store
         .store_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -6113,7 +6232,7 @@ async fn mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc() {
     };
 
     let client_state = outlook_content_sync_state_properties(
-        &[mapi_message_global_counter(&message_id)],
+        &[message_identity.object_id >> 16],
         &[40],
         &[],
         &[40],
@@ -6130,14 +6249,21 @@ async fn mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc() {
     assert_eq!(stream.message_changes.len(), 1);
     assert_eq!(
         stream.message_changes[0].mid.unwrap() >> 16,
-        mapi_message_global_counter(&message_id)
+        message_identity.object_id >> 16
     );
-    assert_eq!(stream.message_changes[0].change_number, Some(41));
+    assert_eq!(
+        stream.message_changes[0].change_number,
+        Some(message_identity.change_number)
+    );
     assert!(stream.read_idset.is_none());
     assert!(stream.unread_idset.is_none());
     assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
     assert!(!contains_bytes(&response_rops, b"Hidden Bcc"));
-    assert_content_final_state_includes(&response_rops, &[message_id], &[41]);
+    assert_content_final_state_includes(
+        &response_rops,
+        &[message_id],
+        &[message_identity.change_number],
+    );
 }
 
 #[tokio::test]
@@ -6178,6 +6304,7 @@ async fn mapi_over_http_sync_manifest_includes_attachment_change_facts_without_b
         )]))),
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -6186,7 +6313,14 @@ async fn mapi_over_http_sync_manifest_includes_attachment_change_facts_without_b
     let cookie = mapi_cookie_header(&connect);
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+            .unwrap(),
+    );
     append_rop_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -6331,15 +6465,15 @@ async fn mapi_over_http_sync_manifest_includes_stable_change_key_facts_without_b
         address: "hidden@example.test".to_string(),
         display_name: Some("Hidden Bcc".to_string()),
     });
-    let change_number = mapi_mailstore::canonical_message_change_number(&email);
-    let change_key = mapi_mailstore::change_key_for_change_number(change_number);
-    let predecessor_change_list = mapi_mailstore::predecessor_change_list(change_number);
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         emails: Arc::new(Mutex::new(vec![email])),
         ..Default::default()
     };
+    let message_identity = loaded_message_identity(&store, message_uuid).await;
+    let change_key = message_identity.change_key.clone();
+    let predecessor_change_list = message_identity.predecessor_change_list.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -6452,21 +6586,24 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     folder_type_property.extend_from_slice(&1i32.to_le_bytes());
     assert!(contains_bytes(&response_rops, &folder_type_property));
     let final_cnset_seen = mapi_last_binary_property(&response_rops, 0x6796_0102).unwrap();
-    assert!(strict_replguid_globset_contains_counter(
-        final_cnset_seen,
-        &globcnt_bytes(change_number)
-    )
-    .unwrap());
-    assert!(!strict_replguid_globset_contains_counter(
-        final_cnset_seen,
-        &globcnt_bytes(folder_id_counter)
-    )
-    .unwrap());
-    assert!(!strict_replguid_globset_contains_counter(
-        final_cnset_seen,
-        &globcnt_bytes(message_change_number)
-    )
-    .unwrap());
+    assert!(
+        strict_replguid_globset_contains_counter(final_cnset_seen, &globcnt_bytes(change_number))
+            .unwrap()
+    );
+    assert!(
+        !strict_replguid_globset_contains_counter(
+            final_cnset_seen,
+            &globcnt_bytes(folder_id_counter)
+        )
+        .unwrap()
+    );
+    assert!(
+        !strict_replguid_globset_contains_counter(
+            final_cnset_seen,
+            &globcnt_bytes(message_change_number)
+        )
+        .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -6520,6 +6657,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         fail_fetch_all_jmap_email_ids: true,
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -6599,7 +6737,9 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     ));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_wire_id_bytes(test_mapi_folder_id(4))
+        &identity_codec
+            .wire_id_bytes_from_object_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+            .unwrap()
     ));
     assert!(contains_bytes(
         &response_rops,
@@ -6615,11 +6755,12 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &0x3613_001Fu32.to_le_bytes()
     ));
-    let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        FakeStore::account().account_id,
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-    )
-    .unwrap();
+    let calendar_entry_id = identity_codec
+        .folder_entry_id_from_object_id(
+            FakeStore::account().account_id,
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap();
     let mut calendar_identification_property = 0x36D0_0102u32.to_le_bytes().to_vec();
     calendar_identification_property
         .extend_from_slice(&(calendar_entry_id.len() as u32).to_le_bytes());
@@ -6662,7 +6803,11 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
             .folder_changes
             .first()
             .and_then(|folder| folder.folder_id),
-        Some(test_mapi_folder_id(5))
+        Some(
+            identity_codec
+                .actual_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+                .unwrap(),
+        )
     );
     assert_eq!(
         decoded
@@ -6671,14 +6816,18 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
             .map(|folder| folder.parent_source_key.as_slice()),
         Some(&[][..])
     );
-    assert!(decoded
-        .folder_changes
-        .iter()
-        .all(|folder| folder.display_name != "Top of Information Store"));
-    assert!(decoded
-        .folder_changes
-        .iter()
-        .all(|folder| folder.folder_id.is_some()));
+    assert!(
+        decoded
+            .folder_changes
+            .iter()
+            .all(|folder| folder.display_name != "Top of Information Store")
+    );
+    assert!(
+        decoded
+            .folder_changes
+            .iter()
+            .all(|folder| folder.folder_id.is_some())
+    );
     let calendar = decoded
         .folder_changes
         .iter()
@@ -6691,8 +6840,12 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     );
     assert!(decoded.folder_changes.iter().all(|folder| {
         let expected_parent = match folder.display_name.as_str() {
-            "Conflicts" | "Local Failures" | "Server Failures" => test_mapi_folder_id(26),
-            _ => test_mapi_folder_id(4),
+            "Conflicts" | "Local Failures" | "Server Failures" => identity_codec
+                .actual_object_id(crate::mapi::identity::SYNC_ISSUES_FOLDER_ID)
+                .unwrap(),
+            _ => identity_codec
+                .actual_object_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+                .unwrap(),
         };
         folder.parent_folder_id == Some(expected_parent)
     }));
@@ -6737,6 +6890,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         )])),
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -6814,35 +6968,51 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(!contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::OUTBOX_FOLDER_ID)
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::OUTBOX_FOLDER_ID)
+            .unwrap()
     ));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::DRAFTS_FOLDER_ID)
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::DRAFTS_FOLDER_ID)
+            .unwrap()
     ));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::TRASH_FOLDER_ID)
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::TRASH_FOLDER_ID)
+            .unwrap()
     ));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CONTACTS_FOLDER_ID)
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::CONTACTS_FOLDER_ID)
+            .unwrap()
     ));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .unwrap()
     ));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::JOURNAL_FOLDER_ID)
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::JOURNAL_FOLDER_ID)
+            .unwrap()
     ));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::NOTES_FOLDER_ID)
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::NOTES_FOLDER_ID)
+            .unwrap()
     ));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::TASKS_FOLDER_ID)
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::TASKS_FOLDER_ID)
+            .unwrap()
     ));
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
@@ -6850,11 +7020,16 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
         crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
     ] {
-        let counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
-            .expect("stable folder counter");
+        let counter = crate::mapi::identity::global_counter_from_store_id(
+            identity_codec.actual_object_id(folder_id).unwrap(),
+        )
+        .expect("stable folder counter");
         assert!(
-            !strict_replguid_globset_contains_counter(&decoded.idset_given, &globcnt_bytes(counter))
-                .expect("hierarchy final IDSET"),
+            !strict_replguid_globset_contains_counter(
+                &decoded.idset_given,
+                &globcnt_bytes(counter)
+            )
+            .expect("hierarchy final IDSET"),
             "final hierarchy state should not acknowledge non-hierarchy special folder 0x{folder_id:016x}"
         );
     }
@@ -7071,6 +7246,7 @@ async fn mapi_over_http_root_hierarchy_sync_keeps_parent_keys_root_relative() {
         )])),
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -7128,7 +7304,9 @@ async fn mapi_over_http_root_hierarchy_sync_keeps_parent_keys_root_relative() {
         shortcuts.container_class.as_deref(),
         Some("IPF.ShortcutFolder")
     );
-    let ipm_source_key = mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4));
+    let ipm_source_key = identity_codec
+        .source_key_for_object_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+        .unwrap();
     for name in ["Inbox", "Outbox", "Sent Items", "Deleted Items"] {
         let folder = decoded
             .folder_changes
@@ -7281,18 +7459,26 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
                 && folder.parent_source_key == decoded.folder_changes[projects].source_key
         })
         .expect("custom Archive folderChange");
-    assert!(decoded.folder_changes[projects]
-        .parent_source_key
-        .is_empty());
-    assert!(decoded.folder_changes[archive]
-        .parent_source_key
-        .eq(&decoded.folder_changes[projects].source_key));
-    assert!(decoded
-        .idset_given
-        .starts_with(&mapi_mailstore::STORE_REPLICA_GUID));
-    assert!(decoded
-        .cnset_seen
-        .starts_with(&mapi_mailstore::STORE_REPLICA_GUID));
+    assert!(
+        decoded.folder_changes[projects]
+            .parent_source_key
+            .is_empty()
+    );
+    assert!(
+        decoded.folder_changes[archive]
+            .parent_source_key
+            .eq(&decoded.folder_changes[projects].source_key)
+    );
+    assert!(
+        decoded
+            .idset_given
+            .starts_with(&mapi_mailstore::STORE_REPLICA_GUID)
+    );
+    assert!(
+        decoded
+            .cnset_seen
+            .starts_with(&mapi_mailstore::STORE_REPLICA_GUID)
+    );
 }
 
 #[tokio::test]
@@ -7342,6 +7528,7 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
         mapi_mailbox_content_commit_times,
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -7391,7 +7578,11 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
     assert_eq!(inbox.folder_id, None);
     assert_eq!(
         inbox.parent_folder_id,
-        Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+        Some(
+            identity_codec
+                .actual_object_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+                .unwrap(),
+        )
     );
     assert_eq!(inbox.content_count, None);
     assert_eq!(inbox.content_unread_count, None);
@@ -7545,10 +7736,12 @@ async fn mapi_over_http_hierarchy_sync_uses_baseline_for_stale_root_checkpoint_w
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
-    assert!(decoded
-        .folder_changes
-        .iter()
-        .any(|folder| folder.display_name == "Inbox"));
+    assert!(
+        decoded
+            .folder_changes
+            .iter()
+            .any(|folder| folder.display_name == "Inbox")
+    );
 }
 
 #[tokio::test]
@@ -7782,7 +7975,8 @@ async fn mapi_over_http_fast_transfer_copy_to_message_excludes_requested_body_pr
     let chunks = mapi_fast_transfer_chunks(&response_rops);
     assert_eq!(chunks.len(), 1, "{response_rops:02x?}");
     let transfer = &chunks[0].1;
-    assert!(transfer.starts_with(&PID_TAG_SUBJECT_W.to_le_bytes()));
+    // Durable MAPI identity fields precede the direct message properties.
+    assert!(contains_bytes(transfer, &PID_TAG_SUBJECT_W.to_le_bytes()));
     assert!(!contains_bytes(transfer, b"LPE-MAPI-FASTTRANSFER\0"));
     assert!(contains_bytes(transfer, &utf16z("CopyTo message")));
     assert!(!contains_bytes(
@@ -8224,11 +8418,13 @@ async fn mapi_over_http_content_sync_after_empty_folder_advances_empty_final_sta
     assert!(stream.message_changes.is_empty());
     let deleted = stream.deleted_idset.as_deref().expect("deleted IDSET");
     for message_id in [first_message_id, second_message_id] {
-        assert!(strict_replid_globset_contains_counter(
-            deleted,
-            &globcnt_bytes(mapi_message_global_counter(&message_id))
-        )
-        .unwrap());
+        assert!(
+            strict_replid_globset_contains_counter(
+                deleted,
+                &globcnt_bytes(mapi_message_global_counter(&message_id))
+            )
+            .unwrap()
+        );
     }
     assert!(stream.idset_given.is_empty());
     assert!(stream.cnset_seen.is_empty());
@@ -8333,6 +8529,7 @@ async fn mapi_over_http_sync_source_transfer_state_returns_client_derived_final_
         )])),
         ..Default::default()
     };
+    let message_identity = loaded_message_identity(&store, message_id).await;
     *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
         current_change_sequence: 88,
         current_modseq: 44,
@@ -8386,18 +8583,28 @@ async fn mapi_over_http_sync_source_transfer_state_returns_client_derived_final_
     assert_eq!(chunks.len(), 2);
     let final_state = &chunks[1].1;
     let idset_given = mapi_binary_property_value(final_state, META_TAG_IDSET_GIVEN);
-    assert!(strict_replguid_globset_contains_counter(
-        idset_given,
-        &globcnt_bytes(mapi_message_global_counter(&message_id))
-    )
-    .unwrap());
-    assert!(!strict_replguid_globset_contains_counter(
-        idset_given,
-        &globcnt_bytes(STALE_CLIENT_COUNTER)
-    )
-    .unwrap());
+    assert!(
+        strict_replguid_globset_contains_counter(
+            idset_given,
+            &globcnt_bytes(message_identity.object_id >> 16)
+        )
+        .unwrap()
+    );
+    assert!(
+        !strict_replguid_globset_contains_counter(
+            idset_given,
+            &globcnt_bytes(STALE_CLIENT_COUNTER)
+        )
+        .unwrap()
+    );
     let cnset_seen = mapi_binary_property_value(final_state, META_TAG_CNSET_SEEN);
-    assert!(strict_replguid_globset_contains_counter(cnset_seen, &globcnt_bytes(41)).unwrap());
+    assert!(
+        strict_replguid_globset_contains_counter(
+            cnset_seen,
+            &globcnt_bytes(message_identity.change_number)
+        )
+        .unwrap()
+    );
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -8841,6 +9048,7 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
         )])),
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     store
         .store_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -8874,7 +9082,14 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
     append_mapi_utf16_property(&mut values, 0x0037_001F, "Collector import message");
     append_mapi_utf16_property(&mut values, PID_TAG_BODY_W, "Collector body");
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+            .unwrap(),
+    );
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
         0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
@@ -8895,7 +9110,7 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
     rops.extend_from_slice(&values);
     rops.extend_from_slice(&[
         0x0C, 0x00, 0x01, 0x03, 0x00, // RopSaveChangesMessage
-        0x82, 0x00, 0x02, 0x04, // RopSynchronizationGetTransferState
+        0x82, 0x00, 0x01, 0x04, // RopSynchronizationGetTransferState from collector
         0x4E, 0x00, 0x04, // RopFastTransferSourceGetBuffer
     ]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
@@ -8957,6 +9172,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_2_1_message_upload_returns_transfer
         )])),
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let imported_emails = store.imported_emails.clone();
     let emails = store.emails.clone();
     let service = ExchangeService::new(store);
@@ -8980,7 +9196,14 @@ async fn mapi_over_http_microsoft_oxcfxics_4_2_1_message_upload_returns_transfer
     append_mapi_utf16_property(&mut values, PID_TAG_BODY_W, "MS-OXCFXICS 4.2.1 body");
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+            .unwrap(),
+    );
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
     ]);
@@ -9002,7 +9225,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_2_1_message_upload_returns_transfer
     rops.extend_from_slice(&values);
     rops.extend_from_slice(&[
         0x0C, 0x00, 0x01, 0x03, 0x00, // RopSaveChangesMessage
-        0x82, 0x00, 0x02, 0x04, // RopSynchronizationGetTransferState
+        0x82, 0x00, 0x01, 0x04, // RopSynchronizationGetTransferState from collector
         0x4E, 0x00, 0x04, // RopFastTransferSourceGetBuffer
     ]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
@@ -9294,8 +9517,8 @@ async fn mapi_over_http_sync_upload_state_does_not_echo_multiple_streams() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_set_local_replica_midset_deleted_persists_folder_scoped_ranges(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_set_local_replica_midset_deleted_persists_folder_scoped_ranges()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -9421,10 +9644,12 @@ async fn mapi_over_http_set_local_replica_midset_deleted_persists_folder_scoped_
             },
         )
         .await;
-    assert!(replay
-        .as_ref()
-        .err()
-        .is_some_and(|error| { error.is::<crate::store::MapiFaiImportObjectDeleted>() }));
+    assert!(
+        replay
+            .as_ref()
+            .err()
+            .is_some_and(|error| { error.is::<crate::store::MapiFaiImportObjectDeleted>() })
+    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             r#"
@@ -9953,16 +10178,20 @@ async fn mapi_over_http_save_message_replaces_out_of_range_import_source_key() {
     assert_eq!(imported_emails.lock().unwrap().len(), 1);
     let allocated = mapi_identities.lock().unwrap();
     let saved_id = emails.lock().unwrap().last().unwrap().id;
-    assert!(!allocated
-        .values()
-        .any(
-            |object_id| crate::mapi::identity::source_key_for_object_id(*object_id)
-                == imported_source_key
-        ));
-    assert!(!mapi_identity_source_keys
-        .lock()
-        .unwrap()
-        .contains_key(&saved_id));
+    assert!(
+        !allocated
+            .values()
+            .any(
+                |object_id| crate::mapi::identity::source_key_for_object_id(*object_id)
+                    == imported_source_key
+            )
+    );
+    assert!(
+        !mapi_identity_source_keys
+            .lock()
+            .unwrap()
+            .contains_key(&saved_id)
+    );
 }
 
 #[tokio::test]
@@ -10035,11 +10264,13 @@ async fn mapi_over_http_save_message_acknowledges_trash_sync_metadata_only_impor
         &mapi_wire_id_bytes(out_of_range_object_id)
     ));
     assert_eq!(imported_emails.lock().unwrap().len(), 0);
-    assert!(!mapi_identities
-        .lock()
-        .unwrap()
-        .values()
-        .any(|object_id| *object_id == out_of_range_object_id));
+    assert!(
+        !mapi_identities
+            .lock()
+            .unwrap()
+            .values()
+            .any(|object_id| *object_id == out_of_range_object_id)
+    );
 }
 
 #[tokio::test]
@@ -10557,10 +10788,10 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         "IPM.Configuration.MessageListSettings",
     );
     append_mapi_i32_property(&mut save_values, 0x0036_0003, 0); // PidTagSensitivity.
-                                                                // Exact first-save value from Outlook trace 202607211302. Per
-                                                                // [MS-OXCMSG] section 2.2.1.6, mfRead and mfUnsent are writable before
-                                                                // the first successful Save, while mfFAI identifies the associated item
-                                                                // and the server adds mfEverRead with mfRead.
+    // Exact first-save value from Outlook trace 202607211302. Per
+    // [MS-OXCMSG] section 2.2.1.6, mfRead and mfUnsent are writable before
+    // the first successful Save, while mfFAI identifies the associated item
+    // and the server adds mfEverRead with mfRead.
     append_mapi_i32_property(&mut save_values, PID_TAG_MESSAGE_FLAGS, 0x49);
     append_mapi_i64_property(
         &mut save_values,
@@ -11166,12 +11397,16 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
             .any(|property| property.tag == PID_TAG_BODY_W),
         "direct CopyTo must not synthesize an empty PidTagBody_W absent from the canonical FAI"
     );
-    assert!(!properties
-        .iter()
-        .any(|property| property.tag == 0x7C07_0102));
-    assert!(!properties
-        .iter()
-        .any(|property| property.tag == 0x7C08_0102));
+    assert!(
+        !properties
+            .iter()
+            .any(|property| property.tag == 0x7C07_0102)
+    );
+    assert!(
+        !properties
+            .iter()
+            .any(|property| property.tag == 0x7C08_0102)
+    );
     let config_binary = properties
         .iter()
         .filter(|property| property.tag == 0x0E0B_0102)
@@ -11265,8 +11500,7 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         (PID_TAG_PREDECESSOR_CHANGE_LIST, imported_pcl.as_slice()),
     ] {
         assert_eq!(
-            direct_get_response_rops[value_offset],
-            0,
+            direct_get_response_rops[value_offset], 0,
             "{tag:#010x} must be a successful FlaggedPropertyValue: {direct_get_response_rops:02x?}"
         );
         value_offset += 1;
@@ -11298,8 +11532,7 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         "direct CopyTo and GetPropertiesSpecific must expose the same PidTagParentEntryId"
     );
     assert_eq!(
-        direct_get_response_rops[value_offset],
-        0,
+        direct_get_response_rops[value_offset], 0,
         "PidTagLastModificationTime must be a successful FlaggedPropertyValue: {direct_get_response_rops:02x?}"
     );
     value_offset += 1;
@@ -11911,10 +12144,12 @@ async fn mapi_over_http_inbox_fai_download_honors_uploaded_state_with_empty_norm
     .await;
     let initial_stream = strict_content_sync_transfer_from_response(&initial_response).unwrap();
     assert!(!initial_stream.message_changes.is_empty());
-    assert!(initial_stream
-        .message_changes
-        .iter()
-        .all(|message| message.associated));
+    assert!(
+        initial_stream
+            .message_changes
+            .iter()
+            .all(|message| message.associated)
+    );
     // Outlook's 0xA139 synchronization configuration uses PropertyTags as an
     // exclusion list. Neither child collection is excluded, so
     // [MS-OXCFXICS] sections 3.2.5.9.1.1 and 3.2.5.10 require an FXDelProp
@@ -14232,9 +14467,11 @@ async fn mapi_over_http_sync_import_deletes_removes_common_views_wlink_by_source
         .load_mapi_mail_store(account.account_id, 500)
         .await
         .unwrap();
-    assert!(reloaded
-        .navigation_shortcut_message_for_id(message_id)
-        .is_none());
+    assert!(
+        reloaded
+            .navigation_shortcut_message_for_id(message_id)
+            .is_none()
+    );
 
     let mut import_values = Vec::new();
     append_mapi_binary_property(&mut import_values, PID_TAG_SOURCE_KEY, &source_key);
@@ -14312,10 +14549,10 @@ async fn mapi_over_http_sync_import_deletes_removes_common_views_wlink_by_source
         .await
         .unwrap();
     let save_response = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &save_response,
-        &[0x0C, 0x00, 0x0A, 0x01, 0x04, 0x80]
-    ), "[MS-OXCFXICS] section 3.3.4.3.3.2.2.1 and [MS-OXCDATA] section 2.4 permit ecObjectDeleted on RopSaveChangesMessage and direct the client to ignore this warning: {save_response:02x?}");
+    assert!(
+        contains_bytes(&save_response, &[0x0C, 0x00, 0x0A, 0x01, 0x04, 0x80]),
+        "[MS-OXCFXICS] section 3.3.4.3.3.2.2.1 and [MS-OXCDATA] section 2.4 permit ecObjectDeleted on RopSaveChangesMessage and direct the client to ignore this warning: {save_response:02x?}"
+    );
     assert!(shortcuts.lock().unwrap().is_empty());
     assert_eq!(
         store
@@ -14328,8 +14565,8 @@ async fn mapi_over_http_sync_import_deletes_removes_common_views_wlink_by_source
 }
 
 #[tokio::test]
-async fn mapi_over_http_import_deletes_retry_ignores_online_unreserved_common_views_wlink(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_import_deletes_retry_ignores_online_unreserved_common_views_wlink()
+-> anyhow::Result<()> {
     // [MS-OXCFXICS] section 3.3.5.2.2 requires the server to allocate the
     // identity of an online-created Message. Unlike an imported local MID,
     // that identity is not backed by a RopGetLocalReplicaIds reservation.
@@ -14524,8 +14761,8 @@ async fn mapi_over_http_import_deletes_retry_ignores_online_unreserved_common_vi
 }
 
 #[tokio::test]
-async fn mapi_over_http_import_deletes_tombstones_reserved_unknown_common_views_wlink(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_import_deletes_tombstones_reserved_unknown_common_views_wlink()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -14668,10 +14905,12 @@ async fn mapi_over_http_import_deletes_tombstones_reserved_unknown_common_views_
             },
         )
         .await;
-    assert!(replay
-        .as_ref()
-        .err()
-        .is_some_and(|error| { error.is::<crate::store::MapiFaiImportObjectDeleted>() }));
+    assert!(
+        replay
+            .as_ref()
+            .err()
+            .is_some_and(|error| { error.is::<crate::store::MapiFaiImportObjectDeleted>() })
+    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             r#"
@@ -14695,8 +14934,8 @@ async fn mapi_over_http_import_deletes_tombstones_reserved_unknown_common_views_
 }
 
 #[tokio::test]
-async fn mapi_over_http_import_deletes_prevalidates_common_views_batch_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_import_deletes_prevalidates_common_views_batch_in_postgresql()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -15061,11 +15300,13 @@ async fn mapi_over_http_sync_import_hard_delete_returns_failure_when_retention_b
         "{response_rops:02x?}"
     );
     assert!(deleted_emails.lock().unwrap().is_empty());
-    assert!(canonical_emails
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|email| email.id == Uuid::parse_str(message_id).unwrap()));
+    assert!(
+        canonical_emails
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|email| email.id == Uuid::parse_str(message_id).unwrap())
+    );
 }
 
 #[tokio::test]
@@ -15772,11 +16013,13 @@ async fn mapi_over_http_import_deletes_prevalidates_hierarchy_batch_before_mutat
         destroyed_mailboxes.lock().unwrap().is_empty(),
         "[MS-OXCFXICS] section 3.2.5.9.4.5 requires predictable batch failure before mutation"
     );
-    assert!(canonical_mailboxes
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|mailbox| mailbox.id == custom_folder_id));
+    assert!(
+        canonical_mailboxes
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|mailbox| mailbox.id == custom_folder_id)
+    );
 }
 
 #[tokio::test]
@@ -16325,8 +16568,8 @@ async fn mapi_over_http_sync_import_hierarchy_change_keeps_hidden_system_folder_
 }
 
 #[tokio::test]
-async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cnset_and_deleted_when_canonical_is_emitted(
-) {
+async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cnset_and_deleted_when_canonical_is_emitted()
+ {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -16342,6 +16585,7 @@ async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cns
         .unwrap();
     let alias_id = crate::mapi::identity::mapi_store_id(first_reserved_counter + 0x204);
     let alias_source_key = crate::mapi::identity::source_key_for_object_id(alias_id);
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let created_mailboxes = store.created_mailboxes.clone();
     let special_folder_aliases = store.mapi_special_folder_aliases.clone();
     let special_folder_alias_change_numbers =
@@ -16361,7 +16605,9 @@ async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cns
     append_mapi_binary_property(
         &mut hierarchy_values,
         PID_TAG_PARENT_SOURCE_KEY,
-        &mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4)),
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+            .unwrap(),
     );
     append_mapi_binary_property(&mut hierarchy_values, PID_TAG_SOURCE_KEY, &alias_source_key);
     append_mapi_i64_property(
@@ -16421,11 +16667,8 @@ async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cns
         "the imported FID remains a durable redirect for stale requests"
     );
     assert!(
-        !strict_replguid_globset_contains_counter(
-            cnset_seen,
-            &globcnt_bytes(alias_change_number),
-        )
-        .unwrap(),
+        !strict_replguid_globset_contains_counter(cnset_seen, &globcnt_bytes(alias_change_number),)
+            .unwrap(),
         "the canonical-wins reconciliation must not acknowledge the Junk Email alias in MetaTagCnsetSeen"
     );
 
@@ -16680,9 +16923,12 @@ async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cns
         .unwrap(),
         "the deleted Junk Email alias must not remain in hierarchy MetaTagIdsetGiven"
     );
-    let canonical_junk_counter =
-        crate::mapi::identity::global_counter_from_store_id(crate::mapi::identity::JUNK_FOLDER_ID)
-            .expect("canonical Junk E-mail GLOBCNT");
+    let canonical_junk_counter = crate::mapi::identity::global_counter_from_store_id(
+        identity_codec
+            .actual_object_id(crate::mapi::identity::JUNK_FOLDER_ID)
+            .unwrap(),
+    )
+    .expect("canonical Junk E-mail GLOBCNT");
     assert!(
         strict_replguid_globset_contains_counter(
             &hierarchy_stream.idset_given,
@@ -16691,8 +16937,9 @@ async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cns
         .unwrap(),
         "the canonical Junk E-mail FID must remain in hierarchy MetaTagIdsetGiven"
     );
-    let canonical_junk_source_key =
-        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::JUNK_FOLDER_ID);
+    let canonical_junk_source_key = identity_codec
+        .source_key_for_object_id(crate::mapi::identity::JUNK_FOLDER_ID)
+        .unwrap();
     assert_eq!(
         hierarchy_stream
             .folder_changes
@@ -17040,8 +17287,8 @@ async fn mapi_over_http_microsoft_failed_sort_and_restrict_invalidate_table_unti
 }
 
 #[tokio::test]
-async fn mapi_over_http_microsoft_folder_search_criteria_example_round_trips_message_class_and_importance(
-) {
+async fn mapi_over_http_microsoft_folder_search_criteria_example_round_trips_message_class_and_importance()
+ {
     let account = FakeStore::account();
     let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555507").unwrap();
     let search_folder_id = Uuid::parse_str("34343434-3434-4434-8434-343434343491").unwrap();
@@ -17069,6 +17316,7 @@ async fn mapi_over_http_microsoft_folder_search_criteria_example_round_trips_mes
         ..Default::default()
     };
     let stored_search_folders = store.search_folders.clone();
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -17231,7 +17479,9 @@ async fn mapi_over_http_microsoft_folder_search_criteria_example_round_trips_mes
     );
     assert_eq!(
         &response_rops[folders_offset + 2..folders_offset + 10],
-        &crate::mapi::identity::wire_id_bytes_from_object_id(test_mapi_folder_id(5)).unwrap()
+        &identity_codec
+            .wire_id_bytes_from_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+            .unwrap()
     );
 
     renew_mapi_request_id(&mut execute_headers);
@@ -17304,8 +17554,8 @@ async fn mapi_over_http_unknown_fasttransfer_marker_terminates_current_buffer() 
 }
 
 #[tokio::test]
-async fn mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_inbox_message_list_settings_import_preserves_outlook_system_properties_after_postgresql_reconnect()
+-> anyhow::Result<()> {
     // Outlook 16.0.20131 sent distinct CreationTime/LMT values during the
     // 202607271610 Inbox FAI import and its canonical SMTP LastModifierName
     // during 202607272146. [MS-OXCFXICS] section 2.2.3.2.4.2.1 places LMT in

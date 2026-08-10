@@ -491,12 +491,14 @@ pub(in crate::mapi) fn contact_input_from_mapi(
             business_phone.as_deref().or(primary_phone.as_deref()),
             home_phone.as_deref(),
         )),
-        addresses_json: Some(existing.addresses_json.clone()),
-        urls_json: Some(contact_urls_json_from_mapi(
-            &existing.urls_json,
-            personal_url.as_deref(),
-            business_url.as_deref(),
-        )),
+        addresses_json: None,
+        urls_json: (personal_url.is_some() || business_url.is_some()).then(|| {
+            contact_urls_json_from_mapi(
+                &existing.urls_json,
+                personal_url.as_deref(),
+                business_url.as_deref(),
+            )
+        }),
         organization_name: company,
         job_title: title,
         ..Default::default()
@@ -740,15 +742,23 @@ pub(in crate::mapi) fn contact_input_from_mapi_with_deletions(
                 input.role.clear();
             }
             PID_TAG_PERSONAL_HOME_PAGE_W => {
+                let urls_json = input
+                    .urls_json
+                    .take()
+                    .unwrap_or_else(|| existing.urls_json.clone());
                 input.urls_json = Some(remove_labeled_contact_values(
-                    input.urls_json.unwrap_or_default(),
+                    urls_json,
                     "url",
                     &["home", "personal"],
                 ));
             }
             PID_TAG_BUSINESS_HOME_PAGE_W => {
+                let urls_json = input
+                    .urls_json
+                    .take()
+                    .unwrap_or_else(|| existing.urls_json.clone());
                 input.urls_json = Some(remove_labeled_contact_values(
-                    input.urls_json.unwrap_or_default(),
+                    urls_json,
                     "url",
                     &["work", "business"],
                 ));

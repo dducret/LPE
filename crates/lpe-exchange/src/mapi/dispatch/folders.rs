@@ -537,17 +537,6 @@ pub(super) async fn append_folder_move_copy_response<S: ExchangeStore>(
         ));
         return;
     }
-    // [MS-OXCFOLD] sections 2.2.1.8 and 3.2.5.8 require CopyFolder to copy
-    // canonical folder contents and honor WantRecursive. LPE does not have
-    // that complete operation yet, so never claim an empty hierarchy-only copy.
-    if rop_id == RopId::CopyFolder.as_u8() {
-        responses.extend_from_slice(&rop_error_response(
-            rop_id,
-            response_handle_index,
-            0x8004_0102,
-        ));
-        return;
-    }
     let Some(source_parent_folder_id) =
         input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
     else {
@@ -653,6 +642,30 @@ pub(super) async fn append_folder_move_copy_response<S: ExchangeStore>(
             ));
             return;
         }
+    }
+
+    if rop_id == RopId::CopyFolder.as_u8() {
+        if snapshot.public_folder_for_id(folder_id).is_none()
+            && folder_row_for_id(folder_id, mailboxes)
+                .is_some_and(|mailbox| mailbox.role != "custom")
+        {
+            responses.extend_from_slice(&rop_error_response(
+                rop_id,
+                response_handle_index,
+                0x8007_0005,
+            ));
+            return;
+        }
+        // [MS-OXCFOLD] sections 2.2.1.8 and 3.2.5.8 require CopyFolder to
+        // copy canonical folder contents and honor WantRecursive. LPE does
+        // not have that complete operation yet, so never claim an empty
+        // hierarchy-only copy after the source has been authorized.
+        responses.extend_from_slice(&rop_error_response(
+            rop_id,
+            response_handle_index,
+            0x8004_0102,
+        ));
+        return;
     }
 
     let Some(source_mailbox) = folder_row_for_id(folder_id, mailboxes) else {

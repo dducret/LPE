@@ -15,6 +15,15 @@ async fn mapi_over_http_custom_named_property_round_trips_on_supported_object() 
         )])),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
+    let contacts_folder_id = u64::from_le_bytes(
+        identity_codec
+            .wire_id_bytes_from_object_id(crate::mapi::identity::CONTACTS_FOLDER_ID)
+            .unwrap(),
+    );
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -26,12 +35,12 @@ async fn mapi_over_http_custom_named_property_round_trips_on_supported_object() 
     let mut custom_values = Vec::new();
     append_mapi_utf16_property(&mut custom_values, custom_tag, "opaque outlook value");
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_open_folder(&mut rops, 0, 1, contacts_folder_id);
     append_rop_open_message(
         &mut rops,
         1,
         2,
-        test_mapi_folder_id(15),
+        contacts_folder_id,
         test_mapi_uuid_id(&contact_id),
     );
     append_rop_set_properties(&mut rops, 2, 1, &custom_values);
@@ -54,12 +63,12 @@ async fn mapi_over_http_custom_named_property_round_trips_on_supported_object() 
     ));
 
     let mut delete_rops = Vec::new();
-    append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_open_folder(&mut delete_rops, 0, 1, contacts_folder_id);
     append_rop_open_message(
         &mut delete_rops,
         1,
         2,
-        test_mapi_folder_id(15),
+        contacts_folder_id,
         test_mapi_uuid_id(&contact_id),
     );
     delete_rops.extend_from_slice(&[0x0B, 0x00, 0x02]);
@@ -3788,6 +3797,15 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
         )]))),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
+    let inbox_folder_id = u64::from_le_bytes(
+        identity_codec
+            .wire_id_bytes_from_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+            .unwrap(),
+    );
     let folder_change_numbers = store.mapi_identity_change_numbers.clone();
     let folder_last_modification_times = store.mapi_identity_last_modification_times.clone();
     let service = ExchangeService::new(store);
@@ -3800,7 +3818,7 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    append_mapi_wire_id(&mut rops, inbox_folder_id);
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific on the folder
@@ -3816,7 +3834,7 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    append_mapi_wire_id(&mut rops, inbox_folder_id);
     rops.push(0);
     append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
@@ -3846,11 +3864,11 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
         folder_last_modification_times.lock().unwrap()[&mailbox_uuid];
     assert!(contains_bytes(
         &response_rops,
-        &mapi_mailstore::STORE_REPLICA_GUID
+        &identity_codec.replica_guid()
     ));
     let message_uuid = Uuid::parse_str(message_id).unwrap();
     let message_source_key = mapi_mailstore::source_key_for_uuid(&message_uuid);
-    let message_change_key = mapi_mailstore::change_key_for_change_number(message_change_number);
+    let message_change_key = identity_codec.change_key_for_change_number(message_change_number);
     let mut source_key_wire_value = 22u16.to_le_bytes().to_vec();
     source_key_wire_value.extend_from_slice(&message_source_key);
     let mut change_key_wire_value = 22u16.to_le_bytes().to_vec();
@@ -5874,6 +5892,12 @@ async fn mapi_over_http_root_default_folder_set_properties_do_not_override_compu
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
+    let root_folder_id = identity_codec
+        .wire_id_bytes_from_object_id(crate::mapi::identity::ROOT_FOLDER_ID)
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -5888,7 +5912,7 @@ async fn mapi_over_http_root_default_folder_set_properties_do_not_override_compu
     let mut set_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut set_rops, crate::mapi::identity::ROOT_FOLDER_ID);
+    set_rops.extend_from_slice(&root_folder_id);
     set_rops.push(0);
     set_rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on root
@@ -5916,7 +5940,7 @@ async fn mapi_over_http_root_default_folder_set_properties_do_not_override_compu
     let mut get_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut get_rops, crate::mapi::identity::ROOT_FOLDER_ID);
+    get_rops.extend_from_slice(&root_folder_id);
     get_rops.push(0);
     get_rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific on reopened root
@@ -5936,11 +5960,10 @@ async fn mapi_over_http_root_default_folder_set_properties_do_not_override_compu
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
-    let expected_calendar_eid = crate::mapi::identity::long_term_id_from_object_id(
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-    )
-    .unwrap()
-    .to_vec();
+    let expected_calendar_eid = identity_codec
+        .long_term_id_from_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+        .unwrap()
+        .to_vec();
     assert!(contains_bytes(&response_rops, &expected_calendar_eid));
     assert!(!contains_bytes(&response_rops, &default_calendar_eid));
 }
@@ -6002,6 +6025,9 @@ async fn mapi_over_http_root_default_folder_set_properties_accept_valid_entry_id
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -6009,18 +6035,23 @@ async fn mapi_over_http_root_default_folder_set_properties_accept_valid_entry_id
         .unwrap();
     let cookie = mapi_cookie_header(&connect);
 
-    let calendar_eid = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-    )
-    .unwrap();
+    let calendar_eid = identity_codec
+        .folder_entry_id_from_object_id(
+            account.account_id,
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap();
     let mut property_values = Vec::new();
     append_mapi_binary_property(&mut property_values, 0x36D0_0102, &calendar_eid);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
+    rops.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(crate::mapi::identity::ROOT_FOLDER_ID)
+            .unwrap(),
+    );
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on root
@@ -6053,6 +6084,9 @@ async fn mapi_over_http_root_default_folder_set_properties_accepts_cached_rem_on
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -6060,18 +6094,23 @@ async fn mapi_over_http_root_default_folder_set_properties_accepts_cached_rem_on
         .unwrap();
     let cookie = mapi_cookie_header(&connect);
 
-    let reminders_eid = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::REMINDERS_FOLDER_ID,
-    )
-    .unwrap();
+    let reminders_eid = identity_codec
+        .folder_entry_id_from_object_id(
+            account.account_id,
+            crate::mapi::identity::REMINDERS_FOLDER_ID,
+        )
+        .unwrap();
     let mut property_values = Vec::new();
     append_mapi_binary_property(&mut property_values, 0x36D5_0102, &reminders_eid);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
+    rops.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(crate::mapi::identity::ROOT_FOLDER_ID)
+            .unwrap(),
+    );
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on root
@@ -6104,6 +6143,9 @@ async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_ent
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -6114,7 +6156,11 @@ async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_ent
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
+    rops.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(crate::mapi::identity::ROOT_FOLDER_ID)
+            .unwrap(),
+    );
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -6176,7 +6222,8 @@ async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_ent
         crate::mapi::identity::TASKS_FOLDER_ID,
         crate::mapi::identity::DRAFTS_FOLDER_ID,
     ] {
-        let entry_id = crate::mapi::identity::long_term_id_from_object_id(folder_id)
+        let entry_id = identity_codec
+            .long_term_id_from_object_id(folder_id)
             .unwrap()
             .to_vec();
         assert!(contains_bytes(&response_rops, &entry_id));
@@ -6250,14 +6297,16 @@ async fn mapi_over_http_folder_get_properties_ignores_stale_protocol_local_folde
         )]))),
         ..Default::default()
     };
-    assert!(store
-        .stale_protocol_local_folder_properties
-        .lock()
-        .unwrap()
-        .contains_key(&(
-            crate::mapi::identity::INBOX_FOLDER_ID,
-            PID_TAG_DISPLAY_NAME_W
-        )));
+    assert!(
+        store
+            .stale_protocol_local_folder_properties
+            .lock()
+            .unwrap()
+            .contains_key(&(
+                crate::mapi::identity::INBOX_FOLDER_ID,
+                PID_TAG_DISPLAY_NAME_W
+            ))
+    );
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")

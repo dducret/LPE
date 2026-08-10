@@ -1906,9 +1906,11 @@ async fn mapi_over_http_duplicate_execute_request_id_with_different_body_does_no
 
     assert_eq!(repeated.status(), StatusCode::OK);
     assert_eq!(repeated.headers().get("x-responsecode").unwrap(), "12");
-    assert!(String::from_utf8(response_bytes(repeated).await)
-        .unwrap()
-        .contains("reused MAPI Execute request id with a different ROP payload"));
+    assert!(
+        String::from_utf8(response_bytes(repeated).await)
+            .unwrap()
+            .contains("reused MAPI Execute request id with a different ROP payload")
+    );
     let recorded = submitted_messages.lock().unwrap();
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].subject, "Duplicate id first submit");
@@ -2349,6 +2351,10 @@ async fn mapi_over_http_execute_returns_transport_folder_without_protocol_outbox
         session: Some(FakeStore::account()),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -2379,7 +2385,12 @@ async fn mapi_over_http_execute_returns_transport_folder_without_protocol_outbox
     let response_rops = response_rops_from_execute_response(response).await;
     let transport_frame: Vec<u8> = {
         let mut expected = vec![0x6D, 0x00, 0, 0, 0, 0];
-        append_mapi_wire_id(&mut expected, crate::mapi::identity::OUTBOX_FOLDER_ID);
+        append_mapi_wire_id(
+            &mut expected,
+            identity_codec
+                .actual_object_id(crate::mapi::identity::OUTBOX_FOLDER_ID)
+                .unwrap(),
+        );
         expected
     };
     let transport_offset = response_rops
@@ -2401,7 +2412,9 @@ async fn mapi_over_http_execute_returns_transport_folder_without_protocol_outbox
             &response_rops[transport_offset + 6..transport_offset + 14]
         )
         .unwrap(),
-        crate::mapi::identity::OUTBOX_FOLDER_ID
+        identity_codec
+            .actual_object_id(crate::mapi::identity::OUTBOX_FOLDER_ID)
+            .unwrap()
     );
 }
 

@@ -179,8 +179,8 @@ async fn assert_outsider_has_no_notifications(
 }
 
 #[tokio::test]
-async fn mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifications_in_postgresql()
+-> anyhow::Result<()> {
     // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.4.1.2 require a custom
     // Calendar folder to keep its FID across its hierarchy create/delete
     // notifications.
@@ -316,8 +316,8 @@ async fn mapi_custom_calendar_collection_lifecycle_replays_as_hierarchy_notifica
 }
 
 #[tokio::test]
-async fn mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_identity_in_postgresql()
+-> anyhow::Result<()> {
     // [MS-OXCNOTIF] sections 2.2.1.1 and 4 require NewMail to carry the
     // recipient's receive-folder ID and durable Message ID.
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
@@ -502,8 +502,8 @@ async fn mapi_inbox_new_mail_notification_allocates_recipient_scoped_message_ide
 }
 
 #[tokio::test]
-async fn mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_non_inbox_message_notification_allocates_message_identity_in_postgresql()
+-> anyhow::Result<()> {
     // [MS-OXCNOTIF] section 2.2.1.4.1.2 requires ObjectCreated to carry both
     // FolderId and MessageId when it represents a message, including Sent.
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
@@ -628,8 +628,8 @@ async fn mapi_non_inbox_message_notification_allocates_message_identity_in_postg
 }
 
 #[tokio::test]
-async fn mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from_postgresql()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -698,9 +698,11 @@ async fn mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from
             trash_checkpoint,
         )
         .await?;
-    assert!(trash_changes
-        .changed_deleted_calendar_event_ids
-        .contains(&event_id));
+    assert!(
+        trash_changes
+            .changed_deleted_calendar_event_ids
+            .contains(&event_id)
+    );
 
     // A second MAPI session starts from the pre-move cursor. The durable poll
     // must reconstruct both [MS-OXCNOTIF] source deletion and destination move
@@ -740,8 +742,8 @@ async fn mapi_calendar_move_notifications_are_replayed_with_old_and_new_ids_from
 }
 
 #[tokio::test]
-async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_calendar_notifications_are_durable_and_principal_scoped_in_postgresql()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -1291,8 +1293,8 @@ async fn mapi_contact_notification_create_carries_current_total_in_postgresql() 
 }
 
 #[tokio::test]
-async fn mapi_navigation_shortcut_notifications_are_durable_across_storage_instances_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_navigation_shortcut_notifications_are_durable_across_storage_instances_in_postgresql()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -1420,8 +1422,8 @@ async fn create_notification_mailbox(
 }
 
 #[tokio::test]
-async fn mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_in_postgresql()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -1710,8 +1712,8 @@ async fn mapi_hierarchy_move_and_copy_replay_is_recipient_scoped_and_historical_
 }
 
 #[tokio::test]
-async fn mapi_nested_folder_delete_replay_uses_historical_parent_and_retained_identity_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_nested_folder_delete_replay_uses_historical_parent_and_retained_identity_in_postgresql()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };

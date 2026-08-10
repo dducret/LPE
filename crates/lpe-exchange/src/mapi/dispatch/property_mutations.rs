@@ -213,6 +213,9 @@ where
             Some(MapiObject::Contact { .. }) => {
                 stage_contact_property_values(session, handle_slots, request, snapshot, values)
             }
+            Some(MapiObject::PendingContact { .. }) => {
+                stage_pending_contact_property_values(session, handle_slots, request, values)
+            }
             Some(MapiObject::NavigationShortcut { .. }) => {
                 stage_existing_navigation_shortcut_property_values(
                     principal,

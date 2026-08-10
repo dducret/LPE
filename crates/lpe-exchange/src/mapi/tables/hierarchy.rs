@@ -52,7 +52,7 @@ pub(super) fn hierarchy_rows_excluding_deleted<'a>(
         sort_hierarchy_rows(&mut rows, sort_orders);
         return rows;
     }
-    let mut rows = if folder_id == SYNC_ISSUES_FOLDER_ID {
+    let mut rows = if matches!(folder_id, ROOT_FOLDER_ID | SYNC_ISSUES_FOLDER_ID) {
         Vec::new()
     } else {
         mailboxes

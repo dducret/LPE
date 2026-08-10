@@ -2,7 +2,7 @@
 
 ## Current State/Functionality Overview
 
-`LPE` publishes client autoconfiguration only for endpoints that are implemented and explicitly exposed. New 0.5.2 installations enable MAPI over HTTP for capable Outlook desktop clients; legacy Exchange provider blocks remain separately gated.
+`LPE` publishes client autoconfiguration only for endpoints that are implemented and explicitly exposed. New 0.5.2 installations enable MAPI over HTTP for capable Outlook desktop clients; legacy Exchange provider blocks remain separately gated. This deployment policy is not a local-verification or Outlook-support claim: the exact deployed revision still requires a clean local `lpe-exchange` suite, the bounded public-host MAPI Gate 1 harness, Microsoft RCA, and real Outlook cached-mode evidence before any support claim is widened.
 
 ## Implementation/Usage
 
@@ -17,7 +17,7 @@
   ActiveSync/MobileSync probes, but it must not imply support for older
   ActiveSync protocol versions.
 - Publish `EWS` only when `LPE_AUTOCONFIG_EWS_ENABLED` is true.
-- Publish `mapiHttp` when `LPE_AUTOCONFIG_MAPI_ENABLED` is true and the client sends a supported positive `X-MapiHttpCapability` value. New 0.5.2 installations enable this setting. The capability header never enables a deployment-disabled endpoint, and legacy `EXCH` / `EXPR` metadata is suppressed only when `mapiHttp` metadata is actually emitted.
+- Publish `mapiHttp` when `LPE_AUTOCONFIG_MAPI_ENABLED` is true and the client sends a supported positive `X-MapiHttpCapability` value. New 0.5.2 installations enable this setting. The capability header never enables a deployment-disabled endpoint, and legacy `EXCH` / `EXPR` metadata is suppressed only when `mapiHttp` metadata is actually emitted. Publication does not claim that the current checkout has passed local, public-host, Microsoft RCA, or real Outlook cached-mode validation.
 - Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is true and an Exchange-style surface is enabled.
 - Publish top-level `EXPR` only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true and `/rpc/rpcproxy.dll` is implemented and exposed.
 - Publish SOAP `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is true and an `EWS` or `MAPI` surface is enabled.
@@ -99,7 +99,7 @@ Microsoft Autodiscover v2 JSON does not advertise `JMAP`. Use `/.well-known/jmap
 
 ## Outlook Release Evidence Checklist
 
-Record these checks for the exact public host used for a 0.5.x release. The checklist no longer acts as a second MAPI runtime switch; `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` remains reserved for legacy `EXPR`/RPC over HTTP:
+Record these checks for the exact deployed revision and public host used for a 0.5.x release. The checklist no longer acts as a second MAPI runtime switch; `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` remains reserved for legacy `EXPR`/RPC over HTTP. Until every item is separately recorded, do not widen Outlook support, readiness, or cached-mode claims from the fact that MAPI/HTTP is published.
 
 - Microsoft MAPI/HTTP and Autodiscover references have been checked for the release, including `MS-OXCMAPIHTTP` transport, `MS-OXDSCLI` `X-MapiHttpCapability` handling, and the MapiHttp response shape.
 - `cargo test -p lpe-admin-api` and `cargo test -p lpe-exchange` pass for the exact revision being deployed.

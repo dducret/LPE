@@ -183,9 +183,11 @@ async fn mapi_calendar_snapshot_identity_is_principal_scoped_in_postgresql() -> 
         owner_event_after_grantee_load.source_key,
         owner_identity.source_key
     );
-    assert!(owner_snapshot
-        .event_for_id(owner_folder_id, grantee_event.id)
-        .is_none());
+    assert!(
+        owner_snapshot
+            .event_for_id(owner_folder_id, grantee_event.id)
+            .is_none()
+    );
 
     fixture.cleanup().await?;
     Ok(())

@@ -325,7 +325,7 @@ async fn mapi_over_http_public_folder_hierarchy_table_lists_canonical_roots() {
     );
     assert_eq!(
         u32::from_le_bytes(response_rops[6..10].try_into().unwrap()),
-        1
+        2
     );
     let query_offset = 10 + 7;
     assert_eq!(response_rops[query_offset], 0x15);
@@ -338,6 +338,7 @@ async fn mapi_over_http_public_folder_hierarchy_table_lists_canonical_roots() {
         1
     );
     assert!(contains_bytes(response_rops, &utf16z("Public Root")));
+    assert!(contains_bytes(response_rops, &utf16z("Team Posts")));
 
     let root_mapi_id = crate::mapi::identity::mapped_mapi_object_id(
         &Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap(),
@@ -844,9 +845,11 @@ async fn mapi_over_http_microsoft_public_folder_copy_folder_is_not_supported_wit
     ));
     let folders = public_folders.lock().unwrap();
     assert_eq!(folders.len(), 3);
-    assert!(folders
-        .iter()
-        .all(|folder| folder.display_name != "Copied Public"));
+    assert!(
+        folders
+            .iter()
+            .all(|folder| folder.display_name != "Copied Public")
+    );
     let items = public_folder_items.lock().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].id, Uuid::parse_str(item_id).unwrap());
@@ -1651,7 +1654,7 @@ async fn mapi_over_http_public_folder_modify_permissions_writes_canonical_grants
         display_name: "Public Delegate".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
-    let delegate_member_id = crate::mapi::identity::mapi_store_id(81);
+    let delegate_member_id = crate::mapi::identity::mapi_store_id(0x151);
     let store = FakeStore {
         session: Some(FakeStore::account()),
         public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
@@ -1784,11 +1787,13 @@ async fn mapi_over_http_public_folder_modify_permissions_writes_canonical_grants
         &remove_response_rops,
         &[0x40, 0x01, 0, 0, 0, 0]
     ));
-    assert!(observed_permissions
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|permission| permission.principal_account_id != delegate.account_id));
+    assert!(
+        observed_permissions
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|permission| permission.principal_account_id != delegate.account_id)
+    );
     let audits = observed_audits.lock().unwrap();
     assert_eq!(audits[0].action, "mapi-modify-public-folder-permissions");
     assert_eq!(audits[1].action, "mapi-modify-public-folder-permissions");
@@ -1812,7 +1817,7 @@ async fn mapi_over_http_public_folder_modify_permissions_requires_share_right() 
         display_name: "Grantee".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
-    let grantee_member_id = crate::mapi::identity::mapi_store_id(82);
+    let grantee_member_id = crate::mapi::identity::mapi_store_id(0x152);
     let mut public_root = FakeStore::public_folder(root_id, None, "Public Root");
     public_root.rights.may_share = false;
     let store = FakeStore {
@@ -2419,10 +2424,12 @@ async fn mapi_over_http_public_folder_content_sync_exports_canonical_read_state(
     assert!(contains_bytes(&response_rops, &unread_flags_property));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 2);
-    assert!(stream
-        .message_changes
-        .iter()
-        .all(|message| message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS)));
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .all(|message| message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS))
+    );
     assert!(stream.read_idset.is_none());
     assert!(stream.unread_idset.is_none());
     assert_eq!(stream.cnset_read, client_cnset_read);
@@ -4204,8 +4211,8 @@ async fn mapi_over_http_public_folder_per_user_information_round_trips_canonical
 }
 
 #[tokio::test]
-async fn mapi_over_http_public_folder_per_user_information_rejects_exchange_blob_without_state_change(
-) {
+async fn mapi_over_http_public_folder_per_user_information_rejects_exchange_blob_without_state_change()
+ {
     let root_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     let item_id = "cccccccc-dddd-eeee-ffff-000000000000";
     let items = Arc::new(Mutex::new(vec![FakeStore::public_folder_item(

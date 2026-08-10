@@ -202,6 +202,10 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
         )])),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let contacts = store.contacts.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -248,10 +252,15 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
     append_mapi_utf16_property(&mut property_values, tag(1), "e.mueller@example.test");
     append_mapi_utf16_property(&mut property_values, 0x3A16_001F, "Société Zürich");
     append_mapi_utf16_property(&mut property_values, 0x3A1C_001F, "+41 44 555 01 02");
-    let mut rops = Vec::new();
-    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(15));
-    append_rop_set_properties(&mut rops, 1, 5, &property_values);
-    append_rop_save_changes_message(&mut rops, 1, 1);
+    let rops =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec.clone(), async {
+            let mut rops = Vec::new();
+            append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(15));
+            append_rop_set_properties(&mut rops, 1, 5, &property_values);
+            append_rop_save_changes_message(&mut rops, 1, 1);
+            rops
+        })
+        .await;
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
@@ -279,29 +288,38 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
     assert_eq!(stored[0].name, "Élodie Müller");
     assert_eq!(stored[0].email, "elodie@example.test");
     assert_eq!(stored[0].organization_name, "Société Zürich");
-    assert!(stored[0]
-        .emails_json
-        .to_string()
-        .contains("elodie@example.test"));
-    assert!(stored[0]
-        .emails_json
-        .to_string()
-        .contains("e.mueller@example.test"));
+    assert!(
+        stored[0]
+            .emails_json
+            .to_string()
+            .contains("elodie@example.test")
+    );
+    assert!(
+        stored[0]
+            .emails_json
+            .to_string()
+            .contains("e.mueller@example.test")
+    );
     drop(stored);
 
     let mut update_values = Vec::new();
     append_mapi_utf16_property(&mut update_values, tag(0), "elodie.updated@example.test");
     append_mapi_utf16_property(&mut update_values, tag(1), "e.updated@example.test");
-    let mut update_rops = Vec::new();
-    append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(15));
-    append_rop_open_message(
-        &mut update_rops,
-        1,
-        2,
-        test_mapi_folder_id(15),
-        contact_mapi_id,
-    );
-    append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    let update_rops =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+            let mut update_rops = Vec::new();
+            append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(15));
+            append_rop_open_message(
+                &mut update_rops,
+                1,
+                2,
+                test_mapi_folder_id(15),
+                contact_mapi_id,
+            );
+            append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+            update_rops
+        })
+        .await;
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
@@ -312,15 +330,19 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!response_rops
-        .windows(4)
-        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+    );
     let stored = contacts.lock().unwrap();
     assert_eq!(stored[0].email, "elodie.updated@example.test");
-    assert!(stored[0]
-        .emails_json
-        .to_string()
-        .contains("e.updated@example.test"));
+    assert!(
+        stored[0]
+            .emails_json
+            .to_string()
+            .contains("e.updated@example.test")
+    );
 }
 
 #[tokio::test]
@@ -344,7 +366,12 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
         .await
         .unwrap();
     let imported_message_id = crate::mapi::identity::mapi_store_id(imported_global_counter);
-    let imported_source_key = crate::mapi::identity::source_key_for_object_id(imported_message_id);
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
+    let imported_source_key = identity_codec
+        .source_key_for_object_id(imported_message_id)
+        .unwrap();
     let change_key = vec![
         0xc7, 0x66, 0xe6, 0xaf, 0x10, 0x7e, 0x2e, 0x4b, 0xa1, 0x95, 0x4a, 0x22, 0xd0, 0xe3, 0x13,
         0xff, 0x00, 0x00, 0x04, 0x5f,
@@ -361,9 +388,6 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
     let identity_predecessor_change_lists = store.mapi_identity_predecessor_change_lists.clone();
     let identity_last_modification_times = store.mapi_identity_last_modification_times.clone();
     let restart_store = store.clone();
-    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
-        .await
-        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -376,7 +400,7 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
     );
 
     let collector_rops =
-        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec.clone(), async {
             let mut collector_rops = Vec::new();
             append_rop_open_folder(
                 &mut collector_rops,
@@ -474,7 +498,11 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
     let save_response = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&save_response, &[0x0a, 0x01, 0, 0, 0, 0]));
     let mut expected_save = vec![0x0c, 0x01, 0, 0, 0, 0, 0x01];
-    expected_save.extend_from_slice(&mapi_wire_id_bytes(imported_message_id));
+    expected_save.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(imported_message_id)
+            .unwrap(),
+    );
     assert!(
         contains_bytes(&save_response, &expected_save),
         "RopSaveChangesMessage must commit the imported Contact MID; expected {expected_save:02x?}, got {save_response:02x?}"
@@ -822,10 +850,10 @@ async fn mapi_over_http_contact_sync_import_save_reports_deleted_source_key() {
         .await
         .unwrap();
     let save_response = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &save_response,
-        &[0x0C, 0x01, 0x0A, 0x01, 0x04, 0x80]
-    ), "[MS-OXCFXICS] section 3.3.4.3.3.2.2.1 and [MS-OXCDATA] section 2.4 require ecObjectDeleted on RopSaveChangesMessage: {save_response:02x?}");
+    assert!(
+        contains_bytes(&save_response, &[0x0C, 0x01, 0x0A, 0x01, 0x04, 0x80]),
+        "[MS-OXCFXICS] section 3.3.4.3.3.2.2.1 and [MS-OXCDATA] section 2.4 require ecObjectDeleted on RopSaveChangesMessage: {save_response:02x?}"
+    );
     assert!(contacts.lock().unwrap().is_empty());
 }
 
@@ -909,9 +937,11 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!response_rops
-        .windows(4)
-        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+    );
     {
         let stored = contacts.lock().unwrap();
         assert_eq!(stored[0].name, "Updated RCA Contact");
@@ -960,9 +990,11 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!response_rops
-        .windows(4)
-        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+    );
     assert!(contacts.lock().unwrap().is_empty());
     assert_eq!(deleted_contacts.lock().unwrap().as_slice(), &[contact_id]);
 }
@@ -1206,16 +1238,20 @@ async fn mapi_over_http_contacts_sync_exports_associated_config_deletes() {
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     let deleted_idset = stream.deleted_idset.as_deref().unwrap();
-    assert!(strict_replid_globset_contains_counter(
-        deleted_idset,
-        &globcnt_bytes(config_object_id >> 16)
-    )
-    .unwrap());
-    assert!(strict_replid_globset_contains_counter(
-        deleted_idset,
-        &globcnt_bytes(contact_object_id >> 16)
-    )
-    .unwrap());
+    assert!(
+        strict_replid_globset_contains_counter(
+            deleted_idset,
+            &globcnt_bytes(config_object_id >> 16)
+        )
+        .unwrap()
+    );
+    assert!(
+        strict_replid_globset_contains_counter(
+            deleted_idset,
+            &globcnt_bytes(contact_object_id >> 16)
+        )
+        .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -1384,11 +1420,17 @@ async fn mapi_over_http_virtual_contacts_content_sync_stores_virtual_checkpoint(
         current_modseq: 42,
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
 
-    let response_rops = content_sync_response_rops_for_store(
-        store.clone(),
-        crate::mapi::identity::CONTACTS_FOLDER_ID,
-        &[],
+    let response_rops = crate::mapi::identity::with_current_mapi_identity_codec(
+        identity_codec,
+        content_sync_response_rops_for_store(
+            store.clone(),
+            crate::mapi::identity::CONTACTS_FOLDER_ID,
+            &[],
+        ),
     )
     .await;
 
@@ -1456,11 +1498,17 @@ async fn mapi_over_http_contacts_search_content_sync_uses_search_folder_parent()
         current_modseq: 43,
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
 
-    let response_rops = content_sync_response_rops_for_store(
-        store.clone(),
-        crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
-        &[],
+    let response_rops = crate::mapi::identity::with_current_mapi_identity_codec(
+        identity_codec.clone(),
+        content_sync_response_rops_for_store(
+            store.clone(),
+            crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
+            &[],
+        ),
     )
     .await;
 
@@ -1468,18 +1516,26 @@ async fn mapi_over_http_contacts_search_content_sync_uses_search_folder_parent()
     assert_eq!(stream.message_changes.len(), 1);
     assert_eq!(stream.message_changes[0].subject, "Contact Search One");
     assert!(!stream.message_changes[0].associated);
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&PID_TAG_DISPLAY_NAME_W));
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&PID_TAG_SUBJECT_W));
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&0x001A_001Fu32));
+    assert!(
+        stream.message_changes[0]
+            .body_tags
+            .contains(&PID_TAG_DISPLAY_NAME_W)
+    );
+    assert!(
+        stream.message_changes[0]
+            .body_tags
+            .contains(&PID_TAG_SUBJECT_W)
+    );
+    assert!(
+        stream.message_changes[0]
+            .body_tags
+            .contains(&0x001A_001Fu32)
+    );
     assert_eq!(
         stream.message_changes[0].parent_source_key,
-        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID)
+        identity_codec
+            .source_key_for_object_id(crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID)
+            .unwrap()
     );
 
     let checkpoint = store
@@ -1710,6 +1766,9 @@ async fn mapi_over_http_builtin_contacts_search_get_search_criteria_uses_fixed_f
         }])),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -1721,14 +1780,19 @@ async fn mapi_over_http_builtin_contacts_search_get_search_criteria_uses_fixed_f
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let mut rops = Vec::new();
-    append_rop_open_folder(
-        &mut rops,
-        0,
-        1,
-        crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
-    );
-    append_rop_get_search_criteria(&mut rops, 1);
+    let rops =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec.clone(), async {
+            let mut rops = Vec::new();
+            append_rop_open_folder(
+                &mut rops,
+                0,
+                1,
+                crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
+            );
+            append_rop_get_search_criteria(&mut rops, 1);
+            rops
+        })
+        .await;
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -1742,9 +1806,8 @@ async fn mapi_over_http_builtin_contacts_search_get_search_criteria_uses_fixed_f
     assert!(contains_bytes(&response_rops, &[0x31, 0x01, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,
-        &crate::mapi::identity::wire_id_bytes_from_object_id(
-            crate::mapi::identity::CONTACTS_FOLDER_ID
-        )
-        .unwrap()
+        &identity_codec
+            .wire_id_bytes_from_object_id(crate::mapi::identity::CONTACTS_FOLDER_ID)
+            .unwrap()
     ));
 }

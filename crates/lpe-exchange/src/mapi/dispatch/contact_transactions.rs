@@ -32,18 +32,38 @@ pub(super) fn stage_contact_property_values(
         bail!("MAPI Contact handle is not writable");
     }
 
-    let canonical_properties = values
-        .iter()
-        .filter(|(tag, _)| !is_custom_property_tag(canonical_property_storage_tag(*tag)))
-        .map(|(tag, value)| (canonical_property_storage_tag(*tag), value.clone()))
-        .collect::<HashMap<_, _>>();
-    reject_unsupported_mapi_contact_properties(&canonical_properties)?;
+    validate_contact_property_values(&values)?;
     apply_contact_property_values(
         &mut transaction.pending_properties,
         &mut transaction.deleted_properties,
         &values,
     );
     Ok(())
+}
+
+pub(super) fn stage_pending_contact_property_values(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    values: Vec<(u32, MapiValue)>,
+) -> Result<()> {
+    validate_contact_property_values(&values)?;
+    let Some(MapiObject::PendingContact { properties, .. }) =
+        input_object_mut(session, handle_slots, request)
+    else {
+        bail!("pending MAPI Contact handle was not found");
+    };
+    apply_contact_property_values(properties, &mut HashSet::new(), &values);
+    Ok(())
+}
+
+fn validate_contact_property_values(values: &[(u32, MapiValue)]) -> Result<()> {
+    let canonical_properties = values
+        .iter()
+        .filter(|(tag, _)| !is_custom_property_tag(canonical_property_storage_tag(*tag)))
+        .map(|(tag, value)| (canonical_property_storage_tag(*tag), value.clone()))
+        .collect::<HashMap<_, _>>();
+    reject_unsupported_mapi_contact_properties(&canonical_properties)
 }
 
 pub(super) fn stage_contact_property_deletions(

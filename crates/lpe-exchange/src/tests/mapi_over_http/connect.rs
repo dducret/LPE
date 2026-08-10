@@ -2425,6 +2425,9 @@ async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_r
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let shortcuts = store.navigation_shortcuts.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -2461,11 +2464,9 @@ async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_r
         &mail_folder_type,
     );
 
-    let inbox_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::INBOX_FOLDER_ID,
-    )
-    .unwrap();
+    let inbox_entry_id = identity_codec
+        .folder_entry_id_from_object_id(account.account_id, crate::mapi::identity::INBOX_FOLDER_ID)
+        .unwrap();
     let mut link_values = Vec::new();
     append_mapi_utf16_property(
         &mut link_values,
@@ -2578,6 +2579,9 @@ async fn mapi_over_http_microsoft_oxocfg_same_target_wlinks_round_trip_distinctl
         ])),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let shortcuts = store.navigation_shortcuts.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -2598,13 +2602,15 @@ async fn mapi_over_http_microsoft_oxocfg_same_target_wlinks_round_trip_distinctl
         0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x46,
     ];
-    let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account.account_id,
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-    )
-    .unwrap();
-    let calendar_record_key =
-        crate::mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CALENDAR_FOLDER_ID);
+    let calendar_entry_id = identity_codec
+        .folder_entry_id_from_object_id(
+            account.account_id,
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap();
+    let calendar_record_key = identity_codec
+        .source_key_for_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+        .unwrap();
     let store_entry_id = crate::mapi::identity::mailbox_store_object_entry_id(
         &account.email,
         &test_account_legacy_dn(&account.email),
@@ -2990,6 +2996,10 @@ async fn mapi_over_http_open_conversation_history_requires_real_mailbox() {
         session: Some(FakeStore::account()),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -3006,7 +3016,9 @@ async fn mapi_over_http_open_conversation_history_requires_real_mailbox() {
         &mut rops,
         0,
         1,
-        crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID)
+            .unwrap(),
     );
 
     let response = service
@@ -3037,6 +3049,10 @@ async fn mapi_over_http_real_conversation_history_open_props_contents_and_notifi
         )])),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -3053,7 +3069,9 @@ async fn mapi_over_http_real_conversation_history_open_props_contents_and_notifi
         &mut rops,
         0,
         1,
-        crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID)
+            .unwrap(),
     );
     append_rop_get_properties_specific(
         &mut rops,
@@ -3079,7 +3097,9 @@ async fn mapi_over_http_real_conversation_history_open_props_contents_and_notifi
     rops.push(0);
     append_mapi_wire_id(
         &mut rops,
-        crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID)
+            .unwrap(),
     );
     rops.extend_from_slice(&0u64.to_le_bytes());
 
@@ -3108,7 +3128,11 @@ async fn mapi_over_http_real_conversation_history_open_props_contents_and_notifi
     assert!(contains_bytes(&response_rops, &utf16z("IPM.Note")));
     assert!(contains_bytes(
         &response_rops,
-        &mapi_wire_id_bytes(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+        &mapi_wire_id_bytes(
+            identity_codec
+                .actual_object_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+                .unwrap()
+        )
     ));
     assert!(contains_bytes(&response_rops, &[0x05, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(
@@ -4222,7 +4246,14 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::ROOT_FOLDER_ID);
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::ROOT_FOLDER_ID)
+            .unwrap(),
+    );
     // 202608041253 :33/:34 matches Exchange 2016 raw/226/:227: a root
     // hierarchy view uses Depth|SuppressesNotifications (0x84), then QueryRows.
     // [MS-OXCFOLD] section 2.2.1.13.1; [MS-OXCNOTIF] section 3.1.4.3.
@@ -4253,7 +4284,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
 
     // Match Outlook's pending-notification follow-up: release a live folder
     // while retaining the root hierarchy table and its subscription.
-    append_rop_open_folder(&mut rops, 0, 4, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_open_folder(&mut rops, 0, 4, scoped_inbox_folder_id);
 
     let response = service
         .handle_mapi(
@@ -4606,6 +4637,9 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
         session: Some(account.clone()),
         ..Default::default()
     };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4617,10 +4651,8 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let object_id = test_mapi_folder_id(5);
-    let mut long_term_id = [0; 24];
-    long_term_id[..16].copy_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
-    long_term_id[16..22].copy_from_slice(&globcnt_bytes(5));
+    let object_id = crate::mapi::identity::INBOX_FOLDER_ID;
+    let long_term_id = identity_codec.long_term_id_from_object_id(object_id).unwrap();
     let mut invalid_long_term_id = long_term_id;
     invalid_long_term_id[0] ^= 0xFF;
     invalid_long_term_id[16..22].copy_from_slice(&globcnt_bytes(5_000));
@@ -4646,6 +4678,7 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
         value[2..8].copy_from_slice(&16_u64.to_le_bytes()[..6]);
         value
     };
+    let dynamic_object_id = crate::mapi::identity::mapi_store_id(75);
     let dynamic_bare_little_endian_short_id = {
         let mut value = [0; 8];
         value[..6].copy_from_slice(&75_u64.to_le_bytes()[..6]);
@@ -4676,14 +4709,14 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     rops.extend_from_slice(&invalid_long_term_id);
     rops.extend_from_slice(&[0x44, 0x00, 0x00]);
     rops.extend_from_slice(
-        &crate::mapi::identity::long_term_id_from_object_id(
-            crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-        )
-        .unwrap(),
+        &identity_codec
+            .long_term_id_from_object_id(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
+            .unwrap(),
     );
     rops.extend_from_slice(&[0x44, 0x00, 0x00]);
     rops.extend_from_slice(
-        &crate::mapi::identity::long_term_id_from_object_id(crate::mapi::identity::VIEWS_FOLDER_ID)
+        &identity_codec
+            .long_term_id_from_object_id(crate::mapi::identity::VIEWS_FOLDER_ID)
             .unwrap(),
     );
 
@@ -4706,7 +4739,9 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     assert!(contains_bytes(&response_rops, &trailing_replid_response));
     let mut stale_short_id_response = vec![0x43, 0x00, 0, 0, 0, 0];
     stale_short_id_response.extend_from_slice(
-        &crate::mapi::identity::long_term_id_from_object_id(test_mapi_folder_id(16)).unwrap(),
+        &identity_codec
+            .long_term_id_from_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .unwrap(),
     );
     assert_eq!(
         response_rops
@@ -4717,7 +4752,9 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     );
     let mut dynamic_short_id_response = vec![0x43, 0x00, 0, 0, 0, 0];
     dynamic_short_id_response.extend_from_slice(
-        &crate::mapi::identity::long_term_id_from_object_id(test_mapi_folder_id(75)).unwrap(),
+        &identity_codec
+            .long_term_id_from_object_id(dynamic_object_id)
+            .unwrap(),
     );
     assert!(contains_bytes(&response_rops, &dynamic_short_id_response));
     assert!(contains_bytes(
@@ -4729,7 +4766,10 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
         &[0x43, 0x00, 0x02, 0x01, 0x04, 0x80]
     ));
     let mut object_id_response = vec![0x44, 0x00, 0, 0, 0, 0];
-    append_mapi_wire_id(&mut object_id_response, object_id);
+    append_mapi_wire_id(
+        &mut object_id_response,
+        identity_codec.actual_object_id(object_id).unwrap(),
+    );
     assert_eq!(
         response_rops
             .windows(object_id_response.len())
@@ -4738,7 +4778,12 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
         3
     );
     let mut stale_calendar_response = vec![0x44, 0x00, 0, 0, 0, 0];
-    append_mapi_wire_id(&mut stale_calendar_response, test_mapi_folder_id(16));
+    append_mapi_wire_id(
+        &mut stale_calendar_response,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .unwrap(),
+    );
     assert!(contains_bytes(&response_rops, &stale_calendar_response));
     assert!(contains_bytes(
         &response_rops,
@@ -4747,13 +4792,17 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     let mut common_views_response = vec![0x44, 0x00, 0, 0, 0, 0];
     append_mapi_wire_id(
         &mut common_views_response,
-        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
+            .unwrap(),
     );
     assert!(contains_bytes(&response_rops, &common_views_response));
     let mut personal_views_response = vec![0x44, 0x00, 0, 0, 0, 0];
     append_mapi_wire_id(
         &mut personal_views_response,
-        crate::mapi::identity::VIEWS_FOLDER_ID,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::VIEWS_FOLDER_ID)
+            .unwrap(),
     );
     assert!(contains_bytes(&response_rops, &personal_views_response));
 }

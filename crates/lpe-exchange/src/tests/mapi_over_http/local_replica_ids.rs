@@ -3,8 +3,8 @@ use super::*;
 // [MS-OXCFXICS] sections 2.2.3.2.4.7 and 3.3.5.2.1 require the server to
 // reserve the complete ID range returned to a local replica for its exclusive use.
 #[tokio::test]
-async fn mapi_over_http_get_local_replica_ids_reserves_full_outlook_range_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_get_local_replica_ids_reserves_full_outlook_range_in_postgresql()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -171,8 +171,8 @@ async fn mapi_local_replica_id_reservations_are_atomic_in_postgresql() -> anyhow
 }
 
 #[tokio::test]
-async fn mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postgresql(
-) -> anyhow::Result<()> {
+async fn mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postgresql()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -214,8 +214,8 @@ async fn mapi_local_replica_exhaustion_does_not_recycle_reserved_ranges_in_postg
 }
 
 #[tokio::test]
-async fn mapi_store_identity_is_shared_and_allocations_do_not_overlap_across_accounts(
-) -> anyhow::Result<()> {
+async fn mapi_store_identity_is_shared_and_allocations_do_not_overlap_across_accounts()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -270,9 +270,11 @@ async fn mapi_store_identity_is_shared_and_allocations_do_not_overlap_across_acc
     .fetch_all(storage.pool())
     .await?;
     assert_eq!(replicas.len(), 2);
-    assert!(replicas
-        .iter()
-        .all(|(_, replica_guid)| *replica_guid == store_replica_guid));
+    assert!(
+        replicas
+            .iter()
+            .all(|(_, replica_guid)| *replica_guid == store_replica_guid)
+    );
 
     let first_identity = storage
         .fetch_or_allocate_mapi_identities(

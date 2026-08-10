@@ -613,13 +613,15 @@ async fn mapi_over_http_bind_creates_nspi_session() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Bind");
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
-    assert!(response
-        .headers()
-        .get_all("set-cookie")
-        .iter()
-        .any(|cookie| cookie
-            .to_str()
-            .is_ok_and(|cookie| cookie.starts_with("MapiContext="))));
+    assert!(
+        response
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .any(|cookie| cookie
+                .to_str()
+                .is_ok_and(|cookie| cookie.starts_with("MapiContext=")))
+    );
 
     let body = response_bytes(response).await;
     assert_eq!(body.len(), 28);
@@ -673,13 +675,15 @@ async fn mapi_over_http_bind_reestablishes_nspi_session_cookie() {
         .await
         .unwrap();
     assert_eq!(new_unbind.headers().get("x-responsecode").unwrap(), "0");
-    assert!(new_unbind
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("Max-Age=0"));
+    assert!(
+        new_unbind
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
+    );
 }
 
 #[tokio::test]
@@ -1556,13 +1560,15 @@ async fn mapi_over_http_microsoft_oxnspi_hierarchy_and_query_rows_example_round_
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Unbind");
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
-    assert!(response
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("Max-Age=0"));
+    assert!(
+        response
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
+    );
 }
 
 #[tokio::test]
@@ -2573,11 +2579,13 @@ async fn mapi_over_http_unbind_consumes_nspi_session() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Unbind");
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
-    assert!(response
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("Max-Age=0"));
+    assert!(
+        response
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
+    );
 }

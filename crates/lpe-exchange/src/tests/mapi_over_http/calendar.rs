@@ -368,9 +368,11 @@ async fn mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canon
         .load_mapi_mail_store(account.account_id, 100)
         .await
         .unwrap();
-    assert!(snapshot
-        .event_for_id(crate::mapi::identity::CALENDAR_FOLDER_ID, event_mapi_id)
-        .is_none());
+    assert!(
+        snapshot
+            .event_for_id(crate::mapi::identity::CALENDAR_FOLDER_ID, event_mapi_id)
+            .is_none()
+    );
     let deleted_event = snapshot
         .event_for_id(crate::mapi::identity::TRASH_FOLDER_ID, new_mapi_id)
         .expect("deleted appointment projected in Deleted Items");
@@ -463,11 +465,13 @@ async fn mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canon
     )
     .await;
     let source_stream = strict_content_sync_transfer_from_response(&source_sync).unwrap();
-    assert!(strict_replid_globset_contains_counter(
-        source_stream.deleted_idset.as_deref().unwrap(),
-        &globcnt_bytes(event_mapi_id >> 16),
-    )
-    .unwrap());
+    assert!(
+        strict_replid_globset_contains_counter(
+            source_stream.deleted_idset.as_deref().unwrap(),
+            &globcnt_bytes(event_mapi_id >> 16),
+        )
+        .unwrap()
+    );
 
     let destination_sync =
         content_sync_response_rops_for_store(store, crate::mapi::identity::TRASH_FOLDER_ID, &[])
@@ -575,9 +579,11 @@ async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session
         .unwrap();
     let response_body = response_bytes(response).await;
     let (response_rops, handle_slots) = response_rops_and_handles_from_execute_body(&response_body);
-    assert!(!response_rops
-        .windows(4)
-        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+    );
     assert!(store.mapi_custom_property_values.lock().unwrap().is_empty());
 
     let save_response_rops =
@@ -783,16 +789,18 @@ async fn mapi_over_http_calendar_delete_properties_clears_canonical_and_custom_f
     assert!(stored[0].location.is_empty());
     assert!(stored[0].notes.is_empty());
     drop(stored);
-    assert!(store
-        .fetch_mapi_custom_property_values(
-            account.account_id,
-            MapiCustomPropertyObjectKind::CalendarEvent,
-            event_id,
-            &[custom_tag],
-        )
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        store
+            .fetch_mapi_custom_property_values(
+                account.account_id,
+                MapiCustomPropertyObjectKind::CalendarEvent,
+                event_id,
+                &[custom_tag],
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(event_versions.lock().unwrap()[&event_id], 4);
 
     let mut reopen_rops = Vec::new();
@@ -3013,8 +3021,8 @@ async fn mapi_over_http_calendar_concurrent_rw_handles_require_force_save() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_second_save_without_global_object_id_uses_distinct_uid(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_calendar_second_save_without_global_object_id_uses_distinct_uid()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -4398,9 +4406,11 @@ async fn mapi_over_http_calendar_meeting_response_updates_canonical_attendee_sta
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
     ));
-    assert!(events.lock().unwrap()[0]
-        .attendees_json
-        .contains(r#""partstat":"needs-action""#));
+    assert!(
+        events.lock().unwrap()[0]
+            .attendees_json
+            .contains(r#""partstat":"needs-action""#)
+    );
 
     let save_response_rops =
         save_staged_calendar_event(&service, &mut execute_headers, &handle_slots).await;
@@ -4410,9 +4420,11 @@ async fn mapi_over_http_calendar_meeting_response_updates_canonical_attendee_sta
     ));
     let stored = events.lock().unwrap();
     assert_eq!(stored[0].attendees, "Bob");
-    assert!(stored[0]
-        .attendees_json
-        .contains(r#""partstat":"accepted""#));
+    assert!(
+        stored[0]
+            .attendees_json
+            .contains(r#""partstat":"accepted""#)
+    );
 }
 
 #[tokio::test]
@@ -4507,9 +4519,11 @@ async fn mapi_over_http_calendar_meeting_response_rejects_binary_payload_without
         &0x8004_0102u32.to_le_bytes()
     ));
     let stored = events.lock().unwrap();
-    assert!(stored[0]
-        .attendees_json
-        .contains(r#""partstat":"needs-action""#));
+    assert!(
+        stored[0]
+            .attendees_json
+            .contains(r#""partstat":"needs-action""#)
+    );
 }
 
 #[tokio::test]
@@ -5486,11 +5500,13 @@ async fn mapi_over_http_calendar_attachment_waits_for_parent_save_and_is_handle_
     ));
     assert!(contains_bytes(&response_rops, &utf16z("agenda.pdf")));
     assert!(contains_bytes(&response_rops, b"%PDF-calendar"));
-    assert!(calendar_attachments
-        .lock()
-        .unwrap()
-        .get(&event_id)
-        .map_or(true, Vec::is_empty));
+    assert!(
+        calendar_attachments
+            .lock()
+            .unwrap()
+            .get(&event_id)
+            .map_or(true, Vec::is_empty)
+    );
     assert_eq!(events.lock().unwrap()[0].title, "Attached Calendar");
     assert_eq!(event_versions.lock().unwrap()[&event_id], 7);
 
@@ -6085,9 +6101,11 @@ async fn mapi_over_http_task_crud_uses_canonical_tasks() {
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!response_rops
-        .windows(4)
-        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+    );
     {
         let stored = tasks.lock().unwrap();
         assert_eq!(stored[0].title, "Updated RCA Task");
@@ -6107,9 +6125,11 @@ async fn mapi_over_http_task_crud_uses_canonical_tasks() {
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(!response_rops
-        .windows(4)
-        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+    );
     assert!(tasks.lock().unwrap().is_empty());
     assert_eq!(deleted_tasks.lock().unwrap().as_slice(), &[task_id]);
 }
@@ -6451,22 +6471,30 @@ async fn mapi_over_http_freebusy_data_folder_content_sync_projects_canonical_fai
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 3)));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 3);
-    assert!(stream
-        .message_changes
-        .iter()
-        .all(|message| message.associated));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Delegate access for owner@example.test"));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "Free/busy for owner@example.test"));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "LocalFreebusy"));
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .all(|message| message.associated)
+    );
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .any(|message| message.subject == "Delegate access for owner@example.test")
+    );
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .any(|message| message.subject == "Free/busy for owner@example.test")
+    );
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .any(|message| message.subject == "LocalFreebusy")
+    );
     assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.Delegate")
@@ -7338,8 +7366,8 @@ async fn mapi_over_http_calendar_associated_contents_columns_include_configurati
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_properties(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_properties()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -7401,9 +7429,11 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
         stream.message_changes[0].subject,
         "PostgreSQL calendar appointment"
     );
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&0x8216_0102u32));
+    assert!(
+        stream.message_changes[0]
+            .body_tags
+            .contains(&0x8216_0102u32)
+    );
     assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
     assert!(contains_bytes(&response_rops, &utf16z("Room 420")));
     assert!(contains_bytes(
@@ -7488,17 +7518,19 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
         &response_rops,
         &0x0E1B_000Bu32.to_le_bytes()
     ));
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&0x0E1B_000Bu32));
+    assert!(
+        stream.message_changes[0]
+            .body_tags
+            .contains(&0x0E1B_000Bu32)
+    );
 
     fixture.cleanup().await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_event_properties(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_event_properties()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -7611,8 +7643,8 @@ async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_ev
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_sync_projects_postgresql_custom_calendar_collection(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_calendar_sync_projects_postgresql_custom_calendar_collection()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -7684,8 +7716,8 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_custom_calendar_collec
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collection(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collection()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -7803,8 +7835,8 @@ async fn mapi_over_http_calendar_create_uses_postgresql_custom_calendar_collecti
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_collection()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -7954,8 +7986,8 @@ async fn mapi_over_http_calendar_reopen_update_uses_postgresql_custom_calendar_c
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_custom_collection_attachment_is_hidden_for_existing_guarded_event(
-) -> anyhow::Result<()> {
+async fn mapi_over_http_calendar_custom_collection_attachment_is_hidden_for_existing_guarded_event()
+-> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -8473,8 +8505,8 @@ async fn mapi_over_http_hierarchy_find_row_by_inbox_default_calendar_entry_id_ma
 }
 
 #[tokio::test]
-async fn mapi_over_http_hierarchy_find_row_by_inbox_default_calendar_entry_id_matches_synthetic_inbox(
-) {
+async fn mapi_over_http_hierarchy_find_row_by_inbox_default_calendar_entry_id_matches_synthetic_inbox()
+ {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -8622,15 +8654,17 @@ async fn mapi_over_http_mailbox_only_account_syncs_empty_contacts_and_calendar()
         mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CONTACTS_FOLDER_ID)
             .unwrap()
             .id;
-    assert!(store
-        .fetch_mapi_sync_checkpoint(
-            account.account_id,
-            Some(contacts_checkpoint_id),
-            MapiCheckpointKind::Content,
-        )
-        .await
-        .unwrap()
-        .is_some());
+    assert!(
+        store
+            .fetch_mapi_sync_checkpoint(
+                account.account_id,
+                Some(contacts_checkpoint_id),
+                MapiCheckpointKind::Content,
+            )
+            .await
+            .unwrap()
+            .is_some()
+    );
 
     let calendar_rops = content_sync_response_rops_for_store(
         store.clone(),
@@ -8648,15 +8682,17 @@ async fn mapi_over_http_mailbox_only_account_syncs_empty_contacts_and_calendar()
         mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
             .unwrap()
             .id;
-    assert!(store
-        .fetch_mapi_sync_checkpoint(
-            account.account_id,
-            Some(calendar_checkpoint_id),
-            MapiCheckpointKind::Content,
-        )
-        .await
-        .unwrap()
-        .is_some());
+    assert!(
+        store
+            .fetch_mapi_sync_checkpoint(
+                account.account_id,
+                Some(calendar_checkpoint_id),
+                MapiCheckpointKind::Content,
+            )
+            .await
+            .unwrap()
+            .is_some()
+    );
     assert!(store.contact_collections.lock().unwrap().is_empty());
     assert!(store.calendar_collections.lock().unwrap().is_empty());
 }
@@ -8788,8 +8824,8 @@ async fn mapi_over_http_custom_only_calendar_collections_keep_default_calendar_o
 }
 
 #[tokio::test]
-async fn mapi_over_http_get_receive_folder_calendar_fid_opens_default_calendar_with_custom_only_collections(
-) {
+async fn mapi_over_http_get_receive_folder_calendar_fid_opens_default_calendar_with_custom_only_collections()
+ {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -10626,16 +10662,14 @@ async fn mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_i
     let custom_folder_counter =
         crate::mapi::identity::global_counter_from_store_id(custom_folder_id).unwrap();
     let custom_folder_globcnt = crate::mapi::identity::globcnt_bytes(custom_folder_counter);
-    assert!(strict_replguid_globset_contains_counter(
-        &hierarchy.idset_given,
-        &custom_folder_globcnt
-    )
-    .unwrap());
-    assert!(strict_replguid_globset_contains_counter(
-        &hierarchy.cnset_seen,
-        &custom_folder_globcnt
-    )
-    .unwrap());
+    assert!(
+        strict_replguid_globset_contains_counter(&hierarchy.idset_given, &custom_folder_globcnt)
+            .unwrap()
+    );
+    assert!(
+        strict_replguid_globset_contains_counter(&hierarchy.cnset_seen, &custom_folder_globcnt)
+            .unwrap()
+    );
 }
 
 #[tokio::test]
