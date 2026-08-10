@@ -119,6 +119,7 @@ fn event_property_value_with_optional_version(
         PID_LID_LOCATION_W_TAG => Some(MapiValue::String(event.location.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Appointment".to_string())),
         PID_TAG_ACCESS => Some(MapiValue::U32(event_mapi_access(event))),
+        PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(u32::from(event.rights.may_write))),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),

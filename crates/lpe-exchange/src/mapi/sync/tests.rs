@@ -1018,6 +1018,11 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
     assert_eq!(sync.body_text.as_deref(), Some("Agenda"));
 
     assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_TAG_ACCESS_LEVEL
+            && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::U32(1))
+    }));
+
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_TAG_HTML_BINARY
             && matches!(
                 value,
