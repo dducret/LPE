@@ -795,7 +795,11 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
             "0x{property_tag:08x} is missing its FastTransfer LID definition"
         );
     }
-    let last_modifier = utf16z("Alice");
+    let mut last_modifier = "Alice"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    last_modifier.extend_from_slice(&0u16.to_le_bytes());
     let mut expected_last_modifier = PID_TAG_LAST_MODIFIER_NAME_W.to_le_bytes().to_vec();
     expected_last_modifier.extend_from_slice(&(last_modifier.len() as u32).to_le_bytes());
     expected_last_modifier.extend_from_slice(&last_modifier);
