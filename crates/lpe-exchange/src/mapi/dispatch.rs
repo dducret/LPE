@@ -1543,15 +1543,16 @@ where
             event.event_mask & 0x0FFF == MapiNotificationEventMask::NewMail.as_u16()
         })
         .count();
-    let preexisting_notification_delivery_count = append_preexisting_notification_responses(
-        &mut responses,
-        snapshot.identity_codec(),
-        preexisting_notification_deliveries,
-        &preexisting_notification_targets,
-        mailboxes,
-        snapshot,
-        principal.account_id,
-    );
+    let preexisting_notification_delivery_count =
+        append_preexisting_notification_responses_with_targets(
+            &mut responses,
+            snapshot.identity_codec(),
+            preexisting_notification_deliveries,
+            &preexisting_notification_targets,
+            mailboxes,
+            snapshot,
+            principal.account_id,
+        );
     if preexisting_notification_delivery_count != 0 {
         tracing::info!(
             rca_debug = true,

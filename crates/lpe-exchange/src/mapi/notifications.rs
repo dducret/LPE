@@ -2,13 +2,13 @@
 use super::identity::wire_id_bytes_from_object_id;
 use super::rop::*;
 use super::session::MapiObject;
-use super::store_adapter::MapiMailStoreSnapshot;
 use super::tables::hierarchy_table_row_modified;
 use super::wire::{
     MapiNotificationEventMask, MAPI_CONTENT_NOTIFICATION_MASK, MAPI_HIERARCHY_NOTIFICATION_MASK,
 };
 use lpe_storage::JmapMailbox;
 use uuid::Uuid;
+use crate::mapi_store::MapiMailStoreSnapshot;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiNotificationRegistration {
@@ -765,6 +765,23 @@ pub(in crate::mapi) fn rop_hierarchy_table_row_modified_response(
 }
 
 pub(in crate::mapi) fn append_preexisting_notification_responses(
+    responses: &mut Vec<u8>,
+    identity_codec: &crate::mapi::identity::MapiIdentityCodec,
+    deliveries: Vec<(u32, u8, MapiNotificationEvent)>,
+) -> usize {
+    let mut delivery_count = 0;
+    for (notification_handle, logon_id, event) in deliveries {
+        if let Some(response) =
+            rop_notify_response(identity_codec, notification_handle, logon_id, &event)
+        {
+            responses.extend_from_slice(&response);
+            delivery_count += 1;
+        }
+    }
+    delivery_count
+}
+
+pub(in crate::mapi) fn append_preexisting_notification_responses_with_targets(
     responses: &mut Vec<u8>,
     identity_codec: &crate::mapi::identity::MapiIdentityCodec,
     deliveries: Vec<(u32, u8, MapiNotificationEvent)>,
