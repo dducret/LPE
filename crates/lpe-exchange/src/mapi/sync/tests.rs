@@ -756,10 +756,16 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc("2026-07-18T10:00:00Z"),
         message_size: 128,
         read_state: None,
-        named_properties: vec![(
-            PID_LID_BUSY_STATUS_TAG,
-            mapi_mailstore::SpecialMessagePropertyValue::I32(2),
-        )],
+        named_properties: vec![
+            (
+                PID_LID_BUSY_STATUS_TAG,
+                mapi_mailstore::SpecialMessagePropertyValue::I32(2),
+            ),
+            (
+                PID_LID_RECURRING_TAG,
+                mapi_mailstore::SpecialMessagePropertyValue::Bool(false),
+            ),
+        ],
         named_property_definitions: Default::default(),
     };
     let buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
@@ -770,17 +776,21 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
         mapi_mailstore::FastTransferDirectPropertyFilter::All,
         mapi_mailstore::FastTransferMessageChildren::all(),
     );
-    let mut expected = PID_LID_BUSY_STATUS_TAG.to_le_bytes().to_vec();
-    expected.extend_from_slice(&PSETID_APPOINTMENT_GUID);
-    expected.push(0x00);
-    expected.extend_from_slice(&PID_LID_BUSY_STATUS.to_le_bytes());
-
-    assert!(
-        buffer
-            .windows(expected.len())
-            .any(|window| window == expected),
-        "PidLidBusyStatus is missing its FastTransfer LID definition"
-    );
+    for (property_tag, lid) in [
+        (PID_LID_BUSY_STATUS_TAG, PID_LID_BUSY_STATUS),
+        (PID_LID_RECURRING_TAG, PID_LID_RECURRING),
+    ] {
+        let mut expected = property_tag.to_le_bytes().to_vec();
+        expected.extend_from_slice(&PSETID_APPOINTMENT_GUID);
+        expected.push(0x00);
+        expected.extend_from_slice(&lid.to_le_bytes());
+        assert!(
+            buffer
+                .windows(expected.len())
+                .any(|window| window == expected),
+            "0x{property_tag:08x} is missing its FastTransfer LID definition"
+        );
+    }
 }
 
 #[test]
@@ -1024,6 +1034,10 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_LID_RESPONSE_STATUS_TAG
             && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::I32(0))
+    }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_LID_RECURRING_TAG
+            && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::Bool(false))
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_LID_IS_RECURRING_TAG
