@@ -764,6 +764,7 @@ pub(in crate::mapi) fn rop_hierarchy_table_row_modified_response(
     Some(response)
 }
 
+#[cfg(test)]
 pub(in crate::mapi) fn append_preexisting_notification_responses(
     responses: &mut Vec<u8>,
     identity_codec: &crate::mapi::identity::MapiIdentityCodec,
