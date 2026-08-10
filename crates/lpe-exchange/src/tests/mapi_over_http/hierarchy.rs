@@ -3045,6 +3045,103 @@ async fn mapi_over_http_notification_wait_serializes_canonical_hierarchy_details
 }
 
 #[tokio::test]
+async fn mapi_over_http_notification_wait_delivers_pending_hierarchy_table_change() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(11))),
+        mapi_notification_polls: Arc::new(Mutex::new(vec![
+            MapiNotificationPoll {
+                event_pending: true,
+                cursor: Some(12),
+                events: vec![
+                    crate::mapi::notifications::MapiNotificationEvent::canonical(
+                        crate::mapi::notifications::MapiNotificationKind::Content,
+                        0x0010,
+                        crate::mapi::identity::CALENDAR_FOLDER_ID,
+                        Some(test_mapi_folder_id(91)),
+                        None,
+                        12,
+                        45,
+                        Some(1),
+                        Some(0),
+                        "updated".to_string(),
+                        None,
+                        None,
+                        Some("Calendar update".to_string()),
+                        Some("IPM.Appointment".to_string()),
+                    )
+                    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+                ],
+            },
+            MapiNotificationPoll {
+                event_pending: false,
+                cursor: Some(11),
+                events: Vec::new(),
+            },
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let restriction = mapi_content_restriction(0x3001_001F, "Top of Information Store");
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::ROOT_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x3602_0003u32.to_le_bytes());
+    rops.extend_from_slice(&0x0FFF_0102u32.to_le_bytes());
+    rops.extend_from_slice(&[0x4F, 0x00, 0x02, 0x00]); // RopFindRow
+    rops.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&restriction);
+    rops.push(0);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let wait = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    let wait_body = response_bytes(wait).await;
+    assert_eq!(u32::from_le_bytes(wait_body[8..12].try_into().unwrap()), 1);
+
+    let mut notification_execute_headers = mapi_headers("Execute");
+    notification_execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &notification_execute_headers,
+            &execute_body(&rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, &utf16z("Calendar")),
+        "the Execute after EventPending must contain the changed hierarchy row: {response_rops:02x?}"
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_notification_wait_reports_hierarchy_event_after_registered_create_folder() {
     let created_mailboxes = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {

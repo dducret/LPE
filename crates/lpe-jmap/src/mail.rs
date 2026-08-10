@@ -10,7 +10,10 @@ use uuid::Uuid;
 
 use crate::{
     convert::{map_existing_recipients, map_recipients, select_from_addresses},
-    drafts::{parse_draft_mutation, parse_email_copy, parse_ordinary_email_mutation},
+    drafts::{
+        parse_draft_mutation, parse_email_copy, parse_ordinary_email_mutation,
+        OrdinaryMailboxMutation,
+    },
     error::{method_error, set_error},
     parse::{parse_uuid, parse_uuid_list},
     protocol::{
@@ -629,15 +632,29 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                 )
                                 .await?;
                         }
-                        if let Some(mailbox_ids) = mailbox_ids {
-                            if mailbox_ids.is_empty() {
+                        if let Some(mailbox_mutation) = mailbox_ids {
+                            let current = existing.mailbox_ids.into_iter().collect::<HashSet<_>>();
+                            let desired = match mailbox_mutation {
+                                OrdinaryMailboxMutation::Replace(mailbox_ids) => mailbox_ids
+                                    .iter()
+                                    .map(|mailbox_id| parse_uuid(mailbox_id))
+                                    .collect::<Result<HashSet<_>>>()?,
+                                OrdinaryMailboxMutation::Patch(patches) => {
+                                    let mut desired = current.clone();
+                                    for (mailbox_id, present) in patches {
+                                        let mailbox_id = parse_uuid(&mailbox_id)?;
+                                        if present {
+                                            desired.insert(mailbox_id);
+                                        } else {
+                                            desired.remove(&mailbox_id);
+                                        }
+                                    }
+                                    desired
+                                }
+                            };
+                            if desired.is_empty() {
                                 bail!("mailboxIds must retain at least one mailbox");
                             }
-                            let desired = mailbox_ids
-                                .iter()
-                                .map(|mailbox_id| parse_uuid(mailbox_id))
-                                .collect::<Result<HashSet<_>>>()?;
-                            let current = existing.mailbox_ids.into_iter().collect::<HashSet<_>>();
                             for mailbox_id in desired.difference(&current) {
                                 self.store
                                     .copy_jmap_email(

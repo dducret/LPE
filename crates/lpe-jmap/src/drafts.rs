@@ -42,35 +42,87 @@ pub(crate) fn parse_draft_mutation(value: Value) -> Result<DraftMutation> {
     })
 }
 
+pub(crate) enum OrdinaryMailboxMutation {
+    Replace(Vec<String>),
+    Patch(HashMap<String, bool>),
+}
+
 pub(crate) fn parse_ordinary_email_mutation(
     value: Value,
-) -> Result<(Option<bool>, Option<bool>, Option<Vec<String>>)> {
+) -> Result<(Option<bool>, Option<bool>, Option<OrdinaryMailboxMutation>)> {
     let object = value
         .as_object()
         .ok_or_else(|| anyhow!("email arguments must be an object"))?;
+    let mut unread = None;
+    let mut flagged = None;
+    let mut mailbox_ids = None;
+    let mut mailbox_patches = HashMap::new();
     for key in object.keys() {
-        if key != "keywords" && key != "mailboxIds" {
-            bail!("delivered email content is immutable");
+        match key.as_str() {
+            "keywords" => {
+                if unread.is_some() || flagged.is_some() {
+                    bail!("keywords may not be combined with keyword property patches");
+                }
+                let keywords = parse_ordinary_keywords(object.get(key))?;
+                unread = keywords.unread;
+                flagged = keywords.flagged;
+            }
+            "mailboxIds" => {
+                if !mailbox_patches.is_empty() {
+                    bail!("mailboxIds may not be combined with mailboxIds property patches");
+                }
+                mailbox_ids = Some(OrdinaryMailboxMutation::Replace(
+                    object
+                        .get(key)
+                        .and_then(Value::as_object)
+                        .ok_or_else(|| anyhow!("mailboxIds must be an object"))?
+                        .iter()
+                        .filter_map(|(id, present)| {
+                            present
+                                .as_bool()
+                                .filter(|present| *present)
+                                .map(|_| id.clone())
+                        })
+                        .collect(),
+                ));
+            }
+            key if key.starts_with("keywords/") => {
+                if object.contains_key("keywords") {
+                    bail!("keywords may not be combined with keyword property patches");
+                }
+                let enabled = match object.get(key) {
+                    Some(Value::Bool(enabled)) => *enabled,
+                    Some(Value::Null) => false,
+                    _ => bail!("keyword property patch must be a boolean or null"),
+                };
+                match &key["keywords/".len()..] {
+                    "$seen" => unread = Some(!enabled),
+                    "$flagged" => flagged = Some(enabled),
+                    _ => bail!("delivered email content is immutable"),
+                }
+            }
+            key if key.starts_with("mailboxIds/") => {
+                if object.contains_key("mailboxIds") {
+                    bail!("mailboxIds may not be combined with mailboxIds property patches");
+                }
+                let mailbox_id = &key["mailboxIds/".len()..];
+                if mailbox_id.is_empty() {
+                    bail!("mailboxIds property patch requires a mailbox id");
+                }
+                let present = match object.get(key) {
+                    Some(Value::Bool(present)) => *present,
+                    Some(Value::Null) => false,
+                    _ => bail!("mailboxIds property patch must be a boolean or null"),
+                };
+                mailbox_patches.insert(mailbox_id.to_string(), present);
+            }
+            _ => bail!("delivered email content is immutable"),
         }
     }
-    let keywords = parse_draft_keywords(object.get("keywords"))?;
-    let mailbox_ids = match object.get("mailboxIds") {
-        Some(value) => Some(
-            value
-                .as_object()
-                .ok_or_else(|| anyhow!("mailboxIds must be an object"))?
-                .iter()
-                .filter_map(|(id, present)| {
-                    present
-                        .as_bool()
-                        .filter(|present| *present)
-                        .map(|_| id.clone())
-                })
-                .collect(),
-        ),
-        None => None,
-    };
-    Ok((keywords.unread, keywords.flagged, mailbox_ids))
+    if !mailbox_patches.is_empty() {
+        mailbox_ids = Some(OrdinaryMailboxMutation::Patch(mailbox_patches));
+    }
+    Ok((unread, flagged, mailbox_ids))
 }
 
 #[derive(Default)]
@@ -101,6 +153,25 @@ fn parse_draft_keywords(value: Option<&Value>) -> Result<ParsedDraftKeywords> {
         }
     }
 
+    Ok(parsed)
+}
+
+fn parse_ordinary_keywords(value: Option<&Value>) -> Result<ParsedDraftKeywords> {
+    let Some(keywords) = value.and_then(Value::as_object) else {
+        return Ok(ParsedDraftKeywords::default());
+    };
+
+    let mut parsed = ParsedDraftKeywords::default();
+    for (keyword, enabled) in keywords {
+        let enabled = enabled
+            .as_bool()
+            .ok_or_else(|| anyhow!("keyword {keyword} must be a boolean"))?;
+        match keyword.as_str() {
+            "$seen" => parsed.unread = Some(!enabled),
+            "$flagged" => parsed.flagged = Some(enabled),
+            _ => bail!("delivered email content is immutable"),
+        }
+    }
     Ok(parsed)
 }
 

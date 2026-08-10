@@ -267,7 +267,16 @@ impl MapiMailStoreSnapshot {
             .collect::<Vec<_>>();
         let messages = emails
             .into_iter()
-            .map(|email| {
+            .map(|mut email| {
+                // [MS-OXOMSG] section 2.2.1.7 defines the DisplayBcc message
+                // property. fetch_jmap_emails_with_protected_bcc is the
+                // canonical owner-authorization boundary; retain that data in
+                // a MAPI snapshot only for the owner's Drafts and Sent
+                // projections, so content tables, FastTransfer, and message
+                // reads cannot expose it from ordinary or shared folders.
+                if !matches!(email.mailbox_role.as_str(), "drafts" | "sent") {
+                    email.bcc.clear();
+                }
                 let folder_id = mapi_message_folder_id(&email, &folders);
                 let durable_identity = calendar_identities
                     .and_then(|identities| identities.message_identity(email.id))

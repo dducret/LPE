@@ -3501,6 +3501,10 @@ async fn email_set_updates_delivered_flags_memberships_and_delete_through_canoni
         ..Default::default()
     };
     let service = JmapService::new(store.clone());
+    let mut ordinary_patch = serde_json::Map::new();
+    ordinary_patch.insert("keywords/$seen".to_string(), Value::Bool(true));
+    ordinary_patch.insert("keywords/$flagged".to_string(), Value::Bool(true));
+    ordinary_patch.insert(format!("mailboxIds/{}", archive.id), Value::Bool(true));
 
     let response = service
         .handle_api_request(
@@ -3511,13 +3515,7 @@ async fn email_set_updates_delivered_flags_memberships_and_delete_through_canoni
                     "Email/set".to_string(),
                     json!({
                         "update": {
-                            email.id.to_string(): {
-                                "keywords": {"$seen": true, "$flagged": true},
-                                "mailboxIds": {
-                                    FakeStore::inbox_mailbox().id.to_string(): true,
-                                    archive.id.to_string(): true
-                                }
-                            }
+                            email.id.to_string(): Value::Object(ordinary_patch)
                         }
                     }),
                     "c1".to_string(),
@@ -3549,7 +3547,10 @@ async fn email_set_updates_delivered_flags_memberships_and_delete_through_canoni
                 using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
                 method_calls: vec![JmapMethodCall(
                     "Email/set".to_string(),
-                    json!({"update": {email.id.to_string(): {"mailboxIds": {archive.id.to_string(): true}}}}),
+                    json!({"update": {email.id.to_string(): {
+                        format!("mailboxIds/{}", archive.id): true,
+                        format!("mailboxIds/{}", FakeStore::inbox_mailbox().id): Value::Null
+                    }}}),
                     "c2".to_string(),
                 )],
             },
@@ -3568,14 +3569,161 @@ async fn email_set_updates_delivered_flags_memberships_and_delete_through_canoni
                 using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
                 method_calls: vec![JmapMethodCall(
                     "Email/set".to_string(),
-                    json!({"destroy": [email.id.to_string()]}),
+                    json!({"update": {email.id.to_string(): {
+                        "keywords/$seen": Value::Null,
+                        "keywords/$flagged": Value::Null
+                    }}}),
                     "c3".to_string(),
                 )],
             },
         )
         .await
         .unwrap();
+    assert_eq!(
+        *store.updated_email_flags.lock().unwrap(),
+        vec![
+            (email.id, Some(false), Some(true)),
+            (email.id, Some(true), Some(false))
+        ]
+    );
+
+    service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/set".to_string(),
+                    json!({"destroy": [email.id.to_string()]}),
+                    "c4".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
     assert_eq!(*store.deleted_emails.lock().unwrap(), vec![email.id]);
+}
+
+#[tokio::test]
+async fn supported_set_methods_reject_stale_if_in_state() {
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    });
+    let methods = [
+        ("Mailbox/set", JMAP_MAIL_CAPABILITY),
+        ("Email/set", JMAP_MAIL_CAPABILITY),
+        ("ContactCard/set", JMAP_CONTACTS_CAPABILITY),
+        ("Calendar/set", JMAP_CALENDARS_CAPABILITY),
+        ("CalendarEvent/set", JMAP_CALENDARS_CAPABILITY),
+        ("TaskList/set", JMAP_TASKS_CAPABILITY),
+        ("Task/set", JMAP_TASKS_CAPABILITY),
+    ];
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                    JMAP_CONTACTS_CAPABILITY.to_string(),
+                    JMAP_CALENDARS_CAPABILITY.to_string(),
+                    JMAP_TASKS_CAPABILITY.to_string(),
+                ],
+                method_calls: methods
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (method, _))| {
+                        JmapMethodCall(
+                            (*method).to_string(),
+                            json!({"ifInState": "stale"}),
+                            format!("c{index}"),
+                        )
+                    })
+                    .collect(),
+            },
+        )
+        .await
+        .unwrap();
+
+    for (response, (method, _)) in response.method_responses.iter().zip(methods) {
+        assert_eq!(response.0, "error", "{method}");
+        assert_eq!(response.1["type"], "stateMismatch", "{method}");
+    }
+}
+
+#[tokio::test]
+async fn email_get_projects_canonical_attachment_structure_and_download_reference() {
+    let mut email = FakeStore::inbox_email();
+    email.has_attachments = true;
+    let attachment_id = Uuid::parse_str("abababab-1111-2222-3333-444444444444").unwrap();
+    let file_reference = format!("attachment:{}:{attachment_id}", email.id);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: vec![email.clone()],
+        message_attachments: Arc::new(Mutex::new(HashMap::from([(
+            email.id,
+            vec![ActiveSyncAttachment {
+                id: attachment_id,
+                message_id: email.id,
+                file_name: "report.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                disposition: Some("attachment".to_string()),
+                content_id: None,
+                size_octets: 7,
+                file_reference: file_reference.clone(),
+            }],
+        )]))),
+        message_attachment_blobs: Arc::new(Mutex::new(HashMap::from([(
+            file_reference.clone(),
+            JmapUploadBlob {
+                id: attachment_id,
+                account_id: FakeStore::account().account_id,
+                media_type: "application/pdf".to_string(),
+                octet_size: 7,
+                blob_bytes: b"PDFDATA".to_vec(),
+            },
+        )]))),
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/get".to_string(),
+                    json!({
+                        "ids": [email.id.to_string()],
+                        "properties": ["id", "bodyStructure", "attachments"]
+                    }),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    let value = &response.method_responses[0].1["list"][0];
+    assert_eq!(value["attachments"][0]["blobId"], file_reference);
+    assert_eq!(value["attachments"][0]["name"], "report.pdf");
+    assert_eq!(value["bodyStructure"]["type"], "multipart/mixed");
+    assert!(value["bodyStructure"]["subParts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|part| part["blobId"] == file_reference));
+
+    let downloaded = service
+        .handle_download(
+            Some("Bearer token"),
+            &FakeStore::account().account_id.to_string(),
+            &file_reference,
+        )
+        .await
+        .unwrap();
+    assert_eq!(downloaded.media_type, "application/pdf");
+    assert_eq!(downloaded.blob_bytes, b"PDFDATA");
 }
 
 #[tokio::test]

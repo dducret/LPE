@@ -3,6 +3,7 @@ use crate::mapi::notifications::{MapiNotificationEvent, MapiNotificationKind};
 use crate::mapi::wire::RopId;
 use crate::mapi::wire::{MapiNotificationEventMask, MapiRestrictionType};
 use crate::mapi_store::MapiJournalEntry;
+use crate::mapi_store::MapiMailStoreSnapshot;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ClientTask, CollaborationCollection, CollaborationRights,
@@ -9005,6 +9006,72 @@ fn bcc_projections_only_expose_drafts_and_sent_items() {
     assert_eq!(email.bcc.len(), bcc.len());
     assert_eq!(email.bcc[0].address, bcc[0].address);
     assert_eq!(email.bcc[0].display_name, bcc[0].display_name);
+}
+
+#[test]
+fn mapi_snapshot_retains_protected_bcc_only_for_owner_drafts_and_sent() {
+    let mailbox_id = Uuid::from_u128(0x8181_0004);
+    let mut email = test_table_email(
+        Uuid::from_u128(0x7171_0004),
+        mailbox_id,
+        "Owner Bcc snapshot projection",
+    );
+    email.bcc = vec![JmapEmailAddress {
+        address: "owner-hidden@example.test".to_string(),
+        display_name: Some("Owner hidden recipient".to_string()),
+    }];
+    crate::mapi::identity::remember_mapi_identity(
+        email.id,
+        crate::mapi::identity::mapi_store_id(0x7171_0004),
+    );
+
+    for role in ["drafts", "sent"] {
+        email.mailbox_role = role.to_string();
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            vec![email.clone()],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let projected = snapshot.emails();
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].bcc[0].address, "owner-hidden@example.test");
+        assert!(message_recipients(&projected[0])
+            .iter()
+            .any(|recipient| recipient.recipient_type == 0x03));
+    }
+
+    for role in ["inbox", "shared"] {
+        email.mailbox_role = role.to_string();
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            vec![email.clone()],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let projected = snapshot.emails();
+        assert_eq!(projected.len(), 1);
+        assert!(projected[0].bcc.is_empty());
+        assert!(!message_recipients(&projected[0])
+            .iter()
+            .any(|recipient| recipient.recipient_type == 0x03));
+        assert_eq!(
+            email_property_value(&projected[0], PID_TAG_DISPLAY_BCC_W),
+            Some(MapiValue::String(String::new()))
+        );
+    }
 }
 
 fn assert_response_contains_utf16(response: &[u8], value: &str) {
