@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::{
     convert::{map_existing_recipients, map_recipients, select_from_addresses},
-    drafts::{parse_draft_mutation, parse_email_copy},
+    drafts::{parse_draft_mutation, parse_email_copy, parse_ordinary_email_mutation},
     error::{method_error, set_error},
     parse::{parse_uuid, parse_uuid_list},
     protocol::{
@@ -298,6 +298,17 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         } else {
             self.store.fetch_jmap_emails(account_id, &ids).await?
         };
+        let mut attachments = HashMap::new();
+        if properties.contains("bodyStructure") || properties.contains("attachments") {
+            for email in &emails {
+                attachments.insert(
+                    email.id,
+                    self.store
+                        .fetch_jmap_message_attachments(account_id, email.id)
+                        .await?,
+                );
+            }
+        }
         let not_found = ids
             .iter()
             .filter(|id| !emails.iter().any(|email| email.id == **id))
@@ -315,6 +326,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         email,
                         &properties,
                         &body_options,
+                        attachments.get(&email.id).map(Vec::as_slice).unwrap_or(&[]),
                         account_access.is_owned
                             && email
                                 .mailbox_states
@@ -545,6 +557,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .await?;
         let account_id = account_access.account_id;
         let old_state = self.mail_object_state(&account_access, "Email").await?;
+        crate::service::ensure_if_in_state(arguments.if_in_state.as_deref(), &old_state)?;
         let mut created = Map::new();
         let mut not_created = Map::new();
         let mut updated = Map::new();
@@ -582,14 +595,81 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(update) = arguments.update {
             for (id, value) in update {
-                let update_result =
-                    match crate::mailboxes::ensure_mailbox_draft_write(&account_access) {
-                        Ok(()) => {
-                            self.update_draft(account, &account_access, &id, value)
-                                .await
+                let update_result = async {
+                    let message_id = parse_uuid(&id)?;
+                    let existing = self
+                        .store
+                        .fetch_jmap_emails(account_id, &[message_id])
+                        .await?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow!("email not found"))?;
+                    if existing.mailbox_states.iter().any(|state| state.draft) {
+                        crate::mailboxes::ensure_mailbox_draft_write(&account_access)?;
+                        self.update_draft(account, &account_access, &id, value)
+                            .await?;
+                    } else {
+                        crate::mailboxes::ensure_mailbox_write(
+                            crate::mailboxes::mailbox_account_may_write(&account_access),
+                        )?;
+                        let (unread, flagged, mailbox_ids) = parse_ordinary_email_mutation(value)?;
+                        if unread.is_some() || flagged.is_some() {
+                            self.store
+                                .update_jmap_email_flags(
+                                    account_id,
+                                    message_id,
+                                    unread,
+                                    flagged,
+                                    AuditEntryInput {
+                                        actor: account.email.clone(),
+                                        action: "jmap-email-update-flags".to_string(),
+                                        subject: id.clone(),
+                                    },
+                                )
+                                .await?;
                         }
-                        Err(error) => Err(error),
-                    };
+                        if let Some(mailbox_ids) = mailbox_ids {
+                            if mailbox_ids.is_empty() {
+                                bail!("mailboxIds must retain at least one mailbox");
+                            }
+                            let desired = mailbox_ids
+                                .iter()
+                                .map(|mailbox_id| parse_uuid(mailbox_id))
+                                .collect::<Result<HashSet<_>>>()?;
+                            let current = existing.mailbox_ids.into_iter().collect::<HashSet<_>>();
+                            for mailbox_id in desired.difference(&current) {
+                                self.store
+                                    .copy_jmap_email(
+                                        account_id,
+                                        message_id,
+                                        *mailbox_id,
+                                        AuditEntryInput {
+                                            actor: account.email.clone(),
+                                            action: "jmap-email-add-mailbox".to_string(),
+                                            subject: id.clone(),
+                                        },
+                                    )
+                                    .await?;
+                            }
+                            for mailbox_id in current.difference(&desired) {
+                                self.store
+                                    .delete_jmap_email_from_mailbox(
+                                        account_id,
+                                        *mailbox_id,
+                                        message_id,
+                                        AuditEntryInput {
+                                            actor: account.email.clone(),
+                                            action: "jmap-email-remove-mailbox".to_string(),
+                                            subject: id.clone(),
+                                        },
+                                    )
+                                    .await?;
+                            }
+                        }
+                    }
+                    Ok::<(), anyhow::Error>(())
+                }
+                .await;
                 match update_result {
                     Ok(_) => {
                         updated.insert(id, Value::Object(Map::new()));
@@ -603,8 +683,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(ids) = arguments.destroy {
             for id in ids {
-                match crate::mailboxes::ensure_mailbox_draft_write(&account_access)
-                    .and_then(|_| parse_uuid(&id))
+                match crate::mailboxes::ensure_mailbox_write(
+                    crate::mailboxes::mailbox_account_may_write(&account_access),
+                )
+                .and_then(|_| parse_uuid(&id))
                 {
                     Ok(message_id) => {
                         let audit = AuditEntryInput {
@@ -614,7 +696,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         };
                         match self
                             .store
-                            .delete_draft_message(account_id, message_id, audit)
+                            .delete_jmap_email(account_id, message_id, audit)
                             .await
                         {
                             Ok(()) => destroyed.push(Value::String(id)),

@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::Row;
@@ -1284,8 +1284,8 @@ fn client_address_book_id_for_role(role: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        ClientContact, ClientEvent, ContactSourceFields, UpsertClientContactInput, Value,
-        client_folder, json_text_matches, merge_contact_update_input,
+        client_folder, json_text_matches, merge_contact_update_input, ClientContact, ClientEvent,
+        ContactSourceFields, UpsertClientContactInput, Value,
     };
     use serde_json::json;
     use uuid::Uuid;

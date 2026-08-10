@@ -1,5 +1,12 @@
 use super::*;
 
+pub(crate) fn ensure_if_in_state(if_in_state: Option<&str>, current_state: &str) -> Result<()> {
+    if if_in_state.is_some_and(|state| state != current_state) {
+        bail!("stateMismatch");
+    }
+    Ok(())
+}
+
 pub(crate) fn api_request_exceeds_call_limit(request: &JmapApiRequest) -> bool {
     request.method_calls.len() > MAX_CALLS_IN_REQUEST as usize
 }

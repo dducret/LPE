@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use crate::mapi::{
     identity::{
-        FIRST_DYNAMIC_GLOBAL_COUNTER, OUTBOX_FOLDER_ID, SENT_FOLDER_ID,
         global_counter_from_store_id, object_ids_from_message_entry_id, source_key_for_object_id,
+        FIRST_DYNAMIC_GLOBAL_COUNTER, OUTBOX_FOLDER_ID, SENT_FOLDER_ID,
     },
     properties::{MapiValue, PID_TAG_TARGET_ENTRY_ID},
 };

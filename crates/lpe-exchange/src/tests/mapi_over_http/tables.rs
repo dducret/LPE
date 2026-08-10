@@ -3169,10 +3169,7 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             async { crate::mapi::identity::source_key_for_object_id(folder_id) },
         )
         .await;
-        assert!(contains_bytes(
-            &response_rops,
-            &source_key
-        ));
+        assert!(contains_bytes(&response_rops, &source_key));
     }
     assert!(!contains_bytes(
         &response_rops,
@@ -3189,15 +3186,13 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
     ] {
         assert!(!contains_bytes(&response_rops, &utf16z(name)));
     }
-    let conversation_history_source_key = crate::mapi::identity::with_current_mapi_identity_codec(
-        identity_codec,
-        async {
+    let conversation_history_source_key =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
             crate::mapi::identity::source_key_for_object_id(
                 crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
             )
-        },
-    )
-    .await;
+        })
+        .await;
     assert!(!contains_bytes(
         &response_rops,
         &conversation_history_source_key

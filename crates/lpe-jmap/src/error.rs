@@ -59,7 +59,12 @@ pub(crate) fn method_error(kind: &str, description: &str) -> Value {
 
 pub(crate) fn method_error_from_error(error: Error) -> Value {
     let description = error.to_string();
-    if description == "anchorNotFound" {
+    if description == "stateMismatch" {
+        method_error(
+            "stateMismatch",
+            "ifInState does not match the current state",
+        )
+    } else if description == "anchorNotFound" {
         method_error("anchorNotFound", "anchor was not found in query results")
     } else {
         method_error("invalidArguments", &description)

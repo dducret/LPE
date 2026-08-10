@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SyncImportVersionRelation {

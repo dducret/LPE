@@ -8529,7 +8529,10 @@ impl ExchangeStore for FakeStore {
         input: MapiContactCommitInput,
     ) -> StoreFuture<'a, MapiContactCommitOutcome> {
         let mut contacts = self.contacts.lock().unwrap();
-        let Some(contact) = contacts.iter_mut().find(|contact| contact.id == input.contact_id) else {
+        let Some(contact) = contacts
+            .iter_mut()
+            .find(|contact| contact.id == input.contact_id)
+        else {
             return Box::pin(async { Ok(MapiContactCommitOutcome::NotFound) });
         };
         if !contact.rights.may_write {

@@ -890,21 +890,15 @@ fn execute_rop_response_summary_keeps_get_address_types_frame_boundary() {
         response_summary.results_csv,
         "0x49:0x00000000,0x02:0x00000000,0x07:0x00000000"
     );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x49@0..23:len=23:out=0:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x02@23..31:len=8:out=2:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x07@31..42:len=11:out=2:rv=0x00000000")
-    );
+    assert!(response_summary
+        .frames
+        .contains("0x49@0..23:len=23:out=0:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x02@23..31:len=8:out=2:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x07@31..42:len=11:out=2:rv=0x00000000"));
     assert!(response_summary.parse_error.is_empty());
 }
 
@@ -936,21 +930,15 @@ fn execute_rop_response_summary_keeps_get_property_ids_frame_boundary() {
         response_summary.results_csv,
         "0x56:0x00000000,0x02:0x00000000,0x07:0x00000000"
     );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x56@0..12:len=12:out=0:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x02@12..20:len=8:out=2:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x07@20..31:len=11:out=2:rv=0x00000000")
-    );
+    assert!(response_summary
+        .frames
+        .contains("0x56@0..12:len=12:out=0:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x02@12..20:len=8:out=2:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x07@20..31:len=11:out=2:rv=0x00000000"));
     assert!(response_summary.parse_error.is_empty());
 }
 
@@ -991,31 +979,21 @@ fn execute_rop_response_summary_keeps_contents_table_frame_boundary() {
         response_summary.results_csv,
         "0x05:0x00000000,0x12:0x00000000,0x13:0x00000000,0x18:0x00000000,0x05:0x00000000"
     );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x05@0..10:len=10:out=1:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x12@10..17:len=7:out=1:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x13@17..24:len=7:out=1:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x18@24..35:len=11:out=1:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x05@35..45:len=10:out=1:rv=0x00000000")
-    );
+    assert!(response_summary
+        .frames
+        .contains("0x05@0..10:len=10:out=1:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x12@10..17:len=7:out=1:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x13@17..24:len=7:out=1:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x18@24..35:len=11:out=1:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x05@35..45:len=10:out=1:rv=0x00000000"));
     assert!(response_summary.parse_error.is_empty());
 }
 
@@ -1060,16 +1038,12 @@ fn execute_rop_response_summary_skips_implausible_query_rows_payload_marker() {
         response_summary.results_csv,
         "0x05:0x00000000,0x12:0x00000000,0x13:0x00000000,0x18:0x00000000,0x4f:0x00000000,0x15:0x00000000"
     );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x4f@35..51:len=16:out=1:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x15@51..60:len=9:out=3:rv=0x00000000")
-    );
+    assert!(response_summary
+        .frames
+        .contains("0x4f@35..51:len=16:out=1:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x15@51..60:len=9:out=3:rv=0x00000000"));
     assert!(!response_summary.results_csv.contains("0x15:0x46005000"));
     assert!(response_summary.parse_error.is_empty());
 }
@@ -1111,36 +1085,24 @@ fn execute_rop_response_summary_keeps_create_setprops_save_frame_boundary() {
         response_summary.results_csv,
         "0x06:0x00000000,0x29:0x00000000,0x0a:0x00000000,0x07:0x00000000,0x0a:0x00000000,0x0c:0x00000000"
     );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x06@0..7:len=7:out=2:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x29@7..13:len=6:out=3:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x0a@13..21:len=8:out=4:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x07@21..32:len=11:out=4:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x0a@32..50:len=18:out=4:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x0c@50..65:len=15:out=5:rv=0x00000000")
-    );
+    assert!(response_summary
+        .frames
+        .contains("0x06@0..7:len=7:out=2:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x29@7..13:len=6:out=3:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x0a@13..21:len=8:out=4:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x07@21..32:len=11:out=4:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x0a@32..50:len=18:out=4:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x0c@50..65:len=15:out=5:rv=0x00000000"));
     assert!(response_summary.parse_error.is_empty());
 }
 
@@ -1283,16 +1245,12 @@ fn execute_rop_response_framing_summary_marks_multi_rop_boundaries() {
         response_summary.results_csv,
         "0x02:0x00000000,0x70:0x00000000,0x75:0x00000000,0x77:0x00000000,0x75:0x00000000,0x77:0x00000000,0x4e:0x00000000"
     );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x02@0..8:len=8:out=1:rv=0x00000000")
-    );
-    assert!(
-        response_summary
-            .frames
-            .contains("0x4e@38..57:len=19:out=2:rv=0x00000000")
-    );
+    assert!(response_summary
+        .frames
+        .contains("0x02@0..8:len=8:out=1:rv=0x00000000"));
+    assert!(response_summary
+        .frames
+        .contains("0x4e@38..57:len=19:out=2:rv=0x00000000"));
     assert!(response_summary.parse_error.is_empty());
 }
 

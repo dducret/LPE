@@ -1028,7 +1028,9 @@ fn calendar_sync_object(
         canonical_id: event.canonical_id,
         associated: false,
         subject: event.event.title.clone(),
-        body_text: Some(crate::mapi::properties::calendar_body_text_for_mapi(&event.event)),
+        body_text: Some(crate::mapi::properties::calendar_body_text_for_mapi(
+            &event.event,
+        )),
         message_class: "IPM.Appointment".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(
             &event.version.updated_at,

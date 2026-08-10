@@ -1181,11 +1181,9 @@ async fn outlook_profile_api_helper_reads_canonical_profile_state() {
     assert_eq!(profile.search_folders_count, 1);
     assert_eq!(profile.rules_count, 1);
     assert!(profile.ipm_subtree_ost_id_present);
-    assert!(
-        profile
-            .unsupported_client_local_state
-            .contains(&"client_local_ost_cache".to_string())
-    );
+    assert!(profile
+        .unsupported_client_local_state
+        .contains(&"client_local_ost_cache".to_string()));
 }
 
 #[tokio::test]

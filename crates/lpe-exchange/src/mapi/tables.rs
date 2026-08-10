@@ -380,13 +380,12 @@ pub(in crate::mapi) fn rop_find_row_response(
                     return rop_find_row_no_match_response(request);
                 }
             } else if *folder_id == CALENDAR_FOLDER_ID {
-                let mut rows =
-                    calendar_content_rows_with_mailbox_guid(
-                        snapshot,
-                        *folder_id,
-                        table_restriction.as_ref(),
-                        mailbox_guid,
-                    );
+                let mut rows = calendar_content_rows_with_mailbox_guid(
+                    snapshot,
+                    *folder_id,
+                    table_restriction.as_ref(),
+                    mailbox_guid,
+                );
                 sort_events(&mut rows, sort_orders);
                 if let Some((index, event)) =
                     find_row(rows.as_slice(), *position, request, |event| {
@@ -443,13 +442,12 @@ pub(in crate::mapi) fn rop_find_row_response(
                         }
                     }
                     MapiCollaborationFolderKind::Calendar => {
-                        let mut rows =
-                            calendar_content_rows_with_mailbox_guid(
-                                snapshot,
-                                *folder_id,
-                                table_restriction.as_ref(),
-                                mailbox_guid,
-                            );
+                        let mut rows = calendar_content_rows_with_mailbox_guid(
+                            snapshot,
+                            *folder_id,
+                            table_restriction.as_ref(),
+                            mailbox_guid,
+                        );
                         sort_events(&mut rows, sort_orders);
                         if let Some((index, event)) =
                             find_row(rows.as_slice(), *position, request, |event| {

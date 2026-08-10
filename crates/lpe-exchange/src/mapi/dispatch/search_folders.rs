@@ -936,9 +936,10 @@ fn rop_property_restriction(
             0
         }),
         "hasAttachment" => MapiValue::Bool(value.as_bool().ok_or(EC_SEARCH_UNSUPPORTED)?),
-        "category" => MapiValue::MultiString(vec![
-            value.as_str().ok_or(EC_SEARCH_UNSUPPORTED)?.to_string(),
-        ]),
+        "category" => MapiValue::MultiString(vec![value
+            .as_str()
+            .ok_or(EC_SEARCH_UNSUPPORTED)?
+            .to_string()]),
         "receivedAt" => {
             let value = value.as_str().ok_or(EC_SEARCH_UNSUPPORTED)?;
             MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))

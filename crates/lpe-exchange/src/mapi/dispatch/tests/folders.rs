@@ -978,14 +978,12 @@ fn folder_set_property_problems_accepts_ipm_subtree_ostid_write() {
         properties: std::collections::HashMap::new(),
     };
 
-    assert!(
-        folder_set_property_problems(
-            Some(&ipm_subtree),
-            &[],
-            &[(PID_TAG_OST_OSTID, MapiValue::Binary(vec![1; 40]))],
-        )
-        .is_empty()
-    );
+    assert!(folder_set_property_problems(
+        Some(&ipm_subtree),
+        &[],
+        &[(PID_TAG_OST_OSTID, MapiValue::Binary(vec![1; 40]))],
+    )
+    .is_empty());
     assert_eq!(
         folder_set_property_problems(
             Some(&ipm_subtree),
@@ -1028,22 +1026,18 @@ fn folder_set_property_problems_accepts_additional_ren_entry_ids_ex_on_root_and_
     };
     let value = MapiValue::Binary(vec![1; 490]);
 
-    assert!(
-        folder_set_property_problems(
-            Some(&root),
-            &[],
-            &[(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, value.clone())],
-        )
-        .is_empty()
-    );
-    assert!(
-        folder_set_property_problems(
-            Some(&inbox),
-            &[],
-            &[(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, value.clone())],
-        )
-        .is_empty()
-    );
+    assert!(folder_set_property_problems(
+        Some(&root),
+        &[],
+        &[(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, value.clone())],
+    )
+    .is_empty());
+    assert!(folder_set_property_problems(
+        Some(&inbox),
+        &[],
+        &[(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, value.clone())],
+    )
+    .is_empty());
     assert_eq!(
         folder_set_property_problems(
             Some(&ipm_subtree),
@@ -1080,17 +1074,15 @@ fn folder_set_property_problems_accepts_a_reserved_default_folder_alias_candidat
     )
     .unwrap();
 
-    assert!(
-        folder_set_property_problems(
-            Some(&root),
-            &[],
-            &[(
-                PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
-                MapiValue::Binary(alias_entry_id),
-            )],
-        )
-        .is_empty()
-    );
+    assert!(folder_set_property_problems(
+        Some(&root),
+        &[],
+        &[(
+            PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+            MapiValue::Binary(alias_entry_id),
+        )],
+    )
+    .is_empty());
 }
 
 #[test]
@@ -1116,25 +1108,21 @@ fn folder_set_property_problems_accepts_hidden_write_on_quick_step_folder() {
         properties: std::collections::HashMap::new(),
     };
 
-    assert!(
-        folder_set_property_problems(
-            Some(&quick_step_folder),
-            std::slice::from_ref(&quick_step),
-            &[(PID_TAG_ATTRIBUTE_HIDDEN, MapiValue::Bool(true))],
-        )
-        .is_empty()
-    );
-    assert!(
-        folder_set_property_problems(
-            Some(&quick_step_folder),
-            std::slice::from_ref(&quick_step),
-            &[(
-                PID_TAG_CONTAINER_CLASS_W,
-                MapiValue::String("IPF.Configuration".to_string())
-            )],
-        )
-        .is_empty()
-    );
+    assert!(folder_set_property_problems(
+        Some(&quick_step_folder),
+        std::slice::from_ref(&quick_step),
+        &[(PID_TAG_ATTRIBUTE_HIDDEN, MapiValue::Bool(true))],
+    )
+    .is_empty());
+    assert!(folder_set_property_problems(
+        Some(&quick_step_folder),
+        std::slice::from_ref(&quick_step),
+        &[(
+            PID_TAG_CONTAINER_CLASS_W,
+            MapiValue::String("IPF.Configuration".to_string())
+        )],
+    )
+    .is_empty());
     assert_eq!(
         folder_set_property_problems(
             Some(&quick_step_folder),
@@ -2137,27 +2125,19 @@ fn first_post_hierarchy_probe_summary_identifies_open_folder_and_getprops_shapes
     let summary = summarize_first_post_hierarchy_probe(&request_buffer, &response_buffer);
 
     assert_eq!(summary.open_folder_request_count, 1);
-    assert!(
-        summary
-            .open_folder_requests
-            .contains(&format!("folder=0x{CALENDAR_FOLDER_ID:016x};name=calendar"))
-    );
-    assert!(
-        summary
-            .open_folder_response_shapes
-            .contains("result=0x00000000;has_rules=0;is_ghosted=0")
-    );
+    assert!(summary
+        .open_folder_requests
+        .contains(&format!("folder=0x{CALENDAR_FOLDER_ID:016x};name=calendar")));
+    assert!(summary
+        .open_folder_response_shapes
+        .contains("result=0x00000000;has_rules=0;is_ghosted=0"));
     assert_eq!(summary.get_properties_specific_request_count, 1);
-    assert!(
-        summary
-            .get_properties_specific_requests
-            .contains("tags=0x3001001f,0x36020003")
-    );
-    assert!(
-        summary
-            .get_properties_specific_response_shapes
-            .contains("result=0x00000000;row=standard")
-    );
+    assert!(summary
+        .get_properties_specific_requests
+        .contains("tags=0x3001001f,0x36020003"));
+    assert!(summary
+        .get_properties_specific_response_shapes
+        .contains("result=0x00000000;row=standard"));
     assert!(summary.parse_error.is_empty());
 }
 
@@ -2178,11 +2158,9 @@ fn post_hierarchy_probe_summary_marks_default_folder_entry_id_getprops() {
 
     let summary = summarize_first_post_hierarchy_probe(&request_buffer, &response_buffer);
 
-    assert!(
-        summary
-            .get_properties_specific_response_shapes
-            .contains("values=0x36d00102:binary:bytes=46")
-    );
+    assert!(summary
+        .get_properties_specific_response_shapes
+        .contains("values=0x36d00102:binary:bytes=46"));
     assert!(summary.parse_error.is_empty());
 }
 
@@ -2243,15 +2221,11 @@ fn first_post_hierarchy_probe_summary_identifies_set_properties_shapes() {
     let summary = summarize_first_post_hierarchy_probe(&request_buffer, &response_buffer);
 
     assert_eq!(summary.set_properties_request_count, 1);
-    assert!(
-        summary
-            .set_properties_requests
-            .contains("tags=0x36d00102;values=0x36d00102:binary:bytes=3")
-    );
-    assert!(
-        summary
-            .set_properties_response_shapes
-            .contains("result=0x00000000;property_problem_count=0")
-    );
+    assert!(summary
+        .set_properties_requests
+        .contains("tags=0x36d00102;values=0x36d00102:binary:bytes=3"));
+    assert!(summary
+        .set_properties_response_shapes
+        .contains("result=0x00000000;property_problem_count=0"));
     assert!(summary.parse_error.is_empty());
 }

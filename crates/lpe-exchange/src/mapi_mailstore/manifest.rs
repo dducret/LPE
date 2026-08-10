@@ -1,10 +1,11 @@
 use super::special_message::{
     special_message_access, special_message_access_level, special_message_change_key,
     special_message_change_number, special_message_flags, special_message_has_attachments,
-    special_message_predecessor_change_list, special_message_sync_parent_source_key,
-    special_message_property_is_ics_identity, special_message_property_is_server_projected,
-    special_message_search_key, special_message_status, special_message_sync_source_key,
-    write_special_message_property, PID_TAG_HAS_ATTACHMENTS, PID_TAG_MESSAGE_STATUS,
+    special_message_predecessor_change_list, special_message_property_is_ics_identity,
+    special_message_property_is_server_projected, special_message_search_key,
+    special_message_status, special_message_sync_parent_source_key,
+    special_message_sync_source_key, write_special_message_property, PID_TAG_HAS_ATTACHMENTS,
+    PID_TAG_MESSAGE_STATUS,
 };
 use super::*;
 use crate::mapi::properties::message_class_for_email;
@@ -1334,7 +1335,12 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         // Exchange 2010 through Exchange 2019 do not expose
         // PidTagRecordKey on Message objects. Keep it omitted from FAI
         // messages just as the direct FastTransfer CopyTo projection does.
-        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SEARCH_KEY) {
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_SEARCH_KEY,
+        ) {
             write_binary_property(
                 &mut buffer,
                 PID_TAG_SEARCH_KEY,

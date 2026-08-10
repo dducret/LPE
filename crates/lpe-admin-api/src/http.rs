@@ -65,6 +65,9 @@ mod tests {
             "cookie",
             HeaderValue::from_static("theme=dark; lpe_mail_session=session-token"),
         );
-        assert_eq!(account_session_token(&headers).as_deref(), Some("session-token"));
+        assert_eq!(
+            account_session_token(&headers).as_deref(),
+            Some("session-token")
+        );
     }
 }

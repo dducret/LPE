@@ -11,6 +11,7 @@ where
         request: &str,
     ) -> Result<String> {
         let include_mime_content = requested_mime_content(request);
+        let prefer_html_body = requested_html_body(request);
         let ids = requested_item_ids(request);
         let contact_ids = ids
             .iter()
@@ -79,12 +80,35 @@ where
                 change_key_for(&task_change_keys, task.id, "task")?,
             ));
         }
-        for email in self
+        let mut emails = self
             .store
             .fetch_jmap_emails(principal.account_id, &message_ids)
-            .await?
-            .into_iter()
-        {
+            .await?;
+        let protected_bcc_ids = emails
+            .iter()
+            .filter(|email| {
+                email
+                    .mailbox_states
+                    .iter()
+                    .any(|state| matches!(state.role.as_str(), "drafts" | "sent"))
+            })
+            .map(|email| email.id)
+            .collect::<Vec<_>>();
+        if !protected_bcc_ids.is_empty() {
+            let protected_emails = self
+                .store
+                .fetch_jmap_emails_with_protected_bcc(principal.account_id, &protected_bcc_ids)
+                .await?;
+            for email in &mut emails {
+                if let Some(protected) = protected_emails
+                    .iter()
+                    .find(|protected| protected.id == email.id)
+                {
+                    email.bcc = protected.bcc.clone();
+                }
+            }
+        }
+        for email in emails {
             let attachments = if email.has_attachments {
                 self.store
                     .fetch_message_attachments(principal.account_id, email.id)
@@ -112,6 +136,7 @@ where
                 &email,
                 &attachments,
                 include_mime_content.then_some(attachment_contents.as_slice()),
+                prefer_html_body,
             ));
         }
         for item in self

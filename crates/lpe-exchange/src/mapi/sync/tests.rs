@@ -1059,11 +1059,17 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_LID_RECURRING_TAG
-            && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::Bool(false))
+            && matches!(
+                value,
+                mapi_mailstore::SpecialMessagePropertyValue::Bool(false)
+            )
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_LID_IS_RECURRING_TAG
-            && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::Bool(false))
+            && matches!(
+                value,
+                mapi_mailstore::SpecialMessagePropertyValue::Bool(false)
+            )
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_TAG_CHANGE_KEY

@@ -50,6 +50,7 @@ use crate::{
 mod blobs;
 mod canonical;
 mod helpers;
+pub(crate) use helpers::ensure_if_in_state;
 mod object_state;
 use helpers::*;
 pub(crate) use helpers::{collection_state_fingerprint, opaque_state_fingerprint, trim_snippet};

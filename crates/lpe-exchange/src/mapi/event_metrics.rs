@@ -108,10 +108,10 @@ mod tests {
         let after = mapi_calendar_event_save_metrics();
         assert!(after.direct_committed_total >= before.direct_committed_total + 1);
         assert!(after.ics_applied_total >= before.ics_applied_total + 1);
-        assert!(after.ics_ignored_older_or_same_total >= before.ics_ignored_older_or_same_total + 1);
         assert!(
-            after.ics_kept_server_content_total >= before.ics_kept_server_content_total + 1
+            after.ics_ignored_older_or_same_total >= before.ics_ignored_older_or_same_total + 1
         );
+        assert!(after.ics_kept_server_content_total >= before.ics_kept_server_content_total + 1);
         assert!(after.direct_failed_total >= before.direct_failed_total + 1);
         assert!(after.ics_failed_total >= before.ics_failed_total + 1);
     }

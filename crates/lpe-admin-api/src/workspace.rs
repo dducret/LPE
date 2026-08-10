@@ -1,7 +1,7 @@
 use axum::{
-    Json,
     extract::{Path as AxumPath, Query, State},
     http::{HeaderMap, StatusCode},
+    Json,
 };
 use lpe_storage::{
     AccessibleContact, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
@@ -31,8 +31,8 @@ mod public_folders;
 pub(crate) use public_folders::*;
 mod mailbox_access;
 use mailbox_access::{
-    ClientWorkspaceQuery, classify_client_mailbox_access_error, ensure_client_mailbox_read_access,
-    ensure_client_mailbox_write_access, resolve_client_mailbox_access,
+    classify_client_mailbox_access_error, ensure_client_mailbox_read_access,
+    ensure_client_mailbox_write_access, resolve_client_mailbox_access, ClientWorkspaceQuery,
 };
 
 #[allow(async_fn_in_trait)]
@@ -853,24 +853,79 @@ pub(crate) async fn upsert_client_event(
     let input = UpsertClientEventInput {
         id: request.id,
         account_id: account.account_id,
-        uid: preserve_empty(request.uid, existing.as_ref().map(|event: &lpe_storage::AccessibleEvent| event.uid.clone())),
+        uid: preserve_empty(
+            request.uid,
+            existing
+                .as_ref()
+                .map(|event: &lpe_storage::AccessibleEvent| event.uid.clone()),
+        ),
         date: request.date,
         time: request.time,
-        time_zone: preserve_empty(request.time_zone, existing.as_ref().map(|event| event.time_zone.clone())),
-        duration_minutes: if request.duration_minutes == 0 { existing.as_ref().map(|event| event.duration_minutes).unwrap_or(60) } else { request.duration_minutes },
-        all_day: existing.as_ref().map(|event| event.all_day).unwrap_or(request.all_day),
-        status: preserve_empty(request.status, existing.as_ref().map(|event| event.status.clone()).or_else(|| Some("confirmed".to_string()))),
-        sequence: if request.sequence == 0 { existing.as_ref().map(|event| event.sequence).unwrap_or(0) } else { request.sequence },
-        recurrence_rule: preserve_empty(request.recurrence_rule, existing.as_ref().map(|event| event.recurrence_rule.clone())),
-        recurrence_json: preserve_empty(request.recurrence_json, existing.as_ref().map(|event| event.recurrence_json.clone()).or_else(|| Some("{}".to_string()))),
-        recurrence_exceptions_json: preserve_empty(request.recurrence_exceptions_json, existing.as_ref().map(|event| event.recurrence_exceptions_json.clone()).or_else(|| Some("[]".to_string()))),
+        time_zone: preserve_empty(
+            request.time_zone,
+            existing.as_ref().map(|event| event.time_zone.clone()),
+        ),
+        duration_minutes: if request.duration_minutes == 0 {
+            existing
+                .as_ref()
+                .map(|event| event.duration_minutes)
+                .unwrap_or(60)
+        } else {
+            request.duration_minutes
+        },
+        all_day: existing
+            .as_ref()
+            .map(|event| event.all_day)
+            .unwrap_or(request.all_day),
+        status: preserve_empty(
+            request.status,
+            existing
+                .as_ref()
+                .map(|event| event.status.clone())
+                .or_else(|| Some("confirmed".to_string())),
+        ),
+        sequence: if request.sequence == 0 {
+            existing.as_ref().map(|event| event.sequence).unwrap_or(0)
+        } else {
+            request.sequence
+        },
+        recurrence_rule: preserve_empty(
+            request.recurrence_rule,
+            existing.as_ref().map(|event| event.recurrence_rule.clone()),
+        ),
+        recurrence_json: preserve_empty(
+            request.recurrence_json,
+            existing
+                .as_ref()
+                .map(|event| event.recurrence_json.clone())
+                .or_else(|| Some("{}".to_string())),
+        ),
+        recurrence_exceptions_json: preserve_empty(
+            request.recurrence_exceptions_json,
+            existing
+                .as_ref()
+                .map(|event| event.recurrence_exceptions_json.clone())
+                .or_else(|| Some("[]".to_string())),
+        ),
         title: request.title,
         location: request.location,
-        organizer_json: preserve_empty(request.organizer_json, existing.as_ref().map(|event| event.organizer_json.clone()).or_else(|| Some("{}".to_string()))),
+        organizer_json: preserve_empty(
+            request.organizer_json,
+            existing
+                .as_ref()
+                .map(|event| event.organizer_json.clone())
+                .or_else(|| Some("{}".to_string())),
+        ),
         attendees: request.attendees,
-        attendees_json: preserve_empty(request.attendees_json, existing.as_ref().map(|event| event.attendees_json.clone())),
+        attendees_json: preserve_empty(
+            request.attendees_json,
+            existing.as_ref().map(|event| event.attendees_json.clone()),
+        ),
         notes: request.notes,
-        body_html: preserve_empty(request.body_html, existing.as_ref().map(|event| event.body_html.clone())),
+        body_html: preserve_empty(
+            request.body_html,
+            existing.as_ref().map(|event| event.body_html.clone()),
+        ),
     };
     let event = if let Some(event_id) = request.id {
         storage
@@ -1001,11 +1056,22 @@ pub(crate) async fn upsert_client_task(
                 title: request.title,
                 description: request.description,
                 status: request.status,
-                starts_at: request.starts_at.or_else(|| existing.as_ref().and_then(|task: &ClientTask| task.starts_at.clone())),
+                starts_at: request.starts_at.or_else(|| {
+                    existing
+                        .as_ref()
+                        .and_then(|task: &ClientTask| task.starts_at.clone())
+                }),
                 due_at: request.due_at,
                 completed_at: request.completed_at,
-                priority: request.priority.unwrap_or_else(|| existing.as_ref().map(|task| task.priority).unwrap_or(0)),
-                recurrence_rule: request.recurrence_rule.unwrap_or_else(|| existing.as_ref().map(|task| task.recurrence_rule.clone()).unwrap_or_default()),
+                priority: request
+                    .priority
+                    .unwrap_or_else(|| existing.as_ref().map(|task| task.priority).unwrap_or(0)),
+                recurrence_rule: request.recurrence_rule.unwrap_or_else(|| {
+                    existing
+                        .as_ref()
+                        .map(|task| task.recurrence_rule.clone())
+                        .unwrap_or_default()
+                }),
                 sort_order: request.sort_order.unwrap_or(0),
             })
             .await

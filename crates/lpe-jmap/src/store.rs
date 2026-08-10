@@ -1,7 +1,7 @@
 use anyhow::Result;
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AttachmentUploadInput, AuditEntryInput,
-    AuthenticatedAccount, CalendarEventAttachment, CanonicalChangeCategory,
+    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, AttachmentUploadInput,
+    AuditEntryInput, AuthenticatedAccount, CalendarEventAttachment, CanonicalChangeCategory,
     CanonicalChangeListener, CanonicalChangeReplay, CanonicalPushChangeSet, ClientNote,
     ClientReminder, ClientTask, ClientTaskList, CollaborationCollection, CollaborationGrantInput,
     CreateTaskListInput, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery, JmapEmailSubmission,
@@ -242,6 +242,22 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         let _ = (account_id, message_id);
         Ok(None)
     }
+    async fn fetch_jmap_message_attachments(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Vec<ActiveSyncAttachment>> {
+        let _ = (account_id, message_id);
+        Ok(Vec::new())
+    }
+    async fn fetch_jmap_message_attachment_blob(
+        &self,
+        account_id: Uuid,
+        file_reference: &str,
+    ) -> Result<Option<JmapUploadBlob>> {
+        let _ = (account_id, file_reference);
+        Ok(None)
+    }
     async fn fetch_calendar_attachment_blob(
         &self,
         account_id: Uuid,
@@ -284,6 +300,36 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         target_mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail>;
+    async fn update_jmap_email_flags(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        unread: Option<bool>,
+        flagged: Option<bool>,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
+        let _ = (account_id, message_id, unread, flagged, audit);
+        anyhow::bail!("Email flag mutation is not available")
+    }
+    async fn delete_jmap_email(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let _ = (account_id, message_id, audit);
+        anyhow::bail!("Email deletion is not available")
+    }
+    async fn delete_jmap_email_from_mailbox(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let _ = (account_id, mailbox_id, message_id, audit);
+        anyhow::bail!("Email mailbox deletion is not available")
+    }
     async fn import_jmap_email(
         &self,
         input: JmapImportedEmailInput,
@@ -830,6 +876,32 @@ impl JmapStore for Storage {
         self.fetch_jmap_message_blob(account_id, message_id).await
     }
 
+    async fn fetch_jmap_message_attachments(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Vec<ActiveSyncAttachment>> {
+        self.fetch_activesync_message_attachments(account_id, message_id)
+            .await
+    }
+
+    async fn fetch_jmap_message_attachment_blob(
+        &self,
+        account_id: Uuid,
+        file_reference: &str,
+    ) -> Result<Option<JmapUploadBlob>> {
+        Ok(self
+            .fetch_activesync_attachment_content(account_id, file_reference)
+            .await?
+            .map(|attachment| JmapUploadBlob {
+                id: Uuid::nil(),
+                account_id,
+                media_type: attachment.media_type,
+                octet_size: attachment.blob_bytes.len() as u64,
+                blob_bytes: attachment.blob_bytes,
+            }))
+    }
+
     async fn fetch_calendar_attachment_blob(
         &self,
         account_id: Uuid,
@@ -910,6 +982,38 @@ impl JmapStore for Storage {
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
         self.import_jmap_email(input, audit).await
+    }
+
+    async fn update_jmap_email_flags(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        unread: Option<bool>,
+        flagged: Option<bool>,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
+        self.update_jmap_email_flags(account_id, message_id, unread, flagged, audit)
+            .await
+    }
+
+    async fn delete_jmap_email(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        self.delete_jmap_email(account_id, message_id, audit).await
+    }
+
+    async fn delete_jmap_email_from_mailbox(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        self.delete_jmap_email_from_mailbox(account_id, mailbox_id, message_id, audit)
+            .await
     }
 
     async fn fetch_accessible_contact_collections(

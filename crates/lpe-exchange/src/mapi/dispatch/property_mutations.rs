@@ -775,10 +775,8 @@ mod tests {
             )],
         );
 
-        assert!(
-            !session
-                .folder_profile_property_tombstones
-                .contains_key(&folder_handle)
-        );
+        assert!(!session
+            .folder_profile_property_tombstones
+            .contains_key(&folder_handle));
     }
 }

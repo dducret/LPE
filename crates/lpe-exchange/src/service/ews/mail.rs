@@ -55,33 +55,73 @@ fn message_item_xml_with_attachments(
     email: &JmapEmail,
     attachments: &[ActiveSyncAttachment],
 ) -> String {
-    message_item_xml_with_details(email, attachments, None)
+    message_item_xml_with_details(email, attachments, None, false)
 }
 
 pub(in crate::service) fn message_item_xml_with_details(
     email: &JmapEmail,
     attachments: &[ActiveSyncAttachment],
     mime_attachment_contents: Option<&[ActiveSyncAttachmentContent]>,
+    prefer_html_body: bool,
 ) -> String {
     let mut xml = message_summary_xml(email);
     let mime_content = mime_attachment_contents
         .map(|contents| {
+            let mut mime_email = email.clone();
+            mime_email.bcc.clear();
             format!(
                 "<t:MimeContent CharacterSet=\"UTF-8\">{}</t:MimeContent>",
-                BASE64_STANDARD.encode(render_mime_message(email, contents))
+                BASE64_STANDARD.encode(render_mime_message(&mime_email, contents))
             )
         })
         .unwrap_or_default();
+    let body = match (
+        prefer_html_body,
+        email
+            .body_html_sanitized
+            .as_deref()
+            .filter(|body| !body.is_empty()),
+    ) {
+        (true, Some(html)) => format!("<t:Body BodyType=\"HTML\">{}</t:Body>", escape_xml(html)),
+        _ => format!(
+            "<t:Body BodyType=\"Text\">{}</t:Body>",
+            escape_xml(&email.body_text)
+        ),
+    };
     xml.insert_str(
         xml.len() - "</t:Message>".len(),
         &format!(
-            "{}<t:Body BodyType=\"Text\">{}</t:Body>{}",
+            "{}{body}{}{}{}{}",
             mime_content,
-            escape_xml(&email.body_text),
+            message_recipients_xml("ToRecipients", &email.to),
+            message_recipients_xml("CcRecipients", &email.cc),
+            message_recipients_xml("BccRecipients", &email.bcc),
             message_attachments_xml(attachments),
         ),
     );
     xml
+}
+
+fn message_recipients_xml(kind: &str, recipients: &[JmapEmailAddress]) -> String {
+    if recipients.is_empty() {
+        return String::new();
+    }
+    let mailboxes = recipients
+        .iter()
+        .map(|recipient| {
+            let name = recipient
+                .display_name
+                .as_deref()
+                .filter(|name| !name.is_empty())
+                .map(|name| format!("<t:Name>{}</t:Name>", escape_xml(name)))
+                .unwrap_or_default();
+            format!(
+                "<t:Mailbox>{name}<t:EmailAddress>{}</t:EmailAddress></t:Mailbox>",
+                escape_xml(&recipient.address),
+            )
+        })
+        .collect::<String>();
+    format!("<t:{kind}>{mailboxes}</t:{kind}>")
 }
 
 pub(in crate::service) fn root_item_id_xml(email: &JmapEmail) -> String {
@@ -94,6 +134,11 @@ pub(in crate::service) fn root_item_id_xml(email: &JmapEmail) -> String {
 
 pub(in crate::service) fn requested_mime_content(request: &str) -> bool {
     request.contains("item:MimeContent") || request.contains("MimeContent")
+}
+
+pub(in crate::service) fn requested_html_body(request: &str) -> bool {
+    element_text(request, "BodyType")
+        .is_some_and(|body_type| body_type.eq_ignore_ascii_case("HTML"))
 }
 
 impl<S, V> ExchangeService<S, V>
@@ -249,7 +294,7 @@ pub(in crate::service) fn parse_create_message_input(
         bcc: parse_recipients(message, "BccRecipients"),
         subject: element_text(message, "Subject").unwrap_or_default(),
         body_text,
-        body_html_sanitized: None,
+        body_html_sanitized: body_type.eq_ignore_ascii_case("HTML").then_some(body_value),
         internet_message_id: element_text(message, "InternetMessageId"),
         mime_blob_ref: Some(format!("ews-createitem:{}", Uuid::new_v4())),
         size_octets: message.len() as i64,

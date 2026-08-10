@@ -329,14 +329,13 @@ fn rop_query_rows_response_inner(
                     .collect::<Vec<_>>()
             } else if *folder_id == TRASH_FOLDER_ID {
                 rows_are_serialized_property_rows = *category_count == 0;
-                let mut rows =
-                    deleted_items_content_rows(
-                        mailboxes,
-                        emails,
-                        snapshot,
-                        restriction.as_ref(),
-                        mailbox_guid,
-                    );
+                let mut rows = deleted_items_content_rows(
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    restriction.as_ref(),
+                    mailbox_guid,
+                );
                 sort_deleted_items_content_rows(&mut rows, sort_orders);
                 if *category_count > 0 {
                     categorized_deleted_items_content_rows(
@@ -398,13 +397,12 @@ fn rop_query_rows_response_inner(
                             .collect::<Vec<_>>()
                     }
                     MapiCollaborationFolderKind::Calendar => {
-                        let mut rows =
-                            calendar_content_rows_with_mailbox_guid(
-                                snapshot,
-                                *folder_id,
-                                restriction.as_ref(),
-                                mailbox_guid,
-                            );
+                        let mut rows = calendar_content_rows_with_mailbox_guid(
+                            snapshot,
+                            *folder_id,
+                            restriction.as_ref(),
+                            mailbox_guid,
+                        );
                         sort_events(&mut rows, sort_orders);
                         rows.into_iter()
                             .map(|event| {

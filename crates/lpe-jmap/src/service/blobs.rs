@@ -115,6 +115,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     blob_bytes,
                 })
             }
+            JmapBlobId::MessageAttachment(file_reference) => self
+                .store
+                .fetch_jmap_message_attachment_blob(requested_account_id, &file_reference)
+                .await?
+                .ok_or_else(|| anyhow!("blob not found")),
             JmapBlobId::CalendarAttachment(file_reference) => self
                 .store
                 .fetch_calendar_attachment_blob(requested_account_id, &file_reference)

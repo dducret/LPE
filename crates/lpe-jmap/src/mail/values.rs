@@ -1,6 +1,8 @@
 use anyhow::{bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use lpe_storage::{JmapEmail, JmapEmailSubmission, JmapQuota, SenderIdentity};
+use lpe_storage::{
+    ActiveSyncAttachment, JmapEmail, JmapEmailSubmission, JmapQuota, SenderIdentity,
+};
 use serde_json::{json, Map, Value};
 use std::{cmp::Ordering, collections::HashSet};
 use uuid::Uuid;
@@ -162,6 +164,8 @@ pub(crate) fn email_properties(properties: Option<Vec<String>>) -> HashSet<Strin
                 "textBody".to_string(),
                 "htmlBody".to_string(),
                 "bodyValues".to_string(),
+                "bodyStructure".to_string(),
+                "attachments".to_string(),
             ]
         })
         .into_iter()
@@ -271,6 +275,7 @@ pub(crate) fn email_to_value(
     email: &JmapEmail,
     properties: &HashSet<String>,
     body_options: &EmailBodyOptions,
+    attachments: &[ActiveSyncAttachment],
     include_owner_bcc: bool,
 ) -> Value {
     let mut object = Map::new();
@@ -446,7 +451,112 @@ pub(crate) fn email_to_value(
     if include_body_values {
         object.insert("bodyValues".to_string(), Value::Object(body_values));
     }
+    if properties.contains("bodyStructure") {
+        object.insert(
+            "bodyStructure".to_string(),
+            email_body_structure(email, attachments, &body_options.body_properties),
+        );
+    }
+    if properties.contains("attachments") {
+        object.insert("attachments".to_string(), attachment_values(attachments));
+    }
 
+    Value::Object(object)
+}
+
+fn email_body_structure(
+    email: &JmapEmail,
+    attachments: &[ActiveSyncAttachment],
+    properties: &HashSet<String>,
+) -> Value {
+    let mut sub_parts = Vec::new();
+    if !email.body_text.is_empty() {
+        sub_parts.push(body_part_value(
+            "textBody",
+            "text/plain",
+            email.body_text.len(),
+            properties,
+        ));
+    }
+    if let Some(html) = &email.body_html_sanitized {
+        sub_parts.push(body_part_value(
+            "htmlBody",
+            "text/html",
+            html.len(),
+            properties,
+        ));
+    }
+    sub_parts.extend(
+        attachments
+            .iter()
+            .map(|attachment| attachment_body_part_value(attachment, properties)),
+    );
+    json!({
+        "partId": "root",
+        "type": "multipart/mixed",
+        "subParts": sub_parts,
+    })
+}
+
+fn attachment_values(attachments: &[ActiveSyncAttachment]) -> Value {
+    Value::Array(
+        attachments
+            .iter()
+            .map(|attachment| {
+                json!({
+                    "partId": format!("attachment:{}", attachment.id),
+                    "blobId": attachment.file_reference,
+                    "name": attachment.file_name,
+                    "type": attachment.media_type,
+                    "size": attachment.size_octets,
+                    "disposition": attachment.disposition,
+                    "cid": attachment.content_id,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn attachment_body_part_value(
+    attachment: &ActiveSyncAttachment,
+    properties: &HashSet<String>,
+) -> Value {
+    let mut object = Map::new();
+    insert_if(
+        properties,
+        &mut object,
+        "partId",
+        format!("attachment:{}", attachment.id),
+    );
+    insert_if(
+        properties,
+        &mut object,
+        "type",
+        attachment.media_type.clone(),
+    );
+    insert_if(properties, &mut object, "size", attachment.size_octets);
+    insert_if(
+        properties,
+        &mut object,
+        "name",
+        attachment.file_name.clone(),
+    );
+    insert_if(
+        properties,
+        &mut object,
+        "disposition",
+        attachment.disposition.clone(),
+    );
+    insert_if(
+        properties,
+        &mut object,
+        "cid",
+        attachment.content_id.clone(),
+    );
+    object.insert(
+        "blobId".to_string(),
+        Value::String(attachment.file_reference.clone()),
+    );
     Value::Object(object)
 }
 

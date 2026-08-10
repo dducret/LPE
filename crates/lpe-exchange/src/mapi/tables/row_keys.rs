@@ -37,14 +37,13 @@ pub(in crate::mapi) fn table_row_keys(
             ..
         } => {
             if !*associated && *folder_id == TRASH_FOLDER_ID {
-                let mut rows =
-                    deleted_items_content_rows(
-                        mailboxes,
-                        emails,
-                        snapshot,
-                        restriction.as_ref(),
-                        mailbox_guid,
-                    );
+                let mut rows = deleted_items_content_rows(
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    restriction.as_ref(),
+                    mailbox_guid,
+                );
                 sort_deleted_items_content_rows(&mut rows, sort_orders);
                 return rows
                     .into_iter()
@@ -52,13 +51,12 @@ pub(in crate::mapi) fn table_row_keys(
                     .collect();
             }
             if *folder_id == CALENDAR_FOLDER_ID {
-                let mut rows =
-                    calendar_content_rows_with_mailbox_guid(
-                        snapshot,
-                        *folder_id,
-                        restriction.as_ref(),
-                        mailbox_guid,
-                    );
+                let mut rows = calendar_content_rows_with_mailbox_guid(
+                    snapshot,
+                    *folder_id,
+                    restriction.as_ref(),
+                    mailbox_guid,
+                );
                 sort_events(&mut rows, sort_orders);
                 return rows.into_iter().map(|event| event.id).collect();
             }
@@ -77,13 +75,12 @@ pub(in crate::mapi) fn table_row_keys(
                         rows.into_iter().map(|contact| contact.id).collect()
                     }
                     MapiCollaborationFolderKind::Calendar => {
-                        let mut rows =
-                            calendar_content_rows_with_mailbox_guid(
-                                snapshot,
-                                *folder_id,
-                                restriction.as_ref(),
-                                mailbox_guid,
-                            );
+                        let mut rows = calendar_content_rows_with_mailbox_guid(
+                            snapshot,
+                            *folder_id,
+                            restriction.as_ref(),
+                            mailbox_guid,
+                        );
                         sort_events(&mut rows, sort_orders);
                         rows.into_iter().map(|event| event.id).collect()
                     }

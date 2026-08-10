@@ -120,5 +120,9 @@ pub(in crate::mapi::dispatch) fn format_inbox_folder_type_getprops_response_cont
 }
 
 pub(in crate::mapi::dispatch) fn debug_context_or_none(context: &str) -> &str {
-    if context.is_empty() { "none" } else { context }
+    if context.is_empty() {
+        "none"
+    } else {
+        context
+    }
 }

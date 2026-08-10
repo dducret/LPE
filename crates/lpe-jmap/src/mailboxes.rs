@@ -329,13 +329,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
         let account_id = account_access.account_id;
+        let old_state = self.mailbox_object_state(&account_access).await?;
+        crate::service::ensure_if_in_state(arguments.if_in_state.as_deref(), &old_state)?;
         let existing_mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
         validate_mailbox_set_names(
             arguments.create.as_ref(),
             arguments.update.as_ref(),
             &existing_mailboxes,
         )?;
-        let old_state = self.mailbox_object_state(&account_access).await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
         let mut updated = Map::new();

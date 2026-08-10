@@ -26,8 +26,9 @@ pub(super) fn restriction_matches_event_with_mailbox_guid(
     event: &crate::mapi_store::MapiEvent,
     mailbox_guid: Uuid,
 ) -> bool {
-    restriction_matches(restriction, |property_tag| {
-        match canonical_property_storage_tag(property_tag) {
+    restriction_matches(
+        restriction,
+        |property_tag| match canonical_property_storage_tag(property_tag) {
             PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
                 mailbox_guid,
                 event.folder_id,
@@ -40,6 +41,6 @@ pub(super) fn restriction_matches_event_with_mailbox_guid(
             }
             PID_TAG_RECORD_KEY => Some(MapiValue::Binary(event.source_key.clone())),
             _ => versioned_event_property_value_with_reminder(event, property_tag, None),
-        }
-    })
+        },
+    )
 }

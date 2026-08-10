@@ -13,6 +13,7 @@ use crate::parse::parse_uuid;
 pub(crate) enum JmapBlobId {
     Upload(Uuid),
     Message(Uuid),
+    MessageAttachment(String),
     CalendarAttachment(String),
     Opaque(String),
 }
@@ -20,7 +21,10 @@ pub(crate) enum JmapBlobId {
 pub(crate) fn parse_upload_blob_id(value: &str) -> Result<Uuid> {
     match JmapBlobId::parse(value)? {
         JmapBlobId::Upload(id) => Ok(id),
-        JmapBlobId::Message(_) | JmapBlobId::CalendarAttachment(_) | JmapBlobId::Opaque(_) => {
+        JmapBlobId::Message(_)
+        | JmapBlobId::MessageAttachment(_)
+        | JmapBlobId::CalendarAttachment(_)
+        | JmapBlobId::Opaque(_) => {
             bail!("blob not found")
         }
     }
@@ -63,6 +67,9 @@ impl JmapBlobId {
         if let Some(message_id) = trimmed.strip_prefix("message:") {
             return Ok(Self::Message(parse_uuid(message_id)?));
         }
+        if trimmed.starts_with("attachment:") {
+            return Ok(Self::MessageAttachment(trimmed.to_string()));
+        }
         if trimmed.starts_with("calendar-attachment:") {
             return Ok(Self::CalendarAttachment(trimmed.to_string()));
         }
@@ -94,6 +101,7 @@ impl JmapBlobId {
         match self {
             Self::Upload(id) => format!("upload:{id}"),
             Self::Message(id) => format!("message:{id}"),
+            Self::MessageAttachment(value) => value,
             Self::CalendarAttachment(value) => value,
             Self::Opaque(value) => value,
         }

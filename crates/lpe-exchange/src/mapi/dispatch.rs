@@ -24,7 +24,7 @@ use crate::store::{
     MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
     UpsertMapiNavigationShortcutInput,
 };
-use lpe_core::outlook_trace::{OutlookTraceDirection, OutlookTraceEvent, write_outlook_trace};
+use lpe_core::outlook_trace::{write_outlook_trace, OutlookTraceDirection, OutlookTraceEvent};
 use lpe_domain::current_windows_filetime;
 use lpe_storage::{
     AuditEntryInput, CreatePublicFolderInput, JmapEmail, JmapMailbox, JmapMailboxCreateInput,
@@ -35,7 +35,7 @@ use lpe_storage::{
     MapiMessageImportedMoveIdentity, PublicFolderPermissionInput, SearchFolderDefinition,
     SubmittedRecipientInput, UpdatePublicFolderInput, UpsertPublicFolderItemInput,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 

@@ -459,10 +459,7 @@ async fn mapi_over_http_empty_store_root_and_ipm_subtree_report_virtual_children
         )
         .await;
         assert!(contains_bytes(&response_rops, &entry_id));
-        assert!(contains_bytes(
-            &response_rops,
-            &instance_key
-        ));
+        assert!(contains_bytes(&response_rops, &instance_key));
     }
 }
 
@@ -517,17 +514,15 @@ async fn mapi_over_http_root_hierarchy_findrow_finds_ipm_subtree_by_display_name
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    let ipm_subtree_entry_id = crate::mapi::identity::with_current_mapi_identity_codec(
-        identity_codec,
-        async {
+    let ipm_subtree_entry_id =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
             crate::mapi::identity::folder_entry_id_from_object_id(
                 account.account_id,
                 crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             )
             .unwrap()
-        },
-    )
-    .await;
+        })
+        .await;
     assert!(contains_bytes(
         &response_rops,
         &[0x4F, 0x02, 0, 0, 0, 0, 0, 1]
@@ -559,17 +554,15 @@ async fn mapi_over_http_root_hierarchy_findrow_finds_ipm_subtree_by_entry_id() {
         "cookie",
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
-    let ipm_subtree_entry_id = crate::mapi::identity::with_current_mapi_identity_codec(
-        identity_codec,
-        async {
+    let ipm_subtree_entry_id =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
             crate::mapi::identity::folder_entry_id_from_object_id(
                 account.account_id,
                 crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             )
             .unwrap()
-        },
-    )
-    .await;
+        })
+        .await;
     let mut restriction = Vec::new();
     append_search_property_binary(&mut restriction, 0x0FFF_0102, 0x04, &ipm_subtree_entry_id);
 

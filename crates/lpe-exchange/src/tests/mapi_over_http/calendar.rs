@@ -8,10 +8,8 @@ async fn with_scoped_mapi_identity<T>(
     let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(store, account_id)
         .await
         .expect("test MAPI identity codec loads");
-    crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
-        operation()
-    })
-    .await
+    crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async { operation() })
+        .await
 }
 
 async fn with_default_scoped_mapi_identity<T>(operation: impl FnOnce() -> T) -> T {
@@ -360,8 +358,7 @@ async fn mapi_over_http_calendar_move_to_deleted_items_rekeys_and_projects_canon
     destination_notification.extend_from_slice(&open_handles[4].to_le_bytes());
     destination_notification.push(0);
     destination_notification.extend_from_slice(&0x8020u16.to_le_bytes());
-    destination_notification
-        .extend_from_slice(&mapi_wire_id_bytes(trash_folder_id));
+    destination_notification.extend_from_slice(&mapi_wire_id_bytes(trash_folder_id));
     destination_notification.extend_from_slice(&mapi_wire_id_bytes(new_mapi_id));
     destination_notification.extend_from_slice(&mapi_wire_id_bytes(calendar_folder_id));
     destination_notification.extend_from_slice(&mapi_wire_id_bytes(event_mapi_id));
@@ -5017,9 +5014,7 @@ async fn mapi_over_http_calendar_whole_start_end_update_canonical_event() {
     assert_eq!(stored[0].time, "13:15");
     assert_eq!(stored[0].duration_minutes, 90);
     let metrics_after = crate::mapi::mapi_calendar_event_save_metrics();
-    assert!(
-        metrics_after.direct_committed_total >= metrics_before.direct_committed_total + 1
-    );
+    assert!(metrics_after.direct_committed_total >= metrics_before.direct_committed_total + 1);
 }
 
 #[tokio::test]
@@ -6773,17 +6768,15 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
     instance_key_property.extend_from_slice(&(instance_key.len() as u32).to_le_bytes());
     instance_key_property.extend_from_slice(&instance_key);
     assert!(contains_bytes(&response_rops, &instance_key_property));
-    let parent_entry_id = crate::mapi::identity::with_current_mapi_identity_codec(
-        identity_codec,
-        async {
+    let parent_entry_id =
+        crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
             crate::mapi::identity::folder_entry_id_from_object_id(
                 account.account_id,
                 crate::mapi::identity::CALENDAR_FOLDER_ID,
             )
             .unwrap()
-        },
-    )
-    .await;
+        })
+        .await;
     let mut parent_entry_id_property = 0x0E09_0102u32.to_le_bytes().to_vec();
     parent_entry_id_property.extend_from_slice(&(parent_entry_id.len() as u32).to_le_bytes());
     parent_entry_id_property.extend_from_slice(&parent_entry_id);
@@ -10097,7 +10090,13 @@ async fn mapi_over_http_outlook_startup_calendar_folder_chain_uses_advertised_de
         .unwrap()
     })
     .await;
-    let calendar_long_term_id = with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID).unwrap()).await;
+    let calendar_long_term_id = with_default_scoped_mapi_identity(|| {
+        crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap()
+    })
+    .await;
     let calendar_folder_id = durable_special_folder_id_for_test(
         &store,
         account.account_id,
@@ -10184,7 +10183,13 @@ async fn mapi_over_http_ms_oxosfld_calendar_lookup_chain_opens_calendar_from_inb
         .unwrap()
     })
     .await;
-    let calendar_long_term_id = with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID).unwrap()).await;
+    let calendar_long_term_id = with_default_scoped_mapi_identity(|| {
+        crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap()
+    })
+    .await;
 
     let mut rops = Vec::new();
     rops.extend_from_slice(&[0x27, 0x00, 0x00]); // RopGetReceiveFolder.
@@ -10616,10 +10621,7 @@ async fn mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_i
         Some("IPM.Appointment")
     );
     assert_eq!(team_calendar.folder_id, Some(custom_folder_id));
-    assert_eq!(
-        team_calendar.parent_folder_id,
-        Some(ipm_subtree_folder_id)
-    );
+    assert_eq!(team_calendar.parent_folder_id, Some(ipm_subtree_folder_id));
     assert!(contains_bytes(&response_rops, &custom_folder_entry_id));
     let custom_folder_counter =
         crate::mapi::identity::global_counter_from_store_id(custom_folder_id).unwrap();
@@ -11083,7 +11085,11 @@ async fn mapi_over_http_store_get_properties_all_lists_calendar_default_entry_id
     ));
     assert!(contains_bytes(
         &response_rops,
-        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID).unwrap()).await,
+        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        )
+        .unwrap())
+        .await,
     ));
 }
 
@@ -11129,7 +11135,11 @@ async fn mapi_over_http_store_get_properties_specific_returns_calendar_default_e
         .expect("store Calendar default EntryID GetProps should return a standard row");
     assert!(contains_bytes(
         &response_rops,
-        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID).unwrap()).await,
+        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        )
+        .unwrap())
+        .await,
     ));
 }
 
@@ -11149,7 +11159,11 @@ async fn mapi_over_http_root_get_properties_all_lists_calendar_default_entry_id(
     ));
     assert!(contains_bytes(
         &response_rops,
-        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID).unwrap()).await,
+        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        )
+        .unwrap())
+        .await,
     ));
 }
 
@@ -11183,7 +11197,11 @@ async fn mapi_over_http_root_get_properties_specific_returns_calendar_default_en
         .expect("Root Calendar default EntryID GetProps should return a standard row");
     assert!(contains_bytes(
         &response_rops,
-        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID).unwrap()).await,
+        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        )
+        .unwrap())
+        .await,
     ));
 }
 
@@ -11233,7 +11251,11 @@ async fn mapi_over_http_inbox_get_properties_all_lists_calendar_default_entry_id
     ));
     assert!(contains_bytes(
         &response_rops,
-        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID).unwrap()).await,
+        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        )
+        .unwrap())
+        .await,
     ));
 }
 
@@ -11267,6 +11289,10 @@ async fn mapi_over_http_inbox_get_properties_specific_returns_calendar_default_e
         .expect("Inbox Calendar default EntryID GetProps should return a standard row");
     assert!(contains_bytes(
         &response_rops,
-        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID).unwrap()).await,
+        &with_default_scoped_mapi_identity(|| crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        )
+        .unwrap())
+        .await,
     ));
 }

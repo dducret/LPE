@@ -342,11 +342,7 @@ where
                     {
                         folders.push_str(
                             &self
-                                .collection_folder_xml(
-                                    &collection,
-                                    CONTACTS_FOLDER_ID,
-                                    "Contacts",
-                                )
+                                .collection_folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts")
                                 .await?,
                         );
                     }
@@ -359,11 +355,7 @@ where
                     {
                         folders.push_str(
                             &self
-                                .collection_folder_xml(
-                                    &collection,
-                                    CALENDAR_FOLDER_ID,
-                                    "Calendar",
-                                )
+                                .collection_folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar")
                                 .await?,
                         );
                     }
@@ -927,7 +919,11 @@ pub(in crate::service) fn folder_change_key(id: &str) -> String {
 }
 
 pub(in crate::service) fn mailbox_folder_change_key(mailbox: &JmapMailbox) -> String {
-    versioned_change_key("mailbox-folder", &mailbox.id.to_string(), &mailbox.modseq.to_string())
+    versioned_change_key(
+        "mailbox-folder",
+        &mailbox.id.to_string(),
+        &mailbox.modseq.to_string(),
+    )
 }
 
 pub(in crate::service) fn public_folder_change_key(folder: &PublicFolder) -> String {

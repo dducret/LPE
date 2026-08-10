@@ -440,7 +440,12 @@ async fn mapi_over_http_accepts_outlook_octet_stream_bind_probe() {
         .headers()
         .get_all("set-cookie")
         .iter()
-        .find_map(|value| value.to_str().ok().filter(|cookie| cookie.starts_with("MapiContext=")))
+        .find_map(|value| {
+            value
+                .to_str()
+                .ok()
+                .filter(|cookie| cookie.starts_with("MapiContext="))
+        })
         .expect("Bind must return MapiContext");
     assert!(set_cookie.starts_with("MapiContext="));
     let set_cookies = response

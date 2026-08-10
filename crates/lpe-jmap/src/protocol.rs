@@ -148,6 +148,7 @@ pub struct QueryChangesArguments<F = Value, S = Value> {
 #[serde(rename_all = "camelCase")]
 pub struct MailboxSetArguments {
     pub account_id: Option<String>,
+    pub if_in_state: Option<String>,
     pub create: Option<HashMap<String, Value>>,
     pub update: Option<HashMap<String, Value>>,
     pub destroy: Option<Vec<String>>,
@@ -204,6 +205,7 @@ pub struct EmailQuerySort {
 #[serde(rename_all = "camelCase")]
 pub struct EmailSetArguments {
     pub account_id: Option<String>,
+    pub if_in_state: Option<String>,
     pub create: Option<HashMap<String, Value>>,
     pub update: Option<HashMap<String, Value>>,
     pub destroy: Option<Vec<String>>,
@@ -360,6 +362,7 @@ pub struct ContactCardQueryFilter {
 #[serde(rename_all = "camelCase")]
 pub struct ContactCardSetArguments {
     pub account_id: Option<String>,
+    pub if_in_state: Option<String>,
     pub create: Option<HashMap<String, Value>>,
     pub update: Option<HashMap<String, Value>>,
     pub destroy: Option<Vec<String>>,
@@ -398,6 +401,7 @@ pub struct CalendarQueryArguments {
 #[serde(rename_all = "camelCase")]
 pub struct CalendarSetArguments {
     pub account_id: Option<String>,
+    pub if_in_state: Option<String>,
     pub create: Option<HashMap<String, Value>>,
     pub update: Option<HashMap<String, Value>>,
     pub destroy: Option<Vec<String>>,
@@ -415,6 +419,7 @@ pub struct TaskListGetArguments {
 #[serde(rename_all = "camelCase")]
 pub struct TaskListSetArguments {
     pub account_id: Option<String>,
+    pub if_in_state: Option<String>,
     pub create: Option<HashMap<String, Value>>,
     pub update: Option<HashMap<String, Value>>,
     pub destroy: Option<Vec<String>>,
@@ -459,6 +464,7 @@ pub struct TaskQuerySort {
 #[serde(rename_all = "camelCase")]
 pub struct TaskSetArguments {
     pub account_id: Option<String>,
+    pub if_in_state: Option<String>,
     pub create: Option<HashMap<String, Value>>,
     pub update: Option<HashMap<String, Value>>,
     pub destroy: Option<Vec<String>>,
@@ -577,6 +583,7 @@ pub struct CalendarEventQueryFilter {
 #[serde(rename_all = "camelCase")]
 pub struct CalendarEventSetArguments {
     pub account_id: Option<String>,
+    pub if_in_state: Option<String>,
     pub create: Option<HashMap<String, Value>>,
     pub update: Option<HashMap<String, Value>>,
     pub destroy: Option<Vec<String>>,

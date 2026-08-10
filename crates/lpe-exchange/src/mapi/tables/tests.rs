@@ -2475,11 +2475,9 @@ fn captured_calendar_table_query_rows_projects_exact_requested_property_row() {
         &mut expected_values,
         &crate::mapi::identity::instance_key_for_object_id(0x0000_0000_0044_0001),
     );
-    let parent_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-        account_id,
-        CALENDAR_FOLDER_ID,
-    )
-    .expect("calendar parent EntryID");
+    let parent_entry_id =
+        crate::mapi::identity::folder_entry_id_from_object_id(account_id, CALENDAR_FOLDER_ID)
+            .expect("calendar parent EntryID");
     write_u16_prefixed_bytes(&mut expected_values, &parent_entry_id);
     write_u16_prefixed_bytes(
         &mut expected_values,

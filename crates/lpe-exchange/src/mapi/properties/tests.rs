@@ -4140,8 +4140,7 @@ fn calendar_projection_backs_outlook_table_identity_and_status_columns() {
         PID_TAG_ENTRY_ID,
         None,
         Some(mailbox_guid),
-    )
-    else {
+    ) else {
         panic!("calendar EntryID must use the Message EntryID format")
     };
     assert_eq!(entry_id.len(), 70);

@@ -36,7 +36,9 @@ async fn find_folder_lists_contact_and_calendar_folders() {
     assert!(body.contains("<t:ContactsFolder>"));
     assert!(body.contains("<t:CalendarFolder>"));
     assert!(body.contains("<t:FolderId Id=\"default\" ChangeKey=\"ck-v1-"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-v1-"));
+    assert!(body.contains(
+        "<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-v1-"
+    ));
     assert!(
         body.find("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"")
             .unwrap()
@@ -185,7 +187,9 @@ async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
     assert!(body.contains("<t:Create><t:Folder>"));
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-v1-"));
+    assert!(body.contains(
+        "<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-v1-"
+    ));
     assert!(
         body.find("<t:Create><t:Folder>").unwrap()
             < body.find("<t:Create><t:ContactsFolder>").unwrap()
@@ -646,8 +650,10 @@ async fn folder_change_keys_follow_canonical_revisions_and_reject_stale_updates(
         .lock()
         .unwrap()
         .iter()
-        .any(|folder| folder.id == Uuid::parse_str(public_folder_id).unwrap()
-            && folder.display_name == "Renamed Shared"));
+        .any(
+            |folder| folder.id == Uuid::parse_str(public_folder_id).unwrap()
+                && folder.display_name == "Renamed Shared"
+        ));
 }
 
 #[tokio::test]
@@ -909,7 +915,9 @@ async fn create_folder_uses_canonical_mailbox_store() {
     let body = response_text(response).await;
     assert!(body.contains("<m:CreateFolderResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-v1-"));
+    assert!(body.contains(
+        "<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-v1-"
+    ));
     assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
     assert_eq!(created_mailboxes.lock().unwrap()[0].name, "RCA Sync");
 }
@@ -1414,7 +1422,9 @@ async fn get_folder_returns_system_mailbox_by_distinguished_id() {
     let body = response_text(response).await;
     assert!(body.contains("<m:GetFolderResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:55555555-5555-5555-5555-555555555555\" ChangeKey=\"ck-v1-"));
+    assert!(body.contains(
+        "<t:FolderId Id=\"mailbox:55555555-5555-5555-5555-555555555555\" ChangeKey=\"ck-v1-"
+    ));
     assert!(body.contains("<t:DisplayName>Inbox</t:DisplayName>"));
 }
 
@@ -2392,6 +2402,54 @@ async fn create_update_task_round_trips_through_sync_folder_items() {
 }
 
 #[tokio::test]
+async fn sync_folder_items_pages_task_changes() {
+    let task_list_id = "aaaaaaaa-0000-0000-0000-000000000001";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        tasks: Arc::new(Mutex::new(vec![
+            FakeStore::task(
+                "11111111-1111-1111-1111-111111111111",
+                task_list_id,
+                "First task",
+            ),
+            FakeStore::task(
+                "22222222-2222-2222-2222-222222222222",
+                task_list_id,
+                "Second task",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:DistinguishedFolderId Id="tasks"/></m:SyncFolderId><m:SyncState>tasks:tasks:v2:0</m:SyncState><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let first_page = response_text(response).await;
+    assert!(first_page.contains("<m:IncludesLastItemInRange>false</m:IncludesLastItemInRange>"));
+    assert_eq!(first_page.matches("<t:Create>").count(), 1);
+    let sync_state = test_xml_text(&first_page, "SyncState").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:DistinguishedFolderId Id="tasks"/></m:SyncFolderId><m:SyncState>{sync_state}</m:SyncState><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let last_page = response_text(response).await;
+    assert!(last_page.contains("<m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>"));
+    assert_eq!(last_page.matches("<t:Create>").count(), 1);
+}
+
+#[tokio::test]
 async fn delete_item_rejects_unsupported_item_ids() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -2663,6 +2721,10 @@ async fn create_item_send_and_save_uses_canonical_submission() {
     assert_eq!(recorded[0].source, "ews-createitem");
     assert_eq!(recorded[0].subject, "Send from EWS");
     assert_eq!(recorded[0].body_text, "Hello");
+    assert_eq!(
+        recorded[0].body_html_sanitized.as_deref(),
+        Some("<p>Hello</p>")
+    );
     assert_eq!(recorded[0].to[0].address, "carol@example.test");
 }
 
@@ -7748,7 +7810,8 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:Subject>Updated RCA Calendar</t:Subject>"));
     assert_eq!(events.lock().unwrap()[0].title, "Updated RCA Calendar");
-    let updated_change_key = test_item_change_key(&body, "event:cccccccc-cccc-cccc-cccc-cccccccccccc");
+    let updated_change_key =
+        test_item_change_key(&body, "event:cccccccc-cccc-cccc-cccc-cccccccccccc");
 
     let response = service
         .handle(
@@ -7796,6 +7859,75 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     let body = response_text(response).await;
     assert!(body.contains("<t:Delete><t:ItemId Id=\"event:cccccccc-cccc-cccc-cccc-cccccccccccc\""));
     assert!(body.contains("<m:SyncState>calendar:default:v2:0</m:SyncState>"));
+}
+
+#[tokio::test]
+async fn sync_folder_items_pages_calendar_changes() {
+    let account = FakeStore::account();
+    let event = |id: &str, title: &str| AccessibleEvent {
+        id: Uuid::parse_str(id).unwrap(),
+        uid: id.to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: account.account_id,
+        owner_email: account.email.clone(),
+        owner_display_name: account.display_name.clone(),
+        rights: FakeStore::rights(),
+        date: "2026-05-04".to_string(),
+        time: "09:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: title.to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: String::new(),
+        notes: String::new(),
+        body_html: String::new(),
+    };
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![
+            event("11111111-1111-1111-1111-111111111111", "First event"),
+            event("22222222-2222-2222-2222-222222222222", "Second event"),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>calendar:default:v2:0</m:SyncState><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let first_page = response_text(response).await;
+    assert!(first_page.contains("<m:IncludesLastItemInRange>false</m:IncludesLastItemInRange>"));
+    assert_eq!(first_page.matches("<t:Create>").count(), 1);
+    let sync_state = test_xml_text(&first_page, "SyncState").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>{sync_state}</m:SyncState><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let last_page = response_text(response).await;
+    assert!(last_page.contains("<m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>"));
+    assert_eq!(last_page.matches("<t:Create>").count(), 1);
 }
 
 #[tokio::test]
@@ -8748,6 +8880,111 @@ async fn get_item_mime_content_hides_bcc_for_sent_message_default_fetch() {
     assert!(mime.contains("Subject: Sent folder item"));
     assert!(!mime.contains("Bcc:"));
     assert!(!mime.contains("hidden@example.test"));
+}
+
+#[tokio::test]
+async fn sync_folder_items_pages_contact_changes() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![
+            FakeStore::contact(
+                "11111111-1111-1111-1111-111111111111",
+                "First contact",
+                "first@example.test",
+            ),
+            FakeStore::contact(
+                "22222222-2222-2222-2222-222222222222",
+                "Second contact",
+                "second@example.test",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let first_page = response_text(response).await;
+    assert!(first_page.contains("<m:IncludesLastItemInRange>false</m:IncludesLastItemInRange>"));
+    assert_eq!(first_page.matches("<t:Create>").count(), 1);
+    let sync_state = test_xml_text(&first_page, "SyncState").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>{sync_state}</m:SyncState><m:MaxChangesReturned>1</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let last_page = response_text(response).await;
+    assert!(last_page.contains("<m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>"));
+    assert_eq!(last_page.matches("<t:Create>").count(), 1);
+}
+
+#[tokio::test]
+async fn get_item_returns_recipients_html_and_owner_sent_bcc_only() {
+    let mut sent = FakeStore::email(
+        "99999999-9999-9999-9999-999999999999",
+        "44444444-4444-4444-4444-444444444444",
+        "sent",
+        "Owner sent item",
+    );
+    sent.cc.push(JmapEmailAddress {
+        address: "carol@example.test".to_string(),
+        display_name: Some("Carol".to_string()),
+    });
+    sent.bcc.push(JmapEmailAddress {
+        address: "owner-bcc@example.test".to_string(),
+        display_name: Some("Owner Bcc".to_string()),
+    });
+    sent.body_html_sanitized = Some("<p>Canonical <b>HTML</b></p>".to_string());
+    let mut ordinary = FakeStore::email(
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "44444444-4444-4444-4444-444444444444",
+        "custom",
+        "Ordinary item",
+    );
+    ordinary.bcc.push(JmapEmailAddress {
+        address: "must-not-leak@example.test".to_string(),
+        display_name: None,
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![sent, ordinary])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape><t:BodyType>HTML</t:BodyType></m:ItemShape><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/><t:ItemId Id="message:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<t:ToRecipients>"));
+    assert!(body.contains("<t:EmailAddress>bob@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:CcRecipients>"));
+    assert!(body.contains("<t:EmailAddress>carol@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:BccRecipients>"));
+    assert!(body.contains("<t:EmailAddress>owner-bcc@example.test</t:EmailAddress>"));
+    assert!(body.contains(
+        "<t:Body BodyType=\"HTML\">&lt;p&gt;Canonical &lt;b&gt;HTML&lt;/b&gt;&lt;/p&gt;</t:Body>"
+    ));
+    assert!(!body.contains("must-not-leak@example.test"));
 }
 
 #[tokio::test]

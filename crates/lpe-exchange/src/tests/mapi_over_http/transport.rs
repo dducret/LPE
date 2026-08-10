@@ -48,7 +48,12 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
         .headers()
         .get_all("set-cookie")
         .iter()
-        .find_map(|value| value.to_str().ok().filter(|cookie| cookie.starts_with("MapiContext=")))
+        .find_map(|value| {
+            value
+                .to_str()
+                .ok()
+                .filter(|cookie| cookie.starts_with("MapiContext="))
+        })
         .expect("Connect must return MapiContext");
     assert!(set_cookie.starts_with("MapiContext="));
     assert!(set_cookie.contains("Max-Age=1800"));

@@ -38,6 +38,37 @@ pub(crate) fn parse_draft_mutation(value: Value) -> Result<DraftMutation> {
     })
 }
 
+pub(crate) fn parse_ordinary_email_mutation(
+    value: Value,
+) -> Result<(Option<bool>, Option<bool>, Option<Vec<String>>)> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("email arguments must be an object"))?;
+    for key in object.keys() {
+        if key != "keywords" && key != "mailboxIds" {
+            bail!("delivered email content is immutable");
+        }
+    }
+    let keywords = parse_draft_keywords(object.get("keywords"))?;
+    let mailbox_ids = match object.get("mailboxIds") {
+        Some(value) => Some(
+            value
+                .as_object()
+                .ok_or_else(|| anyhow!("mailboxIds must be an object"))?
+                .iter()
+                .filter_map(|(id, present)| {
+                    present
+                        .as_bool()
+                        .filter(|present| *present)
+                        .map(|_| id.clone())
+                })
+                .collect(),
+        ),
+        None => None,
+    };
+    Ok((keywords.unread, keywords.flagged, mailbox_ids))
+}
+
 #[derive(Default)]
 struct ParsedDraftKeywords {
     unread: Option<bool>,

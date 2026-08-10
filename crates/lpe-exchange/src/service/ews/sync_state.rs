@@ -15,6 +15,7 @@ where
     ) -> Result<String> {
         let mut changes = String::new();
         let mut includes_last = true;
+        let max_changes = requested_max_changes(request)?;
         let sync_state = match requested_folder_kind(request).unwrap_or(FolderKind::Contacts) {
             FolderKind::Root => "root:0".to_string(),
             FolderKind::Contacts => {
@@ -42,36 +43,44 @@ where
                 let previous_state = requested_sync_state(request)
                     .map(|state| collaboration_sync_state_items(&state, "contacts", &collection_id))
                     .unwrap_or_default();
-                let previous_by_id = sync_state_items_by_id(&previous_state.items);
+                let mut next_by_id = sync_state_items_by_id(&previous_state.items);
+                let previous_by_id = next_by_id.clone();
+                let mut pending_changes = Vec::new();
                 for contact in &contacts {
                     let current_change_key = change_key_for(&change_keys, contact.id, "contact")?;
                     match previous_by_id.get(&contact.id) {
                         None => {
-                            changes.push_str("<t:Create>");
-                            changes.push_str(&contact_item_xml_with_change_key(
-                                contact,
-                                &current_change_key,
+                            pending_changes.push((
+                                contact.id,
+                                Some(current_change_key.to_string()),
+                                format!(
+                                    "<t:Create>{}</t:Create>",
+                                    contact_item_xml_with_change_key(contact, &current_change_key),
+                                ),
                             ));
-                            changes.push_str("</t:Create>");
                         }
                         Some(None) => {
-                            changes.push_str("<t:Update>");
-                            changes.push_str(&contact_item_xml_with_change_key(
-                                contact,
-                                &current_change_key,
+                            pending_changes.push((
+                                contact.id,
+                                Some(current_change_key.to_string()),
+                                format!(
+                                    "<t:Update>{}</t:Update>",
+                                    contact_item_xml_with_change_key(contact, &current_change_key),
+                                ),
                             ));
-                            changes.push_str("</t:Update>");
                         }
                         Some(Some(previous_change_key))
                             if !previous_state.is_current_version
                                 || previous_change_key != &current_change_key =>
                         {
-                            changes.push_str("<t:Update>");
-                            changes.push_str(&contact_item_xml_with_change_key(
-                                contact,
-                                &current_change_key,
+                            pending_changes.push((
+                                contact.id,
+                                Some(current_change_key.to_string()),
+                                format!(
+                                    "<t:Update>{}</t:Update>",
+                                    contact_item_xml_with_change_key(contact, &current_change_key),
+                                ),
                             ));
-                            changes.push_str("</t:Update>");
                         }
                         _ => {}
                     }
@@ -80,15 +89,32 @@ where
                     let contact_id = item.id;
                     if !current_set.contains(&contact_id) {
                         let change_key = item.change_key.as_deref().unwrap_or("deleted");
-                        changes.push_str("<t:Delete>");
-                        changes.push_str(&format!(
-                            "<t:ItemId Id=\"contact:{contact_id}\" ChangeKey=\"{}\"/>",
-                            escape_xml(change_key),
+                        pending_changes.push((
+                            contact_id,
+                            None,
+                            format!(
+                                "<t:Delete><t:ItemId Id=\"contact:{contact_id}\" ChangeKey=\"{}\"/></t:Delete>",
+                                escape_xml(change_key),
+                            ),
                         ));
-                        changes.push_str("</t:Delete>");
                     }
                 }
-                collaboration_sync_state("contacts", &collection_id, &current_items)
+                includes_last = append_sync_change_page(
+                    &mut changes,
+                    pending_changes,
+                    max_changes,
+                    &mut next_by_id,
+                );
+                collaboration_sync_state(
+                    "contacts",
+                    &collection_id,
+                    &next_by_id
+                        .into_iter()
+                        .filter_map(|(id, change_key)| {
+                            change_key.map(|change_key| (id, change_key))
+                        })
+                        .collect::<Vec<_>>(),
+                )
             }
             FolderKind::Calendar => {
                 let collection_id =
@@ -115,36 +141,44 @@ where
                 let previous_state = requested_sync_state(request)
                     .map(|state| collaboration_sync_state_items(&state, "calendar", &collection_id))
                     .unwrap_or_default();
-                let previous_by_id = sync_state_items_by_id(&previous_state.items);
+                let mut next_by_id = sync_state_items_by_id(&previous_state.items);
+                let previous_by_id = next_by_id.clone();
+                let mut pending_changes = Vec::new();
                 for event in &events {
                     let current_change_key = change_key_for(&change_keys, event.id, "calendar")?;
                     match previous_by_id.get(&event.id) {
                         None => {
-                            changes.push_str("<t:Create>");
-                            changes.push_str(&calendar_item_xml_with_change_key(
-                                event,
-                                &current_change_key,
+                            pending_changes.push((
+                                event.id,
+                                Some(current_change_key.to_string()),
+                                format!(
+                                    "<t:Create>{}</t:Create>",
+                                    calendar_item_xml_with_change_key(event, &current_change_key),
+                                ),
                             ));
-                            changes.push_str("</t:Create>");
                         }
                         Some(None) => {
-                            changes.push_str("<t:Update>");
-                            changes.push_str(&calendar_item_xml_with_change_key(
-                                event,
-                                &current_change_key,
+                            pending_changes.push((
+                                event.id,
+                                Some(current_change_key.to_string()),
+                                format!(
+                                    "<t:Update>{}</t:Update>",
+                                    calendar_item_xml_with_change_key(event, &current_change_key),
+                                ),
                             ));
-                            changes.push_str("</t:Update>");
                         }
                         Some(Some(previous_change_key))
                             if !previous_state.is_current_version
                                 || previous_change_key != &current_change_key =>
                         {
-                            changes.push_str("<t:Update>");
-                            changes.push_str(&calendar_item_xml_with_change_key(
-                                event,
-                                &current_change_key,
+                            pending_changes.push((
+                                event.id,
+                                Some(current_change_key.to_string()),
+                                format!(
+                                    "<t:Update>{}</t:Update>",
+                                    calendar_item_xml_with_change_key(event, &current_change_key),
+                                ),
                             ));
-                            changes.push_str("</t:Update>");
                         }
                         _ => {}
                     }
@@ -153,15 +187,32 @@ where
                     let event_id = item.id;
                     if !current_set.contains(&event_id) {
                         let change_key = item.change_key.as_deref().unwrap_or("deleted");
-                        changes.push_str("<t:Delete>");
-                        changes.push_str(&format!(
-                            "<t:ItemId Id=\"event:{event_id}\" ChangeKey=\"{}\"/>",
-                            escape_xml(change_key),
+                        pending_changes.push((
+                            event_id,
+                            None,
+                            format!(
+                                "<t:Delete><t:ItemId Id=\"event:{event_id}\" ChangeKey=\"{}\"/></t:Delete>",
+                                escape_xml(change_key),
+                            ),
                         ));
-                        changes.push_str("</t:Delete>");
                     }
                 }
-                collaboration_sync_state("calendar", &collection_id, &current_items)
+                includes_last = append_sync_change_page(
+                    &mut changes,
+                    pending_changes,
+                    max_changes,
+                    &mut next_by_id,
+                );
+                collaboration_sync_state(
+                    "calendar",
+                    &collection_id,
+                    &next_by_id
+                        .into_iter()
+                        .filter_map(|(id, change_key)| {
+                            change_key.map(|change_key| (id, change_key))
+                        })
+                        .collect::<Vec<_>>(),
+                )
             }
             FolderKind::Tasks => {
                 let collection_id = requested_sync_collection_id(request, "tasks", TASKS_FOLDER_ID);
@@ -187,36 +238,44 @@ where
                 let previous_state = requested_sync_state(request)
                     .map(|state| collaboration_sync_state_items(&state, "tasks", &collection_id))
                     .unwrap_or_default();
-                let previous_by_id = sync_state_items_by_id(&previous_state.items);
+                let mut next_by_id = sync_state_items_by_id(&previous_state.items);
+                let previous_by_id = next_by_id.clone();
+                let mut pending_changes = Vec::new();
                 for task in &tasks {
                     let current_change_key = change_key_for(&change_keys, task.id, "task")?;
                     match previous_by_id.get(&task.id) {
                         None => {
-                            changes.push_str("<t:Create>");
-                            changes.push_str(&task_item_xml_with_change_key(
-                                task,
-                                &current_change_key,
+                            pending_changes.push((
+                                task.id,
+                                Some(current_change_key.to_string()),
+                                format!(
+                                    "<t:Create>{}</t:Create>",
+                                    task_item_xml_with_change_key(task, &current_change_key),
+                                ),
                             ));
-                            changes.push_str("</t:Create>");
                         }
                         Some(None) => {
-                            changes.push_str("<t:Update>");
-                            changes.push_str(&task_item_xml_with_change_key(
-                                task,
-                                &current_change_key,
+                            pending_changes.push((
+                                task.id,
+                                Some(current_change_key.to_string()),
+                                format!(
+                                    "<t:Update>{}</t:Update>",
+                                    task_item_xml_with_change_key(task, &current_change_key),
+                                ),
                             ));
-                            changes.push_str("</t:Update>");
                         }
                         Some(Some(previous_change_key))
                             if !previous_state.is_current_version
                                 || previous_change_key != &current_change_key =>
                         {
-                            changes.push_str("<t:Update>");
-                            changes.push_str(&task_item_xml_with_change_key(
-                                task,
-                                &current_change_key,
+                            pending_changes.push((
+                                task.id,
+                                Some(current_change_key.to_string()),
+                                format!(
+                                    "<t:Update>{}</t:Update>",
+                                    task_item_xml_with_change_key(task, &current_change_key),
+                                ),
                             ));
-                            changes.push_str("</t:Update>");
                         }
                         _ => {}
                     }
@@ -225,15 +284,32 @@ where
                     let task_id = item.id;
                     if !current_set.contains(&task_id) {
                         let change_key = item.change_key.as_deref().unwrap_or("deleted");
-                        changes.push_str("<t:Delete>");
-                        changes.push_str(&format!(
-                            "<t:ItemId Id=\"task:{task_id}\" ChangeKey=\"{}\"/>",
-                            escape_xml(change_key),
+                        pending_changes.push((
+                            task_id,
+                            None,
+                            format!(
+                                "<t:Delete><t:ItemId Id=\"task:{task_id}\" ChangeKey=\"{}\"/></t:Delete>",
+                                escape_xml(change_key),
+                            ),
                         ));
-                        changes.push_str("</t:Delete>");
                     }
                 }
-                collaboration_sync_state("tasks", &collection_id, &current_items)
+                includes_last = append_sync_change_page(
+                    &mut changes,
+                    pending_changes,
+                    max_changes,
+                    &mut next_by_id,
+                );
+                collaboration_sync_state(
+                    "tasks",
+                    &collection_id,
+                    &next_by_id
+                        .into_iter()
+                        .filter_map(|(id, change_key)| {
+                            change_key.map(|change_key| (id, change_key))
+                        })
+                        .collect::<Vec<_>>(),
+                )
             }
             FolderKind::Mailbox => {
                 let Some(mailbox_id) = self
@@ -745,6 +821,24 @@ pub(in crate::service) fn requested_sync_collection_id(
 
 pub(in crate::service) fn requested_sync_state(request: &str) -> Option<String> {
     element_text(request, "SyncState").filter(|value| !value.trim().is_empty())
+}
+
+fn append_sync_change_page(
+    changes: &mut String,
+    pending_changes: Vec<(Uuid, Option<String>, String)>,
+    max_changes: usize,
+    next_by_id: &mut HashMap<Uuid, Option<String>>,
+) -> bool {
+    let includes_last = pending_changes.len() <= max_changes;
+    for (id, change_key, change) in pending_changes.into_iter().take(max_changes) {
+        changes.push_str(&change);
+        if let Some(change_key) = change_key {
+            next_by_id.insert(id, Some(change_key));
+        } else {
+            next_by_id.remove(&id);
+        }
+    }
+    includes_last
 }
 
 fn requested_max_changes(request: &str) -> Result<usize> {

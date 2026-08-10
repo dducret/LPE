@@ -90,6 +90,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let arguments: TaskListSetArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
         let old_state = self.object_state(account_id, "TaskList").await?;
+        crate::service::ensure_if_in_state(arguments.if_in_state.as_deref(), &old_state)?;
         let properties = task_list_properties(None);
         let mut created = Map::new();
         let mut not_created = Map::new();
@@ -337,6 +338,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let arguments: TaskSetArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
         let old_state = self.object_state(account_id, "Task").await?;
+        crate::service::ensure_if_in_state(arguments.if_in_state.as_deref(), &old_state)?;
         let mut created = Map::new();
         let mut not_created = Map::new();
         let mut updated = Map::new();
