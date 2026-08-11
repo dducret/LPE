@@ -155,8 +155,24 @@ before it is advertised.
   out of the root message properties. Normal and special-message ICS now
   follow that Exchange shape; recipient-row identities remain unchanged. This
   follows `[MS-OXCFXICS]` sections 2.2.4.3.13, 2.2.4.3.14, 3.2.5.10,
-  3.2.5.12, and 4.5 and `[MS-OXPROPS]` sections 1.3.3 and 2.744. Elimination
-  of the Outlook error still requires a new-profile real-client rerun.
+  3.2.5.12, and 4.5 and `[MS-OXPROPS]` sections 1.3.3 and 2.744. The following
+  clean-profile rerun shows that correction was present but did not eliminate
+  the Outlook error.
+- The clean-profile `202608111212` rerun confirms that those root identity
+  properties are absent on the wire, but Outlook still records the Calendar
+  download as `MAPI_E_NOT_FOUND`. The first Calendar failure is already the
+  state-only download immediately after the successful initial Outlook create,
+  before the web edit. LPE serialized a contents final state as
+  `CnsetSeen, IdsetGiven, CnsetSeenFAI, CnsetRead`; two Exchange 2016 content
+  downloads and the `[MS-OXCFXICS]` section 4.5 example serialize
+  `CnsetSeen, CnsetSeenFAI, IdsetGiven, CnsetRead`. All LPE content-download
+  state writers now use that Exchange order, including the client-state-selected
+  delta path exercised by Outlook. Hierarchy state remains
+  `CnsetSeen, IdsetGiven`, and upload state remains
+  `CnsetSeen, CnsetSeenFAI, CnsetRead`.
+- The Exchange-order mismatch is the earliest actionable Calendar
+  download-shape divergence in this trace. A fresh-profile real-client rerun is
+  required to establish causality and symptom elimination.
 - For an extended `Execute` request with `Chain` set and a terminal
   `RopFastTransferSourceGetBuffer`, LPE returns the original response followed
   by independently framed synthetic GetBuffer responses until the transfer is
@@ -1607,6 +1623,10 @@ canonical `from` identity.
   REPLGUID/GLOBSET/FastTransfer wire codec. Before adding further behavior, split
   the codec into `mapi_mailstore/client_state/wire.rs`; keep selection and final
   state reconstruction in `client_state.rs`, with focused tests on each side.
+- `mapi_mailstore/diagnostics/codec.rs` owns FastTransfer diagnostic decoding
+  and summary validation. Before adding further diagnostics behavior, split the
+  state-summary validation into `mapi_mailstore/diagnostics/state.rs` and keep
+  the marker/property decoder in `codec.rs`.
 - Uploaded client CN sets are parsed as the initial upload checkpoint, not
   copied as opaque bytes or substituted for server-generated state. The final
   upload checkpoint is the semantic set union of each applicable initial CN set

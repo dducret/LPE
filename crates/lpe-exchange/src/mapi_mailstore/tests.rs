@@ -631,6 +631,17 @@ fn sync_manifest_serializes_content_message_header_in_fixed_order() {
         META_TAG_CNSET_SEEN,
         &replguid_idset_from_counters(&[durable_change_number]),
     );
+    assert_tag_sequence(
+        &final_state,
+        &[
+            INCR_SYNC_STATE_BEGIN,
+            META_TAG_CNSET_SEEN,
+            META_TAG_CNSET_SEEN_FAI,
+            META_TAG_IDSET_GIVEN,
+            META_TAG_CNSET_READ,
+            INCR_SYNC_STATE_END,
+        ],
+    );
 
     let (selected_again, final_state_again) = select_download_manifest_for_client_state(
         SYNC_TYPE_CONTENTS,
@@ -4260,6 +4271,65 @@ fn content_sync_state_keeps_normal_and_fai_cnsets_separate() {
         META_TAG_CNSET_READ,
         &replguid_idset_from_counters(&[20]),
     );
+    assert_tag_sequence(
+        &token,
+        &[
+            INCR_SYNC_STATE_BEGIN,
+            META_TAG_CNSET_SEEN,
+            META_TAG_CNSET_SEEN_FAI,
+            META_TAG_IDSET_GIVEN,
+            META_TAG_CNSET_READ,
+            INCR_SYNC_STATE_END,
+        ],
+    );
+}
+
+#[test]
+fn sync_state_writers_match_exchange_download_and_upload_orders() {
+    let content_download = sync_state_stream_from_raw_properties(
+        SYNC_TYPE_CONTENTS,
+        b"given",
+        b"seen",
+        b"fai",
+        b"read",
+    );
+    assert_tag_sequence(
+        &content_download,
+        &[
+            INCR_SYNC_STATE_BEGIN,
+            META_TAG_CNSET_SEEN,
+            META_TAG_CNSET_SEEN_FAI,
+            META_TAG_IDSET_GIVEN,
+            META_TAG_CNSET_READ,
+            INCR_SYNC_STATE_END,
+        ],
+    );
+
+    let hierarchy_download =
+        sync_state_stream_from_raw_properties(SYNC_TYPE_HIERARCHY, b"given", b"seen", &[], &[]);
+    assert_tag_sequence(
+        &hierarchy_download,
+        &[
+            INCR_SYNC_STATE_BEGIN,
+            META_TAG_CNSET_SEEN,
+            META_TAG_IDSET_GIVEN,
+            INCR_SYNC_STATE_END,
+        ],
+    );
+
+    let content_upload =
+        upload_sync_state_stream_from_raw_properties(SYNC_TYPE_CONTENTS, b"seen", b"fai", b"read");
+    assert_tag_sequence(
+        &content_upload,
+        &[
+            INCR_SYNC_STATE_BEGIN,
+            META_TAG_CNSET_SEEN,
+            META_TAG_CNSET_SEEN_FAI,
+            META_TAG_CNSET_READ,
+            INCR_SYNC_STATE_END,
+        ],
+    );
+    assert_absent_property(&content_upload, META_TAG_IDSET_GIVEN);
 }
 
 #[test]

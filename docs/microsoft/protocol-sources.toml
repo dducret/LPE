@@ -1161,6 +1161,7 @@ used_for = [
   "ICS upload Message saves advance the normal or FAI seen set without advancing CnsetRead",
   "Optimized Outlook send using PidTagTargetEntryId: canonical Sent submission, transient same-message Outbox membership, and ImportMessageMove destination-identity rekey",
   "Calendar full-upload repetition of the required ImportMessageChange PidTagLastModificationTime",
+  "Exchange-compatible contents final-state order: CnsetSeen, CnsetSeenFAI, IdsetGiven, and CnsetRead",
 ]
 sections = [
   "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",

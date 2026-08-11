@@ -567,8 +567,8 @@ pub(super) fn finalize_hierarchy_debug_summary(summary: &mut HierarchyTransferDe
         [META_TAG_CNSET_SEEN, META_TAG_IDSET_GIVEN]
             | [
                 META_TAG_CNSET_SEEN,
-                META_TAG_IDSET_GIVEN,
                 META_TAG_CNSET_SEEN_FAI,
+                META_TAG_IDSET_GIVEN,
                 META_TAG_CNSET_READ
             ]
     );
