@@ -143,6 +143,20 @@ before it is advertised.
   lexical value sizes such as two-byte `PtypBoolean` values. A full normal or
   FAI `messageChange` ends when the following grammar marker begins; LPE must
   not insert a null property tag as an object terminator.
+- The clean-profile `202608111013` Calendar trace confirms that the repaired
+  NSPI row, imported LastModificationTime handling, access values, appointment
+  classification, and recipient collection are all active. Outlook accepts
+  the web-update CN, but local upload materialization of the subsequent edit
+  still fails with `MAPI_E_NOT_FOUND` before
+  `RopSynchronizationImportMessageChange`. The next trace-backed
+  message-identity divergence is in the full content-sync property list: LPE
+  injects root EntryID, ParentEntryID, and table InstanceKey values, while
+  Exchange 2016 reference captures with the same sync flags keep those provider-local values
+  out of the root message properties. Normal and special-message ICS now
+  follow that Exchange shape; recipient-row identities remain unchanged. This
+  follows `[MS-OXCFXICS]` sections 2.2.4.3.13, 2.2.4.3.14, 3.2.5.10,
+  3.2.5.12, and 4.5 and `[MS-OXPROPS]` sections 1.3.3 and 2.744. Elimination
+  of the Outlook error still requires a new-profile real-client rerun.
 - For an extended `Execute` request with `Chain` set and a terminal
   `RopFastTransferSourceGetBuffer`, LPE returns the original response followed
   by independently framed synthetic GetBuffer responses until the transfer is
@@ -245,23 +259,25 @@ before it is advertised.
   `IPM.Configuration.MessageListSettings` FAI and issued
   `RopFastTransferSourceCopyTo` (`0x4D`) with an empty property-exclusion list.
   LPE's parseable direct `messageContent` omitted `PidTagEntryId`
-  (`0x0FFF0102`), although `RopGetPropertiesSpecific` and the ICS projection
-  exposed the same object's stable 70-byte EntryID and PostgreSQL contained one
+  (`0x0FFF0102`), although `RopGetPropertiesSpecific` exposed the same object's
+  stable 70-byte EntryID and PostgreSQL contained one
   coherent canonical FAI row. This is the first demonstrated projection
   inconsistency in that sequence. LPE now supplies the account-scoped EntryID
-  for the special-message families whose existing GetProps and ICS projections
-  use that format: associated configuration, navigation shortcuts, Common
+  for the special-message families whose existing GetProps projections use
+  that format: associated configuration, navigation shortcuts, Common
   Views named views, and the standard `LocalFreebusy` Delegate Information
   object. The shared serializer applies the normal `CopyTo` exclusion /
   `CopyProperties` inclusion filter. It deliberately does not synthesize that
   format for conversation actions or public-folder items, whose existing
-  property projections use different identity rules. A realistic import/reconnect regression first failed with
-  zero EntryID occurrences and now compares the actual CopyTo, GetProps, and
-  ICS values; filter regressions cover typed and `PtypUnspecified` tags. This
-  remains a bounded interoperability hypothesis
-  until a real Outlook rerun proves that it removes the report, because
-  `[MS-OXCFXICS]` does not name `PidTagEntryId` as an unconditional
-  `messageContent` element. The implementation follows `[MS-OXCROPS]` section
+  property projections use different identity rules. A realistic
+  import/reconnect regression first failed with zero EntryID occurrences and
+  now compares the actual CopyTo and GetProps values; ICS regressions
+  separately require provider-internal root identity properties to remain
+  absent. Filter regressions cover typed and `PtypUnspecified` tags. This
+  remains a bounded direct-CopyTo interoperability hypothesis until a real
+  Outlook rerun and a separate Exchange control establish that surface. The
+  content-sync correction does not treat it as an ICS property. The
+  implementation follows `[MS-OXCROPS]` section
   2.2.12.7.1, `[MS-OXCFXICS]` sections 2.2.3.1.1.1.1, 2.2.4.3.16,
   3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12, `[MS-OXPROPS]` sections
   1.3.3 and 2.684, and `[MS-OXODLGT]` section 2.2.2.1.1.
@@ -274,17 +290,17 @@ before it is advertised.
   preceding bounded correction was necessary but insufficient. No ICS state
   regressed before either failure. The next protocol-defined omission was
   `PidTagParentEntryId` (`0x0E090102`): the containing Inbox Folder EntryID was
-  available through GetProps and the associated-contents table, the CopyTo
-  exclusion list was empty, and this property lies outside the provider-internal
-  FastTransfer exclusion range. For the observed associated-configuration
-  family only, the shared special-message serializer now receives the actual
-  account-scoped parent Folder EntryID and applies the same typed or
+  available through GetProps and the associated-contents table. The existing
+  direct CopyTo compatibility path retains identification properties, while
+  ICS message content omits this provider-internal value. For the observed
+  associated-configuration family only, the shared special-message serializer
+  now receives the actual account-scoped parent Folder EntryID and applies the same typed or
   `PtypUnspecified` CopyTo exclusion / CopyProperties inclusion rules. A
   realistic Outlook import/reconnect regression first failed with zero
   occurrences and now requires exactly one value equal to both the Inbox
   EntryID and the independent GetProps projection. This is the next bounded
-  interoperability hypothesis pending a real Outlook rerun; the specification
-  does not name this property as an unconditional `messageContent` element. It
+  direct-CopyTo interoperability hypothesis pending a real Outlook rerun and
+  separate Exchange control; it is not used as the content-sync rule. It
   follows `[MS-OXPROPS]` sections 1.3.3 and 2.860,
   `[MS-OXCFOLD]` section 2.2.2.2.1.7, and `[MS-OXCFXICS]` sections
   2.2.3.1.1.1.1, 2.2.4.3.16, 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12.

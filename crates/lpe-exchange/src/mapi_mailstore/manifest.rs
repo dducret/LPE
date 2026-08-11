@@ -1071,15 +1071,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             PID_TAG_PARENT_SOURCE_KEY,
             &source_key_for_store_id(folder_id),
         );
-        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_ENTRY_ID) {
-            if let Some(entry_id) = crate::mapi::identity::message_entry_id_from_object_ids(
-                mailbox_guid,
-                folder_id,
-                identity.object_id,
-            ) {
-                write_binary_property(&mut buffer, PID_TAG_ENTRY_ID, &entry_id);
-            }
-        }
+        // [MS-OXPROPS] section 1.3.3 and [MS-OXCFXICS] section
+        // 3.2.5.12 exclude provider-internal EntryId from ICS message
+        // content. ExtraFlags.Eid projects Mid in messageChangeHeader instead.
         if content_property_in_scope(
             sync_type,
             sync_flags,
@@ -1278,43 +1272,10 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         }
         write_u32(&mut buffer, INCR_SYNC_MESSAGE);
         write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
-        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_ENTRY_ID) {
-            if let Some(entry_id) = crate::mapi::identity::message_entry_id_from_object_ids(
-                mailbox_guid,
-                object.folder_id,
-                object.item_id,
-            ) {
-                write_binary_property(&mut buffer, PID_TAG_ENTRY_ID, &entry_id);
-                serialized_property_tags.push(PID_TAG_ENTRY_ID);
-            }
-        }
-        if content_property_in_scope(
-            sync_type,
-            sync_flags,
-            sync_property_tags,
-            PID_TAG_PARENT_ENTRY_ID,
-        ) {
-            if let Some(parent_entry_id) = crate::mapi::identity::folder_entry_id_from_object_id(
-                mailbox_guid,
-                object.folder_id,
-            ) {
-                write_binary_property(&mut buffer, PID_TAG_PARENT_ENTRY_ID, &parent_entry_id);
-                serialized_property_tags.push(PID_TAG_PARENT_ENTRY_ID);
-            }
-        }
-        if content_property_in_scope(
-            sync_type,
-            sync_flags,
-            sync_property_tags,
-            PID_TAG_INSTANCE_KEY,
-        ) {
-            write_binary_property(
-                &mut buffer,
-                PID_TAG_INSTANCE_KEY,
-                &crate::mapi::identity::instance_key_for_object_id(object.item_id),
-            );
-            serialized_property_tags.push(PID_TAG_INSTANCE_KEY);
-        }
+        // Do not project provider-internal EntryId/ParentEntryId or table
+        // InstanceKey into ICS message content; messageChangeHeader carries
+        // synchronization identity. [MS-OXCFXICS] sections 2.2.4.3.13,
+        // 2.2.4.3.14, and 3.2.5.12; [MS-OXPROPS] sections 1.3.3 and 2.744.
         // [MS-OXCMSG] v20250520 section 2.2.1.1 product note <3>:
         // Exchange 2010 through Exchange 2019 do not expose
         // PidTagRecordKey on Message objects. Keep it omitted from FAI

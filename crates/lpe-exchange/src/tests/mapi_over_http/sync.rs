@@ -5643,19 +5643,12 @@ async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_change
     for message in &stream.message_changes {
         assert!(message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS));
         assert_eq!(message.parent_source_key, inbox_source_key);
+        assert!(message.entry_id.is_none());
+        assert!(!message.body_tags.contains(&0x0E09_0102)); // PidTagParentEntryId.
+        assert!(!message.body_tags.contains(&0x0FF6_0102)); // PidTagInstanceKey.
         assert!(message.mid.is_some());
         assert!(message.change_number.is_some());
         assert!(!message.associated);
-        let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
-            account.account_id,
-            identity_codec
-                .actual_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
-                .unwrap(),
-            message.mid.unwrap(),
-        )
-        .expect("message EntryID");
-        assert_eq!(entry_id.len(), 70);
-        assert!(contains_bytes(&response_rops, &entry_id));
         assert_eq!(
             message.predecessor_change_list,
             mapi_mailstore::predecessor_change_list(message.change_number.unwrap())
@@ -11264,10 +11257,9 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         offset = property.next_offset;
         properties.push(property);
     }
-    // [MS-OXCFXICS] sections 2.2.3.1.1.1.1, 3.2.5.10, and 3.2.5.12 define
-    // the CopyTo exclusion list and provider-internal download filtering.
-    // PidTagEntryId (0x0FFF0102) is outside that internal range; keep LPE's
-    // selected direct FAI projection coherent with GetProps and ICS.
+    // This regression preserves the existing direct CopyTo compatibility
+    // projection and keeps it coherent with GetProps. Content-sync ICS instead
+    // identifies the object in messageChangeHeader.
     let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
         .await
         .unwrap();
@@ -11293,9 +11285,9 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     );
     // [MS-OXPROPS] section 2.860 and [MS-OXCFOLD] section 2.2.2.2.1.7
     // define PidTagParentEntryId as the EntryID of the folder containing the
-    // Message. The trace's CopyTo exclusion list is empty, so [MS-OXCFXICS]
-    // sections 2.2.3.1.1.1.1, 3.2.5.8.1.1, and 3.2.5.12 do not filter this
-    // property. Keep the CopyTo projection coherent with GetProps.
+    // Message. Preserve the existing direct CopyTo compatibility projection
+    // while ICS omits the provider-internal root value under [MS-OXCFXICS]
+    // section 3.2.5.12.
     let expected_parent_entry_id = identity_codec
         .folder_entry_id_from_object_id(account.account_id, crate::mapi::identity::INBOX_FOLDER_ID)
         .unwrap();
@@ -11613,11 +11605,9 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         .find(|message| message.source_key == imported_source_key)
         .expect("imported MessageListSettings FAI in Inbox ICS");
     assert!(downloaded.associated);
-    assert_eq!(
-        downloaded.entry_id.as_deref(),
-        Some(direct_get_entry_id.as_slice()),
-        "ICS and GetPropertiesSpecific must expose the same PidTagEntryId"
-    );
+    assert!(downloaded.entry_id.is_none());
+    assert!(!downloaded.body_tags.contains(&0x0E09_0102)); // PidTagParentEntryId.
+    assert!(!downloaded.body_tags.contains(&0x0FF6_0102)); // PidTagInstanceKey.
     assert_eq!(
         entry_ids[0].value.as_slice(),
         direct_get_entry_id.as_slice(),

@@ -1115,6 +1115,29 @@ fn microsoft_oxcfxics_content_sync_uses_recipient_markers() {
         1,
     );
 
+    let message_start = buffer
+        .windows(4)
+        .position(|window| window == INCR_SYNC_MESSAGE.to_le_bytes())
+        .expect("normal message content marker");
+    let recipient_start = buffer[message_start..]
+        .windows(4)
+        .position(|window| window == START_RECIP.to_le_bytes())
+        .map(|offset| message_start + offset)
+        .expect("normal message recipient marker");
+    let root_message_content = &buffer[message_start..recipient_start];
+    for identity_tag in [
+        PID_TAG_ENTRY_ID,
+        PID_TAG_PARENT_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+    ] {
+        assert!(
+            !root_message_content
+                .windows(4)
+                .any(|window| window == identity_tag.to_le_bytes()),
+            "ICS root message content must omit provider-local identity 0x{identity_tag:08x}"
+        );
+    }
+
     assert_tag_order(
         &buffer,
         &[
@@ -1221,7 +1244,20 @@ fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_o
                 entry_id: entry_id.clone(),
             },
         ],
-        named_properties: Vec::new(),
+        named_properties: vec![
+            (
+                PID_TAG_ENTRY_ID,
+                SpecialMessagePropertyValue::Binary(vec![0x11; 70]),
+            ),
+            (
+                PID_TAG_PARENT_ENTRY_ID,
+                SpecialMessagePropertyValue::Binary(vec![0x22; 46]),
+            ),
+            (
+                PID_TAG_INSTANCE_KEY,
+                SpecialMessagePropertyValue::Binary(vec![0x33; 22]),
+            ),
+        ],
         named_property_definitions: Default::default(),
     };
     let appointments = [appointment];
@@ -1251,6 +1287,36 @@ fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_o
         buffer
             .windows(START_RECIP.to_le_bytes().len())
             .filter(|window| *window == START_RECIP.to_le_bytes())
+            .count(),
+        2
+    );
+    let message_start = buffer
+        .windows(4)
+        .position(|window| window == INCR_SYNC_MESSAGE.to_le_bytes())
+        .expect("Calendar message content marker");
+    let recipient_start = buffer[message_start..]
+        .windows(4)
+        .position(|window| window == START_RECIP.to_le_bytes())
+        .map(|offset| message_start + offset)
+        .expect("Calendar recipient marker");
+    let root_message_content = &buffer[message_start..recipient_start];
+    for identity_tag in [
+        PID_TAG_ENTRY_ID,
+        PID_TAG_PARENT_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+    ] {
+        assert!(
+            !root_message_content
+                .windows(4)
+                .any(|window| window == identity_tag.to_le_bytes()),
+            "Calendar ICS root must omit provider-local identity 0x{identity_tag:08x}"
+        );
+    }
+    // The two PidTagEntryId values below belong only to recipient rows.
+    assert_eq!(
+        buffer
+            .windows(PID_TAG_ENTRY_ID.to_le_bytes().len())
+            .filter(|window| *window == PID_TAG_ENTRY_ID.to_le_bytes())
             .count(),
         2
     );

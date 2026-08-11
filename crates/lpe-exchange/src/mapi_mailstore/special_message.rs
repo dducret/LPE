@@ -249,9 +249,12 @@ pub(super) fn special_message_property_is_server_projected(property_tag: u32) ->
 
 pub(super) fn special_message_property_is_ics_identity(property_tag: u32) -> bool {
     matches!(
-        property_tag,
+        canonical_property_storage_tag(property_tag),
         PID_TAG_SOURCE_KEY
             | PID_TAG_PARENT_SOURCE_KEY
+            | PID_TAG_ENTRY_ID
+            | PID_TAG_PARENT_ENTRY_ID
+            | PID_TAG_INSTANCE_KEY
             | PID_TAG_RECORD_KEY
             | PID_TAG_SEARCH_KEY
             | PID_TAG_CHANGE_KEY
@@ -325,10 +328,9 @@ fn write_fast_transfer_special_message_content(
             &special_message_parent_source_key(object),
         );
     }
-    // [MS-OXCFXICS] sections 2.2.3.1.1.1.1, 3.2.5.10, and 3.2.5.12 define
-    // the CopyTo exclusion list and provider-internal download filtering.
-    // PidTagEntryId (0x0FFF0102) is outside that range; when the object family
-    // supplies one, keep its direct projection identical to GetProps and ICS.
+    // Preserve the existing direct CopyTo compatibility projection when the
+    // caller's filter includes PidTagEntryId. Content-sync ICS excludes this
+    // provider-internal root value separately.
     if property_filter.includes(PID_TAG_ENTRY_ID) {
         if let Some(entry_id) = entry_id {
             write_binary_property(buffer, PID_TAG_ENTRY_ID, entry_id);
@@ -336,8 +338,8 @@ fn write_fast_transfer_special_message_content(
     }
     // [MS-OXPROPS] section 2.860 and [MS-OXCFOLD] section 2.2.2.2.1.7
     // define PidTagParentEntryId as the containing Folder EntryID.
-    // [MS-OXCFXICS] sections 2.2.3.1.1.1.1, 2.2.4.3.16, 3.2.5.10, and
-    // 3.2.5.12 keep this property eligible for a direct Message CopyTo.
+    // Preserve the existing direct CopyTo compatibility projection separately
+    // from the content-sync ICS exclusion.
     if property_filter.includes(PID_TAG_PARENT_ENTRY_ID) {
         if let Some(parent_entry_id) = parent_entry_id {
             write_binary_property(buffer, PID_TAG_PARENT_ENTRY_ID, parent_entry_id);

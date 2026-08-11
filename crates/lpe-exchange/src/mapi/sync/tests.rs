@@ -34,7 +34,6 @@ fn assert_associated_fai_core_payload(item: &mapi_mailstore::ContentTransferFaiI
         &[
             PID_TAG_SOURCE_KEY,
             PID_TAG_PARENT_SOURCE_KEY,
-            PID_TAG_ENTRY_ID,
             PID_TAG_SEARCH_KEY,
             PID_TAG_CHANGE_KEY,
             PID_TAG_PREDECESSOR_CHANGE_LIST,
@@ -48,7 +47,6 @@ fn assert_associated_fai_core_payload(item: &mapi_mailstore::ContentTransferFaiI
     );
     assert!(item.source_key_len > 0);
     assert!(item.parent_source_key_len > 0);
-    assert!(item.entry_id_len > 0);
     assert_eq!(item.record_key_len, 0);
     assert!(!item.property_tags.contains(&PID_TAG_OBJECT_TYPE));
     assert!(!item.property_tags.contains(&PID_TAG_RECORD_KEY));
@@ -123,7 +121,6 @@ fn assert_fai_boundary_summary(
         assert!(!item.payload_tail_hex.is_empty());
         assert!(item.source_key_len > 0);
         assert!(item.parent_source_key_len > 0);
-        assert!(item.entry_id_len > 0);
         assert_eq!(item.record_key_len, 0);
         assert!(!item.property_tags.contains(&PID_TAG_OBJECT_TYPE));
         assert!(!item.property_tags.contains(&PID_TAG_RECORD_KEY));
@@ -515,7 +512,6 @@ fn outlook_inbox_fai_ics_omits_unsupported_message_identity_properties() {
         &[
             PID_TAG_SOURCE_KEY,
             PID_TAG_PARENT_SOURCE_KEY,
-            PID_TAG_ENTRY_ID,
             PID_TAG_SEARCH_KEY,
             PID_TAG_CHANGE_KEY,
             PID_TAG_PREDECESSOR_CHANGE_LIST,
@@ -2197,7 +2193,7 @@ fn navigation_shortcut_direct_copy_projects_its_account_scoped_entry_id() {
             .filter(|property| *property == encoded)
             .count(),
         1,
-        "direct CopyTo must use the same EntryID as navigation-shortcut GetProps and ICS"
+        "direct CopyTo must use the same EntryID as navigation-shortcut GetProps"
     );
 }
 
