@@ -48,7 +48,8 @@ pub(crate) use special_message::{
     fast_transfer_message_content_buffer_with_special_object, special_message_change_key,
     special_message_change_number, special_message_predecessor_change_list,
     special_message_source_key, special_message_sync_parent_source_key,
-    special_message_sync_source_key, SpecialMessagePropertyValue, SpecialMessageSyncFact,
+    special_message_sync_source_key, SpecialMessagePropertyValue, SpecialMessageRecipientSyncFact,
+    SpecialMessageSyncFact,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,7 +105,17 @@ const START_MESSAGE: u32 = FastTransferMarker::StartMessage.as_u32();
 const END_MESSAGE: u32 = FastTransferMarker::EndMessage.as_u32();
 const END_ATTACH: u32 = FastTransferMarker::EndAttach.as_u32();
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
+const PID_TAG_ADDRESS_TYPE_W: u32 = 0x3002_001F;
 const PID_TAG_EMAIL_ADDRESS_W: u32 = 0x3003_001F;
+const PID_TAG_SMTP_ADDRESS_W: u32 = 0x39FE_001F;
+const PID_TAG_OBJECT_TYPE: u32 = 0x0FFE_0003;
+const PID_TAG_DISPLAY_TYPE: u32 = 0x3900_0003;
+const PID_TAG_DISPLAY_TYPE_EX: u32 = 0x3905_0003;
+const PID_TAG_RECIPIENT_DISPLAY_NAME_W: u32 = 0x5FF6_001F;
+const PID_TAG_RECIPIENT_ENTRY_ID: u32 = 0x5FF7_0102;
+const PID_TAG_RECIPIENT_FLAGS: u32 = 0x5FFD_0003;
+const PID_TAG_RECIPIENT_ORDER: u32 = 0x5FDF_0003;
+const PID_TAG_RECIPIENT_TRACK_STATUS: u32 = 0x5FFF_0003;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
@@ -824,6 +835,7 @@ fn write_fast_transfer_message_children(
     buffer: &mut Vec<u8>,
     message_children: FastTransferMessageChildren,
     email: Option<&JmapEmail>,
+    special_recipients: &[SpecialMessageRecipientSyncFact],
     attachments: &[AttachmentSyncFact],
 ) {
     // [MS-OXCFXICS] sections 2.2.4.3.12 and 3.2.5.10 require an
@@ -838,6 +850,8 @@ fn write_fast_transfer_message_children(
         );
         if let Some(email) = email {
             write_fast_transfer_visible_recipients(buffer, email);
+        } else {
+            write_fast_transfer_special_recipients(buffer, special_recipients);
         }
     }
     if message_children.attachments {
@@ -847,6 +861,54 @@ fn write_fast_transfer_message_children(
             PID_TAG_MESSAGE_ATTACHMENTS as i32,
         );
         write_fast_transfer_attachments(buffer, attachments);
+    }
+}
+
+fn write_fast_transfer_special_recipients(
+    buffer: &mut Vec<u8>,
+    recipients: &[SpecialMessageRecipientSyncFact],
+) {
+    for recipient in recipients {
+        write_u32(buffer, START_RECIP);
+        // [MS-OXCFXICS] section 2.2.4.3.23 fixes PidTagRowid in the first
+        // position of every recipient element. The remaining properties follow
+        // [MS-OXOCAL] sections 2.2.4.10 through 2.2.4.10.7.
+        write_i32_property(buffer, PID_TAG_ROWID, recipient.row_id as i32);
+        write_i32_property(
+            buffer,
+            PID_TAG_RECIPIENT_TYPE,
+            recipient.recipient_type as i32,
+        );
+        write_i32_property(
+            buffer,
+            PID_TAG_RECIPIENT_FLAGS,
+            recipient.recipient_flags as i32,
+        );
+        write_i32_property(buffer, PID_TAG_RECIPIENT_ORDER, recipient.row_id as i32);
+        write_i32_property(
+            buffer,
+            PID_TAG_RECIPIENT_TRACK_STATUS,
+            recipient.track_status as i32,
+        );
+        write_i32_property(buffer, PID_TAG_OBJECT_TYPE, 6);
+        write_i32_property(buffer, PID_TAG_DISPLAY_TYPE, 0);
+        write_i32_property(
+            buffer,
+            PID_TAG_DISPLAY_TYPE_EX,
+            recipient.display_type_ex as i32,
+        );
+        write_utf16_property(buffer, PID_TAG_ADDRESS_TYPE_W, &recipient.address_type);
+        write_utf16_property(buffer, PID_TAG_EMAIL_ADDRESS_W, &recipient.email_address);
+        write_utf16_property(buffer, PID_TAG_SMTP_ADDRESS_W, &recipient.smtp_address);
+        write_utf16_property(buffer, PID_TAG_DISPLAY_NAME_W, &recipient.display_name);
+        write_utf16_property(
+            buffer,
+            PID_TAG_RECIPIENT_DISPLAY_NAME_W,
+            &recipient.display_name,
+        );
+        write_binary_property(buffer, PID_TAG_ENTRY_ID, &recipient.entry_id);
+        write_binary_property(buffer, PID_TAG_RECIPIENT_ENTRY_ID, &recipient.entry_id);
+        write_u32(buffer, END_TO_RECIP);
     }
 }
 

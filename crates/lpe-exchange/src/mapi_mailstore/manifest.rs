@@ -1,9 +1,9 @@
 use super::special_message::{
     special_message_access, special_message_access_level, special_message_change_key,
-    special_message_change_number, special_message_flags, special_message_has_attachments,
-    special_message_predecessor_change_list, special_message_property_is_ics_identity,
-    special_message_property_is_server_projected, special_message_search_key,
-    special_message_status, special_message_sync_parent_source_key,
+    special_message_change_number, special_message_delivery_sort_time, special_message_flags,
+    special_message_has_attachments, special_message_predecessor_change_list,
+    special_message_property_is_ics_identity, special_message_property_is_server_projected,
+    special_message_search_key, special_message_status, special_message_sync_parent_source_key,
     special_message_sync_source_key, write_special_message_property, PID_TAG_HAS_ATTACHMENTS,
     PID_TAG_MESSAGE_STATUS,
 };
@@ -178,24 +178,7 @@ pub(super) fn write_fast_transfer_message_content(
     if property_filter.includes(PID_TAG_BODY_W) {
         write_utf16_property(buffer, PID_TAG_BODY_W, &email.body_text);
     }
-    write_fast_transfer_message_children(buffer, message_children, Some(email), attachments);
-}
-
-fn special_message_delivery_sort_time(object: &SpecialMessageSyncFact) -> u64 {
-    object
-        .named_properties
-        .iter()
-        .find_map(|(tag, value)| {
-            (canonical_property_storage_tag(*tag) == PID_TAG_MESSAGE_DELIVERY_TIME)
-                .then(|| match value {
-                    SpecialMessagePropertyValue::I64(value) => u64::try_from(*value).ok(),
-                    SpecialMessagePropertyValue::U64(value) => Some(*value),
-                    SpecialMessagePropertyValue::Time(value) => parse_rfc3339_utc_filetime(value),
-                    _ => None,
-                })
-                .flatten()
-        })
-        .unwrap_or(object.last_modified_filetime)
+    write_fast_transfer_message_children(buffer, message_children, Some(email), &[], attachments);
 }
 
 fn write_normalized_subject_property(buffer: &mut Vec<u8>, property_tag: u32, subject: &str) {
@@ -347,7 +330,7 @@ pub(crate) fn filetime_from_change_number(change_number: u64) -> u64 {
     FILETIME_2026_01_01 + (change_number % 31_536_000) * WINDOWS_FILETIME_TICKS_PER_SECOND
 }
 
-fn parse_rfc3339_utc_filetime(value: &str) -> Option<u64> {
+pub(super) fn parse_rfc3339_utc_filetime(value: &str) -> Option<u64> {
     let bytes = value.as_bytes();
     if bytes.len() < 20
         || bytes.get(4) != Some(&b'-')
@@ -1230,6 +1213,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             &mut buffer,
             content_sync_message_children(sync_type, sync_flags, sync_property_tags),
             Some(email),
+            &[],
             attachments,
         );
         let original_order = message_changes.len();
@@ -1478,6 +1462,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
             &mut buffer,
             content_sync_message_children(sync_type, sync_flags, sync_property_tags),
             None,
+            &object.recipients,
             attachments,
         );
         if object.message_class.eq_ignore_ascii_case("IPM.Appointment") {

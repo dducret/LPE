@@ -756,6 +756,7 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc("2026-07-18T10:00:00Z"),
         message_size: 128,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![
             (
                 PID_LID_BUSY_STATUS_TAG,
@@ -980,15 +981,16 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
             duration_minutes: 30,
             all_day: false,
             status: "confirmed".to_string(),
-            sequence: 0,
+            sequence: 7,
             recurrence_rule: String::new(),
             recurrence_json: "{}".to_string(),
             recurrence_exceptions_json: "[]".to_string(),
             title: "Attachment sync".to_string(),
             location: String::new(),
-            organizer_json: "{}".to_string(),
-            attendees: String::new(),
-            attendees_json: String::new(),
+            organizer_json:
+                r#"{"email":"alice@example.test","common_name":"Alice"}"#.to_string(),
+            attendees: "Bob".to_string(),
+            attendees_json: r#"{"organizer":{"email":"alice@example.test","common_name":"Alice"},"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"accepted","rsvp":false}]}"#.to_string(),
             notes: String::new(),
             body_html: "<p>Agenda</p>".to_string(),
         },
@@ -1016,6 +1018,40 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
     let sync = calendar_sync_object(&event, None);
 
     assert_eq!(sync.body_text.as_deref(), Some("Agenda"));
+
+    assert_eq!(sync.recipients.len(), 2);
+    let organizer = &sync.recipients[0];
+    assert_eq!(organizer.row_id, 0);
+    assert_eq!(organizer.recipient_type, 1);
+    assert_eq!(organizer.recipient_flags, 3);
+    assert_eq!(organizer.track_status, 0);
+    assert_eq!(organizer.display_type_ex, 0x4000_0000);
+    assert_eq!(organizer.address_type, "EX");
+    assert_eq!(organizer.smtp_address, "alice@example.test");
+    assert!(organizer.email_address.ends_with("/cn=alice-example-test"));
+    assert_eq!(&organizer.entry_id[..4], &[0, 0, 0, 0]);
+    assert_eq!(
+        &organizer.entry_id[4..20],
+        &NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID
+    );
+    let attendee = &sync.recipients[1];
+    assert_eq!(attendee.row_id, 1);
+    assert_eq!(attendee.recipient_type, 1);
+    assert_eq!(attendee.recipient_flags, 1);
+    assert_eq!(attendee.track_status, 3);
+    assert_eq!(attendee.display_type_ex, 0);
+    assert_eq!(attendee.address_type, "SMTP");
+    assert_eq!(attendee.email_address, "bob@example.test");
+    assert_eq!(attendee.smtp_address, "bob@example.test");
+    assert_eq!(&attendee.entry_id[..4], &[0, 0, 0, 0]);
+    assert_eq!(
+        &attendee.entry_id[4..20],
+        &[
+            0x81, 0x2B, 0x1F, 0xA4, 0xBE, 0xA3, 0x10, 0x19, 0x9D, 0x6E, 0x00, 0xDD, 0x01, 0x0F,
+            0x54, 0x02,
+        ]
+    );
+    assert_eq!(&attendee.entry_id[20..24], &[0, 0, 1, 0x80]);
 
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_TAG_ACCESS_LEVEL
@@ -1060,7 +1096,18 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_LID_RESPONSE_STATUS_TAG
-            && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::I32(0))
+            && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::I32(1))
+    }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_LID_APPOINTMENT_SEQUENCE_TAG
+            && matches!(value, mapi_mailstore::SpecialMessagePropertyValue::I32(7))
+    }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_LID_SIDE_EFFECTS_TAG
+            && matches!(
+                value,
+                mapi_mailstore::SpecialMessagePropertyValue::I32(CALENDAR_EVENT_SIDE_EFFECTS)
+            )
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_LID_RECURRING_TAG

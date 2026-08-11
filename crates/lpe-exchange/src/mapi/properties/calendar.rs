@@ -146,6 +146,7 @@ fn event_property_value_with_optional_version(
             Some(MapiValue::String(calendar_optional_attendees(event)))
         }
         PID_LID_BUSY_STATUS_TAG => Some(MapiValue::I32(appointment_busy_status(event))),
+        PID_LID_APPOINTMENT_SEQUENCE_TAG => Some(MapiValue::I32(event.sequence)),
         PID_LID_APPOINTMENT_DURATION_TAG => Some(MapiValue::I32(appointment_duration(event))),
         PID_LID_APPOINTMENT_COLOR_TAG => Some(MapiValue::I32(0)),
         PID_LID_SIDE_EFFECTS_TAG => Some(MapiValue::I32(CALENDAR_EVENT_SIDE_EFFECTS)),
@@ -738,7 +739,11 @@ pub(in crate::mapi) fn event_input_from_mapi(
             .and_then(MapiValue::as_bool)
             .unwrap_or(existing.all_day),
         status: calendar_status_from_mapi(properties).unwrap_or_else(|| existing.status.clone()),
-        sequence: existing.sequence,
+        sequence: properties
+            .get(&PID_LID_APPOINTMENT_SEQUENCE_TAG)
+            .and_then(MapiValue::as_i64)
+            .and_then(|value| i32::try_from(value).ok())
+            .unwrap_or(existing.sequence),
         recurrence_rule: recurrence
             .as_ref()
             .map(|recurrence| recurrence.recurrence_rule.clone())
@@ -772,11 +777,23 @@ pub(in crate::mapi) fn event_input_from_mapi(
 pub(in crate::mapi) fn calendar_pending_recipients(
     event: &AccessibleEvent,
 ) -> Vec<PendingRecipient> {
-    parse_calendar_participants_metadata(&event.attendees_json)
-        .attendees
-        .into_iter()
-        .enumerate()
-        .filter_map(|(row_id, attendee)| {
+    let mut metadata = parse_calendar_participants_metadata(&event.attendees_json);
+    let organizer = metadata
+        .organizer
+        .take()
+        .unwrap_or_else(|| calendar_organizer(event));
+    let mut recipients = Vec::with_capacity(metadata.attendees.len().saturating_add(1));
+    if !organizer.email.is_empty() || !organizer.common_name.is_empty() {
+        recipients.push(PendingRecipient {
+            row_id: 0,
+            recipient_type: 0x01,
+            recipient_flags: 0x0000_0003,
+            address: organizer.email,
+            display_name: (!organizer.common_name.is_empty()).then_some(organizer.common_name),
+        });
+    }
+    recipients.extend(metadata.attendees.into_iter().enumerate().filter_map(
+        |(index, attendee)| {
             let recipient_type = match attendee.role.as_str() {
                 "OPT-PARTICIPANT" => 0x02,
                 "RESOURCE" => 0x03,
@@ -784,7 +801,7 @@ pub(in crate::mapi) fn calendar_pending_recipients(
             };
             (!attendee.email.is_empty() || !attendee.common_name.is_empty()).then_some(
                 PendingRecipient {
-                    row_id: row_id.min(u32::MAX as usize) as u32,
+                    row_id: index.saturating_add(1).min(u32::MAX as usize) as u32,
                     recipient_type,
                     recipient_flags: 0x0000_0001,
                     address: attendee.email,
@@ -792,8 +809,9 @@ pub(in crate::mapi) fn calendar_pending_recipients(
                         .then_some(attendee.common_name),
                 },
             )
-        })
-        .collect()
+        },
+    ));
+    recipients
 }
 
 pub(in crate::mapi) fn apply_calendar_pending_recipients(

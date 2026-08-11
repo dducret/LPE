@@ -22,12 +22,14 @@ pub(in crate::mapi) use super::identity::{
 };
 
 mod associated_config;
+mod calendar;
 mod responses;
 mod scope;
 
 use associated_config::{
     associated_config_direct_fast_transfer_object, associated_config_sync_object,
 };
+use calendar::calendar_recipient_sync_facts;
 pub(in crate::mapi) use responses::*;
 pub(in crate::mapi) use scope::*;
 
@@ -289,6 +291,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
                     ),
                     message_size: note_size(&note.note),
                     read_state: None,
+                    recipients: Vec::new(),
                     named_properties: vec![
                         (
                             PID_LID_NOTE_COLOR_TAG,
@@ -433,6 +436,7 @@ fn public_folder_item_sync_object(
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&item.item.updated_at),
         message_size,
         read_state: Some(item.item.is_read),
+        recipients: Vec::new(),
         named_properties: vec![
             (
                 PID_TAG_ACCESS,
@@ -506,6 +510,7 @@ fn contact_sync_object(
             .unwrap_or_else(|| mapi_mailstore::filetime_from_change_number(change_number)),
         message_size: contact_size(&contact.contact),
         read_state: None,
+        recipients: Vec::new(),
         named_properties: properties,
         named_property_definitions: HashMap::new(),
     }
@@ -554,6 +559,7 @@ fn task_sync_object(
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&task.task.updated_at),
         message_size: task_size(&task.task),
         read_state: None,
+        recipients: Vec::new(),
         named_properties: properties,
         named_property_definitions: HashMap::new(),
     }
@@ -660,6 +666,7 @@ fn journal_sync_object(
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&entry.entry.updated_at),
         message_size: journal_entry_size(&entry.entry),
         read_state: None,
+        recipients: Vec::new(),
         named_properties,
         named_property_definitions: HashMap::new(),
     }
@@ -724,6 +731,7 @@ fn navigation_shortcut_sync_object(
             .unwrap_or_else(|| mapi_mailstore::filetime_from_change_number(change_number)),
         message_size: 128,
         read_state: None,
+        recipients: Vec::new(),
         named_properties,
         named_property_definitions: HashMap::new(),
     }
@@ -802,6 +810,7 @@ fn search_folder_definition_sync_object(
         last_modified_filetime,
         message_size: 128,
         read_state: None,
+        recipients: Vec::new(),
         named_properties,
         named_property_definitions: HashMap::new(),
     }
@@ -846,6 +855,7 @@ fn common_view_named_view_sync_object(
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size: 128,
         read_state: None,
+        recipients: Vec::new(),
         named_properties,
         named_property_definitions: HashMap::new(),
     }
@@ -890,6 +900,7 @@ fn conversation_action_sync_object(
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size,
         read_state: None,
+        recipients: Vec::new(),
         named_properties,
         named_property_definitions: HashMap::new(),
     }
@@ -922,6 +933,7 @@ fn delegate_freebusy_sync_object(
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![(
             0x6843_000B,
             mapi_mailstore::SpecialMessagePropertyValue::Bool(
@@ -960,6 +972,7 @@ fn calendar_sync_object(
     reminder: Option<&lpe_storage::ClientReminder>,
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     let mut properties = Vec::new();
+    let recipients = calendar_recipient_sync_facts(&event.event);
     for property_tag in [
         PID_TAG_CREATION_TIME,
         PID_TAG_START_DATE,
@@ -969,6 +982,7 @@ fn calendar_sync_object(
         PID_LID_COMMON_START_TAG,
         PID_LID_COMMON_END_TAG,
         PID_LID_BUSY_STATUS_TAG,
+        PID_LID_APPOINTMENT_SEQUENCE_TAG,
         PID_LID_LOCATION_W_TAG,
         PID_LID_APPOINTMENT_START_WHOLE_TAG,
         PID_LID_APPOINTMENT_END_WHOLE_TAG,
@@ -977,6 +991,7 @@ fn calendar_sync_object(
         PID_LID_APPOINTMENT_RECUR_TAG,
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
         PID_LID_RESPONSE_STATUS_TAG,
+        PID_LID_SIDE_EFFECTS_TAG,
         PID_LID_RECURRING_TAG,
         PID_LID_IS_RECURRING_TAG,
         PID_LID_TIME_ZONE_STRUCT_TAG,
@@ -1037,6 +1052,7 @@ fn calendar_sync_object(
         ),
         message_size: event_size(&event.event),
         read_state: None,
+        recipients,
         named_properties: properties,
         named_property_definitions: HashMap::new(),
     }

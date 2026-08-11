@@ -67,6 +67,7 @@ pub(super) fn associated_config_sync_object(
         last_modified_filetime,
         message_size,
         read_state: None,
+        recipients: Vec::new(),
         named_properties,
         named_property_definitions: HashMap::new(),
     }

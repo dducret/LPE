@@ -12970,7 +12970,17 @@ const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
 const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
+const PID_TAG_ADDRESS_TYPE_W: u32 = 0x3002_001F;
 const PID_TAG_EMAIL_ADDRESS_W: u32 = 0x3003_001F;
+const PID_TAG_SMTP_ADDRESS_W: u32 = 0x39FE_001F;
+const PID_TAG_OBJECT_TYPE: u32 = 0x0FFE_0003;
+const PID_TAG_DISPLAY_TYPE: u32 = 0x3900_0003;
+const PID_TAG_DISPLAY_TYPE_EX: u32 = 0x3905_0003;
+const PID_TAG_RECIPIENT_DISPLAY_NAME_W: u32 = 0x5FF6_001F;
+const PID_TAG_RECIPIENT_ENTRY_ID: u32 = 0x5FF7_0102;
+const PID_TAG_RECIPIENT_FLAGS: u32 = 0x5FFD_0003;
+const PID_TAG_RECIPIENT_ORDER: u32 = 0x5FDF_0003;
+const PID_TAG_RECIPIENT_TRACK_STATUS: u32 = 0x5FFF_0003;
 const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
@@ -14179,18 +14189,29 @@ fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncSt
                 tag => return Err(format!("unexpected progress property 0x{tag:08x}")),
             },
             StrictContentSection::Recipient => match property.tag {
-                PID_TAG_ROWID => {
+                PID_TAG_ROWID
+                | PID_TAG_RECIPIENT_FLAGS
+                | PID_TAG_RECIPIENT_ORDER
+                | PID_TAG_RECIPIENT_TRACK_STATUS
+                | PID_TAG_OBJECT_TYPE
+                | PID_TAG_DISPLAY_TYPE
+                | PID_TAG_DISPLAY_TYPE_EX => {
                     let _ = strict_decode_i32_property(&property)?;
                 }
                 PID_TAG_RECIPIENT_TYPE => {
                     let recipient_type = strict_decode_i32_property(&property)?;
-                    if recipient_type != 1 && recipient_type != 2 {
+                    if recipient_type != 1 && recipient_type != 2 && recipient_type != 3 {
                         return Err(format!("unexpected recipient type {recipient_type}"));
                     }
                 }
-                PID_TAG_DISPLAY_NAME_W | PID_TAG_EMAIL_ADDRESS_W => {
+                PID_TAG_DISPLAY_NAME_W
+                | PID_TAG_RECIPIENT_DISPLAY_NAME_W
+                | PID_TAG_ADDRESS_TYPE_W
+                | PID_TAG_EMAIL_ADDRESS_W
+                | PID_TAG_SMTP_ADDRESS_W => {
                     let _ = strict_decode_utf16z(&property.value)?;
                 }
+                PID_TAG_ENTRY_ID | PID_TAG_RECIPIENT_ENTRY_ID => {}
                 tag => return Err(format!("unexpected recipient property 0x{tag:08x}")),
             },
             StrictContentSection::Attachment => match property.tag {

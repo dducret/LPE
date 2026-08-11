@@ -20,8 +20,23 @@ pub(crate) struct SpecialMessageSyncFact {
     pub(crate) last_modified_filetime: u64,
     pub(crate) message_size: i64,
     pub(crate) read_state: Option<bool>,
+    pub(crate) recipients: Vec<SpecialMessageRecipientSyncFact>,
     pub(crate) named_properties: Vec<(u32, SpecialMessagePropertyValue)>,
     pub(crate) named_property_definitions: HashMap<u16, crate::mapi::properties::MapiNamedProperty>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SpecialMessageRecipientSyncFact {
+    pub(crate) row_id: u32,
+    pub(crate) recipient_type: u32,
+    pub(crate) recipient_flags: u32,
+    pub(crate) track_status: u32,
+    pub(crate) display_type_ex: u32,
+    pub(crate) address_type: String,
+    pub(crate) email_address: String,
+    pub(crate) smtp_address: String,
+    pub(crate) display_name: String,
+    pub(crate) entry_id: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +51,25 @@ pub(crate) enum SpecialMessagePropertyValue {
     String(String),
     MultiString(Vec<String>),
     Time(String),
+}
+
+pub(super) fn special_message_delivery_sort_time(object: &SpecialMessageSyncFact) -> u64 {
+    object
+        .named_properties
+        .iter()
+        .find_map(|(tag, value)| {
+            (canonical_property_storage_tag(*tag) == PID_TAG_MESSAGE_DELIVERY_TIME)
+                .then(|| match value {
+                    SpecialMessagePropertyValue::I64(value) => u64::try_from(*value).ok(),
+                    SpecialMessagePropertyValue::U64(value) => Some(*value),
+                    SpecialMessagePropertyValue::Time(value) => {
+                        super::manifest::parse_rfc3339_utc_filetime(value)
+                    }
+                    _ => None,
+                })
+                .flatten()
+        })
+        .unwrap_or(object.last_modified_filetime)
 }
 
 fn special_message_binary_property(
@@ -426,6 +460,7 @@ fn write_fast_transfer_special_message_content(
             META_TAG_FX_DEL_PROP,
             PID_TAG_MESSAGE_RECIPIENTS as i32,
         );
+        write_fast_transfer_special_recipients(buffer, &object.recipients);
     }
     if message_children.attachments {
         write_i32_property(

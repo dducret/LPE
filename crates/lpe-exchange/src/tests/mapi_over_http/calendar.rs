@@ -7551,6 +7551,57 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
         &utf16z("alice@example.test")
     ));
     assert!(contains_bytes(&response_rops, &utf16z("Bob")));
+    assert_eq!(
+        response_rops
+            .windows(FX_START_RECIP.to_le_bytes().len())
+            .filter(|window| *window == FX_START_RECIP.to_le_bytes())
+            .count(),
+        2
+    );
+    let organizer_row_prefix = [
+        FX_START_RECIP.to_le_bytes(),
+        PID_TAG_ROWID.to_le_bytes(),
+        0_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TYPE.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_FLAGS.to_le_bytes(),
+        3_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_ORDER.to_le_bytes(),
+        0_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TRACK_STATUS.to_le_bytes(),
+        0_i32.to_le_bytes(),
+    ]
+    .concat();
+    let attendee_row_prefix = [
+        FX_START_RECIP.to_le_bytes(),
+        PID_TAG_ROWID.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TYPE.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_FLAGS.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_ORDER.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TRACK_STATUS.to_le_bytes(),
+        3_i32.to_le_bytes(),
+    ]
+    .concat();
+    assert!(contains_bytes(&response_rops, &organizer_row_prefix));
+    assert!(contains_bytes(&response_rops, &attendee_row_prefix));
+    assert!(contains_bytes(
+        &response_rops,
+        &[
+            0xdc, 0xa7, 0x40, 0xc8, 0xc0, 0x42, 0x10, 0x1a, 0xb4, 0xb9, 0x08, 0x00, 0x2b, 0x2f,
+            0xe1, 0x82,
+        ]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[
+            0x81, 0x2b, 0x1f, 0xa4, 0xbe, 0xa3, 0x10, 0x19, 0x9d, 0x6e, 0x00, 0xdd, 0x01, 0x0f,
+            0x54, 0x02, 0x00, 0x00, 0x01, 0x80,
+        ]
+    ));
     assert!(contains_bytes(
         &response_rops,
         &0x8238_001Fu32.to_le_bytes()
@@ -7579,6 +7630,12 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
         &response_rops,
         &0x8217_0003u32.to_le_bytes()
     ));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&0x8201_0003u32));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&0x8510_0003u32));
     assert!(contains_bytes(
         &response_rops,
         &0x8001_0102u32.to_le_bytes()

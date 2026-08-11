@@ -946,6 +946,7 @@ fn microsoft_oxcfxics_order_by_delivery_time_interleaves_normal_and_fai_changes(
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-20T12:00:00Z"),
         message_size: 64,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: Vec::new(),
         named_property_definitions: Default::default(),
     };
@@ -960,6 +961,7 @@ fn microsoft_oxcfxics_order_by_delivery_time_interleaves_normal_and_fai_changes(
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-20T10:00:00Z"),
         message_size: 64,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: Vec::new(),
         named_property_definitions: Default::default(),
     };
@@ -1018,6 +1020,7 @@ fn microsoft_oxcfxics_order_by_delivery_time_uses_calendar_delivery_property() {
                 last_modified_filetime: filetime_from_rfc3339_utc(modified),
                 message_size: 128,
                 read_state: None,
+                recipients: Vec::new(),
                 named_properties: vec![(
                     PID_TAG_MESSAGE_DELIVERY_TIME,
                     SpecialMessagePropertyValue::I64(filetime_from_rfc3339_utc(delivery) as i64),
@@ -1169,6 +1172,136 @@ fn microsoft_oxcfxics_content_sync_uses_recipient_markers() {
         PID_TAG_EMAIL_ADDRESS_W,
         &utf16z("carol@example.test"),
     );
+}
+
+#[test]
+fn microsoft_oxcfxics_calendar_content_sync_replaces_recipient_collection_with_organizer() {
+    let entry_id = vec![
+        0x00, 0x00, 0x00, 0x00, 0xdc, 0xa7, 0x40, 0xc8, 0xc0, 0x42, 0x10, 0x1a, 0xb4, 0xb9, 0x08,
+        0x00, 0x2b, 0x2f, 0xe1, 0x82, 0x01, 0x00, 0x00, 0x00,
+    ];
+    let appointment = SpecialMessageSyncFact {
+        folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+        item_id: crate::mapi::identity::mapi_store_id(321),
+        canonical_id: Uuid::parse_str("51515151-5151-4151-9151-515151515151").unwrap(),
+        associated: false,
+        subject: "Calendar organizer roundtrip".to_string(),
+        body_text: Some(String::new()),
+        message_class: "IPM.Appointment".to_string(),
+        last_modified_filetime: filetime_from_rfc3339_utc("2026-08-10T20:38:16Z"),
+        message_size: 128,
+        read_state: None,
+        recipients: vec![
+            SpecialMessageRecipientSyncFact {
+                row_id: 0,
+                recipient_type: 1,
+                recipient_flags: 3,
+                track_status: 0,
+                display_type_ex: 0x4000_0000,
+                address_type: "EX".to_string(),
+                email_address:
+                    "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=test-l-p-e-ch"
+                        .to_string(),
+                smtp_address: "test@l-p-e.ch".to_string(),
+                display_name: "test".to_string(),
+                entry_id: entry_id.clone(),
+            },
+            SpecialMessageRecipientSyncFact {
+                row_id: 1,
+                recipient_type: 1,
+                recipient_flags: 1,
+                track_status: 3,
+                display_type_ex: 0x4000_0000,
+                address_type: "EX".to_string(),
+                email_address:
+                    "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test"
+                        .to_string(),
+                smtp_address: "alice@example.test".to_string(),
+                display_name: "Alice".to_string(),
+                entry_id: entry_id.clone(),
+            },
+        ],
+        named_properties: Vec::new(),
+        named_property_definitions: Default::default(),
+    };
+    let appointments = [appointment];
+    let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+        Uuid::nil(),
+        SYNC_TYPE_CONTENTS,
+        0xA139,
+        0x0000_000D,
+        &[],
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &[],
+        &[],
+        &[],
+        &appointments,
+        &[],
+        &[],
+        &[],
+        &[],
+        &[],
+        &appointments,
+        &[],
+        &[],
+        322,
+    );
+
+    assert_eq!(
+        buffer
+            .windows(START_RECIP.to_le_bytes().len())
+            .filter(|window| *window == START_RECIP.to_le_bytes())
+            .count(),
+        2
+    );
+    assert_tag_sequence(
+        &buffer,
+        &[
+            META_TAG_FX_DEL_PROP,
+            START_RECIP,
+            PID_TAG_ROWID,
+            PID_TAG_RECIPIENT_TYPE,
+            PID_TAG_RECIPIENT_FLAGS,
+            PID_TAG_RECIPIENT_ORDER,
+            PID_TAG_RECIPIENT_TRACK_STATUS,
+            PID_TAG_ADDRESS_TYPE_W,
+            PID_TAG_EMAIL_ADDRESS_W,
+            PID_TAG_SMTP_ADDRESS_W,
+            PID_TAG_ENTRY_ID,
+            PID_TAG_RECIPIENT_ENTRY_ID,
+            END_TO_RECIP,
+            META_TAG_FX_DEL_PROP,
+        ],
+    );
+    assert_i32_property(&buffer, PID_TAG_RECIPIENT_TYPE, 1);
+    assert_i32_property(&buffer, PID_TAG_RECIPIENT_FLAGS, 3);
+    assert_i32_property(&buffer, PID_TAG_RECIPIENT_TRACK_STATUS, 0);
+    let accepted_attendee_row = [
+        START_RECIP.to_le_bytes(),
+        PID_TAG_ROWID.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TYPE.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_FLAGS.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_ORDER.to_le_bytes(),
+        1_i32.to_le_bytes(),
+        PID_TAG_RECIPIENT_TRACK_STATUS.to_le_bytes(),
+        3_i32.to_le_bytes(),
+    ]
+    .concat();
+    assert!(buffer
+        .windows(accepted_attendee_row.len())
+        .any(|window| window == accepted_attendee_row));
+    assert_variable_property_present(&buffer, PID_TAG_ADDRESS_TYPE_W, &utf16z("EX"));
+    assert_variable_property_present(
+        &buffer,
+        PID_TAG_EMAIL_ADDRESS_W,
+        &utf16z("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=test-l-p-e-ch"),
+    );
+    assert_variable_property_present(&buffer, PID_TAG_SMTP_ADDRESS_W, &utf16z("test@l-p-e.ch"));
+    assert_variable_property_present(&buffer, PID_TAG_ENTRY_ID, &entry_id);
+    assert_variable_property_present(&buffer, PID_TAG_RECIPIENT_ENTRY_ID, &entry_id);
 }
 
 #[test]
@@ -1498,6 +1631,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![
             (
                 PID_TAG_SEARCH_KEY,
@@ -1657,6 +1791,7 @@ fn outlook_fai_copyto_generates_a_mapiuid_search_key() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-26T11:09:21Z"),
         message_size: 998,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![
             (
                 PID_TAG_MESSAGE_FLAGS,
@@ -2972,6 +3107,7 @@ fn content_sync_manifest_includes_special_folder_message_objects() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![(0x8B00_0003, SpecialMessagePropertyValue::I32(3))],
         named_property_definitions: Default::default(),
     };
@@ -3097,6 +3233,7 @@ fn content_sync_manifest_starts_fai_message_before_item_properties() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 0,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![(
             PID_TAG_MESSAGE_FLAGS,
             SpecialMessagePropertyValue::I32(0x09),
@@ -3181,6 +3318,7 @@ fn fai_foreign_source_key_identity_is_used_by_selected_and_full_idset_given() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-20T21:36:00Z"),
         message_size: 256,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![(
             PID_TAG_SOURCE_KEY,
             SpecialMessagePropertyValue::Binary(foreign_source_key.clone()),
@@ -3345,6 +3483,7 @@ fn microsoft_oxcfxics_fai_content_sync_delimits_empty_child_collections_before_n
             last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
             message_size: 2_048,
             read_state: None,
+            recipients: Vec::new(),
             named_properties: vec![(
                 final_property_tag,
                 SpecialMessagePropertyValue::I32(first_property_value),
@@ -3362,6 +3501,7 @@ fn microsoft_oxcfxics_fai_content_sync_delimits_empty_child_collections_before_n
             last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:01:00Z"),
             message_size: 1_984,
             read_state: None,
+            recipients: Vec::new(),
             named_properties: vec![(
                 final_property_tag,
                 SpecialMessagePropertyValue::I32(second_property_value),
@@ -3441,6 +3581,7 @@ fn content_sync_manifest_unicode_fai_uses_unicode_subject_and_fai_message_flag()
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 128,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: Vec::new(),
         named_property_definitions: Default::default(),
     };
@@ -3492,6 +3633,7 @@ fn content_sync_manifest_applies_property_excludes_to_special_objects() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![(0x8205_0003, SpecialMessagePropertyValue::I32(2))],
         named_property_definitions: Default::default(),
     };
@@ -3549,6 +3691,7 @@ fn content_sync_manifest_applies_string8_property_excludes_to_special_objects() 
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: Vec::new(),
         named_property_definitions: Default::default(),
     };
@@ -3594,6 +3737,7 @@ fn content_sync_manifest_applies_string8_property_includes_to_special_objects() 
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: Vec::new(),
         named_property_definitions: Default::default(),
     };
@@ -3642,6 +3786,7 @@ fn content_sync_manifest_respects_normal_and_fai_scope_flags() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: Vec::new(),
         named_property_definitions: Default::default(),
     };
@@ -3656,6 +3801,7 @@ fn content_sync_manifest_respects_normal_and_fai_scope_flags() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
         message_size: 19,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: Vec::new(),
         named_property_definitions: Default::default(),
     };
@@ -4074,6 +4220,7 @@ fn special_message_headers_and_final_cnsets_share_durable_change_numbers() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-15T10:11:00Z"),
         message_size: 64,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![
             (
                 PID_TAG_CHANGE_NUMBER,
@@ -4103,6 +4250,7 @@ fn special_message_headers_and_final_cnsets_share_durable_change_numbers() {
         last_modified_filetime: filetime_from_rfc3339_utc("2026-07-15T10:12:00Z"),
         message_size: 64,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![
             (
                 PID_TAG_CHANGE_NUMBER,

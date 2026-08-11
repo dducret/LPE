@@ -538,6 +538,7 @@ fn calendar_configuration_debug_contract_uses_roaming_properties() {
         last_modified_filetime: 0,
         message_size: 0,
         read_state: None,
+        recipients: Vec::new(),
         named_properties: vec![
             (
                 PID_TAG_ROAMING_DATATYPES,
