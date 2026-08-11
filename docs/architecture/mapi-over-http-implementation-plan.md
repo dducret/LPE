@@ -170,9 +170,49 @@ before it is advertised.
   delta path exercised by Outlook. Hierarchy state remains
   `CnsetSeen, IdsetGiven`, and upload state remains
   `CnsetSeen, CnsetSeenFAI, CnsetRead`.
-- The Exchange-order mismatch is the earliest actionable Calendar
-  download-shape divergence in this trace. A fresh-profile real-client rerun is
-  required to establish causality and symptom elimination.
+- The later `202608111553` rerun in the Probe-B Outlook profile confirms that
+  the Exchange-order state correction is active on both the initial and
+  web-update Calendar downloads, but it does not eliminate the Outlook error.
+  Across the Probe B, Probe C, and Probe D traces, Outlook supplies a distinct
+  16-byte `PidTagSearchKey` on the initial appointment Save and LPE returns a successful
+  `RopSetProperties` result. LPE then discarded that value, suppressed the
+  creator's own uploaded item from the immediate download, and substituted the
+  canonical event UUID as SearchKey on the first later full download. The
+  SourceKey, GlobalObjectId, and CleanGlobalObjectId remain stable while only
+  SearchKey changes; Outlook subsequently reports `MAPI_E_NOT_FOUND` before it
+  can submit the locally edited item.
+- Calendar import now applies the same bounded compatibility policy already
+  used for imported configuration FAI SearchKeys: a valid 16-byte binary value
+  accepted before the first Save is stored durably, survives canonical web
+  updates and reconnects, and is immutable afterward. Repeated SearchKey values
+  on an existing ICS import are silently disregarded, while direct later Set or
+  Delete operations retain the normal read-only property problem. Web-created
+  events without an imported value continue to use the canonical UUID fallback.
+  The implementation never derives SearchKey from GlobalObjectId data because
+  those properties have independent semantics. `[MS-OXCPRPT]` section 2.2.1.9
+  defines SearchKey stability, and `[MS-OXCMSG]` section 2.2 product note `<1>`
+  records Exchange's exception for this otherwise read-only property. LPE
+  deliberately bounds that compatibility to the pre-first-Save value observed
+  in the Probe B/C/D traces. Their correlation makes this the next evidence-backed
+  Outlook compatibility experiment, not a proven general Exchange appointment
+  contract; a fresh-profile real-client rerun is required to establish symptom
+  elimination.
+- Durable Calendar custom-property validation, immutable SearchKey handling,
+  and storage lookup are isolated in `mapi_events/custom_properties.rs`. This is
+  the first split boundary for the thousand-line `mapi_events.rs`; identity
+  allocation remains in `mapi_events/imported_identity.rs`, and a later split
+  should move attachment/reminder persistence rather than adding unrelated
+  behavior back to the hub.
+- `mapi_store/snapshot.rs` remains a legacy oversized aggregation point. Its
+  next split boundary is the fallback/synthetic-object constructors and their
+  identity helpers; move those into `mapi_store/snapshot/fallback.rs` before
+  adding further snapshot behavior. This SearchKey change only supplies the new
+  version field in the existing fallback constructor.
+- `mapi/properties/streams.rs` has crossed the thousand-line review threshold.
+  Its next split should move object-property stream projection and open/read
+  construction into `mapi/properties/streams/open.rs`, leaving writable-target,
+  seek, copy, commit, and mutation helpers in the parent module until a second
+  cohesive write-side split is required.
 - For an extended `Execute` request with `Chain` set and a terminal
   `RopFastTransferSourceGetBuffer`, LPE returns the original response followed
   by independently framed synthetic GetBuffer responses until the transfer is

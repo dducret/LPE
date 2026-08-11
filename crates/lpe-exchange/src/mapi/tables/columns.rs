@@ -349,6 +349,7 @@ pub(in crate::mapi) fn default_event_property_tags() -> Vec<u32> {
         PID_TAG_ACCESS,
         PID_TAG_MESSAGE_FLAGS,
         PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SEARCH_KEY,
         PID_TAG_SOURCE_KEY,
         PID_TAG_PARENT_SOURCE_KEY,
         PID_TAG_CHANGE_KEY,

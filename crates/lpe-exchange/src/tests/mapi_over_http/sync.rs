@@ -12887,8 +12887,17 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         PID_TAG_LAST_MODIFICATION_TIME,
         i64::from_le_bytes([0x00, 0x49, 0xaa, 0x9a, 0xc3, 0x15, 0xdd, 0x01]),
     );
+    let submitted_search_key = [
+        0x70, 0xc8, 0xfa, 0x8d, 0xfd, 0x82, 0x10, 0x4d, 0xb7, 0x80, 0x6a, 0xed, 0x2b, 0xa1, 0x70,
+        0x3a,
+    ];
+    append_mapi_binary_property(
+        &mut appointment_values,
+        0x300B_0102, // PidTagSearchKey.
+        &submitted_search_key,
+    );
     let mut save_rops = Vec::new();
-    append_rop_set_properties(&mut save_rops, 1, 5, &appointment_values);
+    append_rop_set_properties(&mut save_rops, 1, 6, &appointment_values);
     append_rop_save_changes_message_with_flags(&mut save_rops, 1, 1, 0x08);
 
     renew_mapi_request_id(&mut execute_headers);
@@ -12931,10 +12940,65 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         imported_source_key
     );
     let canonical_version = mapi_event_identity_versions.lock().unwrap()[&event_id].clone();
+    assert_eq!(
+        canonical_version.search_key.as_deref(),
+        Some(submitted_search_key.as_slice())
+    );
     assert_eq!(canonical_version.change_key, change_xid);
     assert_eq!(
         canonical_version.predecessor_change_list,
         predecessor_change_list
+    );
+
+    let mut search_key_stream_rops = Vec::new();
+    append_rop_open_folder(
+        &mut search_key_stream_rops,
+        0,
+        1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    append_rop_open_message(
+        &mut search_key_stream_rops,
+        1,
+        2,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        imported_message_id,
+    );
+    search_key_stream_rops.extend_from_slice(&[0x08, 0x00, 0x02]);
+    search_key_stream_rops.extend_from_slice(&4096u16.to_le_bytes());
+    search_key_stream_rops.extend_from_slice(&1u16.to_le_bytes());
+    search_key_stream_rops.extend_from_slice(&[0x2B, 0x00, 0x02, 0x03]);
+    search_key_stream_rops.extend_from_slice(&0x300B_0102u32.to_le_bytes());
+    search_key_stream_rops.push(0x00);
+    search_key_stream_rops.extend_from_slice(&[0x2C, 0x00, 0x03]);
+    search_key_stream_rops.extend_from_slice(&16u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &search_key_stream_rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let mut expected_property = 0x300B_0102u32.to_le_bytes().to_vec();
+    expected_property.extend_from_slice(&16u16.to_le_bytes());
+    expected_property.extend_from_slice(&submitted_search_key);
+    assert!(
+        contains_bytes(&response_rops, &expected_property),
+        "RopGetPropertiesAll must include the persisted Calendar SearchKey: {response_rops:02x?}"
+    );
+    let mut expected_read = vec![0x2C, 0x03, 0, 0, 0, 0];
+    expected_read.extend_from_slice(&16u16.to_le_bytes());
+    expected_read.extend_from_slice(&submitted_search_key);
+    assert!(
+        contains_bytes(&response_rops, &expected_read),
+        "RopOpenStream must read the persisted Calendar SearchKey: {response_rops:02x?}"
     );
 
     // [MS-OXCFXICS] sections 3.1.5.3 and 3.2.5.9.3.1: the upload
@@ -13056,6 +13120,7 @@ async fn mapi_over_http_replays_outlook_calendar_import_move_to_deleted_items() 
                 event_id,
                 canonical_modseq: 1,
                 change_number: mapi_mailstore::change_number_for_store_id(source_message_id),
+                search_key: None,
                 change_key: change_xid.to_vec(),
                 predecessor_change_list: predecessor_change_list.clone(),
                 created_at: "2026-07-16T20:52:00Z".to_string(),
@@ -13258,6 +13323,7 @@ async fn mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_even
                 event_id,
                 canonical_modseq: 1,
                 change_number: mapi_mailstore::change_number_for_store_id(source_message_id),
+                search_key: None,
                 change_key: move_change_xid.to_vec(),
                 predecessor_change_list: move_predecessor_change_list.clone(),
                 created_at: "2026-07-16T20:52:00Z".to_string(),
@@ -13526,6 +13592,7 @@ fn calendar_sync_conflict_store(
                 event_id,
                 canonical_modseq: 1,
                 change_number: mapi_mailstore::change_number_for_store_id(message_id),
+                search_key: None,
                 change_key,
                 predecessor_change_list,
                 created_at: updated_at.to_string(),

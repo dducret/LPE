@@ -1,3 +1,5 @@
+const PID_TAG_SEARCH_KEY: u32 = 0x300B_0102;
+
 macro_rules! store_impl_mapi_metadata {
     () => {
     fn fetch_or_allocate_mapi_identities<'a>(
@@ -654,6 +656,11 @@ macro_rules! store_impl_mapi_metadata {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
             let mut tx = self.pool().begin().await?;
             for value in values {
+                if object_kind == MapiCustomPropertyObjectKind::CalendarEvent
+                    && value.property_tag == PID_TAG_SEARCH_KEY
+                {
+                    continue;
+                }
                 sqlx::query(
                     r#"
                     INSERT INTO mapi_custom_property_values (
@@ -782,8 +789,15 @@ macro_rules! store_impl_mapi_metadata {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
             let tags = property_tags
                 .iter()
+                .filter(|tag| {
+                    !(object_kind == MapiCustomPropertyObjectKind::CalendarEvent
+                        && **tag == PID_TAG_SEARCH_KEY)
+                })
                 .map(|tag| i64::from(*tag))
                 .collect::<Vec<_>>();
+            if tags.is_empty() {
+                return Ok(());
+            }
             sqlx::query(
                 r#"
                 DELETE FROM mapi_custom_property_values

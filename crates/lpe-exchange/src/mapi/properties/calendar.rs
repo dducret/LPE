@@ -80,6 +80,13 @@ fn event_property_value_with_optional_version(
         return Some(value);
     }
     let property_tag = canonical_property_storage_tag(property_tag);
+    if property_tag == PID_TAG_SEARCH_KEY {
+        return Some(MapiValue::Binary(
+            version
+                .and_then(|version| version.search_key.clone())
+                .unwrap_or_else(|| crate::mapi::identity::generated_message_search_key(&event.id)),
+        ));
+    }
     if let Some(version) = version {
         match property_tag {
             PID_TAG_CHANGE_KEY => return Some(MapiValue::Binary(version.change_key.clone())),

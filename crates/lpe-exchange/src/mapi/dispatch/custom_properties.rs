@@ -102,6 +102,39 @@ pub(super) fn mapi_event_custom_property_values_from_map(
     values
 }
 
+pub(super) fn initial_mapi_event_search_key(
+    properties: &HashMap<u32, MapiValue>,
+) -> Option<Vec<u8>> {
+    match properties.get(&PID_TAG_SEARCH_KEY) {
+        Some(MapiValue::Binary(value)) if value.len() == 16 => Some(value.clone()),
+        _ => None,
+    }
+}
+
+pub(super) fn mapi_event_create_property_values_from_map(
+    properties: &HashMap<u32, MapiValue>,
+    imported_event: bool,
+) -> Vec<MapiEventCustomPropertyValue> {
+    let mut values = mapi_event_custom_property_values_from_map(properties);
+    if imported_event {
+        if let Some(search_key) = initial_mapi_event_search_key(properties) {
+            let mut property_value = Vec::new();
+            write_mapi_value(
+                &mut property_value,
+                PID_TAG_SEARCH_KEY,
+                &MapiValue::Binary(search_key),
+            );
+            values.push(MapiEventCustomPropertyValue {
+                property_tag: PID_TAG_SEARCH_KEY,
+                property_type: MapiPropertyType::Binary.as_u16(),
+                property_value,
+            });
+            values.sort_by_key(|value| value.property_tag);
+        }
+    }
+    values
+}
+
 pub(super) fn mapi_contact_custom_property_values_from_map(
     properties: &HashMap<u32, MapiValue>,
 ) -> Vec<MapiContactCustomPropertyValue> {
@@ -120,6 +153,44 @@ pub(super) fn mapi_contact_custom_property_values_from_map(
         .collect::<Vec<_>>();
     values.sort_by_key(|value| value.property_tag);
     values
+}
+
+#[cfg(test)]
+mod calendar_search_key_tests {
+    use super::*;
+
+    #[test]
+    fn calendar_create_persists_only_a_16_byte_binary_search_key() {
+        let search_key = vec![0x7a; 16];
+        let properties =
+            HashMap::from([(PID_TAG_SEARCH_KEY, MapiValue::Binary(search_key.clone()))]);
+        let values = mapi_event_create_property_values_from_map(&properties, true);
+        let stored = values
+            .iter()
+            .find(|value| value.property_tag == PID_TAG_SEARCH_KEY)
+            .expect("valid Calendar SearchKey");
+        let mut expected = 16u16.to_le_bytes().to_vec();
+        expected.extend_from_slice(&search_key);
+        assert_eq!(stored.property_value, expected);
+
+        for invalid in [
+            MapiValue::Binary(vec![0x7a; 15]),
+            MapiValue::String("invalid".into()),
+        ] {
+            let values = mapi_event_create_property_values_from_map(
+                &HashMap::from([(PID_TAG_SEARCH_KEY, invalid)]),
+                true,
+            );
+            assert!(values
+                .iter()
+                .all(|value| value.property_tag != PID_TAG_SEARCH_KEY));
+        }
+        assert!(
+            mapi_event_create_property_values_from_map(&properties, false)
+                .iter()
+                .all(|value| value.property_tag != PID_TAG_SEARCH_KEY)
+        );
+    }
 }
 
 pub(super) async fn fetch_custom_property_values_for_request<S>(
@@ -269,7 +340,9 @@ where
         .await?
         .into_iter()
         .chain(staged_custom_property_values(source, None).into_iter())
-        .filter(|value| !excluded.contains(&value.property_tag))
+        .filter(|value| {
+            is_custom_property_tag(value.property_tag) && !excluded.contains(&value.property_tag)
+        })
         .map(|value| (value.property_tag, value))
         .collect::<HashMap<_, _>>()
         .into_values()

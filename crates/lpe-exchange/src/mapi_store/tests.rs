@@ -152,6 +152,7 @@ fn test_mapi_event(canonical_id: Uuid, account_id: Uuid, object_id: u64, title: 
             event_id: canonical_id,
             canonical_modseq: 1,
             change_number,
+            search_key: None,
             change_key: crate::mapi_mailstore::change_key_for_change_number(change_number),
             predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(change_number),
             created_at: "2026-07-15T09:00:00Z".to_string(),

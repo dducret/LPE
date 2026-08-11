@@ -1531,6 +1531,206 @@ async fn canonical_event_writer_advances_the_persisted_mapi_version() -> Result<
 }
 
 #[tokio::test]
+async fn calendar_search_key_survives_web_update_and_mapi_reload() -> Result<()> {
+    let _guard = database_test_lock().lock().await;
+    let Some(fixture) = event_fixture().await? else {
+        return Ok(());
+    };
+    let event_id = Uuid::new_v4();
+    let submitted_search_key = [
+        0x70, 0xc8, 0xfa, 0x8d, 0xfd, 0x82, 0x10, 0x4d, 0xb7, 0x80, 0x6a, 0xed, 0x2b, 0xa1, 0x70,
+        0x3a,
+    ];
+    assert_ne!(submitted_search_key.as_slice(), event_id.as_bytes());
+    let mut encoded_search_key = (submitted_search_key.len() as u16).to_le_bytes().to_vec();
+    encoded_search_key.extend_from_slice(&submitted_search_key);
+    let source_counter = 0x65d;
+    reserve_imported_event_range(&fixture, source_counter, source_counter).await?;
+    let imported_change_key = vec![
+        0x10, 0xac, 0xf9, 0xa3, 0xd3, 0x15, 0xb1, 0x45, 0x99, 0xca, 0x94, 0xfb, 0x11, 0xe2, 0x2d,
+        0x59, 0x00, 0x00, 0x04, 0x4d,
+    ];
+    let mut create = create_input(fixture.account_id, "default", event_id, "Probe D");
+    create.imported_identity = Some(MapiEventImportedIdentity {
+        source_key: change_key(source_counter),
+        change_key: imported_change_key.clone(),
+        predecessor_change_list: predecessor_change_list(&imported_change_key),
+    });
+    create
+        .custom_property_upserts
+        .push(MapiEventCustomPropertyValue {
+            property_tag: 0x300B_0102,
+            property_type: 0x0102,
+            property_value: encoded_search_key.clone(),
+        });
+    let mut web_update = create.event.clone();
+    web_update.title = "Probe D - web update".to_string();
+    let created = fixture.storage.create_mapi_event(create).await?;
+    assert_eq!(
+        created.version.search_key.as_deref(),
+        Some(submitted_search_key.as_slice())
+    );
+    let before = sqlx::query(
+        "SELECT event.uid, identity.source_key FROM calendar_events event \
+         JOIN mapi_object_identities identity ON identity.canonical_id = event.id \
+         WHERE event.id = $1 AND identity.account_id = $2 AND identity.deleted_at IS NULL",
+    )
+    .bind(event_id)
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+
+    fixture.storage.upsert_client_event(web_update).await?;
+
+    let versions = fixture
+        .storage
+        .fetch_mapi_event_versions(fixture.account_id, &[event_id])
+        .await?;
+    assert_eq!(versions.len(), 1);
+    assert_eq!(
+        versions[0].search_key.as_deref(),
+        Some(submitted_search_key.as_slice())
+    );
+    let replacement_search_key = vec![0xaa; 16];
+    let mut encoded_replacement = 16u16.to_le_bytes().to_vec();
+    encoded_replacement.extend_from_slice(&replacement_search_key);
+    let replaced = fixture
+        .storage
+        .commit_mapi_event_update(MapiEventCommitInput {
+            principal_account_id: fixture.account_id,
+            event_id,
+            expected_modseq: versions[0].canonical_modseq,
+            force_save: false,
+            imported_identity: None,
+            event: None,
+            reminder: MapiEventReminderPatch::default(),
+            custom_property_upserts: vec![MapiEventCustomPropertyValue {
+                property_tag: 0x300B_0102,
+                property_type: 0x0102,
+                property_value: encoded_replacement,
+            }],
+            custom_property_deletes: Vec::new(),
+            attachment_changes: MapiEventAttachmentChanges::default(),
+        })
+        .await?;
+    let MapiEventCommitOutcome::Saved(replaced) = replaced else {
+        panic!("expected SearchKey replacement save outcome");
+    };
+    assert_eq!(
+        replaced.version.search_key.as_deref(),
+        Some(submitted_search_key.as_slice())
+    );
+    let deleted = fixture
+        .storage
+        .commit_mapi_event_update(MapiEventCommitInput {
+            principal_account_id: fixture.account_id,
+            event_id,
+            expected_modseq: replaced.version.canonical_modseq,
+            force_save: false,
+            imported_identity: None,
+            event: None,
+            reminder: MapiEventReminderPatch::default(),
+            custom_property_upserts: Vec::new(),
+            custom_property_deletes: vec![0x300B_0102],
+            attachment_changes: MapiEventAttachmentChanges::default(),
+        })
+        .await?;
+    let MapiEventCommitOutcome::Saved(deleted) = deleted else {
+        panic!("expected SearchKey delete save outcome");
+    };
+    assert_eq!(
+        deleted.version.search_key.as_deref(),
+        Some(submitted_search_key.as_slice())
+    );
+    let after = sqlx::query(
+        "SELECT event.title, event.uid, identity.source_key FROM calendar_events event \
+         JOIN mapi_object_identities identity ON identity.canonical_id = event.id \
+         WHERE event.id = $1 AND identity.account_id = $2 AND identity.deleted_at IS NULL",
+    )
+    .bind(event_id)
+    .bind(fixture.account_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(after.get::<String, _>("title"), "Probe D - web update");
+    assert_eq!(
+        after.get::<String, _>("uid"),
+        before.get::<String, _>("uid")
+    );
+    assert_eq!(
+        after.get::<Vec<u8>, _>("source_key"),
+        before.get::<Vec<u8>, _>("source_key")
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<u8>>(
+            "SELECT property_value FROM mapi_custom_property_values \
+             WHERE account_id = $1 AND object_kind = 'calendar_event' \
+               AND canonical_id = $2 AND property_tag = $3"
+        )
+        .bind(fixture.account_id)
+        .bind(event_id)
+        .bind(i64::from(0x300B_0102u32))
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        encoded_search_key
+    );
+
+    let web_native_event_id = Uuid::new_v4();
+    let mut web_native_create = create_input(
+        fixture.account_id,
+        "default",
+        web_native_event_id,
+        "Web-native event",
+    );
+    web_native_create
+        .custom_property_upserts
+        .push(MapiEventCustomPropertyValue {
+            property_tag: 0x300B_0102,
+            property_type: 0x0102,
+            property_value: encoded_search_key.clone(),
+        });
+    let web_native = fixture.storage.create_mapi_event(web_native_create).await?;
+    assert_eq!(web_native.version.search_key, None);
+    let injected = fixture
+        .storage
+        .commit_mapi_event_update(MapiEventCommitInput {
+            principal_account_id: fixture.account_id,
+            event_id: web_native_event_id,
+            expected_modseq: web_native.version.canonical_modseq,
+            force_save: false,
+            imported_identity: None,
+            event: None,
+            reminder: MapiEventReminderPatch::default(),
+            custom_property_upserts: vec![MapiEventCustomPropertyValue {
+                property_tag: 0x300B_0102,
+                property_type: 0x0102,
+                property_value: encoded_search_key,
+            }],
+            custom_property_deletes: Vec::new(),
+            attachment_changes: MapiEventAttachmentChanges::default(),
+        })
+        .await?;
+    let MapiEventCommitOutcome::Saved(injected) = injected else {
+        panic!("expected web-native Event update save outcome");
+    };
+    assert_eq!(injected.version.search_key, None);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM mapi_custom_property_values \
+             WHERE account_id = $1 AND object_kind = 'calendar_event' \
+               AND canonical_id = $2 AND property_tag = $3"
+        )
+        .bind(fixture.account_id)
+        .bind(web_native_event_id)
+        .bind(i64::from(0x300B_0102u32))
+        .fetch_one(fixture.storage.pool())
+        .await?,
+        0
+    );
+
+    fixture.cleanup().await
+}
+
+#[tokio::test]
 async fn mapi_event_commit_rejects_stale_version_unless_force_save() -> Result<()> {
     let _guard = database_test_lock().lock().await;
     let Some(fixture) = event_fixture().await? else {

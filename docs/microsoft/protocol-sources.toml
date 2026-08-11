@@ -645,7 +645,7 @@ used_for = [
   "RopGetPropertiesSpecific response-buffer budgeting, per-property NotEnoughMemory, and stream fallback for oversized Outlook Calendar HTML",
   "Server-owned PidTagAccess and PidTagAccessLevel projection in special-message FastTransfer downloads",
   "RopSetProperties durable round-trip of Inbox PidTagAdditionalRenEntryIds client state",
-  "Stable imported FAI PidTagSearchKey semantics while generated Message search identities use the Microsoft MAPI 16-byte MAPIUID representation",
+  "Stable initial imported FAI and Calendar PidTagSearchKey semantics while generated Message search identities use the Microsoft MAPI 16-byte MAPIUID representation",
   "Silent disregard of Outlook's repeated imported Calendar PidTagLastModificationTime while retaining the import header as authoritative",
 ]
 sections = [
@@ -892,7 +892,7 @@ used_for = [
   "Commit of accepted client-written associated-configuration properties through RopSaveChangesMessage",
   "Same-Execute visibility of successfully committed associated-configuration state to post-save property reads",
   "Server-generated PidTagSearchKey fallback for Message objects without an imported search identity",
-  "Exchange 2010 through 2019 product behavior accepting an initial client PidTagSearchKey change on an imported FAI",
+  "Exchange 2010 through 2019 product behavior used for bounded initial client PidTagSearchKey compatibility on imported FAI and Calendar objects",
   "Required general PidTagAccess and PidTagAccessLevel properties on folder-associated Message objects opened read-only by Outlook",
   "Computed PidTagHasAttachments and effective PidTagMessageStatus projection for configuration FAI FastTransfer",
   "Exchange 2010 through 2019 product behavior that does not support PidTagRecordKey",

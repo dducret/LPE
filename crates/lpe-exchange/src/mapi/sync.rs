@@ -1011,6 +1011,7 @@ fn calendar_sync_object(
         PID_TAG_ACCESS,
         PID_TAG_ACCESS_LEVEL,
         PID_TAG_HAS_ATTACHMENTS,
+        PID_TAG_SEARCH_KEY,
         PID_TAG_SOURCE_KEY,
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,

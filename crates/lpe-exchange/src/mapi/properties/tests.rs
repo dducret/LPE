@@ -6285,6 +6285,48 @@ fn folder_default_view_definitions_use_type_specific_columns() {
 }
 
 #[test]
+fn pending_calendar_search_key_does_not_open_a_writable_stream() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let principal = store_test_principal(account_id);
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Execute", "test");
+    let mut session = get_session(&session_id).expect("MAPI session");
+    session.handles.insert(
+        1,
+        MapiObject::PendingEvent {
+            folder_id: CALENDAR_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+            recipients: Vec::new(),
+            recipients_modified: false,
+            fail_on_conflict: false,
+        },
+    );
+    let snapshot = MapiMailStoreSnapshot::empty();
+
+    assert!(property_stream_data(
+        &mut session,
+        1,
+        PID_TAG_SEARCH_KEY,
+        1,
+        &[],
+        account_id,
+        &snapshot,
+    )
+    .is_none());
+    assert_eq!(
+        property_stream_data(&mut session, 1, 0x9000_0102, 1, &[], account_id, &snapshot,),
+        Some((
+            Vec::new(),
+            Some(StreamWriteTarget::PendingEventProperty {
+                handle: 1,
+                property_tag: 0x9000_0102,
+            })
+        ))
+    );
+
+    assert!(remove_session(&session_id).is_some());
+}
+
+#[test]
 fn already_open_common_view_missing_descriptor_uses_empty_stream_semantics() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let view_id = crate::mapi::identity::mapi_store_id(0x7fff_ffff_fff7);

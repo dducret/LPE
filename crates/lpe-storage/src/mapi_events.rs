@@ -1,3 +1,4 @@
+mod custom_properties;
 mod imported_identity;
 
 use std::collections::{BTreeMap, HashSet};
@@ -14,6 +15,10 @@ use crate::{
     },
     AccessibleEvent, CalendarEventAttachment, CanonicalChangeCategory, CollaborationRights,
     MapiEventAttachmentChanges, Storage, UpsertClientEventInput,
+};
+use custom_properties::{
+    apply_mapi_event_custom_properties_in_tx, fetch_mapi_event_search_key_in_tx,
+    mapi_event_search_key, PID_TAG_SEARCH_KEY,
 };
 use imported_identity::{allocate_mapi_event_identity_in_tx, validate_imported_identity};
 
@@ -82,6 +87,8 @@ pub struct MapiEventVersion {
     pub canonical_modseq: i64,
     /// The 48-bit GLOBCNT. The Exchange adapter projects the wire CN with ReplId 1.
     pub change_number: u64,
+    /// Initial imported 16-byte Calendar SearchKey; absent for web-native events.
+    pub search_key: Option<Vec<u8>>,
     pub change_key: Vec<u8>,
     pub predecessor_change_list: Vec<u8>,
     pub created_at: String,
@@ -353,6 +360,7 @@ impl Storage {
             &input.reminder,
         )
         .await?;
+        let allow_initial_search_key = input.imported_identity.is_some();
         apply_mapi_event_custom_properties_in_tx(
             &mut tx,
             &tenant_id,
@@ -360,6 +368,7 @@ impl Storage {
             event_id,
             &input.custom_property_upserts,
             &[],
+            allow_initial_search_key,
         )
         .await?;
         let attachments = self
@@ -451,6 +460,9 @@ impl Storage {
             event_id,
             canonical_modseq: modseq,
             change_number: identity_version.change_number,
+            search_key: allow_initial_search_key
+                .then(|| mapi_event_search_key(&input.custom_property_upserts))
+                .flatten(),
             change_key: identity_version.change_key,
             predecessor_change_list: identity_version.predecessor_change_list,
             created_at,
@@ -482,6 +494,11 @@ impl Storage {
                 event.id AS event_id,
                 event.modseq,
                 identity.mapi_change_number,
+                CASE WHEN octet_length(search_key.property_value) = 18
+                           AND get_byte(search_key.property_value, 0) = 16
+                           AND get_byte(search_key.property_value, 1) = 0
+                     THEN substring(search_key.property_value FROM 3 FOR 16)
+                END AS search_key,
                 identity.change_key,
                 identity.predecessor_change_list,
                 to_char(
@@ -504,6 +521,13 @@ impl Storage {
              )
              AND identity.canonical_id = event.id
              AND identity.deleted_at IS NULL
+            LEFT JOIN mapi_custom_property_values search_key
+              ON search_key.tenant_id = event.tenant_id
+             AND search_key.account_id = event.owner_account_id
+             AND search_key.object_kind = 'calendar_event'
+             AND search_key.canonical_id = event.id
+             AND search_key.property_tag = 806027522
+             AND search_key.property_type = 258
             WHERE event.tenant_id = $1
               AND event.id = ANY($3)
               AND (
@@ -611,6 +635,7 @@ impl Storage {
             input.event_id,
             &input.custom_property_upserts,
             &input.custom_property_deletes,
+            false,
         )
         .await?;
         let attachments = self
@@ -690,6 +715,13 @@ impl Storage {
             fetch_mapi_event_reminder_state_in_tx(&mut tx, &tenant_id, input.event_id).await?;
         let (created_at, updated_at) =
             fetch_event_timestamps_in_tx(&mut tx, &tenant_id, input.event_id).await?;
+        let search_key = fetch_mapi_event_search_key_in_tx(
+            &mut tx,
+            &tenant_id,
+            owner_account_id,
+            input.event_id,
+        )
+        .await?;
         tx.commit().await?;
 
         Ok(MapiEventCommitOutcome::Saved(MapiEventCommitSuccess {
@@ -697,6 +729,7 @@ impl Storage {
                 event_id: input.event_id,
                 canonical_modseq: modseq,
                 change_number: principal_version.change_number,
+                search_key,
                 change_key: principal_version.change_key,
                 predecessor_change_list: principal_version.predecessor_change_list,
                 created_at,
@@ -859,6 +892,11 @@ fn validate_mapi_event_custom_properties(
         if value.property_type != (value.property_tag & 0xFFFF) as u16 {
             bail!("MAPI custom property type does not match its property tag");
         }
+        if value.property_tag == PID_TAG_SEARCH_KEY
+            && mapi_event_search_key(std::slice::from_ref(value)).is_none()
+        {
+            bail!("MAPI Event SearchKey must be a 16-byte binary value");
+        }
         if !upsert_tags.insert(value.property_tag) {
             bail!("MAPI custom property upserts contain a duplicate property tag");
         }
@@ -1007,64 +1045,6 @@ fn reminder_patch_has_changes(reminder: &MapiEventReminderPatch) -> bool {
     reminder.reminder_set.is_some()
         || reminder.reminder_at.is_some()
         || reminder.reminder_dismissed_at.is_some()
-}
-
-async fn apply_mapi_event_custom_properties_in_tx(
-    tx: &mut sqlx::Transaction<'_, Postgres>,
-    tenant_id: &Uuid,
-    principal_account_id: Uuid,
-    event_id: Uuid,
-    upserts: &[MapiEventCustomPropertyValue],
-    deletes: &[u32],
-) -> Result<()> {
-    let mut replaced_tags = deletes.iter().copied().collect::<Vec<_>>();
-    replaced_tags.extend(upserts.iter().map(|value| value.property_tag));
-    replaced_tags.sort_unstable();
-    replaced_tags.dedup();
-    if !replaced_tags.is_empty() {
-        let replaced_tags = replaced_tags.into_iter().map(i64::from).collect::<Vec<_>>();
-        sqlx::query(
-            r#"
-            DELETE FROM mapi_custom_property_values
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND object_kind = 'calendar_event'
-              AND canonical_id = $3
-              AND property_tag = ANY($4)
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(principal_account_id)
-        .bind(event_id)
-        .bind(&replaced_tags)
-        .execute(&mut **tx)
-        .await?;
-    }
-    for value in upserts {
-        sqlx::query(
-            r#"
-            INSERT INTO mapi_custom_property_values (
-                tenant_id,
-                account_id,
-                object_kind,
-                canonical_id,
-                property_tag,
-                property_type,
-                property_value
-            )
-            VALUES ($1, $2, 'calendar_event', $3, $4, $5, $6)
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(principal_account_id)
-        .bind(event_id)
-        .bind(i64::from(value.property_tag))
-        .bind(i32::from(value.property_type))
-        .bind(&value.property_value)
-        .execute(&mut **tx)
-        .await?;
-    }
-    Ok(())
 }
 
 async fn set_created_mapi_event_modseq_in_tx(
@@ -1418,6 +1398,7 @@ fn mapi_event_version_from_row(row: sqlx::postgres::PgRow) -> Result<MapiEventVe
         event_id: row.get("event_id"),
         canonical_modseq: row.get("modseq"),
         change_number: change_number as u64,
+        search_key: row.get("search_key"),
         change_key: row.get("change_key"),
         predecessor_change_list: row.get("predecessor_change_list"),
         created_at: row.get("created_at"),

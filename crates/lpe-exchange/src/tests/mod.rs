@@ -6969,6 +6969,11 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move {
             let mut stored = self.mapi_custom_property_values.lock().unwrap();
             for value in values {
+                if object_kind == MapiCustomPropertyObjectKind::CalendarEvent
+                    && value.property_tag == 0x300B_0102
+                {
+                    continue;
+                }
                 stored.insert(
                     (
                         account_id,
@@ -7092,7 +7097,9 @@ impl ExchangeStore for FakeStore {
                     !(*stored_account_id == account_id
                         && *stored_object_kind == object_kind
                         && *stored_canonical_id == canonical_id
-                        && property_tags.contains(property_tag))
+                        && property_tags.contains(property_tag)
+                        && !(object_kind == MapiCustomPropertyObjectKind::CalendarEvent
+                            && *property_tag == 0x300B_0102))
                 },
             );
             Ok(())
@@ -7915,6 +7922,7 @@ impl ExchangeStore for FakeStore {
                     event_id: *event_id,
                     canonical_modseq: canonical_versions.get(event_id).copied().unwrap_or(1) as i64,
                     change_number,
+                    search_key: None,
                     change_key: mapi_mailstore::change_key_for_change_number(change_number),
                     predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
                     created_at: "2026-07-15T10:00:00Z".to_string(),
@@ -8037,7 +8045,20 @@ impl ExchangeStore for FakeStore {
                 .to_string(),
             });
         }
+        let search_key = imported_identity.as_ref().and_then(|_| {
+            input
+                .custom_property_upserts
+                .iter()
+                .find(|value| value.property_tag == 0x300B_0102)
+                .and_then(|value| {
+                    (value.property_value.len() == 18 && value.property_value[..2] == [16, 0])
+                        .then(|| value.property_value[2..].to_vec())
+                })
+        });
         for value in input.custom_property_upserts {
+            if value.property_tag == 0x300B_0102 && imported_identity.is_none() {
+                continue;
+            }
             self.mapi_custom_property_values.lock().unwrap().insert(
                 (
                     owner_account_id,
@@ -8112,6 +8133,7 @@ impl ExchangeStore for FakeStore {
             event_id,
             canonical_modseq: 1,
             change_number,
+            search_key,
             change_key: imported_identity
                 .as_ref()
                 .map(|identity| identity.change_key.clone())
@@ -8756,6 +8778,9 @@ impl ExchangeStore for FakeStore {
         let owner_account_id = event.owner_account_id;
         let mut custom_values = self.mapi_custom_property_values.lock().unwrap();
         for tag in &input.custom_property_deletes {
+            if *tag == 0x300B_0102 {
+                continue;
+            }
             custom_values.retain(|key, _| {
                 !(key.0 == owner_account_id
                     && key.1 == MapiCustomPropertyObjectKind::CalendarEvent
@@ -8764,16 +8789,17 @@ impl ExchangeStore for FakeStore {
             });
         }
         for value in &input.custom_property_upserts {
-            custom_values.insert(
-                (
-                    owner_account_id,
-                    MapiCustomPropertyObjectKind::CalendarEvent,
-                    input.event_id,
-                    value.property_tag,
-                    value.property_type,
-                ),
-                value.property_value.clone(),
+            if value.property_tag == 0x300B_0102 {
+                continue;
+            }
+            let key = (
+                owner_account_id,
+                MapiCustomPropertyObjectKind::CalendarEvent,
+                input.event_id,
+                value.property_tag,
+                value.property_type,
             );
+            custom_values.insert(key, value.property_value.clone());
         }
         let mut calendar_attachments = self.calendar_attachments.lock().unwrap();
         let attachments = calendar_attachments.entry(input.event_id).or_default();
@@ -8815,11 +8841,14 @@ impl ExchangeStore for FakeStore {
 
         let next_modseq = current_modseq.saturating_add(1);
         canonical_versions.insert(input.event_id, next_modseq as u64);
-        let current_change_number = self
+        let current_version = self
             .mapi_event_identity_versions
             .lock()
             .unwrap()
             .get(&input.event_id)
+            .cloned();
+        let current_change_number = current_version
+            .as_ref()
             .map(|version| version.change_number)
             .unwrap_or_default();
         let imported_source_counter = imported_identity
@@ -8840,6 +8869,7 @@ impl ExchangeStore for FakeStore {
             event_id: input.event_id,
             canonical_modseq: next_modseq,
             change_number,
+            search_key: current_version.and_then(|version| version.search_key),
             change_key: imported_identity
                 .as_ref()
                 .map(|identity| identity.change_key.clone())
@@ -9210,16 +9240,23 @@ impl ExchangeStore for FakeStore {
                 });
             (old_mapi_object_id, old_source_key)
         };
-        let (old_change_number, old_change_key) = self
+        let (old_change_number, old_search_key, old_change_key) = self
             .mapi_event_identity_versions
             .lock()
             .unwrap()
             .get(&event_id)
-            .map(|version| (version.change_number, version.change_key.clone()))
+            .map(|version| {
+                (
+                    version.change_number,
+                    version.search_key.clone(),
+                    version.change_key.clone(),
+                )
+            })
             .unwrap_or_else(|| {
                 let change_number = mapi_mailstore::change_number_for_store_id(old_mapi_object_id);
                 (
                     change_number,
+                    None,
                     mapi_mailstore::change_key_for_change_number(change_number),
                 )
             });
@@ -9347,6 +9384,7 @@ impl ExchangeStore for FakeStore {
                 event_id,
                 canonical_modseq: 2,
                 change_number: new_change_number,
+                search_key: old_search_key,
                 change_key: new_change_key.clone(),
                 predecessor_change_list: new_predecessor_change_list,
                 created_at: "2026-07-15T10:00:00Z".to_string(),
@@ -12260,6 +12298,64 @@ async fn fake_store_custom_property_values_survive_restart_style_clone() {
         .unwrap();
     assert_eq!(fetched.len(), 1);
     assert_eq!(fetched[0].property_tag, second_tag);
+}
+
+#[tokio::test]
+async fn fake_store_generic_metadata_writes_preserve_calendar_search_key() {
+    let store = FakeStore::default();
+    let account_id = FakeStore::account().account_id;
+    let event_id = Uuid::parse_str("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee").unwrap();
+    let original = vec![
+        16, 0, 0x70, 0xc8, 0xfa, 0x8d, 0xfd, 0x82, 0x10, 0x4d, 0xb7, 0x80, 0x6a, 0xed, 0x2b, 0xa1,
+        0x70, 0x3a,
+    ];
+    store.mapi_custom_property_values.lock().unwrap().insert(
+        (
+            account_id,
+            MapiCustomPropertyObjectKind::CalendarEvent,
+            event_id,
+            0x300B_0102,
+            0x0102,
+        ),
+        original.clone(),
+    );
+
+    let mut replacement = vec![16, 0];
+    replacement.extend_from_slice(&[0xaa; 16]);
+    store
+        .upsert_mapi_custom_property_values(
+            account_id,
+            MapiCustomPropertyObjectKind::CalendarEvent,
+            event_id,
+            &[MapiCustomPropertyValue {
+                property_tag: 0x300B_0102,
+                property_type: 0x0102,
+                property_value: replacement,
+            }],
+        )
+        .await
+        .unwrap();
+    store
+        .delete_mapi_custom_property_values(
+            account_id,
+            MapiCustomPropertyObjectKind::CalendarEvent,
+            event_id,
+            &[0x300B_0102],
+        )
+        .await
+        .unwrap();
+
+    let values = store
+        .fetch_mapi_custom_property_values(
+            account_id,
+            MapiCustomPropertyObjectKind::CalendarEvent,
+            event_id,
+            &[0x300B_0102],
+        )
+        .await
+        .unwrap();
+    assert_eq!(values.len(), 1);
+    assert_eq!(values[0].property_value, original);
 }
 
 #[tokio::test]

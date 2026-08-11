@@ -130,6 +130,7 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
     if recipients_modified {
         apply_calendar_pending_recipients(&mut input, &existing, &properties, &recipients);
     }
+    let imported_event = imported_identity.is_some();
     let create_input = MapiEventCreateInput {
         principal_account_id: principal.account_id,
         collection_id,
@@ -140,7 +141,10 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
             reminder_at,
             reminder_dismissed_at: None,
         },
-        custom_property_upserts: mapi_event_custom_property_values_from_map(&properties),
+        custom_property_upserts: mapi_event_create_property_values_from_map(
+            &properties,
+            imported_event,
+        ),
         attachment_changes,
     };
     match store.create_mapi_event(create_input).await {
@@ -226,6 +230,7 @@ fn imported_event_content_properties(
             !matches!(
                 **tag,
                 PID_TAG_SOURCE_KEY
+                    | PID_TAG_SEARCH_KEY
                     | PID_TAG_CHANGE_KEY
                     | PID_TAG_PREDECESSOR_CHANGE_LIST
                     | PID_TAG_LAST_MODIFICATION_TIME

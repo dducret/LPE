@@ -121,10 +121,13 @@ pub(super) fn property_stream_data(
             (object, open_mode),
             (MapiObject::CommonViewNamedView { .. }, 1 | 2)
         ) && common_view_named_view_stream_property_is_writable(property_tag);
+    // The Outlook compatibility exception is limited to imported SetProperties;
+    // SearchKey remains read-only through the generic property-stream surface.
     let writable_pending_event = matches!(
         (object, open_mode),
         (MapiObject::PendingEvent { .. }, 1 | 2)
-    );
+    ) && canonical_property_storage_tag(property_tag)
+        != PID_TAG_SEARCH_KEY;
     let writable_pending_associated_message = matches!(
         (object, open_mode),
         (
@@ -228,14 +231,19 @@ pub(super) fn property_stream_data(
         } if open_mode == 0 => snapshot
             .event_for_id(*folder_id, *event_id)
             .and_then(|event| {
-                event_property_value_with_reminder_and_mailbox_guid(
-                    &event.event,
-                    event.id,
-                    event.folder_id,
-                    property_tag,
-                    snapshot.reminder_for_source("calendar", event.canonical_id),
-                    Some(mailbox_guid),
-                )
+                let reminder = snapshot.reminder_for_source("calendar", event.canonical_id);
+                if canonical_property_storage_tag(property_tag) == PID_TAG_SEARCH_KEY {
+                    versioned_event_property_value_with_reminder(event, property_tag, reminder)
+                } else {
+                    event_property_value_with_reminder_and_mailbox_guid(
+                        &event.event,
+                        event.id,
+                        event.folder_id,
+                        property_tag,
+                        reminder,
+                        Some(mailbox_guid),
+                    )
+                }
             }),
         _ => return None,
     };

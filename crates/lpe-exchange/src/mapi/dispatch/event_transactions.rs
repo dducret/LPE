@@ -200,7 +200,10 @@ pub(super) fn stage_pending_event_property_values(
         .collect::<Vec<_>>();
     let values = values
         .into_iter()
-        .filter(|(_, _, storage_tag, _)| !event_property_is_server_managed(*storage_tag))
+        .filter(|(_, _, storage_tag, _)| {
+            !event_property_is_server_managed(*storage_tag)
+                || (is_imported_event && *storage_tag == PID_TAG_SEARCH_KEY)
+        })
         .collect::<Vec<_>>();
     if values.is_empty() {
         return Ok(problems);
@@ -349,6 +352,7 @@ fn event_property_is_server_managed(tag: u32) -> bool {
         PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
             | PID_TAG_SOURCE_KEY
+            | PID_TAG_SEARCH_KEY
             | PID_TAG_CHANGE_KEY
             | PID_TAG_PREDECESSOR_CHANGE_LIST
             | PID_TAG_CHANGE_NUMBER
@@ -358,10 +362,14 @@ fn event_property_is_server_managed(tag: u32) -> bool {
 
 // [MS-OXCFXICS] 2.2.3.2.4.2.1 and 3.3.4.3.3.2.2.1 require the
 // import header's modification time and then a full property copy. Outlook
-// repeats that read-only value; [MS-OXCPRPT] 3.2.5.4 permits silently ignoring it.
+// repeats that value and the appointment SearchKey. [MS-OXCPRPT] 3.2.5.4
+// permits ignoring read-only changes; [MS-OXCMSG] 2.2 product note <1>
+// records Exchange's SearchKey exception. LPE bounds that compatibility to
+// the pre-first-Save value observed in the Probe B/C/D traces.
 fn event_property_reports_server_managed_problem(tag: u32, is_imported_event: bool) -> bool {
     event_property_is_server_managed(tag)
-        && !(is_imported_event && tag == PID_TAG_LAST_MODIFICATION_TIME)
+        && !(is_imported_event
+            && matches!(tag, PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_SEARCH_KEY))
 }
 
 fn validate_staged_event_property_values(
@@ -535,6 +543,24 @@ pub(super) fn event_open_mode_after_save(disposition: SaveDisposition) -> Option
         SaveDisposition::Default => None,
         SaveDisposition::KeepOpenReadOnly => Some(0x00),
         SaveDisposition::KeepOpenReadWrite | SaveDisposition::ForceSave => Some(0x01),
+    }
+}
+
+#[cfg(test)]
+mod calendar_search_key_tests {
+    use super::*;
+
+    #[test]
+    fn saved_calendar_search_key_is_immutable_and_repeated_import_is_ignored() {
+        assert!(event_property_is_server_managed(PID_TAG_SEARCH_KEY));
+        assert!(event_property_reports_server_managed_problem(
+            PID_TAG_SEARCH_KEY,
+            false
+        ));
+        assert!(!event_property_reports_server_managed_problem(
+            PID_TAG_SEARCH_KEY,
+            true
+        ));
     }
 }
 

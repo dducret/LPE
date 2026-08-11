@@ -951,11 +951,16 @@ fn hierarchy_sync_mailboxes_include_custom_sync_root() {
 }
 
 #[test]
-fn calendar_sync_object_projects_canonical_attachment_presence() {
+fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
     let event_id = Uuid::from_u128(0x71717171717141719171717171717171);
+    let source_key = vec![0x53, 0x43, 0x4f, 0x50, 0x45, 0x44];
+    let search_key = vec![
+        0x70, 0xc8, 0xfa, 0x8d, 0xfd, 0x82, 0x10, 0x4d, 0xb7, 0x80, 0x6a, 0xed, 0x2b, 0xa1, 0x70,
+        0x3a,
+    ];
     let event = crate::mapi_store::MapiEvent {
         id: crate::mapi::identity::mapi_store_id(123),
-        source_key: vec![0x53, 0x43, 0x4f, 0x50, 0x45, 0x44],
+        source_key: source_key.clone(),
         folder_id: CALENDAR_FOLDER_ID,
         canonical_id: event_id,
         event: lpe_storage::AccessibleEvent {
@@ -994,6 +999,7 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
             event_id,
             canonical_modseq: 7,
             change_number: 124,
+            search_key: Some(search_key.clone()),
             change_key: mapi_mailstore::change_key_for_change_number(124),
             predecessor_change_list: mapi_mailstore::predecessor_change_list(124),
             created_at: "2026-05-25T14:00:00Z".to_string(),
@@ -1012,6 +1018,28 @@ fn calendar_sync_object_projects_canonical_attachment_presence() {
     };
 
     let sync = calendar_sync_object(&event, None);
+
+    let binary_property = |tag| {
+        sync.named_properties
+            .iter()
+            .find_map(|(property_tag, value)| {
+                (*property_tag == tag).then(|| match value {
+                    mapi_mailstore::SpecialMessagePropertyValue::Binary(value) => value.clone(),
+                    _ => panic!("0x{tag:08x} was not binary"),
+                })
+            })
+    };
+    assert_eq!(binary_property(PID_TAG_SEARCH_KEY), Some(search_key));
+    assert_eq!(binary_property(PID_TAG_SOURCE_KEY), Some(source_key));
+    let global_object_id = binary_property(PID_LID_GLOBAL_OBJECT_ID_TAG).unwrap();
+    assert_eq!(
+        binary_property(PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG),
+        Some(global_object_id)
+    );
+    assert_ne!(
+        binary_property(PID_TAG_SEARCH_KEY).unwrap(),
+        event.canonical_id.as_bytes()
+    );
 
     assert_eq!(sync.body_text.as_deref(), Some("Agenda"));
 

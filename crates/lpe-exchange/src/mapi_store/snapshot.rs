@@ -1617,6 +1617,7 @@ fn fallback_event_version(event: &AccessibleEvent, event_id: u64) -> MapiEventVe
         event_id: event.id,
         canonical_modseq: 1,
         change_number,
+        search_key: None,
         change_key: mapi_mailstore::change_key_for_change_number(change_number),
         predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
         created_at: timestamp.clone(),
