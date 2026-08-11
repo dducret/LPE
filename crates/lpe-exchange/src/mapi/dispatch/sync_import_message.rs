@@ -1,6 +1,26 @@
 use super::*;
 use lpe_storage::MapiContactImportedIdentity;
 
+fn allocate_sync_import_message_handle(
+    session: &mut MapiSession,
+    output_handle_index: Option<u8>,
+    object: MapiObject,
+    collector_handle: u32,
+    source_key: Option<&[u8]>,
+) -> u32 {
+    let folder_id = object.folder_id();
+    let handle = session.allocate_output_handle(output_handle_index, object);
+    if let (Some(folder_id), Some(source_key)) = (
+        folder_id,
+        source_key.filter(|source_key| source_key.len() == 22),
+    ) {
+        session
+            .pending_sync_import_source_keys
+            .insert(handle, (collector_handle, folder_id, source_key.to_vec()));
+    }
+    handle
+}
+
 pub(super) fn imported_fai_identity(
     properties: &HashMap<u32, MapiValue>,
     imported_message_id: u64,
@@ -139,8 +159,18 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
 ) {
-    let Some(folder_id) =
-        input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+    let Some(collector_handle) = input_handle(handle_slots, request) else {
+        responses.extend_from_slice(&rop_error_response(
+            0x72,
+            request.response_handle_index(),
+            0x8004_010F,
+        ));
+        return;
+    };
+    let Some(folder_id) = session
+        .handles
+        .get(&collector_handle)
+        .and_then(MapiObject::folder_id)
     else {
         responses.extend_from_slice(&rop_error_response(
             0x72,
@@ -166,12 +196,18 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
         .map(|(tag, _)| format!("0x{tag:08x}"))
         .collect::<Vec<_>>()
         .join(",");
-    let import_source_key = property_values
-        .iter()
-        .find_map(|(tag, value)| match (*tag, value) {
-            (PID_TAG_SOURCE_KEY, MapiValue::Binary(bytes)) => Some(bytes_to_hex(bytes)),
-            _ => None,
-        })
+    let staged_import_source_key =
+        property_values
+            .iter()
+            .find_map(|(tag, value)| match (*tag, value) {
+                (PID_TAG_SOURCE_KEY, MapiValue::Binary(bytes)) if bytes.len() == 22 => {
+                    Some(bytes.clone())
+                }
+                _ => None,
+            });
+    let import_source_key = staged_import_source_key
+        .as_deref()
+        .map(bytes_to_hex)
         .unwrap_or_default();
     let import_source_key_global_counter =
         imported_property_source_key_global_counter(&property_values);
@@ -270,7 +306,13 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             imported_message_id: Some(message_id),
             fail_on_conflict: import_flag & 0x40 != 0,
         };
-        let handle = session.allocate_output_handle(request.output_handle_index, pending_object);
+        let handle = allocate_sync_import_message_handle(
+            session,
+            request.output_handle_index,
+            pending_object,
+            collector_handle,
+            staged_import_source_key.as_deref(),
+        );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         tracing::info!(
             rca_debug = true,
@@ -298,7 +340,13 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             imported_message_id: Some(message_id),
             fail_on_conflict: import_flag & 0x40 != 0,
         };
-        let handle = session.allocate_output_handle(request.output_handle_index, pending_object);
+        let handle = allocate_sync_import_message_handle(
+            session,
+            request.output_handle_index,
+            pending_object,
+            collector_handle,
+            staged_import_source_key.as_deref(),
+        );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         responses.extend_from_slice(&rop_synchronization_import_message_change_response(
             &request,
@@ -356,13 +404,16 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                     return;
                 }
             };
-            let handle = session.allocate_output_handle(
+            let handle = allocate_sync_import_message_handle(
+                session,
                 request.output_handle_index,
                 MapiObject::Event {
                     folder_id,
                     event_id: message_id,
                     transaction,
                 },
+                collector_handle,
+                staged_import_source_key.as_deref(),
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
             responses
@@ -420,7 +471,8 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             ));
             return;
         }
-        let handle = session.allocate_output_handle(
+        let handle = allocate_sync_import_message_handle(
+            session,
             request.output_handle_index,
             MapiObject::Message {
                 folder_id,
@@ -428,6 +480,8 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                 saved_email: None,
                 pending_properties: HashMap::new(),
             },
+            collector_handle,
+            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         record_sync_upload_content_change(
@@ -465,13 +519,16 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             ));
             return;
         }
-        let handle = session.allocate_output_handle(
+        let handle = allocate_sync_import_message_handle(
+            session,
             request.output_handle_index,
             MapiObject::PublicFolderItem {
                 folder_id,
                 item_id: message_id,
                 properties: HashMap::new(),
             },
+            collector_handle,
+            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         record_sync_upload_content_change(
@@ -505,12 +562,15 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             ));
             return;
         }
-        let handle = session.allocate_output_handle(
+        let handle = allocate_sync_import_message_handle(
+            session,
             request.output_handle_index,
             MapiObject::Note {
                 folder_id,
                 note_id: message_id,
             },
+            collector_handle,
+            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         record_sync_upload_content_change(
@@ -548,12 +608,15 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             ));
             return;
         }
-        let handle = session.allocate_output_handle(
+        let handle = allocate_sync_import_message_handle(
+            session,
             request.output_handle_index,
             MapiObject::JournalEntry {
                 folder_id,
                 journal_entry_id: message_id,
             },
+            collector_handle,
+            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         record_sync_upload_content_change(
@@ -621,7 +684,13 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                 recipients: Vec::new(),
             },
         };
-        let handle = session.allocate_output_handle(request.output_handle_index, pending_object);
+        let handle = allocate_sync_import_message_handle(
+            session,
+            request.output_handle_index,
+            pending_object,
+            collector_handle,
+            staged_import_source_key.as_deref(),
+        );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         responses.extend_from_slice(&rop_synchronization_import_message_change_response(
             &request,

@@ -1,5 +1,12 @@
 use super::*;
 
+pub(in crate::mapi) fn navigation_shortcut_type_is_group_header(shortcut_type: u32) -> bool {
+    // [MS-OXOCFG] section 2.2.9.5 defines type 4 as a group header. Outlook
+    // 16.0.20228 also emits type 5 for a Calendar group header; the save path
+    // accepts that product variant only after validating the complete header.
+    matches!(shortcut_type, 4 | 5)
+}
+
 pub(in crate::mapi) fn navigation_shortcut_property_value(
     message: &MapiNavigationShortcutMessage,
     account_id: Uuid,
@@ -218,19 +225,27 @@ fn navigation_shortcut_property_value_with_store_entry_id(
         PID_TAG_WLINK_ORDINAL => Some(MapiValue::Binary(message.ordinal.clone())),
         // [MS-OXOCFG] sections 2.2.9.3, 2.2.9.11, and 2.2.9.12
         // define these identifiers as exact 16-byte PtypBinary values.
-        PID_TAG_WLINK_GROUP_HEADER_ID if message.shortcut_type == 4 => message
-            .group_header_id
-            .map(|group_id| MapiValue::Binary(group_id.as_bytes().to_vec())),
-        PID_TAG_WLINK_GROUP_CLSID if message.shortcut_type != 4 => message
-            .group_header_id
-            .map(|group_id| MapiValue::Binary(group_id.as_bytes().to_vec())),
+        PID_TAG_WLINK_GROUP_HEADER_ID
+            if navigation_shortcut_type_is_group_header(message.shortcut_type) =>
+        {
+            message
+                .group_header_id
+                .map(|group_id| MapiValue::Binary(group_id.as_bytes().to_vec()))
+        }
+        PID_TAG_WLINK_GROUP_CLSID
+            if !navigation_shortcut_type_is_group_header(message.shortcut_type) =>
+        {
+            message
+                .group_header_id
+                .map(|group_id| MapiValue::Binary(group_id.as_bytes().to_vec()))
+        }
         // Section 3.1.4.10.1 does not list GroupName on group headers. Their
         // canonical display name is PidTagNormalizedSubject; only child
         // shortcuts carry the redundant group name from section 2.2.9.13.
         // The exact Mail-favorite shape retained by snapshot.rs represents
         // Outlook's observed omission by a missing group UUID and empty name.
         PID_TAG_WLINK_GROUP_NAME_W
-            if message.shortcut_type != 4
+            if !navigation_shortcut_type_is_group_header(message.shortcut_type)
                 && !(message.shortcut_type == 0
                     && message.section == 1
                     && message.target_folder_id.is_some()
@@ -239,15 +254,8 @@ fn navigation_shortcut_property_value_with_store_entry_id(
         {
             Some(MapiValue::String(wlink_group_name(message)))
         }
-        PID_TAG_WLINK_ENTRY_ID if message.shortcut_type != 4 => message
-            .target_folder_id
-            .and_then(|folder_id| {
-                crate::mapi::identity::folder_entry_id_from_object_id(account_id, folder_id)
-            })
-            .map(MapiValue::Binary),
-        property_tag
-            if is_sharing_local_folder_id_property_tag(property_tag)
-                && message.shortcut_type != 4 =>
+        PID_TAG_WLINK_ENTRY_ID
+            if !navigation_shortcut_type_is_group_header(message.shortcut_type) =>
         {
             message
                 .target_folder_id
@@ -256,11 +264,28 @@ fn navigation_shortcut_property_value_with_store_entry_id(
                 })
                 .map(MapiValue::Binary)
         }
-        PID_TAG_WLINK_RECORD_KEY if message.shortcut_type != 4 => message
-            .target_folder_id
-            .map(mapi_mailstore::source_key_for_store_id)
-            .map(MapiValue::Binary),
-        PID_TAG_WLINK_STORE_ENTRY_ID if message.shortcut_type != 4 => {
+        property_tag
+            if is_sharing_local_folder_id_property_tag(property_tag)
+                && !navigation_shortcut_type_is_group_header(message.shortcut_type) =>
+        {
+            message
+                .target_folder_id
+                .and_then(|folder_id| {
+                    crate::mapi::identity::folder_entry_id_from_object_id(account_id, folder_id)
+                })
+                .map(MapiValue::Binary)
+        }
+        PID_TAG_WLINK_RECORD_KEY
+            if !navigation_shortcut_type_is_group_header(message.shortcut_type) =>
+        {
+            message
+                .target_folder_id
+                .map(mapi_mailstore::source_key_for_store_id)
+                .map(MapiValue::Binary)
+        }
+        PID_TAG_WLINK_STORE_ENTRY_ID
+            if !navigation_shortcut_type_is_group_header(message.shortcut_type) =>
+        {
             store_entry_id.map(|value| MapiValue::Binary(value.to_vec()))
         }
         // [MS-OXOCFG] sections 2.2.9.15 through 2.2.9.19 and 3.1.4.10.2:

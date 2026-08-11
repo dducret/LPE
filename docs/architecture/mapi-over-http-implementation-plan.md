@@ -168,8 +168,10 @@ before it is advertised.
   `CnsetSeen, CnsetSeenFAI, IdsetGiven, CnsetRead`. All LPE content-download
   state writers now use that Exchange order, including the client-state-selected
   delta path exercised by Outlook. Hierarchy state remains
-  `CnsetSeen, IdsetGiven`, and upload state remains
-  `CnsetSeen, CnsetSeenFAI, CnsetRead`.
+  `CnsetSeen, IdsetGiven`. Ordinary upload state remains
+  `CnsetSeen, CnsetSeenFAI, CnsetRead`; the successful content-import product
+  exception described below inserts a server-computed `IdsetGiven` between
+  `CnsetSeenFAI` and `CnsetRead`.
 - The later `202608111553` rerun in the Probe-B Outlook profile confirms that
   the Exchange-order state correction is active on both the initial and
   web-update Calendar downloads, but it does not eliminate the Outlook error.
@@ -197,6 +199,32 @@ before it is advertised.
   Outlook compatibility experiment, not a proven general Exchange appointment
   contract; a fresh-profile real-client rerun is required to establish symptom
   elimination.
+- The later `202608111835` Probe E run confirms that durable SearchKey
+  preservation, root provider-identity omission, and Exchange-order download
+  state are all active, but the Calendar edit still fails locally before
+  `RopSynchronizationImportMessageChange`. It also exposes the same exact
+  earlier server failure present in Probe B, C, and D: Outlook imports the
+  targetless Calendar Common Views header `Team: test` with raw
+  `PidTagWlinkType = 5`, and LPE rejects its Save with `MAPI_E_NOT_FOUND`.
+  LPE now preserves type `5` only for that complete Calendar group-header
+  shape; `[MS-OXOCFG]` section 2.2.9.5 still defines type `4`, so this is an
+  Outlook 16.0.20228 product variant rather than a new protocol enum value.
+  Common Views and Calendar use distinct collectors and the later appointment
+  import succeeds, so eliminating the cross-folder symptom remains a
+  real-client rerun question even though the WLink rejection itself is a
+  definite server defect.
+- The same Probe E capture contains six Outlook-created `Synchronization Log:`
+  Messages moved to Deleted Items. Their body-property upload uses
+  `PidTagRtfCompressed` without `PidTagBody` or `PidTagHtml`; LPE previously
+  reduced each canonical Message to its headers and an empty body, hiding the
+  diagnostic text from the web interface and mailbox APIs. LPE now validates
+  the complete MS-OXRTFCP container, CRC, declared size, and LZFu references,
+  then uses bounded Windows-1252/Unicode RTF text extraction as the canonical plain-body
+  fallback. The exact first Probe E value round-trips through
+  `RopCreateMessage`, `RopSetProperties`, and `RopSaveChangesMessage` into a
+  readable body containing `Error synchronizing view/form` and
+  `[8004010F-501-8004010F-320]`. This deliberately does not preserve rich-RTF
+  formatting or claim arbitrary rich-text round-trip fidelity.
 - Durable Calendar custom-property validation, immutable SearchKey handling,
   and storage lookup are isolated in `mapi_events/custom_properties.rs`. This is
   the first split boundary for the thousand-line `mapi_events.rs`; identity
@@ -213,6 +241,13 @@ before it is advertised.
   construction into `mapi/properties/streams/open.rs`, leaving writable-target,
   seek, copy, commit, and mutation helpers in the parent module until a second
   cohesive write-side split is required.
+- `mapi/identity.rs` has reached the thousand-line split threshold. Before
+  extending identity behavior again, move the task-local request identity
+  scope and `MapiIdentityCodec`, including durable/logical alias encoding and
+  decoding, into `mapi/identity/scoped.rs`; leave reserved special-folder
+  constants, raw wire-format helpers, and public compatibility wrappers in the
+  parent module. Preserve request scoping and verify the split with the focused
+  identity tests and PostgreSQL WLink round-trip.
 - For an extended `Execute` request with `Chain` set and a terminal
   `RopFastTransferSourceGetBuffer`, LPE returns the original response followed
   by independently framed synthetic GetBuffer responses until the transfer is
@@ -700,6 +735,12 @@ in `mapi/sync/associated_config.rs`. Keep further behavior in those focused
 helpers and the public entry points as thin wiring. Verify changes with the
 special-message unit tests, the realistic `MessageListSettings`
 import/reconnect regression, and `cargo test -p lpe-exchange`.
+`mapi/dispatch/sync_import.rs` and `mapi/dispatch/table_diagnostics.rs` have
+also crossed the thousand-line threshold. Before expanding either again, move
+upload-checkpoint state recording into `mapi/dispatch/sync_import/state.rs` and
+Common Views diagnostic formatting into
+`mapi/dispatch/table_diagnostics/common_views.rs`; leave the current files as
+dispatch and aggregation wiring.
 
 ### Table Projection Contract
 
@@ -991,7 +1032,11 @@ non-canonical LPE state.
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder
   EntryID, type, flags, save stamp, section, ordinal, group header GUID, and
-  group display name. For fresh Outlook profiles, LPE projects bounded default
+  group display name. A target `PidTagWlinkEntryId` can carry either the
+  account's current durable special-folder identity or an advertised legacy
+  logical special-folder identity retained by the profile; the request-scoped
+  decoder normalizes both to the same canonical folder role and rejects
+  unadvertised logical aliases. For fresh Outlook profiles, LPE projects bounded default
   mail Favorites rows in the Common Views table/open path: the `Favorites`
   group header plus Inbox, Sent, and Trash shortcuts. These rows are an Outlook
   interoperability table projection, not a Microsoft-mandated Inbox
@@ -1001,7 +1046,12 @@ non-canonical LPE state.
   `[MS-OXOCFG]` defines navigation shortcuts as Common Views FAI messages that
   clients create, store, and later read. Outlook-created `WunderBar` group headers are
   persisted as Common Views FAI rows with `PidTagWlinkType = 4` and linked
-  shortcuts retain the matching `PidTagWlinkGroupClsid`. This scope covers
+  shortcuts retain the matching `PidTagWlinkGroupClsid`. Outlook 16.0.20228
+  trace `202608111835` also creates the exact targetless Calendar group-header
+  shape with raw type `5`. LPE preserves that product variant only when section
+  `3`, `CLSID_CalendarFolder`, `PidTagWlinkGroupHeaderID`, and the absence of a
+  target EntryID all validate; it is not a general extension of the type enum
+  in `[MS-OXOCFG]` section 2.2.9.5. This scope covers
   cached-mode profile creation and reopen; full Exchange navigation-pane
   presentation parity, shared-folder shortcut semantics, public-folder shortcut
   flags, and read-only group-type extensions remain deferred until real Outlook
@@ -1373,12 +1423,18 @@ not by itself authorize broad client publication.
   3.2.5.9.4.2.
 - After a new or changed Calendar import is saved, its upload collector unions
   the Event's distinct server CN into `MetaTagCnsetSeen`; it does not add that
-  CN to `MetaTagCnsetSeenFAI` or `MetaTagCnsetRead`, and it does not return the
-  Event MID in `MetaTagIdsetGiven`. The server ignores `MetaTagIdsetGiven` in an
-  upload and omits it from the final upload state, as required by
-  [[MS-OXCFXICS] section 3.2.5.2.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/696ec085-cfb4-451c-a576-7cdc81b1550a)
-  and sections 2.2.1.1.2-2.2.1.1.4. The separate server CN follows
-  [[MS-OXCFXICS] section 3.1.5.3](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/b03168dc-6ad4-4747-b1b5-c95fd436dfce).
+  CN to `MetaTagCnsetSeenFAI` or `MetaTagCnsetRead`. Exchange 2016 product
+  captures additionally return, on the originating upload collector, a
+  server-computed `MetaTagIdsetGiven` containing the exact imported Event
+  SourceKey GID after `SaveChangesMessage` succeeds.
+  LPE mirrors that Outlook compatibility behavior even though
+  `[MS-OXCFXICS]` section 3.2.5.2.1
+  normatively says upload `MetaTagIdsetGiven` is ignored and omitted. This is
+  an Exchange product exception, not a protocol `MUST`: client-uploaded Given
+  is never echoed, and pending/failed saves, deletes, read-state imports, moves,
+  hierarchy imports, foreign-replica SourceKeys, and imports whose conflicting
+  or out-of-range SourceKey is remapped to a different committed MID never add
+  an identifier. The separate server CN follows `[MS-OXCFXICS]` section 3.1.5.3.
 - Content and hierarchy manifests are selected from canonical folder membership
   and canonical change tracking rather than from primary mailbox fields alone.
 - FastTransfer source buffering emits parseable transfer chunks and validates
@@ -1565,8 +1621,11 @@ canonical `from` identity.
 - Final and checkpoint ICS download state generated by LPE uses REPLGUID-scoped
   IDSET/CNSET encoding for `MetaTagIdsetGiven`, `MetaTagCnsetSeen`,
   `MetaTagCnsetSeenFAI`, and `MetaTagCnsetRead` as applicable to the download
-  scope. Final or checkpoint ICS upload state uses the applicable CN sets only;
-  it never returns `MetaTagIdsetGiven`.
+  scope. Final or checkpoint ICS upload state uses the applicable CN sets. A
+  content collector additionally returns a server-computed `MetaTagIdsetGiven`
+  only for exact SourceKeys imported through that same collector whose Message
+  Save succeeded, following the bounded Exchange 2016 product behavior above;
+  concurrent collectors, hierarchy, and all other upload transitions omit it.
 - A successful hierarchy `RopSynchronizationImportDeletes` applies the
   canonical deletion without fabricating a CN from the deleted FID or adding
   that FID to `MetaTagCnsetSeen`. This follows the deletion behavior in
@@ -1667,6 +1726,13 @@ canonical `from` identity.
   and summary validation. Before adding further diagnostics behavior, split the
   state-summary validation into `mapi_mailstore/diagnostics/state.rs` and keep
   the marker/property decoder in `codec.rs`.
+- `dispatch/messages.rs` owns Message create/save response and containing-folder
+  handle contracts. Before expanding it, move the common create/save response
+  and handle helpers into `dispatch/messages/save.rs`; keep Message routing in
+  `dispatch/messages.rs`.
+- `mapi/session.rs` owns active-session behavior plus handle-slot lifecycle.
+  Before expanding it, move handle lookup, response-slot restoration, release,
+  and cleanup helpers into `mapi/session/handles.rs`.
 - Uploaded client CN sets are parsed as the initial upload checkpoint, not
   copied as opaque bytes or substituted for server-generated state. The final
   upload checkpoint is the semantic set union of each applicable initial CN set
@@ -1676,12 +1742,19 @@ canonical `from` identity.
   server-generated checkpoint state. After successful imported message,
   note, journal, read-state, move, delete, or hierarchy changes, the collector
   state is advanced with the server-assigned change numbers in the applicable
-  CN sets; it does not return object IDs through `MetaTagIdsetGiven`. Successful
-  delete and source-move uploads still produce an explicit server checkpoint so
-  the transfer-state path does not fall back to a stale pre-upload folder
-  snapshot. This follows `[MS-OXCFXICS]` sections 2.2.3.2.3.1, 2.2.4.4,
+  CN sets. A successful content `ImportMessageChange` plus
+  `SaveChangesMessage` also adds that import's exact SourceKey to the originating
+  collector's bounded server-computed `MetaTagIdsetGiven` when the SourceKey
+  uses the current mailbox replica GUID and the committed MID retains the same
+  GLOBCNT; the import remains pending until Save, and a failed or
+  identity-remapped Save contributes nothing. Successful delete and
+  source-move uploads still produce an explicit server checkpoint without
+  adding Given, so the transfer-state path does not fall back to a stale
+  pre-upload folder snapshot. This follows `[MS-OXCFXICS]` sections
+  2.2.3.2.3.1, 2.2.4.4,
   3.2.5.9.3.1, and 3.2.5.2.1 and `[MS-OXCROPS]` sections 2.2.13.8.1 and
-  2.2.13.8.2.
+  2.2.13.8.2, with the explicitly non-normative Exchange 2016 product exception
+  above.
 - `RopSaveChangesMessage` for an Outlook-uploaded message with an imported
   `PidTagSourceKey`, including uploads into Deleted Items, persists the message
   through canonical mail storage and returns a server-assigned Message ID/change

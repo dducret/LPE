@@ -164,7 +164,7 @@ fn validated_navigation_shortcut_from_mapi_properties(
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| anyhow!("required WLink display name is missing"))?;
     let shortcut_type = required_navigation_shortcut_u32(properties, PID_TAG_WLINK_TYPE)?;
-    if !matches!(shortcut_type, 0 | 1 | 2 | 4) {
+    if !matches!(shortcut_type, 0 | 1 | 2 | 4 | 5) {
         return Err(anyhow!("WLink type {shortcut_type} is invalid"));
     }
     let _flags = required_navigation_shortcut_u32(properties, PID_TAG_WLINK_FLAGS)?;
@@ -187,7 +187,13 @@ fn validated_navigation_shortcut_from_mapi_properties(
     };
     let folder_type =
         required_navigation_shortcut_binary_16(properties, PID_TAG_WLINK_FOLDER_TYPE)?;
-    if shortcut_type == 4 {
+    let is_group_header = navigation_shortcut_type_is_group_header(shortcut_type);
+    if shortcut_type == 5 && section != 3 {
+        return Err(anyhow!(
+            "Outlook WLink type 5 is valid only for a Calendar group header"
+        ));
+    }
+    if is_group_header {
         if navigation_shortcut_property_by_id(properties, PID_TAG_WLINK_ENTRY_ID).is_some() {
             return Err(anyhow!("a WLink group header cannot target a folder"));
         }
@@ -219,7 +225,7 @@ fn validated_navigation_shortcut_from_mapi_properties(
     // properties unambiguously describe a normal Mail favorite. This rule is
     // independent of client version, session, and captured identifiers, and
     // avoids fabricating an associated group that the client did not send.
-    let (group_name, group_id) = if shortcut_type == 4 {
+    let (group_name, group_id) = if is_group_header {
         (
             subject.to_string(),
             Some(Uuid::from_bytes(required_navigation_shortcut_binary_16(
@@ -250,7 +256,7 @@ fn validated_navigation_shortcut_from_mapi_properties(
         || shortcut.group_name != group_name
         || shortcut.group_header_id != group_id
         || wlink_folder_type_guid(&shortcut) != folder_type
-        || (shortcut_type != 4 && shortcut.target_folder_id.is_none())
+        || (!is_group_header && shortcut.target_folder_id.is_none())
     {
         return Err(anyhow!(
             "WLink properties do not identify one canonical shortcut"
@@ -633,6 +639,62 @@ pub(super) async fn append_existing_navigation_shortcut_save_response<S: Exchang
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outlook_type_five_wlink_is_limited_to_targetless_calendar_headers() {
+        let account_id = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let mut properties = HashMap::from([
+            (
+                PID_TAG_SUBJECT_W,
+                MapiValue::String("Team: test".to_string()),
+            ),
+            (PID_TAG_WLINK_TYPE, MapiValue::U32(5)),
+            (PID_TAG_WLINK_FLAGS, MapiValue::U32(0)),
+            (PID_TAG_WLINK_SAVE_STAMP, MapiValue::U32(1)),
+            (PID_TAG_WLINK_SECTION, MapiValue::U32(3)),
+            (PID_TAG_WLINK_ORDINAL, MapiValue::Binary(vec![0xBF])),
+            (
+                PID_TAG_WLINK_FOLDER_TYPE,
+                MapiValue::Binary(vec![
+                    0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x46,
+                ]),
+            ),
+            (
+                PID_TAG_WLINK_GROUP_HEADER_ID,
+                MapiValue::Binary(vec![0x5A; 16]),
+            ),
+        ]);
+
+        let header =
+            validated_navigation_shortcut_from_mapi_properties(account_id, None, &properties)
+                .expect("complete Outlook type-5 Calendar header");
+        assert_eq!(header.shortcut_type, 5);
+        assert_eq!(header.section, 3);
+        assert_eq!(header.target_folder_id, None);
+
+        properties.insert(PID_TAG_WLINK_SECTION, MapiValue::U32(4));
+        assert!(
+            validated_navigation_shortcut_from_mapi_properties(account_id, None, &properties,)
+                .is_err()
+        );
+
+        properties.insert(PID_TAG_WLINK_SECTION, MapiValue::U32(3));
+        properties.insert(
+            PID_TAG_WLINK_ENTRY_ID,
+            MapiValue::Binary(
+                crate::mapi::identity::folder_entry_id_from_object_id(
+                    account_id,
+                    CALENDAR_FOLDER_ID,
+                )
+                .unwrap(),
+            ),
+        );
+        assert!(
+            validated_navigation_shortcut_from_mapi_properties(account_id, None, &properties,)
+                .is_err()
+        );
+    }
 
     #[test]
     fn wlink_group_identifiers_reject_obsolete_ptyp_guid_tags() {

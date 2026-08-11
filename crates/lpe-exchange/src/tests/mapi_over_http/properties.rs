@@ -742,6 +742,70 @@ async fn mapi_over_http_microsoft_oxcmsg_setting_message_properties_preserves_ht
 }
 
 #[tokio::test]
+async fn mapi_over_http_outlook_sync_log_rtf_only_save_keeps_canonical_body_text() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let compressed_rtf = BASE64_STANDARD
+        .decode(crate::mapi::properties::OUTLOOK_SYNC_LOG_RTF_BASE64)
+        .expect("captured Outlook Sync Log RTF");
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Synchronization Log:");
+    append_mapi_binary_property(&mut property_values, 0x1009_0102, &compressed_rtf);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_create_message(&mut rops, 1, 2, test_mapi_folder_id(5));
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 2);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0A, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+
+    let recorded = imported_emails.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].subject, "Synchronization Log:");
+    assert!(recorded[0]
+        .body_text
+        .starts_with("18:30:46 Synchronizer Version 16.0.20228"));
+    assert!(recorded[0]
+        .body_text
+        .contains("18:30:54 Error synchronizing view/form"));
+    assert!(recorded[0]
+        .body_text
+        .contains("[8004010F-501-8004010F-320]"));
+    assert!(recorded[0].body_html_sanitized.is_none());
+}
+
+#[tokio::test]
 async fn mapi_over_http_get_properties_sees_message_saved_in_same_execute() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let store = FakeStore {

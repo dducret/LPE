@@ -1388,6 +1388,7 @@ pub(in crate::mapi) fn release_handle_slot(
         session.handles.remove(handle);
         session.folder_profile_property_tombstones.remove(handle);
         session.message_handle_generations.remove(handle);
+        session.pending_sync_import_source_keys.remove(handle);
     }
     *handle = u32::MAX;
 }

@@ -890,9 +890,15 @@ pub(super) fn pending_body_text_property(properties: &HashMap<u32, MapiValue>) -
     if !body_text.trim().is_empty() {
         return body_text;
     }
-    pending_html_property(properties)
-        .map(|value| plain_text_from_html_body(&value))
-        .unwrap_or_default()
+    if let Some(html) = pending_html_property(properties) {
+        return plain_text_from_html_body(&html);
+    }
+    match properties.get(&PID_TAG_RTF_COMPRESSED) {
+        Some(MapiValue::Binary(value)) => {
+            super::rtf::plain_text_from_rtf_container(value).unwrap_or_default()
+        }
+        _ => String::new(),
+    }
 }
 
 pub(in crate::mapi) fn pending_text_property(
@@ -1001,6 +1007,7 @@ mod tests {
             message_handle_generations: HashMap::new(),
             pending_message_recipient_replacements: HashMap::new(),
             pending_message_attachments: HashMap::new(),
+            pending_sync_import_source_keys: HashMap::new(),
             pending_attachment_parent_messages: HashMap::new(),
             pending_event_attachment_transactions: HashMap::new(),
             pending_attachment_deletions: HashSet::new(),

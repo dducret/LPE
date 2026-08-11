@@ -2737,9 +2737,10 @@ fn save_changes_success_response_preserves_containing_folder_handle_slot() {
     };
     let mut responses = Vec::new();
     let mut handle_slots = vec![77, 42];
+    let mut session = test_mapi_session();
 
     append_save_changes_message_response(
-        &test_mapi_session(),
+        &mut session,
         &mut responses,
         &mut handle_slots,
         &request,
@@ -2750,6 +2751,79 @@ fn save_changes_success_response_preserves_containing_folder_handle_slot() {
     assert_eq!(handle_slots, vec![77, 42]);
     assert_eq!(responses[0], 0x0c);
     assert_eq!(responses[1], 1);
+}
+
+#[test]
+fn saved_import_given_is_isolated_and_requires_committed_local_identity() {
+    const META_TAG_IDSET_GIVEN: u32 = 0x4017_0003;
+
+    fn collector(folder_id: u64) -> MapiObject {
+        MapiObject::SynchronizationCollector {
+            folder_id,
+            mailbox_id: None,
+            checkpoint_kind: MapiCheckpointKind::Content,
+            sync_type: 0x01,
+            state: Vec::new(),
+            state_upload_property_tag: None,
+            state_upload_buffer: Vec::new(),
+            client_state_uploaded_bytes: 0,
+            client_state_uploaded_marker_mask: 0,
+            uploaded_object_ids: Vec::new(),
+            saved_import_source_keys: Vec::new(),
+            uploaded_normal_change_numbers: Vec::new(),
+            uploaded_fai_change_numbers: Vec::new(),
+            uploaded_read_change_numbers: Vec::new(),
+        }
+    }
+
+    let folder_id = crate::mapi::identity::CALENDAR_FOLDER_ID;
+    let source_key = crate::mapi::identity::source_key_for_object_id(
+        crate::mapi::identity::mapi_store_id(0x065d),
+    );
+    let mut foreign_source_key = source_key.clone();
+    foreign_source_key[0] ^= 0xFF;
+    let imported_message_id = crate::mapi::identity::mapi_store_id(0x065d);
+    let mut session = test_mapi_session();
+    session.handles.insert(100, collector(folder_id));
+    session.handles.insert(200, collector(folder_id));
+    session.handles.insert(300, collector(folder_id));
+
+    record_sync_upload_saved_import_source_key(
+        &mut session,
+        100,
+        folder_id,
+        imported_message_id,
+        &source_key,
+    );
+    record_sync_upload_saved_import_source_key(
+        &mut session,
+        200,
+        folder_id,
+        crate::mapi::identity::mapi_store_id(0x065e),
+        &source_key,
+    );
+    record_sync_upload_saved_import_source_key(
+        &mut session,
+        300,
+        folder_id,
+        imported_message_id,
+        &foreign_source_key,
+    );
+
+    for (handle, expected_given) in [(100, true), (200, false), (300, false)] {
+        let MapiObject::SynchronizationCollector { state, .. } =
+            session.handles.get(&handle).unwrap()
+        else {
+            unreachable!();
+        };
+        assert_eq!(
+            state
+                .windows(4)
+                .any(|window| window == META_TAG_IDSET_GIVEN.to_le_bytes()),
+            expected_given,
+            "collector handle {handle} Given isolation/remap guard"
+        );
+    }
 }
 
 #[test]
@@ -3052,6 +3126,7 @@ fn test_mapi_session() -> MapiSession {
         message_statuses: HashMap::new(),
         message_save_generations: HashMap::new(),
         message_handle_generations: HashMap::new(),
+        pending_sync_import_source_keys: HashMap::new(),
         pending_message_recipient_replacements: HashMap::new(),
         pending_message_attachments: HashMap::new(),
         pending_attachment_parent_messages: HashMap::new(),

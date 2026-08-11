@@ -33,12 +33,16 @@ mod notes;
 mod recurrence;
 mod reminders;
 mod restrictions;
+mod rtf;
 mod search_folders;
 mod streams;
 mod tags;
 mod task;
 mod values;
 mod views;
+
+#[cfg(test)]
+pub(crate) use rtf::OUTLOOK_SYNC_LOG_RTF_BASE64;
 
 pub(in crate::mapi) use attachments::*;
 pub(in crate::mapi) use calendar::*;

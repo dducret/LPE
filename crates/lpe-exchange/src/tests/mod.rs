@@ -12971,13 +12971,6 @@ fn assert_content_upload_final_state_includes(
     );
     let state = &state_chunks[0].1;
 
-    for tag in [META_TAG_IDSET_GIVEN, META_TAG_IDSET_GIVEN_BINARY] {
-        assert!(
-            !contains_bytes(state, &tag.to_le_bytes()),
-            "[MS-OXCFXICS] section 3.2.5.2.1 forbids MetaTagIdsetGiven in upload state"
-        );
-    }
-
     for (tag, name, change_numbers) in [
         (
             META_TAG_CNSET_SEEN,
@@ -12996,10 +12989,36 @@ fn assert_content_upload_final_state_includes(
             assert!(
                 strict_replguid_globset_contains_counter(cnset, &globcnt_bytes(*change_number))
                     .unwrap(),
-                "final content upload {name} missing change {change_number}"
+                "final content upload {name} missing change {change_number}: {state:02x?}"
             );
         }
     }
+}
+
+fn assert_content_upload_final_state_omits_given(bytes: &[u8]) {
+    let state_chunks = mapi_fast_transfer_chunks(bytes);
+    assert_eq!(state_chunks.len(), 1);
+    for tag in [META_TAG_IDSET_GIVEN, META_TAG_IDSET_GIVEN_BINARY] {
+        assert!(
+            !contains_bytes(&state_chunks[0].1, &tag.to_le_bytes()),
+            "upload state unexpectedly contains MetaTagIdsetGiven"
+        );
+    }
+}
+
+fn assert_content_upload_final_state_includes_source_key(bytes: &[u8], source_key: &[u8]) {
+    assert_eq!(source_key.len(), 22, "SourceKey must be one complete XID");
+    let state_chunks = mapi_fast_transfer_chunks(bytes);
+    assert_eq!(state_chunks.len(), 1);
+    let idset_given = mapi_binary_property_value(&state_chunks[0].1, META_TAG_IDSET_GIVEN);
+    assert!(
+        idset_given.starts_with(&source_key[..16]),
+        "upload IdsetGiven did not preserve the imported SourceKey REPLGUID"
+    );
+    assert!(
+        strict_replguid_globset_contains_counter(idset_given, &source_key[16..22]).unwrap(),
+        "upload IdsetGiven is missing the imported SourceKey GLOBCNT"
+    );
 }
 
 fn mapi_binary_property_value(bytes: &[u8], property_tag: u32) -> &[u8] {

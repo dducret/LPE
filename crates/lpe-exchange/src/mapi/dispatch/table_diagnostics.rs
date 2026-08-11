@@ -1151,7 +1151,7 @@ pub(super) fn format_common_views_wlink_target_decoding(
         .common_views_table_messages()
         .filter_map(|message| match message {
             crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(shortcut) => {
-                if shortcut.shortcut_type == 4 {
+                if navigation_shortcut_type_is_group_header(shortcut.shortcut_type) {
                     return None;
                 }
                 let entry_id = shortcut
@@ -1265,7 +1265,7 @@ pub(super) fn format_common_views_wlink_contract_summary(
             matches!(
                 message,
                 crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                    if shortcut.shortcut_type != 4
+                    if !navigation_shortcut_type_is_group_header(shortcut.shortcut_type)
             )
         })
         .count();
@@ -1275,7 +1275,7 @@ pub(super) fn format_common_views_wlink_contract_summary(
             matches!(
                 message,
                 crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(shortcut)
-                    if shortcut.shortcut_type == 4
+                    if navigation_shortcut_type_is_group_header(shortcut.shortcut_type)
             )
         })
         .count();

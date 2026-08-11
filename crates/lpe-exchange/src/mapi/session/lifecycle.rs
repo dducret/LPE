@@ -127,6 +127,7 @@ pub(in crate::mapi) fn create_session(
         message_statuses: HashMap::new(),
         message_save_generations: HashMap::new(),
         message_handle_generations: HashMap::new(),
+        pending_sync_import_source_keys: HashMap::new(),
         pending_message_recipient_replacements: HashMap::new(),
         pending_message_attachments: HashMap::new(),
         pending_attachment_parent_messages: HashMap::new(),

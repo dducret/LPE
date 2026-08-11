@@ -528,6 +528,7 @@ pub(super) fn append_synchronization_open_collector_response(
             client_state_uploaded_bytes: 0,
             client_state_uploaded_marker_mask: 0,
             uploaded_object_ids: Vec::new(),
+            saved_import_source_keys: Vec::new(),
             uploaded_normal_change_numbers: Vec::new(),
             uploaded_fai_change_numbers: Vec::new(),
             uploaded_read_change_numbers: Vec::new(),
@@ -953,6 +954,7 @@ pub(super) fn record_sync_upload_content_change(
             sync_type,
             state,
             uploaded_object_ids,
+            saved_import_source_keys,
             uploaded_normal_change_numbers,
             uploaded_fai_change_numbers,
             uploaded_read_change_numbers,
@@ -977,8 +979,8 @@ pub(super) fn record_sync_upload_content_change(
         if read_state_changed && !uploaded_read_change_numbers.contains(&change_number) {
             uploaded_read_change_numbers.push(change_number);
         }
-        *state = mapi_mailstore::upload_sync_state_stream_from_sets(
-            0x01,
+        *state = mapi_mailstore::content_upload_sync_state_stream_from_sets_with_saved_imports(
+            saved_import_source_keys,
             uploaded_normal_change_numbers,
             uploaded_fai_change_numbers,
             uploaded_read_change_numbers,
@@ -992,6 +994,7 @@ pub(super) fn record_sync_upload_content_checkpoint(session: &mut MapiSession, f
             folder_id: collector_folder_id,
             sync_type,
             state,
+            saved_import_source_keys,
             uploaded_normal_change_numbers,
             uploaded_fai_change_numbers,
             uploaded_read_change_numbers,
@@ -1003,13 +1006,60 @@ pub(super) fn record_sync_upload_content_checkpoint(session: &mut MapiSession, f
         if *collector_folder_id != folder_id || *sync_type != 0x01 {
             continue;
         }
-        *state = mapi_mailstore::upload_sync_state_stream_from_sets(
-            0x01,
+        *state = mapi_mailstore::content_upload_sync_state_stream_from_sets_with_saved_imports(
+            saved_import_source_keys,
             uploaded_normal_change_numbers,
             uploaded_fai_change_numbers,
             uploaded_read_change_numbers,
         );
     }
+}
+
+pub(super) fn record_sync_upload_saved_import_source_key(
+    session: &mut MapiSession,
+    collector_handle: u32,
+    folder_id: u64,
+    committed_message_id: u64,
+    source_key: &[u8],
+) {
+    let Some(imported_counter) = source_key_global_counter(source_key) else {
+        return;
+    };
+    if crate::mapi::identity::global_counter_from_store_id(committed_message_id)
+        != Some(imported_counter)
+    {
+        // A conflicting or out-of-range imported identity was remapped during
+        // Save. Do not acknowledge the discarded SourceKey in IdsetGiven.
+        return;
+    }
+    let Some(MapiObject::SynchronizationCollector {
+        folder_id: collector_folder_id,
+        sync_type,
+        state,
+        saved_import_source_keys,
+        uploaded_normal_change_numbers,
+        uploaded_fai_change_numbers,
+        uploaded_read_change_numbers,
+        ..
+    }) = session.handles.get_mut(&collector_handle)
+    else {
+        return;
+    };
+    if *collector_folder_id != folder_id || *sync_type != 0x01 {
+        return;
+    }
+    if !saved_import_source_keys
+        .iter()
+        .any(|saved_source_key| saved_source_key == source_key)
+    {
+        saved_import_source_keys.push(source_key.to_vec());
+    }
+    *state = mapi_mailstore::content_upload_sync_state_stream_from_sets_with_saved_imports(
+        saved_import_source_keys,
+        uploaded_normal_change_numbers,
+        uploaded_fai_change_numbers,
+        uploaded_read_change_numbers,
+    );
 }
 
 pub(super) fn record_sync_upload_hierarchy_change_with_change_number(

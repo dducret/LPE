@@ -36,14 +36,14 @@ pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
         .unwrap_or(2);
     let group_header_id = navigation_shortcut_property_by_id(
         properties,
-        if shortcut_type == 4 {
+        if navigation_shortcut_type_is_group_header(shortcut_type) {
             &PID_TAG_WLINK_GROUP_HEADER_ID
         } else {
             &PID_TAG_WLINK_GROUP_CLSID
         },
     )
     .and_then(navigation_shortcut_guid_value);
-    let group_name = if shortcut_type == 4 {
+    let group_name = if navigation_shortcut_type_is_group_header(shortcut_type) {
         // [MS-OXOCFG] section 3.1.4.10.1 does not put
         // PidTagWlinkGroupName on a group header. Its canonical group name is
         // the display name carried by PidTagNormalizedSubject.

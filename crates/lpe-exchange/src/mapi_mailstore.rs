@@ -563,11 +563,15 @@ pub(crate) fn upload_sync_state_stream_with_uploaded_property(
         META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => META_TAG_IDSET_GIVEN,
         tag => tag,
     };
-    // [MS-OXCFXICS] section 3.2.5.2.1: MetaTagIdsetGiven is ignored
-    // during upload and is not included in the final upload state.
+    // [MS-OXCFXICS] section 3.2.5.2.1: client-supplied MetaTagIdsetGiven is
+    // ignored and never echoed. Returning the current state also preserves a
+    // server-computed saved-import Given already present under the bounded
+    // Exchange 2016 product compatibility exception below.
     if normalized_property_tag == META_TAG_IDSET_GIVEN {
         return current_state.to_vec();
     }
+    let server_computed_idset_given =
+        sync_state_property_value(current_state, META_TAG_IDSET_GIVEN).unwrap_or_default();
     let cnset_seen = if normalized_property_tag == META_TAG_CNSET_SEEN {
         value.to_vec()
     } else {
@@ -585,6 +589,7 @@ pub(crate) fn upload_sync_state_stream_with_uploaded_property(
     };
     upload_sync_state_stream_from_raw_properties(
         sync_type,
+        &server_computed_idset_given,
         &cnset_seen,
         &cnset_seen_fai,
         &cnset_read,
@@ -599,6 +604,27 @@ pub(crate) fn upload_sync_state_stream_from_sets(
 ) -> Vec<u8> {
     upload_sync_state_stream_from_raw_properties(
         sync_type,
+        &[],
+        &replguid_idset_from_counters(normal_change_numbers),
+        &replguid_idset_from_counters(fai_change_numbers),
+        &replguid_idset_from_counters(read_change_numbers),
+    )
+}
+
+pub(crate) fn content_upload_sync_state_stream_from_sets_with_saved_imports(
+    saved_import_source_keys: &[Vec<u8>],
+    normal_change_numbers: &[u64],
+    fai_change_numbers: &[u64],
+    read_change_numbers: &[u64],
+) -> Vec<u8> {
+    let idset_given = client_state::replguid_idset_from_source_keys(
+        saved_import_source_keys
+            .iter()
+            .map(|source_key| (source_key.as_slice(), 0)),
+    );
+    upload_sync_state_stream_from_raw_properties(
+        SYNC_TYPE_CONTENTS,
+        &idset_given,
         &replguid_idset_from_counters(normal_change_numbers),
         &replguid_idset_from_counters(fai_change_numbers),
         &replguid_idset_from_counters(read_change_numbers),
@@ -645,6 +671,7 @@ fn sync_state_stream_from_raw_properties(
 
 fn upload_sync_state_stream_from_raw_properties(
     sync_type: u8,
+    server_computed_idset_given: &[u8],
     cnset_seen: &[u8],
     cnset_seen_fai: &[u8],
     cnset_read: &[u8],
@@ -654,6 +681,17 @@ fn upload_sync_state_stream_from_raw_properties(
     write_binary_property(&mut token, META_TAG_CNSET_SEEN, cnset_seen);
     if sync_type == SYNC_TYPE_CONTENTS {
         write_binary_property(&mut token, META_TAG_CNSET_SEEN_FAI, cnset_seen_fai);
+        // Exchange 2016 returns a server-computed IdsetGiven after a successful
+        // imported-Message Save. This is a bounded product exception to
+        // [MS-OXCFXICS] section 3.2.5.2.1: client Given remains ignored and an
+        // empty computed set remains omitted.
+        if !server_computed_idset_given.is_empty() {
+            write_binary_property(
+                &mut token,
+                META_TAG_IDSET_GIVEN,
+                server_computed_idset_given,
+            );
+        }
         write_binary_property(&mut token, META_TAG_CNSET_READ, cnset_read);
     }
     write_u32(&mut token, INCR_SYNC_STATE_END);

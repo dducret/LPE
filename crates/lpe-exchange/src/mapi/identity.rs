@@ -396,7 +396,10 @@ impl MapiIdentityCodec {
         }
         global_counter_from_globcnt(&entry_id[38..44])
             .map(mapi_store_id)
-            .and_then(|object_id| self.logical_object_id(object_id))
+            .and_then(|object_id| {
+                self.logical_object_id(object_id)
+                    .or_else(|| is_advertised_special_folder_id(object_id).then_some(object_id))
+            })
     }
 
     pub(crate) fn object_id_from_folder_identifier_bytes(&self, bytes: &[u8]) -> Option<u64> {
@@ -1062,6 +1065,9 @@ pub(crate) fn legacy_migration_object_id(canonical_id: &Uuid) -> u64 {
     ]) & 0x0000_FFFF_FFFF_FFFF;
     mapi_store_id(value.max(0x100))
 }
+
+#[cfg(test)]
+mod entry_id_tests;
 
 #[cfg(test)]
 mod tests {
