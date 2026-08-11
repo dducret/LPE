@@ -36,6 +36,10 @@ pub(super) const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x3005_001F, // PidTagAddressBookDisplayNamePrintable / legacy DN
     0x3A20_001E, // PidTagTransmittableDisplayName string8
     0x3A20_001F, // PidTagTransmittableDisplayName
+    0x3A19_001E, // PidTagOfficeLocation string8
+    0x3A19_001F, // PidTagOfficeLocation
+    0x3A40_000B, // PidTagSendRichInfo
+    0x3A71_0003, // PidTagSendInternetEncoding
     0x3A06_001E, // PidTagGivenName string8
     0x3A06_001F, // PidTagGivenName
     0x3A0F_001E, // PidTagMessageHandlingSystemCommonName string8
@@ -120,9 +124,6 @@ pub(super) const NSPI_SUPPORTED_REQUEST_TYPES: &[MapiRequestType] = &[
 ];
 
 const NSPI_KNOWN_UNSUPPORTED_PROPERTY_TAGS: &[(u32, &str)] = &[
-    (0x3A19_001E, "PidTagOfficeLocation"),
-    (0x3A19_001F, "PidTagOfficeLocation"),
-    (0x3A71_001F, "PidTagSendRichInfo"),
     (0x3A8C_001E, "PidTagAddressBookPhoneticDisplayName"),
     (0x3A8C_001F, "PidTagAddressBookPhoneticDisplayName"),
     (0x3A8F_001E, "PidTagAddressBookPhoneticCompanyName"),
@@ -181,6 +182,70 @@ pub(in crate::mapi) fn nspi_requested_property_tags(request: &[u8]) -> Vec<u32> 
     } else {
         tags
     }
+}
+
+// [MS-OXCMAPIHTTP] 2.2.5.5.1: GetMatches finishes with HasColumns, an
+// optional LargePropertyTagArray, and the auxiliary buffer. Parse that
+// declared suffix instead of scanning four-byte-aligned words: HasColumns is
+// byte-sized, so Outlook's actual property tags are commonly unaligned.
+pub(super) fn nspi_declared_property_tag_suffix(request: &[u8]) -> Option<Vec<u32>> {
+    let mut found = None;
+    for has_columns_offset in 0..request.len() {
+        if request[has_columns_offset] == 0 || has_columns_offset + 9 > request.len() {
+            continue;
+        }
+        let count = u32::from_le_bytes(
+            request[has_columns_offset + 1..has_columns_offset + 5]
+                .try_into()
+                .ok()?,
+        ) as usize;
+        if count > 100_000 {
+            continue;
+        }
+        let tags_bytes = count.checked_mul(4)?;
+        let auxiliary_size_offset = has_columns_offset.checked_add(5 + tags_bytes)?;
+        let Some(auxiliary_size_bytes) =
+            request.get(auxiliary_size_offset..auxiliary_size_offset + 4)
+        else {
+            continue;
+        };
+        let auxiliary_size = u32::from_le_bytes(auxiliary_size_bytes.try_into().ok()?) as usize;
+        if auxiliary_size_offset
+            .checked_add(4 + auxiliary_size)
+            .filter(|end| *end == request.len())
+            .is_none()
+        {
+            continue;
+        }
+
+        let mut tags = Vec::with_capacity(count);
+        let mut offset = has_columns_offset + 5;
+        for _ in 0..count {
+            tags.push(u32::from_le_bytes(
+                request[offset..offset + 4].try_into().ok()?,
+            ));
+            offset += 4;
+        }
+        if tags.iter().any(|tag| !nspi_property_tag_is_supported(*tag)) {
+            continue;
+        }
+        if found.replace(tags).is_some() {
+            return None;
+        }
+    }
+    found
+}
+
+// [MS-OXNSPI] 3.1.4.1.10 constraint 16: on success, GetMatches copies
+// CurrentRec to ContainerID and leaves every other STAT field unchanged.
+pub(super) fn nspi_get_matches_response_state(request: &[u8]) -> Option<[u8; 36]> {
+    if request.get(4).copied()? == 0 {
+        return None;
+    }
+    let mut state: [u8; 36] = request.get(5..41)?.try_into().ok()?;
+    let current_rec: [u8; 4] = state[8..12].try_into().ok()?;
+    state[4..8].copy_from_slice(&current_rec);
+    Some(state)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -353,8 +418,22 @@ pub(in crate::mapi) fn nspi_resolved_entry_row(
     directory_entries: &[ExchangeAddressBookEntry],
 ) -> Vec<u8> {
     let mut row = Vec::new();
-    row.push(0);
+    let has_missing_values = columns
+        .iter()
+        .any(|property_tag| !nspi_property_tag_is_supported(*property_tag));
+    row.push(u8::from(has_missing_values));
     for property_tag in columns {
+        if has_missing_values {
+            if nspi_property_tag_is_supported(*property_tag) {
+                row.push(0);
+            } else {
+                // [MS-OXCMAPIHTTP] 2.2.1.5 and 2.2.1.7 require one
+                // flagged error slot for each unavailable requested column.
+                row.push(0x0A);
+                write_u32(&mut row, 0x8004_010F);
+                continue;
+            }
+        }
         write_address_book_property_value(
             &mut row,
             *property_tag,
@@ -471,6 +550,9 @@ pub(in crate::mapi) fn nspi_entry_value_with_directory<'a>(
         0x3002_001F | 0x3002_001E => NspiValue::String("EX"),
         0x3005_001F | 0x3005_001E => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
         0x3A20_001F | 0x3A20_001E => NspiValue::String(&entry.display_name),
+        0x3A19_001F | 0x3A19_001E => NspiValue::String(""),
+        0x3A40_000B => NspiValue::Bool(false),
+        0x3A71_0003 => NspiValue::U32(0),
         0x3A06_001F | 0x3A06_001E => NspiValue::String(&entry.details.given_name),
         0x3A0F_001F | 0x3A0F_001E => NspiValue::String(&entry.display_name),
         0x3A11_001F | 0x3A11_001E => NspiValue::String(&entry.details.surname),

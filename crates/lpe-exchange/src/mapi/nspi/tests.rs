@@ -367,12 +367,39 @@ fn nspi_entry_required_address_book_properties_match_exchange_identity_contract(
         nspi_u32_value(nspi_entry_value(account_id, &entry, 0xFFFD_0003)),
         0
     );
+    assert!(matches!(
+        nspi_entry_value(account_id, &entry, 0x3A40_000B),
+        NspiValue::Bool(false)
+    ));
+    assert_eq!(
+        nspi_u32_value(nspi_entry_value(account_id, &entry, 0x3A71_0003)),
+        0
+    );
     assert_eq!(
         nspi_binary_value(nspi_entry_value(account_id, &entry, 0x300B_0102)),
         format!("EX:{}", legacy_dn.to_ascii_uppercase())
             .bytes()
             .chain(std::iter::once(0))
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn query_rows_missing_column_uses_flagged_error_without_truncating_row() {
+    let account_id = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+    let entry = ExchangeAddressBookEntry {
+        id: account_id,
+        display_name: "Alice".to_string(),
+        email: "alice@example.test".to_string(),
+        entry_kind: ExchangeAddressBookEntryKind::Account,
+        directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        member_emails: Vec::new(),
+        details: ExchangeAddressBookEntryDetails::default(),
+    };
+
+    assert_eq!(
+        nspi_resolved_entry_row(account_id, &entry, &[0x0FFE_0003, 0x1234_0102], &[]),
+        vec![1, 0, 6, 0, 0, 0, 0x0A, 0x0F, 0x01, 0x04, 0x80]
     );
 }
 
@@ -452,55 +479,78 @@ fn requested_entry_ids_ignore_misaligned_utf16_lookup_bytes() {
 }
 
 #[test]
-fn query_rows_count_skips_explicit_table_before_count() {
-    let mut request = Vec::new();
-    request.extend_from_slice(&0u32.to_le_bytes());
-    request.extend_from_slice(&[0; 36]);
-    request.extend_from_slice(&2u32.to_le_bytes());
-    request.extend_from_slice(&0x8000_0034u32.to_le_bytes());
-    request.extend_from_slice(&0x4000_0001u32.to_le_bytes());
-    request.extend_from_slice(&7u32.to_le_bytes());
+fn query_rows_parser_decodes_complete_outlook_explicit_table_request() {
+    let request = hex_bytes(
+        "00000000ff000000000000000000000000000000000000000000000000e40400000904000009080000\
+         010000002b00008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a1f000330\
+         1f0002300b00403a1f00ff391f00fe390300713a00000000",
+    );
+    let parsed = parse_nspi_query_rows_request("QueryRows", &request).unwrap();
 
-    assert_eq!(nspi_query_rows_count("QueryRows", &request), Some(7));
+    assert_eq!(parsed.state, Some(request[5..41].try_into().unwrap()));
+    assert_eq!(parsed.explicit_entry_ids, vec![0x8000_002B]);
+    assert_eq!(parsed.row_count, 1);
+    let expected_tags = vec![
+        0x0FFF_0102,
+        0x3001_001F,
+        0x0FFE_0003,
+        0x3900_0003,
+        0x3A20_001F,
+        0x3003_001F,
+        0x3002_001F,
+        0x3A40_000B,
+        0x39FF_001F,
+        0x39FE_001F,
+        0x3A71_0003,
+    ];
+    assert_eq!(parsed.property_tags, Some(expected_tags));
 }
 
 #[test]
-fn query_rows_count_parses_outlook_explicit_table_body() {
+fn requested_property_tags_parse_unaligned_get_matches_column_suffix() {
     let request = hex_bytes(
-            "00000000ff0000000000000000000000000000000000000000000000e40400000904000009080000010000003400008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a1f0003301f0002300b00403a1f00ff391f00",
-        );
+        "00000000ffe80300000d0010812b000080000000000000000000000000e40400000904000000000000\
+         00000000800000ffffff7fff0f0000001f0001301f00173a1f00083a1f00193a1f00183a1f00fe391f\
+         00163a1f00003a1f0002300201ff0f0300fe0f03000039030005390201f60f1e00033000000000",
+    );
 
-    assert_eq!(nspi_query_rows_count("QueryRows", &request), Some(1));
     assert_eq!(
-        nspi_query_rows_explicit_entry_ids("QueryRows", &request),
-        vec![0x8000_0034]
+        nspi_declared_property_tag_suffix(&request).unwrap(),
+        vec![
+            0x3001_001F,
+            0x3A17_001F,
+            0x3A08_001F,
+            0x3A19_001F,
+            0x3A18_001F,
+            0x39FE_001F,
+            0x3A16_001F,
+            0x3A00_001F,
+            0x3002_001F,
+            0x0FFF_0102,
+            0x0FFE_0003,
+            0x3900_0003,
+            0x3905_0003,
+            0x0FF6_0102,
+            0x3003_001E,
+        ]
+    );
+    let mut expected_state: [u8; 36] = request[5..41].try_into().unwrap();
+    expected_state[4..8].copy_from_slice(&request[13..17]);
+    assert_eq!(
+        nspi_get_matches_response_state(&request),
+        Some(expected_state)
     );
 }
 
 #[test]
-fn query_rows_parser_falls_back_to_body_shape_for_logged_outlook_body() {
+fn strict_query_rows_parser_rejects_truncated_log_preview() {
     let request = hex_bytes(
-            "00000000ff0000000000000000000000000000000000000000000000e40400000904000009080000010000003400008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a1f0003301f0002300b00403a1f00ff391f00",
-        );
-
-    assert_eq!(nspi_query_rows_count("", &request), Some(1));
-    assert_eq!(
-        nspi_query_rows_explicit_entry_ids("", &request),
-        vec![0x8000_0034]
+        "00000000ff000000000000000000000000000000000000000000000000e40400000904000009080000\
+         010000003400008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a1f000330\
+         1f0002300b00403a1f00ff391f00",
     );
-}
 
-#[test]
-fn query_rows_parser_handles_shifted_outlook_stat_boundary() {
-    let request = hex_bytes(
-            "00000000ff000000000000000000000000000000000000000000000000e40400000904000009080000010000003400008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a1f0003301f0002300b00403a1f00ff391f00",
-        );
-
-    assert_eq!(nspi_query_rows_count("QueryRows", &request), Some(1));
-    assert_eq!(
-        nspi_query_rows_explicit_entry_ids("QueryRows", &request),
-        vec![0x8000_0034]
-    );
+    assert!(parse_nspi_query_rows_request("QueryRows", &request).is_none());
 }
 
 #[test]

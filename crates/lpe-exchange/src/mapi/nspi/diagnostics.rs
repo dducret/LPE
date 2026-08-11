@@ -179,15 +179,19 @@ pub(super) fn log_nspi_rowset_debug(
         .map(|value| format!("{value:#010x}"))
         .unwrap_or_default();
     let row_limit = row_limit.map(|limit| limit.to_string()).unwrap_or_default();
-    let query_rows_count = nspi_query_rows_count_details(request_type, request);
-    let query_rows_explicit_entry_ids = nspi_query_rows_explicit_entry_ids(request_type, request);
-    let query_rows_explicit_table_count = query_rows_count
+    let query_rows = parse_nspi_query_rows_request(request_type, request)
+        .or_else(|| parse_legacy_nspi_query_rows_request(request_type, request));
+    let query_rows_explicit_entry_ids = query_rows
         .as_ref()
-        .map(|details| details.explicit_table_count.to_string())
+        .map(|parsed| parsed.explicit_entry_ids.as_slice())
         .unwrap_or_default();
-    let query_rows_count_offset = query_rows_count
+    let query_rows_explicit_table_count = query_rows
         .as_ref()
-        .map(|details| details.count_offset.to_string())
+        .map(|parsed| parsed.explicit_entry_ids.len().to_string())
+        .unwrap_or_default();
+    let query_rows_count_offset = query_rows
+        .as_ref()
+        .map(|parsed| parsed.row_count_offset.to_string())
         .unwrap_or_default();
     let (duplicate_entry_key_count, duplicate_entry_keys) =
         format_nspi_duplicate_entry_keys_for_debug(entries);
@@ -213,7 +217,7 @@ pub(super) fn log_nspi_rowset_debug(
         returned_entry_count = entries.len(),
         row_limit = %row_limit,
         query_rows_explicit_table_count = %query_rows_explicit_table_count,
-        query_rows_explicit_entry_ids = %format_nspi_u32_values_for_debug(&query_rows_explicit_entry_ids),
+        query_rows_explicit_entry_ids = %format_nspi_u32_values_for_debug(query_rows_explicit_entry_ids),
         query_rows_count_offset = %query_rows_count_offset,
         duplicate_entry_key_count = duplicate_entry_key_count,
         duplicate_entry_keys = %duplicate_entry_keys,

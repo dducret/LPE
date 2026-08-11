@@ -12892,8 +12892,13 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         0x0061_0040,
         test_filetime("2026-07-16", "21:22"),
     );
+    append_mapi_i64_property(
+        &mut appointment_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        i64::from_le_bytes([0x00, 0x49, 0xaa, 0x9a, 0xc3, 0x15, 0xdd, 0x01]),
+    );
     let mut save_rops = Vec::new();
-    append_rop_set_properties(&mut save_rops, 1, 4, &appointment_values);
+    append_rop_set_properties(&mut save_rops, 1, 5, &appointment_values);
     append_rop_save_changes_message_with_flags(&mut save_rops, 1, 1, 0x08);
 
     renew_mapi_request_id(&mut execute_headers);
@@ -12907,7 +12912,10 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let save_response = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&save_response, &[0x0a, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &save_response,
+        &[0x0a, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
     let mut expected_save = vec![0x0c, 0x01, 0, 0, 0, 0, 0x01];
     expected_save.extend_from_slice(&mapi_wire_id_bytes(imported_message_id));
     assert!(
@@ -13350,10 +13358,11 @@ async fn mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_even
         PID_TAG_SOURCE_KEY,
         &destination_message_gid,
     );
+    let imported_last_modification_time = test_filetime("2026-07-17", "08:35");
     append_mapi_i64_property(
         &mut import_values,
         PID_TAG_LAST_MODIFICATION_TIME,
-        test_filetime("2026-07-17", "08:35"),
+        imported_last_modification_time,
     );
     append_mapi_binary_property(&mut import_values, PID_TAG_CHANGE_KEY, &update_change_xid);
     append_mapi_binary_property(
@@ -13382,13 +13391,18 @@ async fn mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_even
         0x0061_0040,
         test_filetime("2026-07-17", "07:05"),
     );
+    append_mapi_i64_property(
+        &mut update_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time,
+    );
     let mut update_rops = vec![
         0x72, 0x00, 0x01, 0x02, // RopSynchronizationImportMessageChange.
         0x00, // ImportFlag.
     ];
     update_rops.extend_from_slice(&4u16.to_le_bytes());
     update_rops.extend_from_slice(&import_values);
-    append_rop_set_properties(&mut update_rops, 2, 4, &update_values);
+    append_rop_set_properties(&mut update_rops, 2, 5, &update_values);
     append_rop_save_changes_message_with_flags(&mut update_rops, 2, 2, 0x08);
 
     renew_mapi_request_id(&mut execute_headers);
@@ -13409,7 +13423,10 @@ async fn mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_even
         contains_bytes(&update_response, &[0x72, 0x02, 0, 0, 0, 0]),
         "RopSynchronizationImportMessageChange 0x72 failed: {update_response:02x?}"
     );
-    assert!(contains_bytes(&update_response, &[0x0a, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &update_response,
+        &[0x0a, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
     let mut expected_save = vec![0x0c, 0x02, 0, 0, 0, 0, 0x02];
     expected_save.extend_from_slice(&mapi_wire_id_bytes(destination_message_id));
     assert!(

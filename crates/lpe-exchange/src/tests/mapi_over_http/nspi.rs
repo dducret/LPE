@@ -1572,6 +1572,83 @@ async fn mapi_over_http_microsoft_oxnspi_hierarchy_and_query_rows_example_round_
 }
 
 #[tokio::test]
+async fn mapi_over_http_get_matches_preserves_outlook_state_and_unaligned_columns() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = hex_bytes(
+        "00000000ffe80300000d0010812b000080000000000000000000000000e40400000904000000000000\
+         00000000800000ffffff7fff0f0000001f0001301f00173a1f00083a1f00193a1f00183a1f00fe391f\
+         00163a1f00003a1f0002300201ff0f0300fe0f03000039030005390201f60f1e00033000000000",
+    );
+    let headers = nspi_bound_headers(&service, "GetMatches").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+
+    let mut offset = 8;
+    assert_eq!(body[offset], 0xFF);
+    offset += 1;
+    let mut expected_state: [u8; 36] = request[5..41].try_into().unwrap();
+    expected_state[4..8].copy_from_slice(&request[13..17]);
+    assert_eq!(&body[offset..offset + 36], &expected_state);
+    offset += 36;
+
+    assert_eq!(body[offset], 1);
+    offset += 1;
+    let minimal_id_count =
+        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize;
+    assert!(minimal_id_count > 0);
+    offset += 4 + minimal_id_count * 4;
+    assert_eq!(body[offset], 1);
+    offset += 1;
+
+    let tag_count = u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize;
+    offset += 4;
+    let tags = (0..tag_count)
+        .map(|_| {
+            let tag = u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap());
+            offset += 4;
+            tag
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tags,
+        vec![
+            0x3001_001F,
+            0x3A17_001F,
+            0x3A08_001F,
+            0x3A19_001F,
+            0x3A18_001F,
+            0x39FE_001F,
+            0x3A16_001F,
+            0x3A00_001F,
+            0x3002_001F,
+            0x0FFF_0102,
+            0x0FFE_0003,
+            0x3900_0003,
+            0x3905_0003,
+            0x0FF6_0102,
+            0x3003_001E,
+        ]
+    );
+    assert_eq!(
+        u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize,
+        minimal_id_count
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_nspi_get_matches_ranks_distribution_list_exact_smtp_first() {
     let mut display_name_account = FakeStore::account();
     display_name_account.account_id =

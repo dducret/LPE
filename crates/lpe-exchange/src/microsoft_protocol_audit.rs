@@ -1180,8 +1180,8 @@ const REPORT_ROWS: &[ReportRow] = &[
         spec: "MS-OXCMAPIHTTP NSPI request types and MS-OXPROPS address-book properties",
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/cb1f2c87-eb69-418f-9e59-c30c179615a0",
         anchor: "`crates/lpe-exchange/src/mapi/nspi.rs::nspi_request_and_property_manifests_cover_implemented_static_values`",
-        implemented: "Supported NSPI request types, bootstrap property tags, and additional requested property tags are manifest-checked. Contacts project canonical MS-OXPROPS name, phone, postal-address, organization, title, department, nickname, and phonetic-name fields when LPE already stores those values. The MS-OXNSPI hierarchy-table and QueryRows examples are covered by `crates/lpe-exchange/src/tests/mapi_over_http.rs::mapi_over_http_microsoft_oxnspi_hierarchy_and_query_rows_example_round_trips`.",
-        gaps: "MS-NSPI required properties not projected by LPE plus address-book office-location, phonetic-display/company, manager, rich-info, and structured home-address fields beyond stored contact address components are explicitly `KnownUnsupported`.",
+        implemented: "Supported NSPI request types, bootstrap property tags, and additional requested property tags are manifest-checked. Contacts project canonical MS-OXPROPS name, phone, postal-address, organization, title, department, nickname, and phonetic-name fields when LPE already stores those values. Outlook QueryRows and GetMatches requests preserve their unaligned requested-column order and STAT state, including EntryId, bounded office-location, rich-info, and internet-encoding projections. The MS-OXNSPI hierarchy-table and QueryRows examples are covered by `crates/lpe-exchange/src/tests/mapi_over_http.rs::mapi_over_http_microsoft_oxnspi_hierarchy_and_query_rows_example_round_trips`.",
+        gaps: "MS-NSPI required properties not projected by LPE plus address-book phonetic-display/company, manager, and structured home-address fields beyond stored contact address components are explicitly `KnownUnsupported`.",
     },
     ReportRow {
         surface: "EWS simple schema enums",

@@ -12,6 +12,7 @@ use std::sync::{Mutex, OnceLock};
 mod diagnostics;
 mod dn_to_mid;
 mod property_values;
+mod query_rows;
 mod special_tables;
 
 #[cfg(test)]
@@ -25,6 +26,7 @@ use diagnostics::{
 use dn_to_mid::parse_dn_to_mid_names;
 use property_values::{
     allocate_nspi_entry_identities, allocate_principal_nspi_identity,
+    nspi_declared_property_tag_suffix, nspi_get_matches_response_state,
     nspi_get_props_missing_property_value_list, nspi_get_props_property_tags,
     nspi_get_props_property_value_list, nspi_property_tags_response, nspi_resolved_entry_row,
     parse_nspi_get_props_request, NSPI_BOOTSTRAP_PROPERTY_TAGS,
@@ -39,6 +41,10 @@ pub(in crate::mapi) use property_values::{
 #[cfg(test)]
 use property_values::{
     nspi_entry_value, NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS, NSPI_SUPPORTED_REQUEST_TYPES,
+};
+use query_rows::{
+    nspi_request_type_is_query_rows, parse_legacy_nspi_query_rows_request,
+    parse_nspi_query_rows_request,
 };
 #[cfg(test)]
 use special_tables::NSPI_UNICODE_STRINGS_FLAG;
@@ -730,11 +736,16 @@ where
     };
     let available_entry_count = entries.len();
     let lookup_values = scan_address_book_lookup_values(request);
-    let explicit_entry_ids = nspi_query_rows_explicit_entry_ids(request_type, request);
+    let query_rows = parse_nspi_query_rows_request(request_type, request)
+        .or_else(|| parse_legacy_nspi_query_rows_request(request_type, request));
+    let explicit_entry_ids = query_rows
+        .as_ref()
+        .map(|parsed| parsed.explicit_entry_ids.as_slice())
+        .unwrap_or_default();
     let entries = if explicit_entry_ids.is_empty() {
         nspi_filter_entries_for_request(principal.account_id, entries, request)
     } else {
-        nspi_filter_explicit_table_entries(principal.account_id, entries, &explicit_entry_ids)
+        nspi_filter_explicit_table_entries(principal.account_id, entries, explicit_entry_ids)
     };
     if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
         return mapi_diagnostic_response(
@@ -744,13 +755,16 @@ where
             &format!("failed to project address book identifiers: {error}"),
         );
     }
-    let row_limit = nspi_query_rows_count(request_type, request);
+    let row_limit = query_rows.as_ref().map(|parsed| parsed.row_count);
     let entries = if let Some(limit) = row_limit {
         entries.into_iter().take(limit).collect::<Vec<_>>()
     } else {
         entries
     };
-    let tags = nspi_requested_property_tags(request);
+    let tags = query_rows
+        .as_ref()
+        .and_then(|parsed| parsed.property_tags.clone())
+        .unwrap_or_else(|| nspi_requested_property_tags(request));
     log_nspi_rowset_debug(
         principal,
         request,
@@ -764,7 +778,14 @@ where
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
-    body.push(0);
+    // [MS-OXCMAPIHTTP] 2.2.5.12.2 returns the in/out STAT. The captured
+    // Outlook request uses an explicit table, so the state is unchanged.
+    if let Some(state) = query_rows.as_ref().and_then(|parsed| parsed.state) {
+        body.push(0xFF);
+        body.extend_from_slice(&state);
+    } else {
+        body.push(0);
+    }
     body.push((!entries.is_empty()) as u8);
     if !entries.is_empty() {
         write_large_property_tag_array(&mut body, &tags);
@@ -791,103 +812,6 @@ where
         "rowset",
     );
     mapi_response(request_type, request_id, 0, body, None)
-}
-
-pub(in crate::mapi) fn nspi_query_rows_count(request_type: &str, request: &[u8]) -> Option<usize> {
-    nspi_query_rows_count_details(request_type, request).map(|details| details.count)
-}
-
-pub(in crate::mapi) fn nspi_query_rows_explicit_entry_ids(
-    request_type: &str,
-    request: &[u8],
-) -> Vec<u32> {
-    let Some(details) = nspi_query_rows_count_details(request_type, request) else {
-        return Vec::new();
-    };
-    (0..details.explicit_table_count)
-        .filter_map(|index| {
-            let offset = details.table_offset + index * 4;
-            let bytes = request.get(offset..offset + 4)?;
-            let value = u32::from_le_bytes(bytes.try_into().ok()?);
-            nspi_word_looks_like_entry_id(value).then_some(value)
-        })
-        .collect()
-}
-
-struct NspiQueryRowsCountDetails {
-    count: usize,
-    explicit_table_count: usize,
-    table_offset: usize,
-    count_offset: usize,
-}
-
-fn nspi_query_rows_count_details(
-    request_type: &str,
-    request: &[u8],
-) -> Option<NspiQueryRowsCountDetails> {
-    if !nspi_request_type_is_query_rows(request_type) && !nspi_body_looks_like_query_rows(request) {
-        return None;
-    }
-    nspi_query_rows_layout_from_body(request)
-}
-
-fn nspi_request_type_is_query_rows(request_type: &str) -> bool {
-    request_type
-        .trim_matches(|ch: char| ch.is_control() || ch.is_whitespace())
-        .eq_ignore_ascii_case("QueryRows")
-}
-
-fn nspi_body_looks_like_query_rows(request: &[u8]) -> bool {
-    nspi_query_rows_layout_from_body(request).is_some()
-}
-
-fn nspi_query_rows_layout_from_body(request: &[u8]) -> Option<NspiQueryRowsCountDetails> {
-    const FLAGS_BYTES: usize = 4;
-    const STAT_BYTES: usize = 36;
-    let documented_offset = FLAGS_BYTES + STAT_BYTES;
-    nspi_query_rows_layout_at_offset(request, documented_offset).or_else(|| {
-        (FLAGS_BYTES + 32..=FLAGS_BYTES + 44)
-            .filter(|offset| *offset != documented_offset)
-            .find_map(|offset| nspi_query_rows_layout_at_offset(request, offset))
-    })
-}
-
-fn nspi_query_rows_layout_at_offset(
-    request: &[u8],
-    etable_count_offset: usize,
-) -> Option<NspiQueryRowsCountDetails> {
-    const ETABLE_COUNT_BYTES: usize = 4;
-    let etable_count_bytes = request.get(etable_count_offset..etable_count_offset + 4)?;
-    let etable_count = u32::from_le_bytes(etable_count_bytes.try_into().ok()?) as usize;
-    if etable_count > 1024 {
-        return None;
-    }
-    let etable_bytes = etable_count.checked_mul(4)?;
-    let count_offset = etable_count_offset
-        .checked_add(ETABLE_COUNT_BYTES)?
-        .checked_add(etable_bytes)?;
-    let count_bytes = request.get(count_offset..count_offset + 4)?;
-    let count = u32::from_le_bytes(count_bytes.try_into().ok()?) as usize;
-    if count > 100_000 {
-        return None;
-    }
-    if etable_count > 0 {
-        let table_offset = etable_count_offset.checked_add(ETABLE_COUNT_BYTES)?;
-        for index in 0..etable_count {
-            let offset = table_offset.checked_add(index.checked_mul(4)?)?;
-            let bytes = request.get(offset..offset + 4)?;
-            let value = u32::from_le_bytes(bytes.try_into().ok()?);
-            if !nspi_word_looks_like_entry_id(value) {
-                return None;
-            }
-        }
-    }
-    Some(NspiQueryRowsCountDetails {
-        count,
-        explicit_table_count: etable_count,
-        table_offset: etable_count_offset + ETABLE_COUNT_BYTES,
-        count_offset,
-    })
 }
 
 pub(in crate::mapi) async fn nspi_matches_response<S>(
@@ -921,7 +845,11 @@ where
             &format!("failed to project address book identifiers: {error}"),
         );
     }
-    let tags = nspi_requested_property_tags(request);
+    let declared_tags = nspi_declared_property_tag_suffix(request);
+    let response_state = declared_tags
+        .as_ref()
+        .and_then(|_| nspi_get_matches_response_state(request));
+    let tags = declared_tags.unwrap_or_else(|| nspi_requested_property_tags(request));
     log_nspi_rowset_debug(
         principal,
         request,
@@ -935,7 +863,12 @@ where
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
-    body.push(0);
+    if let Some(state) = response_state {
+        body.push(0xFF);
+        body.extend_from_slice(&state);
+    } else {
+        body.push(0);
+    }
     body.push((!entries.is_empty()) as u8);
     write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
     for entry in &entries {
@@ -1353,8 +1286,12 @@ pub(in crate::mapi) fn nspi_requested_entry_ids(request: &[u8]) -> Vec<u32> {
     if let Some(value) = nspi_direct_entry_id(request) {
         push_unique_nspi_entry_id(&mut ids, value);
     }
-    for value in nspi_query_rows_explicit_entry_ids("", request) {
-        push_unique_nspi_entry_id(&mut ids, value);
+    if let Some(parsed) = parse_nspi_query_rows_request("QueryRows", request)
+        .or_else(|| parse_legacy_nspi_query_rows_request("QueryRows", request))
+    {
+        for value in parsed.explicit_entry_ids {
+            push_unique_nspi_entry_id(&mut ids, value);
+        }
     }
     ids
 }

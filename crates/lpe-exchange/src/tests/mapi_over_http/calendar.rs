@@ -9231,27 +9231,109 @@ fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_
 
     let mut nspi_query_rows_request = hex_bytes(
         "00000000ff000000000000000000000000000000000000000000000000e40400000904000009080000\
-         010000002600008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a\
-         1f0003301f0002300b00403a1f00ff391f00",
+         010000002b00008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a\
+         1f0003301f0002300b00403a1f00ff391f00fe390300713a00000000",
     );
-    nspi_query_rows_request[49..53].copy_from_slice(&principal_mid.to_le_bytes());
+    nspi_query_rows_request[45..49].copy_from_slice(&principal_mid.to_le_bytes());
     let nspi_headers = nspi_bound_headers(&service, "QueryRows").await;
     let nspi_query_rows = service
         .handle_mapi(MapiEndpoint::Nspi, &nspi_headers, &nspi_query_rows_request)
         .await
         .unwrap();
     let nspi_query_rows_body = response_bytes(nspi_query_rows).await;
-    assert!(contains_bytes(
-        &nspi_query_rows_body,
-        &utf16z("alice@example.test")
-    ));
-    assert!(contains_bytes(
-        &nspi_query_rows_body,
-        &utf16z(&test_account_legacy_dn("alice@example.test"))
-    ));
-    assert!(contains_bytes(&nspi_query_rows_body, &utf16z("alice")));
-    assert!(contains_bytes(&nspi_query_rows_body, &utf16z("EX")));
-    assert!(!contains_bytes(&nspi_query_rows_body, &utf16z("SMTP")));
+    fn read_nspi_u32(bytes: &[u8], offset: &mut usize) -> u32 {
+        let value = u32::from_le_bytes(bytes[*offset..*offset + 4].try_into().unwrap());
+        *offset += 4;
+        value
+    }
+    fn read_nspi_binary(bytes: &[u8], offset: &mut usize) -> Vec<u8> {
+        assert_eq!(bytes[*offset], 0xFF);
+        *offset += 1;
+        let len = read_nspi_u32(bytes, offset) as usize;
+        let value = bytes[*offset..*offset + len].to_vec();
+        *offset += len;
+        value
+    }
+    fn read_nspi_unicode(bytes: &[u8], offset: &mut usize) -> String {
+        assert_eq!(bytes[*offset], 0xFF);
+        *offset += 1;
+        read_rop_utf16z(bytes, offset).unwrap()
+    }
+    let requested_query_rows_tags: [u32; 11] = [
+        0x0FFF_0102,
+        0x3001_001F,
+        0x0FFE_0003,
+        0x3900_0003,
+        0x3A20_001F,
+        0x3003_001F,
+        0x3002_001F,
+        0x3A40_000B,
+        0x39FF_001F,
+        0x39FE_001F,
+        0x3A71_0003,
+    ];
+    let mut nspi_offset = 0usize;
+    assert_eq!(read_nspi_u32(&nspi_query_rows_body, &mut nspi_offset), 0);
+    assert_eq!(read_nspi_u32(&nspi_query_rows_body, &mut nspi_offset), 0);
+    assert_eq!(nspi_query_rows_body[nspi_offset], 0xFF);
+    nspi_offset += 1;
+    assert_eq!(
+        &nspi_query_rows_body[nspi_offset..nspi_offset + 36],
+        &nspi_query_rows_request[5..41]
+    );
+    nspi_offset += 36;
+    assert_ne!(nspi_query_rows_body[nspi_offset], 0);
+    nspi_offset += 1;
+    assert_eq!(
+        read_nspi_u32(&nspi_query_rows_body, &mut nspi_offset),
+        requested_query_rows_tags.len() as u32
+    );
+    for expected_tag in requested_query_rows_tags {
+        assert_eq!(
+            read_nspi_u32(&nspi_query_rows_body, &mut nspi_offset),
+            expected_tag
+        );
+    }
+    assert_eq!(read_nspi_u32(&nspi_query_rows_body, &mut nspi_offset), 1);
+    assert_eq!(nspi_query_rows_body[nspi_offset], 0);
+    nspi_offset += 1;
+    let entry_id = read_nspi_binary(&nspi_query_rows_body, &mut nspi_offset);
+    assert_eq!(
+        &entry_id[4..20],
+        &[0xdc, 0xa7, 0x40, 0xc8, 0xc0, 0x42, 0x10, 0x1a,
+          0xb4, 0xb9, 0x08, 0x00, 0x2b, 0x2f, 0xe1, 0x82]
+    );
+    assert_eq!(
+        read_nspi_unicode(&nspi_query_rows_body, &mut nspi_offset),
+        "Alice"
+    );
+    assert_eq!(read_nspi_u32(&nspi_query_rows_body, &mut nspi_offset), 6);
+    assert_eq!(read_nspi_u32(&nspi_query_rows_body, &mut nspi_offset), 0);
+    assert_eq!(
+        read_nspi_unicode(&nspi_query_rows_body, &mut nspi_offset),
+        "Alice"
+    );
+    assert_eq!(
+        read_nspi_unicode(&nspi_query_rows_body, &mut nspi_offset),
+        test_account_legacy_dn("alice@example.test")
+    );
+    assert_eq!(
+        read_nspi_unicode(&nspi_query_rows_body, &mut nspi_offset),
+        "EX"
+    );
+    assert_eq!(nspi_query_rows_body[nspi_offset], 0);
+    nspi_offset += 1;
+    assert_eq!(
+        read_nspi_unicode(&nspi_query_rows_body, &mut nspi_offset),
+        "Alice"
+    );
+    assert_eq!(
+        read_nspi_unicode(&nspi_query_rows_body, &mut nspi_offset),
+        "alice@example.test"
+    );
+    assert_eq!(read_nspi_u32(&nspi_query_rows_body, &mut nspi_offset), 0);
+    assert_eq!(read_nspi_u32(&nspi_query_rows_body, &mut nspi_offset), 0);
+    assert_eq!(nspi_offset, nspi_query_rows_body.len());
 
     let bootstrap_connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")

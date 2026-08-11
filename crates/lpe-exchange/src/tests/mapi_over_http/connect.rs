@@ -5946,15 +5946,18 @@ async fn mapi_over_http_get_matches_uses_complete_utf16_lookup_value() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let body = response_bytes(response).await;
-    assert_eq!(body[8], 0);
-    assert_eq!(body[9], 1);
-    assert_eq!(u32::from_le_bytes(body[10..14].try_into().unwrap()), 1);
-    let matched_id = u32::from_le_bytes(body[14..18].try_into().unwrap());
+    assert_eq!(body[8], 0xFF);
+    let mut expected_state: [u8; 36] = request[5..41].try_into().unwrap();
+    expected_state[4..8].copy_from_slice(&request[13..17]);
+    assert_eq!(&body[9..45], &expected_state);
+    assert_eq!(body[45], 1);
+    assert_eq!(u32::from_le_bytes(body[46..50].try_into().unwrap()), 1);
+    let matched_id = u32::from_le_bytes(body[50..54].try_into().unwrap());
     assert_ne!(matched_id, 0);
     assert_eq!(matched_id & 0x8000_0000, 0x8000_0000);
     assert_ne!(matched_id, 0xedc3_32f7);
-    assert_eq!(body[18], 1);
-    assert!(contains_bytes(&body, &utf16z("test@l-p-e.ch")));
-    assert!(!contains_bytes(&body, &utf16z("fabien@l-p-e.ch")));
-    assert!(!contains_bytes(&body, &utf16z("Fabien")));
+    assert_eq!(body[54], 1);
+    assert!(contains_bytes(&body, b"test@l-p-e.ch\0"));
+    assert!(!contains_bytes(&body, b"fabien@l-p-e.ch\0"));
+    assert!(!contains_bytes(&body, b"Fabien\0"));
 }

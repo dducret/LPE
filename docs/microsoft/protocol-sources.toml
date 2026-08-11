@@ -299,6 +299,7 @@ used_for = [
   "Address book hierarchy and QueryRows protocol example behavior",
   "DN-to-Minimal-ID cardinality and missing-property GetProps error projection",
   "StringsArray_r maximum cardinality and duplicate-preserving DNToMId projection",
+  "Order-preserving QueryRows and GetMatches requested-column projection plus QueryRows and GetMatches STAT handling",
 ]
 sections = [
   "2.2.1.8 Positioning Minimal Entry IDs",
@@ -312,6 +313,7 @@ sections = [
   "3.1.4.1.3 NspiGetSpecialTable",
   "3.1.4.1.7 NspiGetProps",
   "3.1.4.1.8 NspiQueryRows",
+  "3.1.4.1.10 NspiGetMatches",
   "3.1.4.1.13 NspiDNToMId",
   "3.1.4.1.16 NspiResolveNames",
   "4 Protocol Examples",
@@ -332,6 +334,7 @@ used_for = [
   "Bounded NSPI address-book object property projection audit row",
   "Calendar navigation shortcut owner EntryID validation",
   "PidTagDisplayTypeEx, PidTagAddressBookRoomContainers, and fixed PidTagMappingSignature NSPI projection",
+  "PidTagOfficeLocation, PidTagSendRichInfo, and PidTagSendInternetEncoding address-book projections",
 ]
 sections = [
   "2.2 Message Syntax",
@@ -344,7 +347,10 @@ sections = [
   "2.2.3 Properties that Apply to All Address Book Objects",
   "2.2.3.2 PidTagEntryId",
   "2.2.3.12 PidTagDisplayTypeEx",
+  "2.2.3.18 PidTagSendRichInfo",
+  "2.2.3.19 PidTagSendInternetEncoding",
   "2.2.3.32 PidTagMappingSignature",
+  "2.2.4.5 PidTagOfficeLocation",
   "3.1.4.4 ResolveNames Operations",
   "2.2.7.1 PidTagAddressBookRoomContainers",
 ]
@@ -367,11 +373,15 @@ used_for = [
   "GetProps, GetSpecialTable, and GetTemplateInfo AddressBookPropertyValueList encoding",
   "HTTP, X-ResponseCode, Content-Type, and Execute failure-layer separation with complete Session Context cookie propagation",
   "Execute MaxRopOut and RopBuffer response-size boundary",
+  "QueryRows and GetMatches request/response STAT, requested-column framing, and flagged missing-column values",
 ]
 sections = [
   "2.2.1.1 AddressBookPropertyValue Structure",
   "2.2.1.2 AddressBookTaggedPropertyValue Structure",
   "2.2.1.3 AddressBookPropertyValueList Structure",
+  "2.2.1.5 AddressBookFlaggedPropertyValue Structure",
+  "2.2.1.7 AddressBookPropertyRow Structure",
+  "2.2.1.8 LargePropertyTagArray Structure",
   "2.2.2.2 Common Response Format",
   "2.2.3.2.2 Content-Type Header Field",
   "2.2.3.2.3 Set-Cookie Header Field",
@@ -392,11 +402,15 @@ sections = [
   "2.2.5.1 Bind Request Type",
   "2.2.5.4.1 DnToMinId Request Type Request Body",
   "2.2.5.4.2 DnToMinId Request Type Success Response Body",
+  "2.2.5.5.1 GetMatches Request Type Request Body",
+  "2.2.5.5.2 GetMatches Request Type Success Response Body",
   "2.2.5.7.1 GetProps Request Type Request Body",
   "2.2.5.7.2 GetProps Request Type Success Response Body",
   "2.2.5.8.1 GetSpecialTable Request Type Request Body",
   "2.2.5.8.2 GetSpecialTable Request Type Success Response Body",
   "2.2.5.9.2 GetTemplateInfo Request Type Success Response Body",
+  "2.2.5.12.1 QueryRows Request Type Request Body",
+  "2.2.5.12.2 QueryRows Request Type Success Response Body",
   "2.2.5.14 ResolveNames Request Type",
   "2.2.6 PING Request Type",
   "3.1.1 Abstract Data Model",
@@ -632,6 +646,7 @@ used_for = [
   "Server-owned PidTagAccess and PidTagAccessLevel projection in special-message FastTransfer downloads",
   "RopSetProperties durable round-trip of Inbox PidTagAdditionalRenEntryIds client state",
   "Stable imported FAI PidTagSearchKey semantics while generated Message search identities use the Microsoft MAPI 16-byte MAPIUID representation",
+  "Silent disregard of Outlook's repeated imported Calendar PidTagLastModificationTime while retaining the import header as authoritative",
 ]
 sections = [
   "2.2.1 Common Object Properties",
@@ -649,6 +664,7 @@ sections = [
   "2.2.5 RopSetProperties ROP",
   "2.2.5.1 RopSetProperties ROP Request Buffer",
   "2.2.5.2 RopSetProperties ROP Response Buffer",
+  "3.2.5.4 Processing RopSetProperties",
   "2.2.7 RopDeleteProperties ROP",
   "2.2.7.1 RopDeleteProperties ROP Request Buffer",
   "2.2.7.2 RopDeleteProperties ROP Response Buffer",
@@ -766,6 +782,7 @@ used_for = [
   "PidTagRecordKey identity and PtypBinary type",
   "PidTagFolderFlags canonical property ID 0x66A8 and PtypInteger32 type for computed hierarchy-row folder classification",
   "Verification that Outlook-observed, unpersisted folder tags 0x36E6001F, 0x36DE0003, 0x36E10003, 0x36EB0102, and 0x672D0003 have no MS-OXPROPS definition and must not receive synthetic projections",
+  "PidTagOfficeLocation, PidTagSendRichInfo, and PidTagSendInternetEncoding NSPI row types",
 ]
 sections = [
   "1.3.2 Commonly Used Property Sets",
@@ -801,6 +818,7 @@ sections = [
   "2.798 PidTagMessageSize",
   "2.800 PidTagMessageStatus",
   "2.803 PidTagMid",
+  "2.816 PidTagOfficeLocation",
   "2.860 PidTagParentEntryId",
   "2.863 PidTagParentSourceKey",
   "2.921 PidTagReplyTime",
@@ -809,6 +827,8 @@ sections = [
   "2.940 PidTagRoamingXmlStream",
   "2.941 PidTagRowid",
   "2.999 PidTagSearchKey",
+  "2.1010 PidTagSendInternetEncoding",
+  "2.1011 PidTagSendRichInfo",
   "2.912 PidTagRecordKey",
   "2.917 PidTagReplyRecipientEntries",
   "2.1006 PidTagSenderName",
@@ -1136,6 +1156,7 @@ used_for = [
   "Message and FAI FastTransfer surfaces from which unsupported Message PidTagRecordKey is omitted",
   "ICS upload Message saves advance the normal or FAI seen set without advancing CnsetRead",
   "Optimized Outlook send using PidTagTargetEntryId: canonical Sent submission, transient same-message Outbox membership, and ImportMessageMove destination-identity rekey",
+  "Calendar full-upload repetition of the required ImportMessageChange PidTagLastModificationTime",
 ]
 sections = [
   "2.2.1.1.1 MetaTagIdsetGiven ICS State Property",

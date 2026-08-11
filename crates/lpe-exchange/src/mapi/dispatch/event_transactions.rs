@@ -82,6 +82,7 @@ pub(super) fn stage_event_property_values(
     if transaction.import_disposition != MapiEventImportDisposition::Apply {
         return Ok(Vec::new());
     }
+    let is_imported_event = transaction.imported_identity.is_some();
 
     let values = values
         .into_iter()
@@ -90,7 +91,9 @@ pub(super) fn stage_event_property_values(
         .collect::<Vec<_>>();
     let mut problems = values
         .iter()
-        .filter(|(_, _, storage_tag, _)| event_property_is_server_managed(*storage_tag))
+        .filter(|(_, _, storage_tag, _)| {
+            event_property_reports_server_managed_problem(*storage_tag, is_imported_event)
+        })
         .map(|(index, tag, _, _)| (*index, *tag, 0x8004_0102))
         .collect::<Vec<_>>();
     let values = values
@@ -179,6 +182,10 @@ pub(super) fn stage_pending_event_property_values(
     else {
         bail!("MAPI PendingEvent handle was not found");
     };
+    let is_imported_event = imported_event_identity_from_properties(properties)
+        .ok()
+        .flatten()
+        .is_some();
     let values = values
         .into_iter()
         .enumerate()
@@ -186,7 +193,9 @@ pub(super) fn stage_pending_event_property_values(
         .collect::<Vec<_>>();
     let mut problems = values
         .iter()
-        .filter(|(_, _, storage_tag, _)| event_property_is_server_managed(*storage_tag))
+        .filter(|(_, _, storage_tag, _)| {
+            event_property_reports_server_managed_problem(*storage_tag, is_imported_event)
+        })
         .map(|(index, tag, _, _)| (*index, *tag, 0x8004_0102))
         .collect::<Vec<_>>();
     let values = values
@@ -345,6 +354,14 @@ fn event_property_is_server_managed(tag: u32) -> bool {
             | PID_TAG_CHANGE_NUMBER
             | PID_TAG_DISPLAY_NAME_W
     )
+}
+
+// [MS-OXCFXICS] 2.2.3.2.4.2.1 and 3.3.4.3.3.2.2.1 require the
+// import header's modification time and then a full property copy. Outlook
+// repeats that read-only value; [MS-OXCPRPT] 3.2.5.4 permits silently ignoring it.
+fn event_property_reports_server_managed_problem(tag: u32, is_imported_event: bool) -> bool {
+    event_property_is_server_managed(tag)
+        && !(is_imported_event && tag == PID_TAG_LAST_MODIFICATION_TIME)
 }
 
 fn validate_staged_event_property_values(
