@@ -6,9 +6,9 @@ use super::tables::hierarchy_table_row_modified;
 use super::wire::{
     MapiNotificationEventMask, MAPI_CONTENT_NOTIFICATION_MASK, MAPI_HIERARCHY_NOTIFICATION_MASK,
 };
+use crate::mapi_store::MapiMailStoreSnapshot;
 use lpe_storage::JmapMailbox;
 use uuid::Uuid;
-use crate::mapi_store::MapiMailStoreSnapshot;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiNotificationRegistration {

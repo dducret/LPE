@@ -1223,7 +1223,7 @@ fn sync_issues_query_rows_returns_no_children_until_backed() {
 }
 
 #[test]
-fn persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy() {
+fn persisted_sync_issues_roles_project_as_children_in_startup_depth_hierarchy() {
     let sync_id = Uuid::parse_str("11111111-1111-1111-1111-11111111111a").unwrap();
     let mailboxes = vec![
         JmapMailbox {
@@ -1276,7 +1276,7 @@ fn persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy() {
         },
     ];
     let snapshot = MapiMailStoreSnapshot::empty();
-    let rows = hierarchy_rows(
+    let ipm_rows = hierarchy_rows(
         IPM_SUBTREE_FOLDER_ID,
         &mailboxes,
         &snapshot,
@@ -1284,13 +1284,16 @@ fn persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy() {
         &[],
         Uuid::nil(),
     );
-    let row_ids = rows.iter().map(hierarchy_row_id).collect::<HashSet<_>>();
+    let ipm_row_ids = ipm_rows
+        .iter()
+        .map(hierarchy_row_id)
+        .collect::<HashSet<_>>();
 
-    assert!(row_ids.contains(&SYNC_ISSUES_FOLDER_ID));
-    assert!(!row_ids.contains(&CONFLICTS_FOLDER_ID));
-    assert!(!row_ids.contains(&LOCAL_FAILURES_FOLDER_ID));
-    assert!(!row_ids.contains(&SERVER_FAILURES_FOLDER_ID));
-    let sync_row = rows
+    assert!(ipm_row_ids.contains(&SYNC_ISSUES_FOLDER_ID));
+    assert!(!ipm_row_ids.contains(&CONFLICTS_FOLDER_ID));
+    assert!(!ipm_row_ids.contains(&LOCAL_FAILURES_FOLDER_ID));
+    assert!(!ipm_row_ids.contains(&SERVER_FAILURES_FOLDER_ID));
+    let sync_row = ipm_rows
         .iter()
         .find(|row| hierarchy_row_id(row) == SYNC_ISSUES_FOLDER_ID)
         .expect("sync issues startup row");
@@ -1302,18 +1305,47 @@ fn persisted_sync_issues_roles_stay_leaf_in_startup_hierarchy() {
             &[PID_TAG_SUBFOLDERS],
             Uuid::nil(),
         ),
-        vec![0]
+        vec![1]
     );
-    assert!(!mailbox_has_subfolders(&mailboxes[0], &mailboxes));
-    assert!(hierarchy_rows(
+    assert!(mailbox_has_subfolders(&mailboxes[0], &mailboxes));
+    let sync_rows = hierarchy_rows(
         SYNC_ISSUES_FOLDER_ID,
         &mailboxes,
         &snapshot,
         None,
         &[],
         Uuid::nil(),
-    )
-    .is_empty());
+    );
+    let sync_row_ids = sync_rows
+        .iter()
+        .map(hierarchy_row_id)
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        sync_row_ids,
+        HashSet::from([
+            CONFLICTS_FOLDER_ID,
+            LOCAL_FAILURES_FOLDER_ID,
+            SERVER_FAILURES_FOLDER_ID,
+        ])
+    );
+
+    let depth_rows = hierarchy_table_rows_excluding_deleted(
+        ROOT_FOLDER_ID,
+        &mailboxes,
+        &snapshot,
+        None,
+        &[],
+        Uuid::nil(),
+        &HashSet::new(),
+        true,
+    );
+    let depth_row_ids = depth_rows
+        .iter()
+        .map(hierarchy_row_id)
+        .collect::<HashSet<_>>();
+    assert!(depth_row_ids.contains(&CONFLICTS_FOLDER_ID));
+    assert!(depth_row_ids.contains(&LOCAL_FAILURES_FOLDER_ID));
+    assert!(depth_row_ids.contains(&SERVER_FAILURES_FOLDER_ID));
 }
 
 #[test]
@@ -2562,6 +2594,7 @@ fn calendar_sort_uses_only_backed_calendar_values() {
             },
             event: zero_duration,
             attachments: Vec::new(),
+            stored_properties: Vec::new(),
         },
         crate::mapi_store::MapiEvent {
             id: mapi_item_id(&one_minute.id),
@@ -2580,6 +2613,7 @@ fn calendar_sort_uses_only_backed_calendar_values() {
             },
             event: one_minute,
             attachments: Vec::new(),
+            stored_properties: Vec::new(),
         },
     ];
     let mut row_refs = rows.iter().collect::<Vec<_>>();
@@ -2635,6 +2669,34 @@ fn calendar_sort_uses_only_backed_calendar_values() {
         assert_eq!(row_refs[0].event.title, "One minute");
         assert_eq!(row_refs[1].event.title, "Zero");
     }
+
+    let mut row_refs = rows.iter().collect::<Vec<_>>();
+    sort_events(
+        &mut row_refs,
+        &[MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+            order: 0,
+        }],
+    );
+    assert_eq!(row_refs[0].event.title, "One minute");
+    assert_eq!(row_refs[1].event.title, "Zero");
+
+    let mut deleted_rows = rows
+        .iter()
+        .map(DeletedItemsContentRow::Event)
+        .collect::<Vec<_>>();
+    sort_deleted_items_content_rows(
+        &mut deleted_rows,
+        &[MapiSortOrder {
+            property_tag: PID_TAG_MESSAGE_DELIVERY_TIME,
+            order: 0,
+        }],
+    );
+    assert!(matches!(
+        deleted_rows.as_slice(),
+        [DeletedItemsContentRow::Event(first), DeletedItemsContentRow::Event(second)]
+            if first.event.title == "One minute" && second.event.title == "Zero"
+    ));
 }
 
 #[test]
@@ -7670,10 +7732,10 @@ fn virtual_rule_organizer_projects_exchange_stream_property() {
         associated_config_property_value(&message, OUTLOOK_RULE_ORGANIZER_BINARY_6802),
         Some(MapiValue::Binary(vec![
             0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]))
     );
 }

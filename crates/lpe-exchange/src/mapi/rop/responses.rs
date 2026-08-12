@@ -1,22 +1,13 @@
-use super::{
-    default_folder_property_tags_with_identity, message_for_id, pending_text_property,
-    search_folder_message_for_id,
-};
+use super::{message_for_id, pending_text_property, search_folder_message_for_id};
 use super::{
     rop_error_response, write_object_id, write_typed_string,
     write_typed_string_reduced_unicode_when_lossless, write_u16, write_u32, write_u64, RopRequest,
 };
 use crate::mapi::identity::OUTBOX_FOLDER_ID;
-use crate::mapi::identity::{INBOX_FOLDER_ID, ROOT_FOLDER_ID};
 use crate::mapi::properties::*;
 use crate::mapi::session::MapiObject;
 use crate::mapi::tables::{
-    default_attachment_columns, default_contact_property_tags,
-    default_conversation_action_property_tags, default_event_property_tags,
-    default_folder_property_tags, default_journal_entry_property_tags,
-    default_message_property_tags, default_note_property_tags, default_store_property_tags,
-    default_task_property_tags, message_recipients, serialize_recipient_row,
-    write_standard_property_row,
+    message_recipients, serialize_recipient_row, write_standard_property_row,
 };
 use crate::mapi::wire::RopId;
 use crate::mapi_store::MapiMailStoreSnapshot;
@@ -468,16 +459,46 @@ pub(in crate::mapi) fn rop_upload_state_success_response(request: &RopRequest) -
 pub(in crate::mapi) fn rop_fast_transfer_put_buffer_response(
     request: &RopRequest,
     used_size: usize,
+    complete: bool,
 ) -> Vec<u8> {
     let mut response = vec![request.rop_id, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
-    if request.rop_id == RopId::FastTransferDestinationPutBufferExtended.as_u8() {
-        write_u32(&mut response, used_size.min(u32::MAX as usize) as u32);
-    } else {
-        response.push(0);
-        write_u16(&mut response, used_size.min(u16::MAX as usize) as u16);
-    }
+    write_u16(&mut response, if complete { 0x0003 } else { 0x0001 });
+    write_fast_transfer_put_buffer_progress(&mut response, request, used_size);
     response
+}
+
+pub(in crate::mapi) fn rop_fast_transfer_put_buffer_error_response(
+    request: &RopRequest,
+    return_value: u32,
+    used_size: usize,
+) -> Vec<u8> {
+    let mut response = vec![request.rop_id, request.input_handle_index().unwrap_or(0)];
+    write_u32(&mut response, return_value);
+    write_u16(&mut response, 0x0000);
+    write_fast_transfer_put_buffer_progress(&mut response, request, used_size);
+    response
+}
+
+fn write_fast_transfer_put_buffer_progress(
+    response: &mut Vec<u8>,
+    request: &RopRequest,
+    used_size: usize,
+) {
+    // [MS-OXCROPS] sections 2.2.12.2.2 and 2.2.12.3.2 keep
+    // BufferUsedSize at 2 bytes; Extended widens only the progress counters.
+    let used_size = used_size.min(u16::MAX as usize) as u16;
+    if request.rop_id == RopId::FastTransferDestinationPutBufferExtended.as_u8() {
+        write_u32(response, 0);
+        write_u32(response, 0);
+        response.push(0);
+        write_u16(response, used_size);
+    } else {
+        write_u16(response, 0);
+        write_u16(response, 0);
+        response.push(0);
+        write_u16(response, used_size);
+    }
 }
 
 pub(in crate::mapi) fn rop_save_changes_message_response(
@@ -706,49 +727,5 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
     response.extend_from_slice(&(recipient_count.min(u16::MAX as usize) as u16).to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);
-    response
-}
-
-pub(in crate::mapi) fn rop_get_properties_list_response(
-    request: &RopRequest,
-    object: Option<&MapiObject>,
-) -> Vec<u8> {
-    let Some(object) = object else {
-        return rop_error_response(0x09, request.response_handle_index(), 0x8004_0102);
-    };
-    let tags = match object {
-        MapiObject::Logon => default_store_property_tags(),
-        MapiObject::Folder {
-            folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
-            ..
-        } => default_folder_property_tags_with_identity(),
-        MapiObject::Attachment { .. }
-        | MapiObject::PendingAttachment { .. }
-        | MapiObject::SavedAttachment { .. } => default_attachment_columns(),
-        MapiObject::Contact { .. } | MapiObject::PendingContact { .. } => {
-            default_contact_property_tags()
-        }
-        MapiObject::Event { .. } | MapiObject::PendingEvent { .. } => default_event_property_tags(),
-        MapiObject::Task { .. } | MapiObject::PendingTask { .. } => default_task_property_tags(),
-        MapiObject::Note { .. } | MapiObject::PendingNote { .. } => default_note_property_tags(),
-        MapiObject::JournalEntry { .. } | MapiObject::PendingJournalEntry { .. } => {
-            default_journal_entry_property_tags()
-        }
-        MapiObject::ConversationAction { .. } | MapiObject::PendingConversationAction { .. } => {
-            default_conversation_action_property_tags()
-        }
-        MapiObject::Message { .. }
-        | MapiObject::AssociatedConfig { .. }
-        | MapiObject::PublicFolderItem { .. }
-        | MapiObject::PendingAssociatedMessage { .. }
-        | MapiObject::PendingMessage { .. } => default_message_property_tags(),
-        _ => default_folder_property_tags(),
-    };
-    let mut response = vec![0x09, request.response_handle_index()];
-    write_u32(&mut response, 0);
-    response.extend_from_slice(&(tags.len() as u16).to_le_bytes());
-    for tag in tags {
-        write_u32(&mut response, tag);
-    }
     response
 }

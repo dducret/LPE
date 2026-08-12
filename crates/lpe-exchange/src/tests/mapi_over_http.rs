@@ -241,18 +241,7 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = HeaderValue::from_str(
-        connect
-            .headers()
-            .get("set-cookie")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap(),
-    )
-    .unwrap();
+    let cookie = mapi_cookie_header(&connect);
 
     let calendar_reminder_at = "2026-05-21T08:45:00Z";
     let task_reminder_at = "2026-05-21T11:45:00Z";
@@ -320,7 +309,7 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
     append_rop_save_changes_message(&mut rops, 3, 4);
 
     let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", cookie);
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -422,16 +411,7 @@ async fn mapi_over_http_reminders_folder_open_uses_canonical_search_projection()
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -482,16 +462,7 @@ async fn mapi_over_http_root_rem_online_entry_id_projects_reminders_folder() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -644,16 +615,7 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = connect
-        .headers()
-        .get("set-cookie")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_string();
+    let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(

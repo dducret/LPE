@@ -1,0 +1,420 @@
+use super::*;
+
+struct EffectiveEventProperties {
+    tags: Vec<u32>,
+    values_by_property_id: HashMap<u16, (u32, MapiValue)>,
+}
+
+pub(in crate::mapi) fn rop_get_properties_all_response(
+    request: &RopRequest,
+    session: &MapiSession,
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let Some(object) = object else {
+        return rop_error_response(0x08, request.input_handle_index().unwrap_or(0), 0x8004_0102);
+    };
+    if let MapiObject::Event {
+        folder_id,
+        event_id,
+        ..
+    } = object
+    {
+        if snapshot.event_for_id(*folder_id, *event_id).is_none() {
+            return rop_error_response(
+                0x08,
+                request.input_handle_index().unwrap_or(0),
+                0x8004_010F,
+            );
+        }
+    }
+
+    let effective_event = effective_event_properties(object, snapshot);
+    let tags = effective_event
+        .as_ref()
+        .map(|effective| effective.tags.clone())
+        .unwrap_or_else(|| get_properties_all_tags(object, snapshot));
+    let mut response = vec![0x08, request.input_handle_index().unwrap_or(0)];
+    write_u32(&mut response, 0);
+    let size_limit = request_property_size_limit(request);
+    let want_unicode = request_get_properties_all_want_unicode(request);
+    response.extend_from_slice(&(tags.len() as u16).to_le_bytes());
+    for storage_tag in tags {
+        let storage_response_tag = get_properties_all_response_tag(storage_tag, want_unicode);
+        let response_tag = event_enumeration_response_tag(
+            session,
+            effective_event.is_some(),
+            storage_response_tag,
+        );
+        let value = effective_event
+            .as_ref()
+            .and_then(|effective| {
+                effective
+                    .values_by_property_id
+                    .get(&MapiPropertyTag::new(storage_tag).property_id())
+            })
+            .filter(|(tag, _)| *tag == storage_tag)
+            .map(|(_, value)| {
+                let mut encoded = Vec::new();
+                write_mapi_value(&mut encoded, storage_response_tag, value);
+                encoded
+            })
+            .unwrap_or_else(|| {
+                serialize_object_property(
+                    Some(object),
+                    principal,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    storage_response_tag,
+                )
+            });
+        if size_limit != 0 && value.len() > size_limit {
+            write_u32(&mut response, property_error_tag(response_tag));
+            write_u32(&mut response, 0x8007_000E);
+        } else {
+            write_u32(&mut response, response_tag);
+            response.extend_from_slice(&value);
+        }
+    }
+    response
+}
+
+pub(in crate::mapi) fn rop_get_properties_list_response(
+    request: &RopRequest,
+    session: &MapiSession,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let Some(object) = object else {
+        return rop_error_response(0x09, request.response_handle_index(), 0x8004_0102);
+    };
+    if let MapiObject::Event {
+        folder_id,
+        event_id,
+        ..
+    } = object
+    {
+        if snapshot.event_for_id(*folder_id, *event_id).is_none() {
+            return rop_error_response(0x09, request.response_handle_index(), 0x8004_010F);
+        }
+    }
+    let tags = effective_event_properties(object, snapshot)
+        .map(|effective| effective.tags)
+        .unwrap_or_else(|| get_properties_list_tags(object));
+    let mut response = vec![0x09, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(tags.len() as u16).to_le_bytes());
+    let event_enumeration = matches!(
+        object,
+        MapiObject::Event { .. } | MapiObject::PendingEvent { .. }
+    );
+    for tag in tags {
+        write_u32(
+            &mut response,
+            event_enumeration_response_tag(session, event_enumeration, tag),
+        );
+    }
+    response
+}
+
+fn event_enumeration_response_tag(
+    session: &MapiSession,
+    event_enumeration: bool,
+    property_tag: u32,
+) -> u32 {
+    let tag = MapiPropertyTag::new(property_tag);
+    if !event_enumeration || tag.property_id() < MIN_NAMED_PROPERTY_ID {
+        return property_tag;
+    }
+
+    let canonical_definition = (property_tag == PID_LID_APPOINTMENT_COLOR_TAG
+        || !crate::mapi::dispatch::custom_properties::is_calendar_passthrough_property_tag(
+            property_tag,
+        ))
+    .then(|| fast_transfer_named_property_for_message_tag("IPM.Appointment", property_tag))
+    .flatten();
+    let definition = canonical_definition
+        .or_else(|| session.named_property_ids.get(&tag.property_id()).cloned());
+    let Some(property_id) = definition
+        .as_ref()
+        .and_then(|definition| session.named_properties.get(definition))
+        .copied()
+    else {
+        return property_tag;
+    };
+    (u32::from(property_id) << 16) | u32::from(tag.property_type_code())
+}
+
+fn effective_event_properties(
+    object: &MapiObject,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<EffectiveEventProperties> {
+    let mut values_by_property_id = HashMap::<u16, (u32, MapiValue)>::new();
+    let (transaction, stored_values, mut canonical_tags) = match object {
+        MapiObject::Event {
+            folder_id,
+            event_id,
+            transaction,
+        } => {
+            let event = snapshot.event_for_id(*folder_id, *event_id)?;
+            (
+                Some(transaction),
+                event.stored_properties.as_slice(),
+                calendar_enumerable_property_tags(
+                    event,
+                    snapshot.reminder_for_source("calendar", event.canonical_id),
+                ),
+            )
+        }
+        MapiObject::PendingEvent { properties, .. } => {
+            let canonical_tags = properties
+                .keys()
+                .copied()
+                .map(canonical_calendar_property_storage_tag)
+                .filter(|tag| {
+                    !crate::mapi::dispatch::custom_properties::is_calendar_passthrough_property_tag(
+                        *tag,
+                    ) && !crate::mapi::dispatch::custom_properties::is_invalid_calendar_canonical_named_property_tag(*tag)
+                })
+                .collect::<Vec<_>>();
+            for (tag, value) in properties {
+                insert_effective_event_value(&mut values_by_property_id, *tag, value.clone(), true);
+            }
+            return Some(finalize_effective_event_properties(
+                values_by_property_id,
+                canonical_tags,
+            ));
+        }
+        _ => return None,
+    };
+
+    for stored in stored_values {
+        if !crate::mapi::dispatch::custom_properties::is_calendar_passthrough_property_tag(
+            stored.property_tag,
+        ) || stored.property_type != stored.property_tag as u16
+        {
+            continue;
+        }
+        let mut cursor = Cursor::new(&stored.property_value);
+        let Ok(value) = parse_mapi_property_value(&mut cursor, stored.property_tag) else {
+            continue;
+        };
+        if cursor.remaining() != 0 {
+            continue;
+        }
+        insert_effective_event_value(
+            &mut values_by_property_id,
+            stored.property_tag,
+            value,
+            false,
+        );
+    }
+
+    if let Some(transaction) = transaction {
+        for tag in &transaction.deleted_properties {
+            let property_id = MapiPropertyTag::new(*tag).property_id();
+            values_by_property_id.remove(&property_id);
+            canonical_tags.retain(|tag| MapiPropertyTag::new(*tag).property_id() != property_id);
+        }
+        for (tag, value) in &transaction.pending_properties {
+            let storage_tag = canonical_calendar_property_storage_tag(*tag);
+            if crate::mapi::dispatch::custom_properties::is_calendar_passthrough_property_tag(
+                storage_tag,
+            ) {
+                insert_effective_event_value(
+                    &mut values_by_property_id,
+                    storage_tag,
+                    value.clone(),
+                    true,
+                );
+            } else if !crate::mapi::dispatch::custom_properties::is_invalid_calendar_canonical_named_property_tag(storage_tag) {
+                canonical_tags.push(storage_tag);
+            }
+        }
+    }
+    Some(finalize_effective_event_properties(
+        values_by_property_id,
+        canonical_tags,
+    ))
+}
+
+fn calendar_enumeration_tag_priority(property_tag: u32) -> u8 {
+    if property_tag == PID_TAG_HTML_BINARY {
+        0
+    } else if matches!(
+        MapiPropertyTag::new(property_tag).property_type(),
+        Some(MapiPropertyType::String | MapiPropertyType::MultipleString)
+    ) {
+        1
+    } else {
+        2
+    }
+}
+
+fn insert_effective_event_value(
+    values: &mut HashMap<u16, (u32, MapiValue)>,
+    property_tag: u32,
+    value: MapiValue,
+    replace: bool,
+) {
+    if !crate::mapi::dispatch::custom_properties::is_calendar_passthrough_property_tag(property_tag)
+    {
+        return;
+    }
+    let property_id = MapiPropertyTag::new(property_tag).property_id();
+    let unicode = matches!(
+        MapiPropertyTag::new(property_tag).property_type(),
+        Some(MapiPropertyType::String | MapiPropertyType::MultipleString)
+    );
+    let replace = match values.get(&property_id) {
+        None => true,
+        Some((existing_tag, _)) => {
+            let existing_unicode = matches!(
+                MapiPropertyTag::new(*existing_tag).property_type(),
+                Some(MapiPropertyType::String | MapiPropertyType::MultipleString)
+            );
+            if existing_unicode != unicode {
+                unicode
+            } else {
+                replace
+            }
+        }
+    };
+    if replace {
+        values.insert(property_id, (property_tag, value));
+    }
+}
+
+fn finalize_effective_event_properties(
+    mut values_by_property_id: HashMap<u16, (u32, MapiValue)>,
+    mut tags: Vec<u32>,
+) -> EffectiveEventProperties {
+    tags.sort_unstable_by_key(|tag| {
+        (
+            MapiPropertyTag::new(*tag).property_id(),
+            calendar_enumeration_tag_priority(*tag),
+            *tag,
+        )
+    });
+    tags.dedup_by_key(|tag| MapiPropertyTag::new(*tag).property_id());
+    let default_ids = tags
+        .iter()
+        .map(|tag| MapiPropertyTag::new(*tag).property_id())
+        .collect::<HashSet<_>>();
+    values_by_property_id.retain(|property_id, _| !default_ids.contains(property_id));
+    let mut passthrough_tags = values_by_property_id
+        .values()
+        .map(|(tag, _)| *tag)
+        .collect::<Vec<_>>();
+    passthrough_tags.sort_unstable();
+    tags.extend(passthrough_tags);
+    EffectiveEventProperties {
+        tags,
+        values_by_property_id,
+    }
+}
+
+fn get_properties_all_tags(object: &MapiObject, snapshot: &MapiMailStoreSnapshot) -> Vec<u32> {
+    match object {
+        MapiObject::Logon => default_store_property_tags(),
+        MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
+            ..
+        } => default_folder_property_tags_with_identity(),
+        MapiObject::Attachment { .. }
+        | MapiObject::PendingAttachment { .. }
+        | MapiObject::SavedAttachment { .. } => default_attachment_columns(),
+        MapiObject::Message { .. }
+        | MapiObject::PublicFolderItem { .. }
+        | MapiObject::PendingMessage { .. } => default_message_property_tags(),
+        MapiObject::Contact { .. } | MapiObject::PendingContact { .. } => {
+            default_contact_property_tags()
+        }
+        MapiObject::Task { .. } | MapiObject::PendingTask { .. } => default_task_property_tags(),
+        MapiObject::Note { .. } | MapiObject::PendingNote { .. } => default_note_property_tags(),
+        MapiObject::JournalEntry { .. } | MapiObject::PendingJournalEntry { .. } => {
+            default_journal_entry_property_tags()
+        }
+        MapiObject::ConversationAction { .. } | MapiObject::PendingConversationAction { .. } => {
+            default_conversation_action_property_tags()
+        }
+        MapiObject::AssociatedConfig {
+            folder_id,
+            config_id,
+            saved_message,
+            ..
+        } => {
+            let mut tags = default_folder_property_tags();
+            if let Some(message) = saved_message
+                .clone()
+                .or_else(|| snapshot.associated_config_message_for_id(*config_id))
+                .filter(|message| message.folder_id == *folder_id)
+            {
+                tags.extend(associated_config_named_property_tags(&message));
+                tags.sort_unstable();
+                tags.dedup();
+            }
+            tags
+        }
+        _ => default_folder_property_tags(),
+    }
+}
+
+fn get_properties_list_tags(object: &MapiObject) -> Vec<u32> {
+    match object {
+        MapiObject::Logon => default_store_property_tags(),
+        MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
+            ..
+        } => default_folder_property_tags_with_identity(),
+        MapiObject::Attachment { .. }
+        | MapiObject::PendingAttachment { .. }
+        | MapiObject::SavedAttachment { .. } => default_attachment_columns(),
+        MapiObject::Contact { .. } | MapiObject::PendingContact { .. } => {
+            default_contact_property_tags()
+        }
+        MapiObject::Task { .. } | MapiObject::PendingTask { .. } => default_task_property_tags(),
+        MapiObject::Note { .. } | MapiObject::PendingNote { .. } => default_note_property_tags(),
+        MapiObject::JournalEntry { .. } | MapiObject::PendingJournalEntry { .. } => {
+            default_journal_entry_property_tags()
+        }
+        MapiObject::ConversationAction { .. } | MapiObject::PendingConversationAction { .. } => {
+            default_conversation_action_property_tags()
+        }
+        MapiObject::Message { .. }
+        | MapiObject::AssociatedConfig { .. }
+        | MapiObject::PublicFolderItem { .. }
+        | MapiObject::PendingAssociatedMessage { .. }
+        | MapiObject::PendingMessage { .. } => default_message_property_tags(),
+        _ => default_folder_property_tags(),
+    }
+}
+
+fn request_get_properties_all_want_unicode(request: &RopRequest) -> bool {
+    request
+        .payload
+        .get(2..4)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+        .unwrap_or(1)
+        != 0
+}
+
+fn get_properties_all_response_tag(property_tag: u32, want_unicode: bool) -> u32 {
+    if want_unicode {
+        return property_tag;
+    }
+    match MapiPropertyTag::new(property_tag).property_type() {
+        Some(MapiPropertyType::String) => (property_tag & 0xFFFF_0000) | 0x001E,
+        Some(MapiPropertyType::MultipleString) => (property_tag & 0xFFFF_0000) | 0x101E,
+        _ => property_tag,
+    }
+}
+
+pub(in crate::mapi) fn property_error_tag(property_tag: u32) -> u32 {
+    (property_tag & 0xFFFF_0000) | 0x000A
+}

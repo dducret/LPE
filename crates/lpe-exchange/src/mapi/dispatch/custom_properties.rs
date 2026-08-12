@@ -87,7 +87,7 @@ pub(super) fn mapi_event_custom_property_values_from_map(
 ) -> Vec<MapiEventCustomPropertyValue> {
     let mut values = properties
         .iter()
-        .filter(|(tag, _)| is_custom_property_tag(**tag))
+        .filter(|(tag, _)| is_calendar_passthrough_property_tag(**tag))
         .map(|(property_tag, value)| {
             let mut property_value = Vec::new();
             write_mapi_value(&mut property_value, *property_tag, value);
@@ -205,37 +205,73 @@ pub(super) async fn fetch_custom_property_values_for_request<S>(
 where
     S: ExchangeStore,
 {
-    let tags = property_tags
-        .iter()
-        .copied()
-        .filter(|tag| is_custom_property_tag(*tag))
-        .collect::<Vec<_>>();
-    if tags.is_empty() {
-        return Ok(HashMap::new());
-    }
     let Some((object_kind, canonical_id)) =
         custom_property_object_identity(object, mailboxes, emails, snapshot)
     else {
         return Ok(HashMap::new());
     };
+    let requested_tags = property_tags
+        .iter()
+        .copied()
+        .filter_map(|tag| {
+            let storage_tag = if object_kind == MapiCustomPropertyObjectKind::CalendarEvent {
+                canonical_calendar_property_storage_tag(tag)
+            } else {
+                tag
+            };
+            (is_custom_property_tag(storage_tag)
+                || (object_kind == MapiCustomPropertyObjectKind::CalendarEvent
+                    && is_calendar_passthrough_property_tag(storage_tag)))
+            .then_some((tag, storage_tag))
+        })
+        .collect::<Vec<_>>();
+    if requested_tags.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut storage_tags = requested_tags
+        .iter()
+        .map(|(_, storage_tag)| *storage_tag)
+        .collect::<Vec<_>>();
+    storage_tags.sort_unstable();
+    storage_tags.dedup();
     let account_id = custom_property_storage_account_id(principal, object, snapshot);
-    let mut values = store
-        .fetch_mapi_custom_property_values(account_id, object_kind, canonical_id, &tags)
+    let mut stored_values = store
+        .fetch_mapi_custom_property_values(account_id, object_kind, canonical_id, &storage_tags)
         .await?
         .into_iter()
         .map(|value| (value.property_tag, value.property_value))
         .collect::<HashMap<_, _>>();
     if let Some(MapiObject::Event { transaction, .. }) = object {
         for tag in &transaction.deleted_properties {
-            values.remove(tag);
+            stored_values.remove(tag);
         }
         for (tag, value) in &transaction.pending_properties {
-            if tags.contains(tag) && is_custom_property_tag(*tag) {
+            if storage_tags.contains(tag) {
                 let mut property_value = Vec::new();
                 write_mapi_value(&mut property_value, *tag, value);
-                values.insert(*tag, property_value);
+                stored_values.insert(*tag, property_value);
             }
         }
+    }
+    let mut values = HashMap::new();
+    for (requested_tag, storage_tag) in requested_tags {
+        let Some(stored) = stored_values.get(&storage_tag) else {
+            continue;
+        };
+        if requested_tag == storage_tag {
+            values.insert(requested_tag, stored.clone());
+            continue;
+        }
+        let mut cursor = Cursor::new(stored);
+        let Ok(value) = parse_mapi_property_value(&mut cursor, storage_tag) else {
+            continue;
+        };
+        if cursor.remaining() != 0 {
+            continue;
+        }
+        let mut encoded = Vec::new();
+        write_mapi_value(&mut encoded, requested_tag, &value);
+        values.insert(requested_tag, encoded);
     }
     Ok(values)
 }
@@ -512,16 +548,98 @@ fn staged_custom_property_values(
         .collect()
 }
 
-pub(super) fn is_custom_property_tag(property_tag: u32) -> bool {
+pub(in crate::mapi) fn is_custom_property_tag(property_tag: u32) -> bool {
     let tag = MapiPropertyTag::new(property_tag);
-    tag.property_id() >= FIRST_NAMED_PROPERTY_ID
+    tag.property_id() >= MIN_NAMED_PROPERTY_ID
         && tag.property_type().is_some()
         && !is_canonical_named_property_tag(property_tag)
 }
 
-fn is_canonical_named_property_tag(property_tag: u32) -> bool {
+pub(in crate::mapi) fn is_calendar_passthrough_property_tag(property_tag: u32) -> bool {
+    if is_invalid_calendar_canonical_named_property_tag(property_tag)
+        || is_calendar_named_passthrough_property_id(property_tag)
+            && !is_calendar_named_passthrough_property_tag(property_tag)
+        || crate::store::is_mapi_calendar_standard_passthrough_property_id(property_tag)
+            && !is_calendar_standard_passthrough_property_tag(property_tag)
+    {
+        return false;
+    }
+    calendar_passthrough_property_type_is_supported(property_tag)
+        && (is_custom_property_tag(property_tag)
+            || is_calendar_named_passthrough_property_tag(property_tag)
+            || is_calendar_standard_passthrough_property_tag(property_tag))
+}
+
+pub(in crate::mapi) fn is_unsupported_calendar_passthrough_property_tag(property_tag: u32) -> bool {
+    is_invalid_calendar_canonical_named_property_tag(property_tag)
+        || is_calendar_named_passthrough_property_id(property_tag)
+            && !is_calendar_named_passthrough_property_tag(property_tag)
+        || crate::store::is_mapi_calendar_standard_passthrough_property_id(property_tag)
+            && !is_calendar_standard_passthrough_property_tag(property_tag)
+        || is_custom_property_tag(property_tag)
+            && !calendar_passthrough_property_type_is_supported(property_tag)
+}
+
+pub(in crate::mapi) fn is_invalid_calendar_canonical_named_property_tag(property_tag: u32) -> bool {
+    is_canonical_named_property_id(property_tag) && !is_canonical_named_property_tag(property_tag)
+}
+
+fn calendar_passthrough_property_type_is_supported(property_tag: u32) -> bool {
     matches!(
-        canonical_property_storage_tag(property_tag),
+        MapiPropertyTag::new(property_tag).property_type(),
+        Some(
+            MapiPropertyType::Integer32
+                | MapiPropertyType::Boolean
+                | MapiPropertyType::Integer64
+                | MapiPropertyType::String8
+                | MapiPropertyType::String
+                | MapiPropertyType::Time
+                | MapiPropertyType::Guid
+                | MapiPropertyType::ServerId
+                | MapiPropertyType::Binary
+                | MapiPropertyType::MultipleString8
+                | MapiPropertyType::MultipleString
+        )
+    )
+}
+
+fn is_calendar_standard_passthrough_property_tag(property_tag: u32) -> bool {
+    crate::store::is_mapi_calendar_standard_passthrough_property_tag(property_tag)
+}
+
+fn is_calendar_named_passthrough_property_tag(property_tag: u32) -> bool {
+    property_tag == PID_LID_APPOINTMENT_COLOR_TAG
+}
+
+pub(in crate::mapi) fn is_calendar_named_passthrough_property_id(property_tag: u32) -> bool {
+    property_tag & 0xFFFF_0000 == PID_LID_APPOINTMENT_COLOR_TAG & 0xFFFF_0000
+}
+
+fn is_canonical_named_property_tag(property_tag: u32) -> bool {
+    if is_exact_canonical_named_property_tag(property_tag) {
+        return true;
+    }
+    let tag = MapiPropertyTag::new(property_tag);
+    let unicode_tag = match tag.property_type() {
+        Some(MapiPropertyType::String8) => (property_tag & 0xFFFF_0000) | 0x001F,
+        Some(MapiPropertyType::MultipleString8) => (property_tag & 0xFFFF_0000) | 0x101F,
+        _ => return false,
+    };
+    is_exact_canonical_named_property_tag(unicode_tag)
+}
+
+fn is_canonical_named_property_id(property_tag: u32) -> bool {
+    let property_id = property_tag & 0xFFFF_0000;
+    [
+        0x0002, 0x0003, 0x000B, 0x0014, 0x001F, 0x0040, 0x0048, 0x0102, 0x101F, 0x1102,
+    ]
+    .into_iter()
+    .any(|property_type| is_exact_canonical_named_property_tag(property_id | property_type))
+}
+
+fn is_exact_canonical_named_property_tag(property_tag: u32) -> bool {
+    matches!(
+        property_tag,
         PID_LID_FLAG_REQUEST_W_TAG
             | PID_LID_COMMON_START_TAG
             | PID_LID_COMMON_END_TAG
@@ -535,14 +653,19 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
             | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG
             | PID_LID_IS_RECURRING_TAG
             | PID_LID_BUSY_STATUS_TAG
+            | PID_LID_APPOINTMENT_SEQUENCE_TAG
             | PID_LID_LOCATION_W_TAG
             | PID_LID_APPOINTMENT_START_WHOLE_TAG
             | PID_LID_APPOINTMENT_END_WHOLE_TAG
+            | PID_LID_CLIP_START_TAG
+            | PID_LID_CLIP_END_TAG
             | PID_LID_APPOINTMENT_DURATION_TAG
             | PID_LID_APPOINTMENT_RECUR_TAG
             | PID_LID_APPOINTMENT_SUB_TYPE_TAG
             | PID_LID_APPOINTMENT_STATE_FLAGS_TAG
             | PID_LID_RESPONSE_STATUS_TAG
+            | PID_LID_SIDE_EFFECTS_TAG
+            | PID_LID_OUTLOOK_COMMON_8578_TAG
             | PID_LID_RECURRING_TAG
             | PID_LID_ALL_ATTENDEES_STRING_W_TAG
             | PID_LID_TO_ATTENDEES_STRING_W_TAG
@@ -552,8 +675,12 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
             | PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG
             | PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG
             | PID_LID_REMINDER_SET_TAG
+            | PID_LID_REMINDER_DELTA_TAG
             | PID_LID_REMINDER_TIME_TAG
             | PID_LID_REMINDER_SIGNAL_TIME_TAG
+            | PID_LID_REMINDER_OVERRIDE_TAG
+            | PID_LID_REMINDER_PLAY_SOUND_TAG
+            | PID_LID_REMINDER_FILE_PARAMETER_W_TAG
             | PID_LID_EMAIL1_ADDRESS_TYPE_W_TAG
             | PID_LID_EMAIL1_DISPLAY_NAME_W_TAG
             | PID_LID_EMAIL1_EMAIL_ADDRESS_W_TAG
@@ -578,4 +705,57 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
             | PID_LID_CONVERSATION_PROCESSED_TAG
             | PID_NAME_KEYWORDS_TAG
     )
+}
+
+#[cfg(test)]
+mod calendar_passthrough_tests {
+    use super::*;
+
+    #[test]
+    fn calendar_named_property_ownership_rejects_alias_types_and_unserializable_values() {
+        let location_string8 = (PID_LID_LOCATION_W_TAG & 0xFFFF_0000) | 0x001E;
+        let location_i32 = (PID_LID_LOCATION_W_TAG & 0xFFFF_0000) | 0x0003;
+        let appointment_color_string = (PID_LID_APPOINTMENT_COLOR_TAG & 0xFFFF_0000) | 0x001F;
+        let appointment_color_binary = (PID_LID_APPOINTMENT_COLOR_TAG & 0xFFFF_0000) | 0x0102;
+        assert!(!is_custom_property_tag(location_string8));
+        assert!(is_custom_property_tag(location_i32));
+        assert!(!is_invalid_calendar_canonical_named_property_tag(
+            location_string8
+        ));
+        assert!(is_invalid_calendar_canonical_named_property_tag(
+            location_i32
+        ));
+        assert!(is_custom_property_tag(PID_LID_APPOINTMENT_COLOR_TAG));
+        assert!(is_calendar_passthrough_property_tag(
+            PID_LID_APPOINTMENT_COLOR_TAG
+        ));
+        assert_eq!(
+            mapi_event_custom_property_values_from_map(&HashMap::from([(
+                PID_LID_APPOINTMENT_COLOR_TAG,
+                MapiValue::I32(7),
+            )])),
+            vec![MapiEventCustomPropertyValue {
+                property_tag: PID_LID_APPOINTMENT_COLOR_TAG,
+                property_type: 0x0003,
+                property_value: 7i32.to_le_bytes().to_vec(),
+            }]
+        );
+        for property_tag in [appointment_color_string, appointment_color_binary] {
+            assert!(is_custom_property_tag(property_tag));
+            assert!(!is_calendar_passthrough_property_tag(property_tag));
+            assert!(is_unsupported_calendar_passthrough_property_tag(
+                property_tag
+            ));
+        }
+        assert!(is_custom_property_tag(0x9100_1003));
+        assert!(is_unsupported_calendar_passthrough_property_tag(
+            0x9100_1003
+        ));
+        assert!(is_unsupported_calendar_passthrough_property_tag(
+            0x0063_0003
+        ));
+        assert!(is_unsupported_calendar_passthrough_property_tag(
+            0x0070_0102
+        ));
+    }
 }

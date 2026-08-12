@@ -412,6 +412,7 @@ impl MapiMailStoreSnapshot {
                         event,
                         version,
                         attachments: Vec::new(),
+                        stored_properties: Vec::new(),
                     }
                 }))
             })
@@ -437,6 +438,7 @@ impl MapiMailStoreSnapshot {
                         event,
                         version,
                         attachments: Vec::new(),
+                        stored_properties: Vec::new(),
                     })
                 })
                 .collect::<Result<Vec<_>>>()?,

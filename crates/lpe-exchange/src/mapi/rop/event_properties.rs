@@ -9,7 +9,7 @@ pub(in crate::mapi) fn event_object_property_is_deleted(
         Some(MapiObject::Event { transaction, .. })
             if transaction
                 .deleted_properties
-                .contains(&canonical_property_storage_tag(property_tag))
+                .contains(&canonical_calendar_property_storage_tag(property_tag))
     )
 }
 
@@ -30,7 +30,7 @@ pub(in crate::mapi) fn serialize_event_object_property(
     snapshot
         .event_for_id(*folder_id, *event_id)
         .map(|event| {
-            let storage_tag = canonical_property_storage_tag(property_tag);
+            let storage_tag = canonical_calendar_property_storage_tag(property_tag);
             if transaction.deleted_properties.contains(&storage_tag) {
                 let mut value = Vec::new();
                 write_property_default(&mut value, property_tag);

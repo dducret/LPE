@@ -198,26 +198,17 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 }
             };
             session.record_special_folder_alias(alias_folder_id, canonical_folder_id);
-            let canonical_is_emitted = sync_mailboxes_for_excluding_deleted(
+            // [MS-OXCFXICS] sections 3.2.5.9.4.3 and 3.3.5.8.8: a
+            // successful hierarchy import advances CnsetSeen and the client
+            // retains the imported FID in IdsetGiven. The alias remains a
+            // redirect rather than a second projected hierarchy row, but it
+            // must not be acknowledged and then reported as deleted.
+            record_sync_upload_hierarchy_change_with_change_number(
+                session,
                 folder_id,
-                0x02,
-                mailboxes,
-                &session.deleted_advertised_special_folders,
-            )
-            .iter()
-            .any(|mailbox| mapi_folder_id(mailbox) == canonical_folder_id);
-            // This LPE-only compatibility policy treats the alias as a stale
-            // request redirect, not a hierarchy replica object. When its
-            // canonical target is in the full hierarchy projection, leave the
-            // alias CN out of MetaTagCnsetSeen for reconciliation download.
-            if !canonical_is_emitted {
-                record_sync_upload_hierarchy_change_with_change_number(
-                    session,
-                    folder_id,
-                    canonical_folder_id,
-                    change_number,
-                );
-            }
+                canonical_folder_id,
+                change_number,
+            );
         }
         responses.extend_from_slice(&rop_synchronization_import_hierarchy_change_response(
             request,

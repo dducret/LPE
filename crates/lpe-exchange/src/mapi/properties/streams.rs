@@ -1,5 +1,8 @@
 use super::*;
 
+mod calendar;
+use calendar::*;
+
 // [MS-OXOCAL] sections 2.2.12.5 and 2.2.12.5.1. This is the only
 // appointment-tombstone value that has no canonical deleted-meeting state.
 pub(in crate::mapi) const EMPTY_APPOINTMENT_TOMBSTONE: [u8; 20] = [
@@ -126,8 +129,25 @@ pub(super) fn property_stream_data(
     let writable_pending_event = matches!(
         (object, open_mode),
         (MapiObject::PendingEvent { .. }, 1 | 2)
-    ) && canonical_property_storage_tag(property_tag)
-        != PID_TAG_SEARCH_KEY;
+    ) && calendar_event_stream_property_is_writable(property_tag);
+    let writable_event = match (object, open_mode) {
+        (
+            MapiObject::Event {
+                folder_id,
+                event_id,
+                transaction,
+            },
+            1 | 2,
+        ) if transaction.import_disposition == MapiEventImportDisposition::Apply
+            && matches!(transaction.open_mode_flags & 0x03, 0x01 | 0x03)
+            && calendar_event_stream_property_is_writable(property_tag) =>
+        {
+            snapshot
+                .event_for_id(*folder_id, *event_id)
+                .is_some_and(|event| event.event.rights.may_write)
+        }
+        _ => false,
+    };
     let writable_pending_associated_message = matches!(
         (object, open_mode),
         (
@@ -149,6 +169,7 @@ pub(super) fn property_stream_data(
         && !writable_associated_config
         && !writable_common_view_named_view
         && !writable_pending_event
+        && !writable_event
         && !writable_pending_associated_message
         && !writable_local_freebusy_tombstone
     {
@@ -198,7 +219,7 @@ pub(super) fn property_stream_data(
         MapiObject::PendingEvent { properties, .. } => match open_mode {
             2 => None,
             _ => properties
-                .get(&canonical_property_storage_tag(property_tag))
+                .get(&canonical_calendar_property_storage_tag(property_tag))
                 .cloned(),
         },
         MapiObject::PendingAssociatedMessage { properties, .. }
@@ -227,23 +248,18 @@ pub(super) fn property_stream_data(
         MapiObject::Event {
             folder_id,
             event_id,
-            ..
-        } if open_mode == 0 => snapshot
+            transaction,
+        } => snapshot
             .event_for_id(*folder_id, *event_id)
             .and_then(|event| {
-                let reminder = snapshot.reminder_for_source("calendar", event.canonical_id);
-                if canonical_property_storage_tag(property_tag) == PID_TAG_SEARCH_KEY {
-                    versioned_event_property_value_with_reminder(event, property_tag, reminder)
-                } else {
-                    event_property_value_with_reminder_and_mailbox_guid(
-                        &event.event,
-                        event.id,
-                        event.folder_id,
-                        property_tag,
-                        reminder,
-                        Some(mailbox_guid),
-                    )
-                }
+                (open_mode != 2).then_some(())?;
+                effective_event_stream_property_value(
+                    event,
+                    transaction,
+                    property_tag,
+                    mailbox_guid,
+                    snapshot,
+                )
             }),
         _ => return None,
     };
@@ -263,6 +279,11 @@ pub(super) fn property_stream_data(
         Some(StreamWriteTarget::VolatileProperty)
     } else if writable_pending_event {
         Some(StreamWriteTarget::PendingEventProperty {
+            handle: input_handle,
+            property_tag,
+        })
+    } else if writable_event {
+        Some(StreamWriteTarget::EventProperty {
             handle: input_handle,
             property_tag,
         })
@@ -396,7 +417,8 @@ pub(in crate::mapi) fn message_body_stream_data(
             let event = snapshot.event_for_id(*folder_id, *event_id)?;
             if open_mode != 0
                 && (!matches!(transaction.open_mode_flags & 0x03, 0x01 | 0x03)
-                    || !event.event.rights.may_write)
+                    || !event.event.rights.may_write
+                    || transaction.import_disposition != MapiEventImportDisposition::Apply)
             {
                 return None;
             }
@@ -492,7 +514,9 @@ pub(in crate::mapi) fn message_body_stream_data(
                 property_tag,
             })
         }
-        (Some(MapiObject::PendingEvent { .. }), 1 | 2) => {
+        (Some(MapiObject::PendingEvent { .. }), 1 | 2)
+            if calendar_event_stream_property_is_writable(property_tag) =>
+        {
             Some(StreamWriteTarget::PendingEventProperty {
                 handle: input_handle,
                 property_tag,
@@ -710,7 +734,7 @@ pub(in crate::mapi) fn sync_stream_target(
             if let Some(MapiObject::PendingEvent { properties, .. }) =
                 session.handles.get_mut(&handle)
             {
-                properties.insert(canonical_property_storage_tag(property_tag), value);
+                insert_pending_event_stream_property(properties, property_tag, value);
                 Some(())
             } else {
                 None
@@ -722,9 +746,7 @@ pub(in crate::mapi) fn sync_stream_target(
         } => {
             let value = stream_property_value(property_tag, data)?;
             if let Some(MapiObject::Event { transaction, .. }) = session.handles.get_mut(&handle) {
-                let storage_tag = canonical_property_storage_tag(property_tag);
-                transaction.deleted_properties.remove(&storage_tag);
-                transaction.pending_properties.insert(storage_tag, value);
+                insert_event_stream_property(transaction, property_tag, value);
                 Some(())
             } else {
                 None
@@ -818,6 +840,9 @@ pub(in crate::mapi) fn stream_property_value(
             Some(MapiValue::String(decode_utf16_stream_value(&data)?))
         }
         PID_TAG_HTML_BINARY => Some(MapiValue::Binary(data)),
+        _ if property_tag_type(property_tag) == 0x001E => {
+            Some(MapiValue::String(decode_string8_stream_value(&data)))
+        }
         _ if property_tag_type(property_tag) == 0x001F => {
             Some(MapiValue::String(decode_utf16_stream_value(&data)?))
         }
@@ -982,6 +1007,85 @@ fn decode_basic_html_entities(value: &str) -> String {
 mod tests {
     use super::*;
 
+    fn pending_event_session() -> MapiSession {
+        test_session(MapiObject::PendingEvent {
+            folder_id: CALENDAR_FOLDER_ID,
+            properties: HashMap::new(),
+            recipients: Vec::new(),
+            recipients_modified: false,
+            fail_on_conflict: false,
+        })
+    }
+
+    fn saved_event_session_and_snapshot() -> (MapiSession, MapiMailStoreSnapshot) {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let canonical_id = Uuid::from_u128(0x9100);
+        let event_id = crate::mapi::identity::mapi_store_id(0x9100);
+        let mut snapshot = MapiMailStoreSnapshot::empty();
+        snapshot.remember_created_event(
+            CALENDAR_FOLDER_ID,
+            event_id,
+            lpe_storage::AccessibleEvent {
+                id: canonical_id,
+                uid: "stream-event".to_string(),
+                collection_id: "default".to_string(),
+                owner_account_id: account_id,
+                owner_email: "sender@example.test".to_string(),
+                owner_display_name: "Sender".to_string(),
+                rights: lpe_storage::CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: false,
+                },
+                date: "2026-08-12".to_string(),
+                time: "09:00".to_string(),
+                time_zone: "UTC".to_string(),
+                duration_minutes: 30,
+                all_day: false,
+                status: "confirmed".to_string(),
+                sequence: 0,
+                recurrence_rule: String::new(),
+                recurrence_json: "{}".to_string(),
+                recurrence_exceptions_json: "[]".to_string(),
+                title: "Stream event".to_string(),
+                location: String::new(),
+                organizer_json: "{}".to_string(),
+                attendees: String::new(),
+                attendees_json: "[]".to_string(),
+                notes: "Body".to_string(),
+                body_html: "<p>Body</p>".to_string(),
+            },
+            Vec::new(),
+        );
+        let stored_values = [
+            (0x9100_0102, MapiValue::Binary(b"persisted binary".to_vec())),
+            (
+                0x9101_001F,
+                MapiValue::String("persisted unicode".to_string()),
+            ),
+        ]
+        .into_iter()
+        .map(|(property_tag, value)| {
+            let mut property_value = Vec::new();
+            write_mapi_value(&mut property_value, property_tag, &value);
+            crate::store::MapiCalendarPropertyValue {
+                event_id: canonical_id,
+                property_tag,
+                property_type: property_tag as u16,
+                property_value,
+            }
+        })
+        .collect();
+        let snapshot = snapshot.with_calendar_property_values(stored_values);
+        let session = test_session(MapiObject::Event {
+            folder_id: CALENDAR_FOLDER_ID,
+            event_id,
+            transaction: MapiEventTransaction::new(1, 1),
+        });
+        (session, snapshot)
+    }
+
     fn test_session(object: MapiObject) -> MapiSession {
         let mut handles = HashMap::new();
         handles.insert(1, object);
@@ -1090,6 +1194,306 @@ mod tests {
         assert_eq!(
             stream_property_value(PID_TAG_RTF_COMPRESSED, b"opaque rtf".to_vec()),
             None
+        );
+    }
+
+    #[test]
+    fn pending_calendar_stream_rejects_identity_and_wrong_type_canonical_properties() {
+        let mut session = pending_event_session();
+        let account_id = session.account_id;
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let location_binary = (PID_LID_LOCATION_W_TAG & 0xFFFF_0000) | 0x0102;
+
+        for property_tag in [PID_TAG_ENTRY_ID, location_binary] {
+            assert!(property_stream_data(
+                &mut session,
+                1,
+                property_tag,
+                1,
+                &[],
+                account_id,
+                &snapshot,
+            )
+            .is_none());
+        }
+    }
+
+    #[test]
+    fn calendar_stream_guard_rejects_all_server_managed_identity_type_variants() {
+        for managed_tag in [
+            PID_TAG_ENTRY_ID,
+            PID_TAG_PARENT_ENTRY_ID,
+            PID_TAG_INSTANCE_KEY,
+            PID_TAG_RECORD_KEY,
+            PID_TAG_SOURCE_KEY,
+            PID_TAG_PARENT_SOURCE_KEY,
+            PID_TAG_SEARCH_KEY,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+        ] {
+            assert!(!calendar_event_stream_property_is_writable(managed_tag));
+            assert!(!calendar_event_stream_property_is_writable(
+                (managed_tag & 0xFFFF_0000) | 0x001F
+            ));
+        }
+        assert!(!calendar_event_stream_property_is_writable(
+            (PID_LID_LOCATION_W_TAG & 0xFFFF_0000) | 0x0102
+        ));
+        assert!(!calendar_event_stream_property_is_writable(
+            (PID_TAG_SUBJECT_W & 0xFFFF_0000) | 0x0102
+        ));
+        assert!(!calendar_event_stream_property_is_writable(
+            PID_TAG_SENDER_ENTRY_ID
+        ));
+        assert!(!calendar_event_stream_property_is_writable(
+            PID_TAG_SENT_REPRESENTING_EMAIL_ADDRESS_W
+        ));
+        assert!(calendar_event_stream_property_is_writable(
+            PID_TAG_SENDER_EMAIL_ADDRESS_W
+        ));
+        assert!(calendar_event_stream_property_is_writable(0x9100_0102));
+        assert!(calendar_event_stream_property_is_writable(0x9101_001F));
+        assert!(calendar_event_stream_property_is_writable(
+            PID_TAG_HTML_BINARY
+        ));
+        assert!(calendar_event_stream_property_is_writable(
+            PID_LID_APPOINTMENT_RECUR_TAG
+        ));
+    }
+
+    #[test]
+    fn pending_calendar_stream_commits_supported_named_properties_canonically() {
+        let mut session = pending_event_session();
+        let account_id = session.account_id;
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let named_binary = 0x9100_0102;
+        let named_string8 = 0x9101_001E;
+        let named_unicode = 0x9102_001F;
+
+        for (property_tag, data) in [
+            (named_binary, b"named-binary".to_vec()),
+            (named_string8, b"named string8\0".to_vec()),
+            (named_unicode, utf16z_bytes("named unicode")),
+        ] {
+            let (_, target) =
+                property_stream_data(&mut session, 1, property_tag, 2, &[], account_id, &snapshot)
+                    .expect("supported named Calendar stream");
+            sync_stream_target(
+                &mut session,
+                target.expect("writable named Calendar stream"),
+                data,
+            )
+            .expect("commit named Calendar stream");
+        }
+
+        let MapiObject::PendingEvent { properties, .. } = session.handles.get(&1).unwrap() else {
+            panic!("pending Calendar event");
+        };
+        assert_eq!(
+            properties.get(&named_binary),
+            Some(&MapiValue::Binary(b"named-binary".to_vec()))
+        );
+        assert!(!properties.contains_key(&named_string8));
+        assert_eq!(
+            properties.get(&0x9101_001F),
+            Some(&MapiValue::String("named string8".to_string()))
+        );
+        assert_eq!(
+            properties.get(&named_unicode),
+            Some(&MapiValue::String("named unicode".to_string()))
+        );
+    }
+
+    #[test]
+    fn calendar_stream_pending_html_keeps_unicode_and_binary_aliases_coherent() {
+        let mut session = pending_event_session();
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        let (_, target) =
+            message_body_stream_data(&session, 1, PID_TAG_BODY_HTML_W, 2, &[], &[], &snapshot)
+                .expect("writable Unicode HTML stream");
+        sync_stream_target(
+            &mut session,
+            target.expect("Unicode HTML write target"),
+            utf16z_bytes("<b>wide</b>"),
+        )
+        .expect("commit Unicode HTML stream");
+
+        let MapiObject::PendingEvent { properties, .. } = session.handles.get(&1).unwrap() else {
+            panic!("pending Calendar event");
+        };
+        assert_eq!(
+            properties.get(&PID_TAG_BODY_HTML_W),
+            Some(&MapiValue::String("<b>wide</b>".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_HTML_BINARY),
+            Some(&MapiValue::Binary(b"<b>wide</b>".to_vec()))
+        );
+
+        let (_, target) =
+            message_body_stream_data(&session, 1, PID_TAG_HTML_BINARY, 2, &[], &[], &snapshot)
+                .expect("writable binary HTML stream");
+        sync_stream_target(
+            &mut session,
+            target.expect("binary HTML write target"),
+            b"<i>binary</i>".to_vec(),
+        )
+        .expect("commit binary HTML stream");
+
+        let MapiObject::PendingEvent { properties, .. } = session.handles.get(&1).unwrap() else {
+            panic!("pending Calendar event");
+        };
+        assert_eq!(
+            properties.get(&PID_TAG_BODY_HTML_W),
+            Some(&MapiValue::String("<i>binary</i>".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_HTML_BINARY),
+            Some(&MapiValue::Binary(b"<i>binary</i>".to_vec()))
+        );
+    }
+
+    #[test]
+    fn calendar_stream_subject_keeps_subject_aliases_coherent() {
+        let mut pending = pending_event_session();
+        sync_stream_target(
+            &mut pending,
+            StreamWriteTarget::PendingEventProperty {
+                handle: 1,
+                property_tag: PID_TAG_NORMALIZED_SUBJECT_W,
+            },
+            utf16z_bytes("Pending subject"),
+        )
+        .expect("stage pending Event subject stream");
+        let MapiObject::PendingEvent { properties, .. } = pending.handles.get(&1).unwrap() else {
+            panic!("pending Calendar event");
+        };
+        assert_eq!(
+            properties.get(&PID_TAG_SUBJECT_W),
+            Some(&MapiValue::String("Pending subject".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_NORMALIZED_SUBJECT_W),
+            Some(&MapiValue::String("Pending subject".to_string()))
+        );
+
+        let (mut saved, _) = saved_event_session_and_snapshot();
+        sync_stream_target(
+            &mut saved,
+            StreamWriteTarget::EventProperty {
+                handle: 1,
+                property_tag: PID_TAG_SUBJECT_W,
+            },
+            utf16z_bytes("Saved subject"),
+        )
+        .expect("stage saved Event subject stream");
+        let MapiObject::Event { transaction, .. } = saved.handles.get(&1).unwrap() else {
+            panic!("saved Calendar event");
+        };
+        assert_eq!(
+            transaction.pending_properties.get(&PID_TAG_SUBJECT_W),
+            Some(&MapiValue::String("Saved subject".to_string()))
+        );
+        assert_eq!(
+            transaction
+                .pending_properties
+                .get(&PID_TAG_NORMALIZED_SUBJECT_W),
+            Some(&MapiValue::String("Saved subject".to_string()))
+        );
+    }
+
+    #[test]
+    fn saved_calendar_stream_reads_persisted_values_and_transaction_overlay() {
+        let (mut session, snapshot) = saved_event_session_and_snapshot();
+        let account_id = session.account_id;
+
+        let (stream, target) =
+            property_stream_data(&mut session, 1, 0x9100_0102, 1, &[], account_id, &snapshot)
+                .expect("persisted named binary stream");
+        assert_eq!(stream, b"persisted binary");
+        assert_eq!(
+            target,
+            Some(StreamWriteTarget::EventProperty {
+                handle: 1,
+                property_tag: 0x9100_0102,
+            })
+        );
+        sync_stream_target(&mut session, target.unwrap(), b"pending binary".to_vec())
+            .expect("stage Event stream write");
+        assert_eq!(
+            property_stream_data(&mut session, 1, 0x9100_0102, 0, &[], account_id, &snapshot,),
+            Some((b"pending binary".to_vec(), None))
+        );
+
+        let (unicode_as_string8, _) =
+            property_stream_data(&mut session, 1, 0x9101_001E, 0, &[], account_id, &snapshot)
+                .expect("persisted named Unicode stream through String8 alias");
+        assert_eq!(unicode_as_string8, b"persisted unicode\0");
+
+        let MapiObject::Event { transaction, .. } = session.handles.get_mut(&1).unwrap() else {
+            panic!("saved Calendar event");
+        };
+        transaction.pending_properties.remove(&0x9100_0102);
+        transaction.deleted_properties.insert(0x9100_0102);
+        assert_eq!(
+            property_stream_data(&mut session, 1, 0x9100_0102, 0, &[], account_id, &snapshot,),
+            Some((Vec::new(), None))
+        );
+    }
+
+    #[test]
+    fn saved_calendar_stream_enforces_write_state_and_keeps_html_aliases_coherent() {
+        let (mut session, snapshot) = saved_event_session_and_snapshot();
+        let account_id = session.account_id;
+
+        for property_tag in [
+            PID_TAG_ENTRY_ID,
+            (PID_LID_LOCATION_W_TAG & 0xFFFF_0000) | 0x0102,
+        ] {
+            assert!(property_stream_data(
+                &mut session,
+                1,
+                property_tag,
+                1,
+                &[],
+                account_id,
+                &snapshot,
+            )
+            .is_none());
+        }
+        let MapiObject::Event { transaction, .. } = session.handles.get_mut(&1).unwrap() else {
+            panic!("saved Calendar event");
+        };
+        transaction.import_disposition = MapiEventImportDisposition::IgnoreOlderOrSame;
+        assert!(
+            property_stream_data(&mut session, 1, 0x9100_0102, 1, &[], account_id, &snapshot,)
+                .is_none()
+        );
+        let MapiObject::Event { transaction, .. } = session.handles.get_mut(&1).unwrap() else {
+            panic!("saved Calendar event");
+        };
+        transaction.import_disposition = MapiEventImportDisposition::Apply;
+
+        let (_, target) =
+            message_body_stream_data(&session, 1, PID_TAG_HTML_BINARY, 2, &[], &[], &snapshot)
+                .expect("writable saved Event HTML stream");
+        sync_stream_target(
+            &mut session,
+            target.expect("saved Event HTML write target"),
+            b"<b>saved</b>".to_vec(),
+        )
+        .expect("stage saved Event HTML stream");
+        let MapiObject::Event { transaction, .. } = session.handles.get(&1).unwrap() else {
+            panic!("saved Calendar event");
+        };
+        assert_eq!(
+            transaction.pending_properties.get(&PID_TAG_BODY_HTML_W),
+            Some(&MapiValue::String("<b>saved</b>".to_string()))
+        );
+        assert_eq!(
+            transaction.pending_properties.get(&PID_TAG_HTML_BINARY),
+            Some(&MapiValue::Binary(b"<b>saved</b>".to_vec()))
         );
     }
 }

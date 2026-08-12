@@ -29,7 +29,7 @@ mod scope;
 use associated_config::{
     associated_config_direct_fast_transfer_object, associated_config_sync_object,
 };
-use calendar::calendar_recipient_sync_facts;
+use calendar::calendar_sync_object;
 pub(in crate::mapi) use responses::*;
 pub(in crate::mapi) use scope::*;
 
@@ -374,9 +374,8 @@ fn populate_special_message_named_property_definitions(
             if property_id < 0x8000 {
                 return None;
             }
-            snapshot
-                .named_property_for_id(property_id)
-                .cloned()
+            canonical_calendar_named_property_definition(object, *property_tag)
+                .or_else(|| snapshot.named_property_for_id(property_id).cloned())
                 .or_else(|| {
                     fast_transfer_named_property_for_message_tag(
                         &object.message_class,
@@ -386,6 +385,24 @@ fn populate_special_message_named_property_definitions(
                 .map(|property| (property_id, property))
         })
         .collect();
+}
+
+fn canonical_calendar_named_property_definition(
+    object: &mapi_mailstore::SpecialMessageSyncFact,
+    property_tag: u32,
+) -> Option<MapiNamedProperty> {
+    if !object.message_class.eq_ignore_ascii_case("IPM.Appointment")
+        || (property_tag != PID_LID_APPOINTMENT_COLOR_TAG
+            && crate::mapi::dispatch::custom_properties::is_calendar_passthrough_property_tag(
+                property_tag,
+            ))
+    {
+        return None;
+    }
+
+    // [MS-OXCFXICS] section 2.2.4.1 identifies a named property by its
+    // property-set definition, not by a potentially colliding numeric ID.
+    fast_transfer_named_property_for_message_tag(&object.message_class, property_tag)
 }
 
 fn special_message_with_named_property_definitions(
@@ -964,98 +981,6 @@ fn special_message_property_value(
             mapi_mailstore::SpecialMessagePropertyValue::MultiString(values),
         ),
         _ => None,
-    }
-}
-
-fn calendar_sync_object(
-    event: &crate::mapi_store::MapiEvent,
-    reminder: Option<&lpe_storage::ClientReminder>,
-) -> mapi_mailstore::SpecialMessageSyncFact {
-    let mut properties = Vec::new();
-    let recipients = calendar_recipient_sync_facts(&event.event);
-    for property_tag in [
-        PID_TAG_CREATION_TIME,
-        PID_TAG_START_DATE,
-        PID_TAG_END_DATE,
-        PID_TAG_MESSAGE_DELIVERY_TIME,
-        PID_TAG_LAST_MODIFIER_NAME_W,
-        PID_LID_COMMON_START_TAG,
-        PID_LID_COMMON_END_TAG,
-        PID_LID_BUSY_STATUS_TAG,
-        PID_LID_APPOINTMENT_SEQUENCE_TAG,
-        PID_LID_LOCATION_W_TAG,
-        PID_LID_APPOINTMENT_START_WHOLE_TAG,
-        PID_LID_APPOINTMENT_END_WHOLE_TAG,
-        PID_LID_APPOINTMENT_DURATION_TAG,
-        PID_LID_APPOINTMENT_SUB_TYPE_TAG,
-        PID_LID_APPOINTMENT_RECUR_TAG,
-        PID_LID_APPOINTMENT_STATE_FLAGS_TAG,
-        PID_LID_RESPONSE_STATUS_TAG,
-        PID_LID_SIDE_EFFECTS_TAG,
-        PID_LID_RECURRING_TAG,
-        PID_LID_IS_RECURRING_TAG,
-        PID_LID_TIME_ZONE_STRUCT_TAG,
-        PID_LID_TIME_ZONE_DESCRIPTION_W_TAG,
-        PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG,
-        PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG,
-        PID_LID_GLOBAL_OBJECT_ID_TAG,
-        PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
-        PID_TAG_HTML_BINARY,
-        PID_TAG_SENDER_NAME_W,
-        PID_TAG_SENDER_EMAIL_ADDRESS_W,
-        PID_TAG_DISPLAY_TO_W,
-        PID_TAG_DISPLAY_CC_W,
-        PID_LID_ALL_ATTENDEES_STRING_W_TAG,
-        PID_LID_TO_ATTENDEES_STRING_W_TAG,
-        PID_LID_CC_ATTENDEES_STRING_W_TAG,
-        PID_TAG_ACCESS,
-        PID_TAG_ACCESS_LEVEL,
-        PID_TAG_HAS_ATTACHMENTS,
-        PID_TAG_SEARCH_KEY,
-        PID_TAG_SOURCE_KEY,
-        PID_TAG_CHANGE_KEY,
-        PID_TAG_PREDECESSOR_CHANGE_LIST,
-        PID_TAG_CHANGE_NUMBER,
-        PID_TAG_LOCAL_COMMIT_TIME,
-        PID_LID_REMINDER_SET_TAG,
-        PID_LID_REMINDER_DELTA_TAG,
-        PID_LID_REMINDER_TIME_TAG,
-        PID_LID_REMINDER_SIGNAL_TIME_TAG,
-        PID_LID_REMINDER_OVERRIDE_TAG,
-        PID_LID_REMINDER_PLAY_SOUND_TAG,
-        PID_LID_REMINDER_FILE_PARAMETER_W_TAG,
-    ] {
-        let value = if property_tag == PID_TAG_HAS_ATTACHMENTS {
-            Some(mapi_mailstore::SpecialMessagePropertyValue::Bool(
-                !event.attachments.is_empty(),
-            ))
-        } else {
-            versioned_event_property_value_with_reminder(event, property_tag, reminder)
-                .and_then(special_message_property_value)
-        };
-        if let Some(value) = value {
-            properties.push((property_tag, value));
-        }
-    }
-
-    mapi_mailstore::SpecialMessageSyncFact {
-        folder_id: event.folder_id,
-        item_id: event.id,
-        canonical_id: event.canonical_id,
-        associated: false,
-        subject: event.event.title.clone(),
-        body_text: Some(crate::mapi::properties::calendar_body_text_for_mapi(
-            &event.event,
-        )),
-        message_class: "IPM.Appointment".to_string(),
-        last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(
-            &event.version.updated_at,
-        ),
-        message_size: event_size(&event.event),
-        read_state: None,
-        recipients,
-        named_properties: properties,
-        named_property_definitions: HashMap::new(),
     }
 }
 

@@ -190,6 +190,10 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             return;
         }
     };
+    let property_values = property_values
+        .into_iter()
+        .map(|(tag, value)| (session.normalize_named_property_tag(tag), value))
+        .collect::<Vec<_>>();
     let import_flag = request.import_flag().unwrap_or_default();
     let import_property_tags = property_values
         .iter()
@@ -656,20 +660,46 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                     fail_on_conflict: import_flag & 0x40 != 0,
                 }
             }
-            Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
-                folder_id,
-                properties: property_values.into_iter().collect(),
-                recipients: Vec::new(),
-                recipients_modified: false,
-                fail_on_conflict: import_flag & 0x40 != 0,
-            },
-            None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
-                folder_id,
-                properties: property_values.into_iter().collect(),
-                recipients: Vec::new(),
-                recipients_modified: false,
-                fail_on_conflict: import_flag & 0x40 != 0,
-            },
+            Some(MapiCollaborationFolderKind::Calendar) => {
+                let properties = match pending_event_import_properties(property_values) {
+                    Ok(properties) => properties,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x72,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        return;
+                    }
+                };
+                MapiObject::PendingEvent {
+                    folder_id,
+                    properties,
+                    recipients: Vec::new(),
+                    recipients_modified: false,
+                    fail_on_conflict: import_flag & 0x40 != 0,
+                }
+            }
+            None if folder_id == CALENDAR_FOLDER_ID => {
+                let properties = match pending_event_import_properties(property_values) {
+                    Ok(properties) => properties,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x72,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        return;
+                    }
+                };
+                MapiObject::PendingEvent {
+                    folder_id,
+                    properties,
+                    recipients: Vec::new(),
+                    recipients_modified: false,
+                    fail_on_conflict: import_flag & 0x40 != 0,
+                }
+            }
             _ if folder_id == NOTES_FOLDER_ID => MapiObject::PendingNote {
                 folder_id,
                 properties: property_values.into_iter().collect(),

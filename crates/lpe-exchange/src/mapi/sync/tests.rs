@@ -809,6 +809,98 @@ fn appointment_fast_transfer_named_lid_includes_property_definition() {
 }
 
 #[test]
+fn appointment_fast_transfer_prefers_canonical_definition_over_numeric_collision() {
+    let canonical_id = Uuid::from_u128(0x6d617069_6361_6c50_8000_000000000402);
+    let item_id = crate::mapi::identity::mapi_store_id(0x7a11);
+    let conflicting_property = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("legacy-0x8214-occupant".to_string()),
+    };
+    let dynamic_property = MapiNamedProperty {
+        guid: [0x90; 16],
+        kind: MapiNamedPropertyKind::Name("Probe F dynamic".to_string()),
+    };
+    let snapshot = MapiMailStoreSnapshot::empty().with_named_property_mappings(vec![
+        crate::store::MapiNamedPropertyMapping {
+            property_id: 0x8214,
+            property: conflicting_property,
+        },
+        crate::store::MapiNamedPropertyMapping {
+            property_id: 0x9001,
+            property: dynamic_property.clone(),
+        },
+    ]);
+    let mut object = mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: CALENDAR_FOLDER_ID,
+        item_id,
+        canonical_id,
+        associated: false,
+        subject: "Named-property collision".to_string(),
+        body_text: None,
+        message_class: "IPM.Appointment".to_string(),
+        last_modified_filetime: 0,
+        message_size: 64,
+        read_state: None,
+        recipients: Vec::new(),
+        named_properties: vec![
+            (
+                PID_LID_APPOINTMENT_COLOR_TAG,
+                mapi_mailstore::SpecialMessagePropertyValue::I32(7),
+            ),
+            (
+                0x9001_001F,
+                mapi_mailstore::SpecialMessagePropertyValue::String("dynamic".to_string()),
+            ),
+        ],
+        named_property_definitions: Default::default(),
+    };
+
+    populate_special_message_named_property_definitions(&mut object, &snapshot);
+
+    assert_eq!(
+        object
+            .named_property_definitions
+            .get(&((PID_LID_APPOINTMENT_COLOR_TAG >> 16) as u16)),
+        Some(&MapiNamedProperty {
+            guid: PSETID_APPOINTMENT_GUID,
+            kind: MapiNamedPropertyKind::Lid(PID_LID_APPOINTMENT_COLOR),
+        })
+    );
+    assert_eq!(
+        object.named_property_definitions.get(&0x9001),
+        Some(&dynamic_property),
+        "dynamic passthrough properties still use the durable mailbox mapping"
+    );
+
+    let buffer = mapi_mailstore::fast_transfer_message_content_buffer_with_special_object(
+        None,
+        None,
+        &object,
+        0x09,
+        mapi_mailstore::FastTransferDirectPropertyFilter::All,
+        mapi_mailstore::FastTransferMessageChildren::all(),
+    );
+    let mut expected_color = PID_LID_APPOINTMENT_COLOR_TAG.to_le_bytes().to_vec();
+    expected_color.extend_from_slice(&PSETID_APPOINTMENT_GUID);
+    expected_color.push(0x00);
+    expected_color.extend_from_slice(&PID_LID_APPOINTMENT_COLOR.to_le_bytes());
+    assert!(buffer
+        .windows(expected_color.len())
+        .any(|window| window == expected_color));
+
+    let mut expected_dynamic = 0x9001_001Fu32.to_le_bytes().to_vec();
+    expected_dynamic.extend_from_slice(&dynamic_property.guid);
+    expected_dynamic.push(0x01);
+    if let MapiNamedPropertyKind::Name(name) = &dynamic_property.kind {
+        expected_dynamic.extend(name.encode_utf16().flat_map(u16::to_le_bytes));
+        expected_dynamic.extend_from_slice(&0u16.to_le_bytes());
+    }
+    assert!(buffer
+        .windows(expected_dynamic.len())
+        .any(|window| window == expected_dynamic));
+}
+
+#[test]
 fn import_rop_success_responses_return_zero_object_ids() {
     let import_change = RopRequest {
         rop_id: 0x72,
@@ -1015,6 +1107,7 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
             content_id: None,
             size_octets: 12,
         }],
+        stored_properties: Vec::new(),
     };
 
     let sync = calendar_sync_object(&event, None);
@@ -1165,6 +1258,17 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_TAG_LOCAL_COMMIT_TIME
+            && matches!(
+                value,
+                mapi_mailstore::SpecialMessagePropertyValue::I64(filetime)
+                    if *filetime
+                        == mapi_mailstore::filetime_from_rfc3339_utc(
+                            "2026-05-25T14:00:00Z"
+                        ) as i64
+            )
+    }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_TAG_MESSAGE_DELIVERY_TIME
             && matches!(
                 value,
                 mapi_mailstore::SpecialMessagePropertyValue::I64(filetime)

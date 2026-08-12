@@ -296,10 +296,16 @@ fn folder_counts_hierarchy_table_event(
     let mut table_event = folder_event.clone();
     table_event.folder_id = folder_event.parent_folder_id?;
     table_event.event_mask = MapiNotificationEventMask::TableModified.as_u16();
+    // [MS-OXCNOTIF] section 2.2.1.4.1.2: M marks a table-row
+    // notification caused by a message event. Preserve that causality when a
+    // content change is retargeted to its parent hierarchy row.
+    if source_event.message_id.is_some() {
+        table_event.event_mask |= 0x8000;
+    }
     if source_event.event_mask & 0x0FFF == MapiNotificationEventMask::NewMail.as_u16() {
         // Exchange 2016 test1_202608031300.saz raw/753 sets the message and
         // search bits on the active hierarchy row it emits for NewMail.
-        table_event.event_mask |= 0xC000;
+        table_event.event_mask |= 0x4000;
     }
     Some(table_event)
 }

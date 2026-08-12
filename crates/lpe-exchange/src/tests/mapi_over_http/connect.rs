@@ -2850,11 +2850,7 @@ async fn mapi_over_http_ics_transient_read_state_uses_message_changes_not_synthe
     assert!(stream
         .message_changes
         .iter()
-        .any(|message| message.change_number == Some(41)));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.change_number == Some(42)));
+        .all(|message| message.change_number.is_some()));
     assert!(stream.read_idset.is_none());
     assert!(stream.unread_idset.is_none());
     assert!(!contains_bytes(
@@ -3213,7 +3209,7 @@ async fn mapi_over_http_fast_transfer_copy_messages_filters_to_requested_canonic
 }
 
 #[tokio::test]
-async fn mapi_over_http_fast_transfer_destination_put_buffer_extended_is_parseable() {
+async fn mapi_over_http_fast_transfer_destination_put_buffer_extended_has_exact_rop_boundary() {
     let mut transfer_data = Vec::new();
     let subject = utf16z("FastTransfer extended subject");
     transfer_data.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
@@ -3231,13 +3227,48 @@ async fn mapi_over_http_fast_transfer_destination_put_buffer_extended_is_parseab
     rops.extend_from_slice(&[0x9D, 0x00, 0x03]);
     rops.extend_from_slice(&(transfer_data.len() as u16).to_le_bytes());
     rops.extend_from_slice(&transfer_data);
+    rops.extend_from_slice(&[0x7B, 0x00, 0x00]);
 
     let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]).await;
 
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x9D, 0x03, 0, 0, 0, 0, transfer_data.len() as u8, 0, 0, 0]
-    ));
+    let put_buffer_offset = response_rops
+        .windows(6)
+        .position(|response| response == [0x9D, 0x03, 0, 0, 0, 0])
+        .expect("successful PutBufferExtended response");
+    assert_eq!(
+        &response_rops[put_buffer_offset..put_buffer_offset + 29],
+        &[
+            0x9D,
+            0x03,
+            0,
+            0,
+            0,
+            0,
+            0x03,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            transfer_data.len() as u8,
+            0,
+            0x7B,
+            0x00,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ]
+    );
 }
 
 #[tokio::test]
@@ -3250,14 +3281,55 @@ async fn mapi_over_http_fast_transfer_destination_rejects_wrong_target_handle() 
 
     let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
 
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x53, 0x02, 0x02, 0x01, 0x04, 0x80]
-    ));
-    assert!(contains_bytes(
-        &response_rops,
+    assert_eq!(response_rops.len(), 24);
+    assert_eq!(&response_rops[8..14], &[0x53, 0x02, 2, 1, 4, 128]);
+    assert_eq!(
+        &response_rops[14..24],
         &[0x7B, 0x00, 0, 0, 0, 0, 0, 0, 0, 0]
-    ));
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_destination_put_buffer_extended_failure_has_exact_rop_boundary(
+) {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    // A nonempty PutBuffer against the Folder handle is rejected without
+    // terminating the batch, so the trailing ROP proves the exact boundary.
+    rops.extend_from_slice(&[0x9D, 0x00, 0x01, 0x01, 0x00, 0x00]);
+    rops.extend_from_slice(&[0x7B, 0x00, 0x00]);
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+
+    assert_eq!(response_rops.len(), 37);
+    assert_eq!(
+        &response_rops[8..27],
+        &[0x9D, 0x01, 0x0F, 0x01, 0x04, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,]
+    );
+    assert_eq!(
+        &response_rops[27..37],
+        &[0x7B, 0x00, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_destination_rejects_unsupported_source_operation() {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x06, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x53, 0x00, 0x02, 0x03, 0x03, 0x00]);
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]).await;
+
+    assert_eq!(
+        &response_rops[15..21],
+        &[0x53, 0x03, 0x02, 0x01, 0x04, 0x80]
+    );
 }
 
 #[tokio::test]
@@ -3881,7 +3953,8 @@ async fn mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify() {
                         None,
                         Some("quarterly report".to_string()),
                         None,
-                    ),
+                    )
+                    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
                 ],
             },
             MapiNotificationPoll {
@@ -3892,6 +3965,11 @@ async fn mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify() {
         ])),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
+    let canonical_folder_id = identity_codec.actual_object_id(folder_id).unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -3945,7 +4023,7 @@ async fn mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify() {
     expected.extend_from_slice(&3u32.to_le_bytes());
     expected.push(0);
     expected.extend_from_slice(&0xB010u16.to_le_bytes());
-    expected.extend_from_slice(&mapi_wire_id_bytes(folder_id));
+    expected.extend_from_slice(&mapi_wire_id_bytes(canonical_folder_id));
     expected.extend_from_slice(&mapi_wire_id_bytes(message_id));
     expected.extend_from_slice(&0u16.to_le_bytes());
     expected.extend_from_slice(&3u32.to_le_bytes());
@@ -3954,7 +4032,7 @@ async fn mapi_over_http_run_1903_delivers_read_state_change_as_rop_notify() {
     expected.extend_from_slice(&3u32.to_le_bytes());
     expected.push(0);
     expected.extend_from_slice(&0x3010u16.to_le_bytes());
-    expected.extend_from_slice(&mapi_wire_id_bytes(folder_id));
+    expected.extend_from_slice(&mapi_wire_id_bytes(canonical_folder_id));
     expected.extend_from_slice(&0u16.to_le_bytes());
     expected.extend_from_slice(&3u32.to_le_bytes());
     expected.extend_from_slice(&0u32.to_le_bytes());
@@ -4101,7 +4179,7 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
     assert!(
         contains_bytes(
             &response_rops,
-            &[0x2A, 0x07, 0, 0, 0, 0, 0x00, 0x01, 0x01, 0x00]
+            &[0x2A, 0x07, 0, 0, 0, 0, 0x00, 0x81, 0x05, 0x00]
         ),
         "response={response_rops:02x?}"
     );
@@ -4131,6 +4209,118 @@ async fn mapi_over_http_run_1940_notifies_the_active_inbox_table() {
         &response_rops,
         &[0x2A, 0x05, 0, 0, 0, 0, 0x00, 0x01]
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_depth_root_hierarchy_includes_persisted_sync_issue_children() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(
+                "26262626-2626-4626-8626-262626262626",
+                "sync_issues",
+                "Sync Issues",
+            ),
+            FakeStore::mailbox(
+                "27272727-2727-4727-8727-272727272727",
+                "conflicts",
+                "Conflicts",
+            ),
+            FakeStore::mailbox(
+                "28282828-2828-4828-8828-282828282828",
+                "local_failures",
+                "Local Failures",
+            ),
+            FakeStore::mailbox(
+                "29292929-2929-4929-8929-292929292929",
+                "server_failures",
+                "Server Failures",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let identity_codec = crate::mapi::load_mapi_identity_codec_for_test(&store, account.account_id)
+        .await
+        .unwrap();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        identity_codec
+            .actual_object_id(crate::mapi::identity::ROOT_FOLDER_ID)
+            .unwrap(),
+    );
+    // [MS-OXCFOLD] section 2.2.1.13.1: Depth returns every descendant of Root.
+    rops.extend_from_slice(&[0x04, 0x00, 0x01, 0x02, 0x04]); // RopGetHierarchyTable
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]); // RopSetColumns
+    let hierarchy_columns = [0x6748_0014u32, 0x3001_001F, 0x360A_000B];
+    rops.extend_from_slice(&(hierarchy_columns.len() as u16).to_le_bytes());
+    for tag in hierarchy_columns {
+        rops.extend_from_slice(&tag.to_le_bytes());
+    }
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]); // RopQueryRows
+    rops.extend_from_slice(&64u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let query_rows_offset = 8 + 10 + 7;
+    assert_eq!(
+        &response_rops[query_rows_offset..query_rows_offset + 6],
+        &[0x15, 0x02, 0, 0, 0, 0]
+    );
+
+    for (logical_folder_id, display_name, has_subfolders) in [
+        (
+            crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+            "Sync Issues",
+            true,
+        ),
+        (
+            crate::mapi::identity::CONFLICTS_FOLDER_ID,
+            "Conflicts",
+            false,
+        ),
+        (
+            crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
+            "Local Failures",
+            false,
+        ),
+        (
+            crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
+            "Server Failures",
+            false,
+        ),
+    ] {
+        let mut expected_row = vec![0]; // StandardPropertyRow.
+        expected_row.extend_from_slice(&mapi_wire_id_bytes(
+            identity_codec.actual_object_id(logical_folder_id).unwrap(),
+        ));
+        expected_row.extend_from_slice(&utf16z(display_name));
+        expected_row.push(has_subfolders as u8);
+        assert!(
+            contains_bytes(&response_rops[query_rows_offset + 9..], &expected_row),
+            "root Depth hierarchy omitted {display_name}: {response_rops:02x?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -4361,12 +4551,14 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     // whole-store NewMail subscription. The hierarchy row notification is
     // informative, while NewMail is delivered first for the same change.
     let basic_table_notification_prefix = [0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x01, 0x05, 0x00];
+    let message_table_notification_prefix = [0x2A, 0x03, 0, 0, 0, 0, 0x00, 0x81, 0x05, 0x00];
     let new_mail_table_notification_prefix = [0x2A, 0x03, 0, 0, 0, 0, 0x00, 0xC1, 0x05, 0x00];
     let table_notification_offsets = response_rops
         .windows(basic_table_notification_prefix.len())
         .enumerate()
         .filter_map(|(offset, window)| {
             (window == basic_table_notification_prefix
+                || window == message_table_notification_prefix
                 || window == new_mail_table_notification_prefix)
                 .then_some(offset)
         })
@@ -4387,6 +4579,18 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
             .expect("hierarchy table row notification should be present");
         let notification_flags =
             u16::from_le_bytes(response_rops[offset + 6..offset + 8].try_into().unwrap());
+        if notification_flags & 0x8000 != 0 {
+            assert_eq!(
+                &response_rops[offset + 18..offset + 30],
+                &[0; 12],
+                "message-caused hierarchy rows require a zero message/instance key"
+            );
+            assert_eq!(
+                &response_rops[offset + 38..offset + 50],
+                &[0; 12],
+                "message-caused hierarchy rows require a zero insert-after message/instance key"
+            );
+        }
         let row_data_size_offset = offset
             + if notification_flags & 0x8000 != 0 {
                 50
@@ -4434,7 +4638,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
             );
             table_notification_offset = Some(offset);
         } else {
-            assert_eq!(notification_flags, 0x0100);
+            assert_eq!(notification_flags, 0x8100);
         }
     }
     let table_notification_offset = table_notification_offset.unwrap();
@@ -4652,7 +4856,9 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     );
 
     let object_id = crate::mapi::identity::INBOX_FOLDER_ID;
-    let long_term_id = identity_codec.long_term_id_from_object_id(object_id).unwrap();
+    let long_term_id = identity_codec
+        .long_term_id_from_object_id(object_id)
+        .unwrap();
     let mut invalid_long_term_id = long_term_id;
     invalid_long_term_id[0] ^= 0xFF;
     invalid_long_term_id[16..22].copy_from_slice(&globcnt_bytes(5_000));

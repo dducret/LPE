@@ -995,7 +995,7 @@ pub(in crate::mapi) fn nspi_entry_permanent_entry_id(entry: &ExchangeAddressBook
     value
 }
 
-fn nspi_entry_search_key(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
+pub(in crate::mapi) fn nspi_entry_search_key(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
     let legacy_dn = nspi_entry_unprefixed_legacy_dn(entry).to_ascii_uppercase();
     let mut value = format!("EX:{legacy_dn}").into_bytes();
     value.push(0);

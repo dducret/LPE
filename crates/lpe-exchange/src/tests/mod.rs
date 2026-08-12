@@ -14,11 +14,13 @@ use lpe_storage::{
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, ManagedRetentionFolderCreateInput,
     MapiContactCommitInput, MapiContactCommitOutcome, MapiContactCommitResult,
-    MapiContactCreateInput, MapiContactCreateResult, MapiContactVersion, MapiEventCommitInput,
-    MapiEventCommitOutcome, MapiEventCommitSuccess, MapiEventCreateInput, MapiEventCreateResult,
-    MapiEventIdentityMove, MapiEventImportedMoveIdentity, MapiEventReminderState, MapiEventVersion,
-    MapiMessageIdentityMove, MapiMessageImportedMoveIdentity, MapiMessageMoveResult,
-    MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
+    MapiContactCreateInput, MapiContactCreateResult, MapiContactVersion,
+    MapiEventAttachmentChanges, MapiEventCommitInput, MapiEventCommitOutcome,
+    MapiEventCommitSuccess, MapiEventCreateInput, MapiEventCreateResult,
+    MapiEventCustomPropertyValue, MapiEventIdentityMove, MapiEventImportedIdentity,
+    MapiEventImportedMoveIdentity, MapiEventReminderPatch, MapiEventReminderState,
+    MapiEventVersion, MapiMessageIdentityMove, MapiMessageImportedMoveIdentity,
+    MapiMessageMoveResult, MoveAccessibleEventToDeletedItemsResult, PublicFolder, PublicFolderItem,
     PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
     PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights, PublicFolderTree,
     ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
@@ -58,19 +60,20 @@ use crate::{
         rpc_proxy_in_channel_response_for_endpoint_query_with_store, ExchangeService,
     },
     store::{
-        EwsAppMarketplacePolicy, EwsDelegate, EwsDiscoverySearchConfig, EwsDiscoverySearchItem,
-        EwsDiscoverySearchResult, EwsHoldMailbox, EwsImGroup, EwsImGroupMember, EwsImList,
-        EwsImMemberInput, EwsMailAppInstall, EwsMailAppManifest, EwsMailAppTokenEvent,
-        EwsMessageTrackingEvent, EwsMessageTrackingReport, EwsMessageTrackingReportDetail,
-        EwsNonIndexableReport, EwsRetentionPolicyTag, EwsSearchableMailbox, EwsTransferEntry,
-        EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration, EwsUserConfigurationKey,
+        is_mapi_calendar_standard_passthrough_property_tag, EwsAppMarketplacePolicy, EwsDelegate,
+        EwsDiscoverySearchConfig, EwsDiscoverySearchItem, EwsDiscoverySearchResult, EwsHoldMailbox,
+        EwsImGroup, EwsImGroupMember, EwsImList, EwsImMemberInput, EwsMailAppInstall,
+        EwsMailAppManifest, EwsMailAppTokenEvent, EwsMessageTrackingEvent,
+        EwsMessageTrackingReport, EwsMessageTrackingReportDetail, EwsNonIndexableReport,
+        EwsRetentionPolicyTag, EwsSearchableMailbox, EwsTransferEntry, EwsTransferJob,
+        EwsUnifiedMessagingCall, EwsUserConfiguration, EwsUserConfigurationKey,
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
         ExchangeAddressBookEntryDetails, ExchangeAddressBookEntryKind, ExchangeStore,
-        MapiCheckpointKind, MapiContactCreateOutcome, MapiContentTableQuery,
-        MapiContentTableQueryResult, MapiContentTableSortField, MapiCustomPropertyObjectKind,
-        MapiCustomPropertyValue, MapiEventCreateOutcome, MapiFolderHierarchyCommitOutcome,
-        MapiFolderProfilePropertyValue, MapiFolderVersion, MapiIdentityLookupRecord,
-        MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
+        MapiCalendarPropertyValue, MapiCheckpointKind, MapiContactCreateOutcome,
+        MapiContentTableQuery, MapiContentTableQueryResult, MapiContentTableSortField,
+        MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiEventCreateOutcome,
+        MapiFolderHierarchyCommitOutcome, MapiFolderProfilePropertyValue, MapiFolderVersion,
+        MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
         MapiMailboxContentCommitTime, MapiNamedPropertyMapping, MapiNotificationPoll,
         MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
         UpsertEwsUserConfigurationInput,
@@ -327,6 +330,186 @@ async fn postgres_mapi_calendar_fixture_drop_cleans_temporary_schema() -> anyhow
         "dropping an unfinished Calendar fixture left temporary schema {schema_name} behind"
     );
     Ok(())
+}
+
+#[tokio::test]
+async fn postgres_mapi_calendar_property_bag_survives_web_update_and_reload() -> anyhow::Result<()>
+{
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let account_id = fixture.account_id;
+    let event_id = Uuid::new_v4();
+    let imported_counter = fixture
+        .storage
+        .reserve_mapi_local_replica_ids(account_id, 1)
+        .await?;
+    let source_key = crate::mapi::identity::source_key_for_object_id(
+        crate::mapi::identity::mapi_store_id(imported_counter),
+    );
+    let change_key = vec![
+        0x67, 0x45, 0x48, 0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2,
+        0xc1, 0x00, 0x00, 0x04, 0x57,
+    ];
+    let mut predecessor_change_list = vec![change_key.len() as u8];
+    predecessor_change_list.extend_from_slice(&change_key);
+
+    let named_tag = 0x9001_0102;
+    let named_value = vec![3, 0, 0xaa, 0xbb, 0xcc];
+    let stale_subject = utf16z("stale property-bag subject");
+    let event = UpsertClientEventInput {
+        id: Some(event_id),
+        account_id,
+        uid: format!("probe-f-property-bag-{}", event_id.simple()),
+        date: "2026-08-11".to_string(),
+        time: "21:37".to_string(),
+        time_zone: "Europe/Berlin".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Probe F imported appointment".to_string(),
+        location: "Room F".to_string(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "{}".to_string(),
+        notes: "Imported body".to_string(),
+        body_html: String::new(),
+    };
+    fixture
+        .storage
+        .create_mapi_event(MapiEventCreateInput {
+            principal_account_id: account_id,
+            collection_id: "default".to_string(),
+            event: event.clone(),
+            imported_identity: Some(MapiEventImportedIdentity {
+                source_key,
+                change_key,
+                predecessor_change_list,
+            }),
+            reminder: MapiEventReminderPatch::default(),
+            custom_property_upserts: vec![
+                MapiEventCustomPropertyValue {
+                    property_tag: PID_TAG_RESPONSE_REQUESTED,
+                    property_type: 0x000B,
+                    property_value: vec![1],
+                },
+                MapiEventCustomPropertyValue {
+                    property_tag: PID_TAG_REPLY_REQUESTED,
+                    property_type: 0x000B,
+                    property_value: vec![1],
+                },
+                MapiEventCustomPropertyValue {
+                    property_tag: named_tag,
+                    property_type: 0x0102,
+                    property_value: named_value.clone(),
+                },
+                MapiEventCustomPropertyValue {
+                    property_tag: PID_TAG_SUBJECT_W,
+                    property_type: 0x001F,
+                    property_value: stale_subject.clone(),
+                },
+            ],
+            attachment_changes: MapiEventAttachmentChanges::default(),
+        })
+        .await?;
+
+    let mut web_update = event;
+    web_update.title = "Probe F - web update".to_string();
+    fixture.storage.upsert_client_event(web_update).await?;
+
+    let persisted_rows = sqlx::query(
+        r#"
+        SELECT property_tag, property_type, property_value
+        FROM mapi_custom_property_values
+        WHERE account_id = $1
+          AND object_kind = 'calendar_event'
+          AND canonical_id = $2
+        ORDER BY property_tag, property_type
+        "#,
+    )
+    .bind(account_id)
+    .bind(event_id)
+    .fetch_all(fixture.storage.pool())
+    .await?
+    .into_iter()
+    .map(|row| {
+        (
+            row.get::<i64, _>("property_tag") as u32,
+            row.get::<i32, _>("property_type") as u16,
+            row.get::<Vec<u8>, _>("property_value"),
+        )
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(
+        persisted_rows,
+        vec![
+            (PID_TAG_SUBJECT_W, 0x001F, stale_subject),
+            (PID_TAG_RESPONSE_REQUESTED, 0x000B, vec![1]),
+            (PID_TAG_REPLY_REQUESTED, 0x000B, vec![1]),
+            (named_tag, 0x0102, named_value.clone()),
+        ]
+    );
+
+    let fetched = fixture
+        .storage
+        .fetch_mapi_calendar_property_values(account_id, &[event_id])
+        .await?;
+    assert_eq!(
+        fetched,
+        vec![
+            MapiCalendarPropertyValue {
+                event_id,
+                property_tag: PID_TAG_RESPONSE_REQUESTED,
+                property_type: 0x000B,
+                property_value: vec![1],
+            },
+            MapiCalendarPropertyValue {
+                event_id,
+                property_tag: PID_TAG_REPLY_REQUESTED,
+                property_type: 0x000B,
+                property_value: vec![1],
+            },
+            MapiCalendarPropertyValue {
+                event_id,
+                property_tag: named_tag,
+                property_type: 0x0102,
+                property_value: named_value,
+            },
+        ]
+    );
+
+    let reloaded = fixture
+        .storage
+        .load_mapi_mail_store(account_id, 500)
+        .await?;
+    let reloaded_event = reloaded
+        .events_for_folder(crate::mapi::identity::CALENDAR_FOLDER_ID)
+        .into_iter()
+        .find(|event| event.canonical_id == event_id)
+        .expect("reloaded imported Calendar event");
+    assert_eq!(reloaded_event.event.title, "Probe F - web update");
+    assert_eq!(
+        reloaded_event
+            .stored_properties
+            .iter()
+            .map(|value| (
+                value.property_tag,
+                value.property_type,
+                value.property_value.clone(),
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (PID_TAG_RESPONSE_REQUESTED, 0x000B, vec![1]),
+            (PID_TAG_REPLY_REQUESTED, 0x000B, vec![1]),
+            (named_tag, 0x0102, vec![3, 0, 0xaa, 0xbb, 0xcc]),
+        ]
+    );
+
+    fixture.cleanup().await
 }
 
 #[tokio::test]
@@ -7077,6 +7260,65 @@ impl ExchangeStore for FakeStore {
         })
     }
 
+    fn fetch_mapi_calendar_property_values<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        event_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiCalendarPropertyValue>> {
+        Box::pin(async move {
+            let mut owner_account_ids = self
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| event_ids.contains(&event.id))
+                .map(|event| (event.id, event.owner_account_id))
+                .collect::<HashMap<_, _>>();
+            owner_account_ids.extend(
+                self.deleted_calendar_events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|event| event_ids.contains(&event.id))
+                    .map(|event| (event.id, event.owner_account_id)),
+            );
+            let mut values = self
+                .mapi_custom_property_values
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(
+                    |(
+                        (
+                            stored_account_id,
+                            stored_object_kind,
+                            stored_canonical_id,
+                            property_tag,
+                            property_type,
+                        ),
+                        property_value,
+                    )| {
+                        (*stored_object_kind == MapiCustomPropertyObjectKind::CalendarEvent
+                            && owner_account_ids.get(stored_canonical_id)
+                                == Some(stored_account_id)
+                            && ((*property_tag >> 16) >= 0x8000
+                                || is_mapi_calendar_standard_passthrough_property_tag(
+                                    *property_tag,
+                                )))
+                        .then(|| MapiCalendarPropertyValue {
+                            event_id: *stored_canonical_id,
+                            property_tag: *property_tag,
+                            property_type: *property_type,
+                            property_value: property_value.clone(),
+                        })
+                    },
+                )
+                .collect::<Vec<_>>();
+            values.sort_by_key(|value| (value.event_id, value.property_tag, value.property_type));
+            Ok(values)
+        })
+    }
+
     fn delete_mapi_custom_property_values<'a>(
         &'a self,
         account_id: Uuid,
@@ -11613,9 +11855,6 @@ impl ExchangeStore for FakeStore {
             if !email.mailbox_ids.contains(&source_mailbox_id) {
                 anyhow::bail!("source mailbox does not contain message");
             }
-            if !email.mailbox_ids.contains(&target_mailbox_id) {
-                anyhow::bail!("target mailbox does not contain mirrored message");
-            }
 
             let mut identities = self.mapi_identities.lock().unwrap();
             let old_mapi_object_id = *identities
@@ -11701,6 +11940,25 @@ impl ExchangeStore for FakeStore {
                 .unwrap()
                 .insert(message_id, new_change_number);
 
+            if !email.mailbox_ids.contains(&target.id) {
+                email.mailbox_ids.push(target.id);
+            }
+            if !email
+                .mailbox_states
+                .iter()
+                .any(|state| state.mailbox_id == target.id)
+            {
+                let mut state = email
+                    .mailbox_states
+                    .first()
+                    .cloned()
+                    .expect("fake email must have a primary mailbox state");
+                state.mailbox_id = target.id;
+                state.role = target.role.clone();
+                state.name = target.name.clone();
+                state.draft = state.role == "drafts";
+                email.mailbox_states.push(state);
+            }
             email
                 .mailbox_ids
                 .retain(|mailbox_id| *mailbox_id != source_mailbox_id);
@@ -13082,6 +13340,40 @@ const FX_END_TO_RECIP: u32 = 0x4004_0003;
 const FX_END_ATTACH: u32 = 0x400E_0003;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
+const PID_TAG_ALTERNATE_RECIPIENT_ALLOWED: u32 = 0x0002_000B;
+const PID_TAG_IMPORTANCE: u32 = 0x0017_0003;
+const PID_TAG_ORIGINATOR_DELIVERY_REPORT_REQUESTED: u32 = 0x0023_000B;
+const PID_TAG_PRIORITY: u32 = 0x0026_0003;
+const PID_TAG_READ_RECEIPT_REQUESTED: u32 = 0x0029_000B;
+const PID_TAG_SENSITIVITY: u32 = 0x0036_0003;
+const PID_TAG_CLIENT_SUBMIT_TIME: u32 = 0x0039_0040;
+const PID_TAG_SENT_REPRESENTING_SEARCH_KEY: u32 = 0x003B_0102;
+const PID_TAG_SUBJECT_PREFIX_W: u32 = 0x003D_001F;
+const PID_TAG_SENT_REPRESENTING_ENTRY_ID: u32 = 0x0041_0102;
+const PID_TAG_RESPONSE_REQUESTED: u32 = 0x0063_000B;
+const PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W: u32 = 0x0064_001F;
+const PID_TAG_CONVERSATION_TOPIC_W: u32 = 0x0070_001F;
+const PID_TAG_CONVERSATION_INDEX: u32 = 0x0071_0102;
+const PID_TAG_REPLY_REQUESTED: u32 = 0x0C17_000B;
+const PID_TAG_SENDER_ENTRY_ID: u32 = 0x0C19_0102;
+const PID_TAG_SENDER_SEARCH_KEY: u32 = 0x0C1D_0102;
+const PID_TAG_SENDER_ADDRESS_TYPE_W: u32 = 0x0C1E_001F;
+const PID_TAG_DELETE_AFTER_SUBMIT: u32 = 0x0E01_000B;
+const PID_TAG_PARENT_ENTRY_ID: u32 = 0x0E09_0102;
+const PID_TAG_RTF_IN_SYNC: u32 = 0x0E1F_000B;
+const PID_TAG_INSTANCE_KEY: u32 = 0x0FF6_0102;
+const PID_TAG_RECORD_KEY: u32 = 0x0FF9_0102;
+const PID_TAG_ICON_INDEX: u32 = 0x1080_0003;
+const PID_TAG_NATIVE_BODY: u32 = 0x1016_0003;
+const PID_TAG_SEARCH_KEY: u32 = 0x300B_0102;
+const PID_TAG_CONVERSATION_INDEX_TRACKING: u32 = 0x3016_000B;
+const PID_TAG_INTERNET_CODEPAGE: u32 = 0x3FDE_0003;
+const PID_TAG_MESSAGE_LOCALE_ID: u32 = 0x3FF1_0003;
+const PID_LID_CLIP_START_TAG: u32 = 0x8235_0040;
+const PID_LID_CLIP_END_TAG: u32 = 0x8236_0040;
+const PID_LID_REMINDER_DELTA_TAG: u32 = 0x8501_0003;
+const PID_LID_SIDE_EFFECTS_TAG: u32 = 0x8510_0003;
+const CALENDAR_EVENT_SIDE_EFFECTS: i32 = 0x0000_0171;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
 const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
@@ -14096,6 +14388,7 @@ struct StrictContentMessageChange {
     change_key: Vec<u8>,
     predecessor_change_list: Vec<u8>,
     body_tags: Vec<u32>,
+    body_properties: Vec<(u32, Vec<u8>)>,
     access: Option<u32>,
     access_level: Option<u32>,
     mid: Option<u64>,
@@ -14109,6 +14402,7 @@ struct StrictContentMessageChange {
 struct StrictContentMessageBuilder {
     header_tags: Vec<u32>,
     body_tags: Vec<u32>,
+    body_properties: Vec<(u32, Vec<u8>)>,
     access: Option<u32>,
     access_level: Option<u32>,
     source_key: Option<Vec<u8>>,
@@ -14569,6 +14863,9 @@ fn strict_record_content_body_property(
         ));
     }
     message.body_tags.push(property.tag);
+    message
+        .body_properties
+        .push((property.tag, property.value.clone()));
     match property.tag {
         PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = Some(property.value),
         PID_TAG_ENTRY_ID => message.entry_id = Some(property.value),
@@ -14636,6 +14933,7 @@ fn strict_finish_content_message(
         change_key,
         predecessor_change_list,
         body_tags: message.body_tags,
+        body_properties: message.body_properties,
         access: message.access,
         access_level: message.access_level,
         mid: message.mid,

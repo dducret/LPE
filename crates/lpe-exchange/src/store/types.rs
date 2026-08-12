@@ -300,6 +300,42 @@ pub(crate) struct MapiCustomPropertyValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiCalendarPropertyValue {
+    pub(crate) event_id: Uuid,
+    pub(crate) property_tag: u32,
+    pub(crate) property_type: u16,
+    pub(crate) property_value: Vec<u8>,
+}
+
+pub(crate) const MAPI_CALENDAR_STANDARD_PASSTHROUGH_PROPERTY_TAGS: &[u32] = &[
+    0x0002_000B, // PidTagAlternateRecipientAllowed
+    0x0017_0003, // PidTagImportance
+    0x0023_000B, // PidTagOriginatorDeliveryReportRequested
+    0x0026_0003, // PidTagPriority
+    0x0029_000B, // PidTagReadReceiptRequested
+    0x0036_0003, // PidTagSensitivity
+    0x0063_000B, // PidTagResponseRequested
+    0x0070_001F, // PidTagConversationTopic
+    0x0071_0102, // PidTagConversationIndex
+    0x0C17_000B, // PidTagReplyRequested
+    0x0E01_000B, // PidTagDeleteAfterSubmit
+    0x3016_000B, // PidTagConversationIndexTracking
+    0x3FDE_0003, // PidTagInternetCodepage
+    0x3FF1_0003, // PidTagMessageLocaleId
+];
+
+pub(crate) fn is_mapi_calendar_standard_passthrough_property_tag(property_tag: u32) -> bool {
+    MAPI_CALENDAR_STANDARD_PASSTHROUGH_PROPERTY_TAGS.contains(&property_tag)
+}
+
+pub(crate) fn is_mapi_calendar_standard_passthrough_property_id(property_tag: u32) -> bool {
+    let property_id = property_tag & 0xFFFF_0000;
+    MAPI_CALENDAR_STANDARD_PASSTHROUGH_PROPERTY_TAGS
+        .iter()
+        .any(|tag| *tag & 0xFFFF_0000 == property_id)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiFolderProfilePropertyValue {
     pub(crate) folder_id: u64,
     pub(crate) property_tag: u32,

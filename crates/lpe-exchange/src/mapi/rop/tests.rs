@@ -90,6 +90,50 @@ fn message_create_and_save_responses_match_microsoft_message_examples() {
 }
 
 #[test]
+fn fast_transfer_put_buffer_success_and_failure_responses_keep_the_full_wire_shape() {
+    let normal = RopRequest {
+        rop_id: RopId::FastTransferDestinationPutBuffer.as_u8(),
+        input_handle_index: Some(3),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+    let normal_success = rop_fast_transfer_put_buffer_response(&normal, 0x1234, true);
+    assert_eq!(normal_success.len(), 15);
+    assert_eq!(
+        &normal_success[..13],
+        &[0x54, 0x03, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(&normal_success[13..15], &0x1234u16.to_le_bytes());
+    let normal_failure = rop_fast_transfer_put_buffer_error_response(&normal, 0x8004_0102, 0x1234);
+    assert_eq!(normal_failure.len(), 15);
+    assert_eq!(
+        &normal_failure[..13],
+        &[0x54, 0x03, 2, 1, 4, 128, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(&normal_failure[13..15], &0x1234u16.to_le_bytes());
+
+    let extended = RopRequest {
+        rop_id: RopId::FastTransferDestinationPutBufferExtended.as_u8(),
+        ..normal
+    };
+    let extended_success = rop_fast_transfer_put_buffer_response(&extended, 0x1234, true);
+    assert_eq!(extended_success.len(), 19);
+    assert_eq!(
+        &extended_success[..17],
+        &[0x9D, 0x03, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(&extended_success[17..19], &0x1234u16.to_le_bytes());
+    let extended_failure =
+        rop_fast_transfer_put_buffer_error_response(&extended, 0x8004_0102, 0x1234);
+    assert_eq!(extended_failure.len(), 19);
+    assert_eq!(
+        &extended_failure[..17],
+        &[0x9D, 0x03, 2, 1, 4, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    );
+    assert_eq!(&extended_failure[17..19], &0x1234u16.to_le_bytes());
+}
+
+#[test]
 fn attachment_create_and_save_responses_match_microsoft_message_examples() {
     let table = RopRequest {
         rop_id: RopId::GetAttachmentTable.as_u8(),
@@ -1473,6 +1517,7 @@ fn associated_config_get_properties_all_returns_its_named_properties() {
     };
     let unicode_response = rop_get_properties_all_response(
         &unicode_request,
+        &property_enumeration_test_session(),
         Some(&object),
         &principal,
         &[],
@@ -1496,6 +1541,7 @@ fn associated_config_get_properties_all_returns_its_named_properties() {
     };
     let string8_response = rop_get_properties_all_response(
         &string8_request,
+        &property_enumeration_test_session(),
         Some(&object),
         &principal,
         &[],
@@ -2468,6 +2514,19 @@ fn contains_bytes(bytes: &[u8], needle: &[u8]) -> bool {
     bytes.windows(needle.len()).any(|window| window == needle)
 }
 
+fn property_enumeration_test_session() -> MapiSession {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "enumeration@example.test".to_string(),
+        display_name: "Enumeration".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:enum");
+    remove_session(&session_id).expect("property-enumeration test session")
+}
+
 #[test]
 fn get_properties_all_honors_non_unicode_string_request() {
     let principal = AccountPrincipal {
@@ -2501,6 +2560,7 @@ fn get_properties_all_honors_non_unicode_string_request() {
 
     let response = rop_get_properties_all_response(
         &request,
+        &property_enumeration_test_session(),
         Some(&object),
         &principal,
         &[],
@@ -2550,6 +2610,7 @@ fn get_properties_all_returns_error_tag_for_size_limited_value() {
 
     let response = rop_get_properties_all_response(
         &request,
+        &property_enumeration_test_session(),
         Some(&object),
         &principal,
         &[],
@@ -2650,6 +2711,7 @@ fn calendar_event_getprops_all_rejects_missing_event_handle() {
 
     let response = rop_get_properties_all_response(
         &request,
+        &property_enumeration_test_session(),
         Some(&object),
         &principal,
         &[],
@@ -2662,6 +2724,217 @@ fn calendar_event_getprops_all_rejects_missing_event_handle() {
         u32::from_le_bytes(response[2..6].try_into().unwrap()),
         0x8004_010F
     );
+}
+
+#[test]
+fn calendar_event_getprops_list_rejects_missing_event_handle() {
+    let object = MapiObject::Event {
+        folder_id: CALENDAR_FOLDER_ID,
+        event_id: crate::mapi::identity::mapi_store_id(0x43),
+        transaction: MapiEventTransaction::new(0, 0x43),
+    };
+    let request = RopRequest {
+        rop_id: RopId::GetPropertiesList.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+
+    let response = rop_get_properties_list_response(
+        &request,
+        &property_enumeration_test_session(),
+        Some(&object),
+        &MapiMailStoreSnapshot::empty(),
+    );
+
+    assert_eq!(response[0], RopId::GetPropertiesList.as_u8());
+    assert_eq!(
+        u32::from_le_bytes(response[2..6].try_into().unwrap()),
+        0x8004_010F
+    );
+}
+
+#[test]
+fn pending_calendar_property_enumeration_uses_only_staged_properties() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "test@example.test".to_string(),
+        display_name: "Test".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let creation_time = 134_309_505_016_550_000u64;
+    let modification_time = 134_309_505_020_910_000u64;
+    let search_key = vec![
+        0xb7, 0x6f, 0xbc, 0x81, 0xf8, 0xfb, 0x16, 0x45, 0xaf, 0x54, 0xfa, 0x8b, 0x53, 0x4e, 0x9b,
+        0xcc,
+    ];
+    let object = MapiObject::PendingEvent {
+        folder_id: CALENDAR_FOLDER_ID,
+        properties: HashMap::from([
+            (PID_LID_APPOINTMENT_SEQUENCE_TAG, MapiValue::I32(7)),
+            (
+                PID_TAG_CONVERSATION_TOPIC_W,
+                MapiValue::String("original topic".to_string()),
+            ),
+            (PID_TAG_CREATION_TIME, MapiValue::U64(creation_time)),
+            (
+                PID_TAG_LAST_MODIFICATION_TIME,
+                MapiValue::U64(modification_time),
+            ),
+            (PID_TAG_SEARCH_KEY, MapiValue::Binary(search_key.clone())),
+            (
+                PID_TAG_BODY_HTML_W,
+                MapiValue::String("<p>staged</p>".to_string()),
+            ),
+            (
+                PID_TAG_HTML_BINARY,
+                MapiValue::Binary(b"<p>staged</p>".to_vec()),
+            ),
+        ]),
+        recipients: Vec::new(),
+        recipients_modified: false,
+        fail_on_conflict: false,
+    };
+    let list_request = RopRequest {
+        rop_id: RopId::GetPropertiesList.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+
+    let list = rop_get_properties_list_response(
+        &list_request,
+        &property_enumeration_test_session(),
+        Some(&object),
+        &MapiMailStoreSnapshot::empty(),
+    );
+    assert!(contains_bytes(
+        &list,
+        &PID_LID_APPOINTMENT_SEQUENCE_TAG.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &list,
+        &PID_TAG_CONVERSATION_TOPIC_W.to_le_bytes()
+    ));
+    assert!(contains_bytes(&list, &PID_TAG_CREATION_TIME.to_le_bytes()));
+    assert!(contains_bytes(
+        &list,
+        &PID_TAG_LAST_MODIFICATION_TIME.to_le_bytes()
+    ));
+    assert!(contains_bytes(&list, &PID_TAG_SEARCH_KEY.to_le_bytes()));
+    assert!(contains_bytes(&list, &PID_TAG_HTML_BINARY.to_le_bytes()));
+    assert!(!contains_bytes(&list, &PID_TAG_BODY_HTML_W.to_le_bytes()));
+    assert!(!contains_bytes(
+        &list,
+        &PID_LID_REMINDER_SET_TAG.to_le_bytes()
+    ));
+
+    let all_request = RopRequest {
+        rop_id: RopId::GetPropertiesAll.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: [0, 0, 1, 0].to_vec(),
+    };
+    let all = rop_get_properties_all_response(
+        &all_request,
+        &property_enumeration_test_session(),
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+    assert!(contains_bytes(
+        &all,
+        &PID_LID_APPOINTMENT_SEQUENCE_TAG.to_le_bytes()
+    ));
+    assert!(contains_bytes(&all, &7i32.to_le_bytes()));
+    assert!(contains_utf16(&all, "original topic"));
+    assert!(contains_bytes(&all, &creation_time.to_le_bytes()));
+    assert!(contains_bytes(&all, &modification_time.to_le_bytes()));
+    assert!(contains_bytes(&all, &search_key));
+    assert!(!contains_bytes(
+        &all,
+        &PID_LID_REMINDER_SET_TAG.to_le_bytes()
+    ));
+}
+
+#[test]
+fn calendar_property_enumeration_uses_registered_named_id_despite_numeric_collision() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "calendar@example.test".to_string(),
+        display_name: "Calendar".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let mut session = property_enumeration_test_session();
+    let conflicting_property = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("legacy-0x8214-occupant".to_string()),
+    };
+    let appointment_color = MapiNamedProperty {
+        guid: PSETID_APPOINTMENT_GUID,
+        kind: MapiNamedPropertyKind::Lid(PID_LID_APPOINTMENT_COLOR),
+    };
+    assert_eq!(
+        session.cache_named_property(0x8214, conflicting_property),
+        Some(0x8214)
+    );
+    assert_eq!(
+        session.cache_named_property(0x8020, appointment_color),
+        Some(0x8020)
+    );
+    let object = MapiObject::PendingEvent {
+        folder_id: CALENDAR_FOLDER_ID,
+        properties: HashMap::from([(PID_LID_APPOINTMENT_COLOR_TAG, MapiValue::I32(7))]),
+        recipients: Vec::new(),
+        recipients_modified: false,
+        fail_on_conflict: false,
+    };
+
+    let list_request = RopRequest {
+        rop_id: RopId::GetPropertiesList.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+    let list = rop_get_properties_list_response(
+        &list_request,
+        &session,
+        Some(&object),
+        &MapiMailStoreSnapshot::empty(),
+    );
+    assert_eq!(u16::from_le_bytes(list[6..8].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(list[8..12].try_into().unwrap()),
+        0x8020_0003
+    );
+
+    let all_request = RopRequest {
+        rop_id: RopId::GetPropertiesAll.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: [0, 0, 1, 0].to_vec(),
+    };
+    let all = rop_get_properties_all_response(
+        &all_request,
+        &session,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &MapiMailStoreSnapshot::empty(),
+    );
+    assert_eq!(u16::from_le_bytes(all[6..8].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(all[8..12].try_into().unwrap()),
+        0x8020_0003
+    );
+    assert_eq!(i32::from_le_bytes(all[12..16].try_into().unwrap()), 7);
 }
 
 #[test]

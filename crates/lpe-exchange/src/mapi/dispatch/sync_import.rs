@@ -1,15 +1,14 @@
 use super::*;
 
+mod fast_transfer_destination;
+pub(super) use fast_transfer_destination::*;
+
 // Version 3 adds the owner Inbox special-folder identification properties to
 // folderChange, so version 2 checkpoints must replay a full hierarchy once.
 pub(super) const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 3;
-
-pub(super) fn first_fast_transfer_marker(request: &RopRequest) -> Option<u32> {
-    let size = u16::from_le_bytes(request.payload.get(..2)?.try_into().ok()?) as usize;
-    let bytes = request.payload.get(2..2 + size)?;
-    let marker = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?);
-    (marker & 0x4000_0000 != 0).then_some(marker)
-}
+// Keep staged destination data within the 25 MiB maximum message size LPE
+// advertises, with one request's worth of framing headroom.
+const MAX_FAST_TRANSFER_DESTINATION_STAGED_BYTES: usize = 25 * 1024 * 1024 + u16::MAX as usize;
 
 pub(super) fn fast_transfer_destination_target_folder_id(object: &MapiObject) -> Option<u64> {
     match object {
@@ -56,6 +55,40 @@ pub(super) fn commit_fast_transfer_destination_buffer(
     {
         *buffer = full_buffer;
     }
+}
+
+pub(super) fn invalidate_fast_transfer_destination(session: &mut MapiSession, handle: u32) {
+    let Some(target_handle) = session
+        .handles
+        .get(&handle)
+        .and_then(|object| match object {
+            MapiObject::FastTransferDestination { target_handle, .. } => Some(*target_handle),
+            _ => None,
+        })
+    else {
+        return;
+    };
+    session.handles.remove(&handle);
+    session.handles.remove(&target_handle);
+    session
+        .pending_sync_import_source_keys
+        .remove(&target_handle);
+}
+
+fn reject_ft(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+    error_code: u32,
+) -> bool {
+    if let Some(handle) = input_handle(handle_slots, request) {
+        invalidate_fast_transfer_destination(session, handle);
+    }
+    responses.extend_from_slice(&rop_fast_transfer_put_buffer_error_response(
+        request, error_code, 0,
+    ));
+    true
 }
 
 pub(super) fn append_tell_version_response(
@@ -463,6 +496,14 @@ pub(super) fn append_fast_transfer_destination_configure_response(
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
 ) {
+    if !matches!(request.payload.first().copied(), Some(0x01 | 0x02)) {
+        responses.extend_from_slice(&rop_error_response(
+            0x53,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    }
     let Some(target_handle) = input_handle(handle_slots, request) else {
         responses.extend_from_slice(&rop_error_response(
             0x53,
@@ -545,53 +586,115 @@ pub(super) fn append_fast_transfer_destination_put_buffer_response(
     request: &RopRequest,
     responses: &mut Vec<u8>,
 ) -> bool {
-    if first_fast_transfer_marker(request).is_some() {
-        responses.extend_from_slice(&rop_error_response(
-            request.rop_id,
-            request.response_handle_index(),
+    let upload_data = request.fast_transfer_upload_data().to_vec();
+    if upload_data.is_empty() {
+        responses.extend_from_slice(&rop_fast_transfer_put_buffer_error_response(
+            request,
             0x8004_0102,
+            0,
         ));
         return true;
     }
-    let upload_data = request.fast_transfer_upload_data().to_vec();
     let Some((target_handle, full_buffer)) =
         staged_fast_transfer_destination_buffer(session, handle_slots, request)
     else {
-        responses.extend_from_slice(&rop_error_response(
-            request.rop_id,
-            request.response_handle_index(),
+        responses.extend_from_slice(&rop_fast_transfer_put_buffer_error_response(
+            request,
             0x8004_010F,
+            0,
         ));
         return false;
     };
-    let property_values = match fast_transfer_property_values(&full_buffer) {
+    if full_buffer.len() > MAX_FAST_TRANSFER_DESTINATION_STAGED_BYTES {
+        return reject_ft(session, handle_slots, request, responses, 0x8007_000E);
+    }
+    let (property_values, consumed) = match fast_transfer_property_values(session, &full_buffer) {
         Ok(values) => values,
         Err(_) => {
-            responses.extend_from_slice(&rop_error_response(
-                request.rop_id,
-                request.response_handle_index(),
-                0x8004_0102,
-            ));
-            return true;
+            return reject_ft(session, handle_slots, request, responses, 0x8004_0102);
         }
     };
     if !property_values.is_empty()
         && apply_fast_transfer_destination_properties(session, target_handle, property_values)
             .is_none()
     {
-        responses.extend_from_slice(&rop_error_response(
-            request.rop_id,
-            request.response_handle_index(),
-            0x8004_0102,
-        ));
-        return false;
+        return reject_ft(session, handle_slots, request, responses, 0x8004_0102);
     }
-    commit_fast_transfer_destination_buffer(session, handle_slots, request, full_buffer);
+    commit_fast_transfer_destination_buffer(
+        session,
+        handle_slots,
+        request,
+        full_buffer[consumed..].to_vec(),
+    );
     responses.extend_from_slice(&rop_fast_transfer_put_buffer_response(
         request,
         upload_data.len(),
+        consumed == full_buffer.len(),
     ));
     false
+}
+
+pub(super) async fn append_fast_transfer_destination_put_buffer_response_with_store<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) -> bool
+where
+    S: ExchangeStore,
+{
+    let Some((_target_handle, full_buffer)) =
+        staged_fast_transfer_destination_buffer(session, handle_slots, request)
+    else {
+        return append_fast_transfer_destination_put_buffer_response(
+            session,
+            handle_slots,
+            request,
+            responses,
+        );
+    };
+    if full_buffer.len() > MAX_FAST_TRANSFER_DESTINATION_STAGED_BYTES {
+        return reject_ft(session, handle_slots, request, responses, 0x8007_000E);
+    }
+    let mut allocated_named_property_count = 0usize;
+    loop {
+        match fast_transfer_property_values(session, &full_buffer) {
+            Ok(_) => break,
+            Err(error) => {
+                let Some(missing) = error.downcast_ref::<MissingFastTransferNamedProperty>() else {
+                    return reject_ft(session, handle_slots, request, responses, 0x8004_0102);
+                };
+                let properties = [missing.0.clone()];
+                allocated_named_property_count = allocated_named_property_count.saturating_add(1);
+                if allocated_named_property_count > 256 {
+                    return reject_ft(session, handle_slots, request, responses, 0x8007_000E);
+                }
+                let mapping = match store
+                    .fetch_or_allocate_mapi_named_property_ids(
+                        principal.account_id,
+                        &properties,
+                        true,
+                    )
+                    .await
+                {
+                    Ok(mappings) => mappings.into_iter().next().flatten(),
+                    Err(_) => None,
+                };
+                let Some(mapping) = mapping else {
+                    return reject_ft(session, handle_slots, request, responses, 0x8007_000E);
+                };
+                if session
+                    .cache_named_property(mapping.property_id, mapping.property)
+                    .is_none()
+                {
+                    return reject_ft(session, handle_slots, request, responses, 0x8004_0102);
+                }
+            }
+        }
+    }
+    append_fast_transfer_destination_put_buffer_response(session, handle_slots, request, responses)
 }
 
 pub(super) fn apply_fast_transfer_destination_properties(
@@ -599,13 +702,21 @@ pub(super) fn apply_fast_transfer_destination_properties(
     target_handle: u32,
     property_values: Vec<(u32, MapiValue)>,
 ) -> Option<()> {
+    let account_id = session.account_id;
     match session.handles.get_mut(&target_handle)? {
         MapiObject::PendingAssociatedMessage { properties, .. } => {
             apply_pending_associated_message_property_values(properties, property_values);
         }
+        MapiObject::PendingEvent { properties, .. } => {
+            apply_pending_event_fast_transfer_property_values(
+                account_id,
+                properties,
+                property_values,
+            )
+            .ok()?;
+        }
         MapiObject::PendingMessage { properties, .. }
         | MapiObject::PendingContact { properties, .. }
-        | MapiObject::PendingEvent { properties, .. }
         | MapiObject::PendingTask { properties, .. }
         | MapiObject::PendingNote { properties, .. }
         | MapiObject::PendingJournalEntry { properties, .. }
@@ -618,79 +729,6 @@ pub(super) fn apply_fast_transfer_destination_properties(
         _ => return None,
     }
     Some(())
-}
-
-pub(super) fn fast_transfer_property_values(bytes: &[u8]) -> Result<Vec<(u32, MapiValue)>> {
-    let mut cursor = Cursor::new(bytes);
-    let mut values = Vec::new();
-    while cursor.remaining() > 0 {
-        let property_tag = cursor.read_u32()?;
-        if property_tag & 0x4000_0000 != 0 {
-            return Err(anyhow::anyhow!("unsupported FastTransfer marker"));
-        }
-        values.push((
-            property_tag,
-            read_fast_transfer_property_value(&mut cursor, property_tag)?,
-        ));
-    }
-    Ok(values)
-}
-
-fn read_fast_transfer_property_value(
-    cursor: &mut Cursor<'_>,
-    property_tag: u32,
-) -> Result<MapiValue> {
-    match MapiPropertyType::from_code((property_tag & 0xFFFF) as u16) {
-        Some(MapiPropertyType::Integer16) => Ok(MapiValue::I16(cursor.read_u16()? as i16)),
-        Some(MapiPropertyType::Integer32) => Ok(MapiValue::I32(cursor.read_i32()?)),
-        Some(MapiPropertyType::Floating32 | MapiPropertyType::Floating64) => Err(anyhow::anyhow!(
-            "unsupported FastTransfer floating-point property type"
-        )),
-        Some(MapiPropertyType::Boolean) => Ok(MapiValue::Bool(cursor.read_u16()? != 0)),
-        Some(MapiPropertyType::Integer64) | Some(MapiPropertyType::Time) => {
-            Ok(MapiValue::I64(cursor.read_i64()?))
-        }
-        Some(MapiPropertyType::String8) => {
-            let bytes = read_fast_transfer_variable_bytes(cursor)?;
-            Ok(MapiValue::String(decode_fast_transfer_string8(&bytes)))
-        }
-        Some(MapiPropertyType::String) => {
-            let bytes = read_fast_transfer_variable_bytes(cursor)?;
-            Ok(MapiValue::String(decode_fast_transfer_utf16(&bytes)?))
-        }
-        Some(MapiPropertyType::Binary) => Ok(MapiValue::Binary(read_fast_transfer_variable_bytes(
-            cursor,
-        )?)),
-        Some(MapiPropertyType::Guid) => {
-            let bytes = cursor.read_bytes(16)?;
-            Ok(MapiValue::Guid(bytes.try_into().unwrap_or([0; 16])))
-        }
-        _ => Err(anyhow::anyhow!("unsupported FastTransfer property type")),
-    }
-}
-
-fn read_fast_transfer_variable_bytes(cursor: &mut Cursor<'_>) -> Result<Vec<u8>> {
-    let len = cursor.read_u32()? as usize;
-    Ok(cursor.read_bytes(len)?.to_vec())
-}
-
-fn decode_fast_transfer_string8(bytes: &[u8]) -> String {
-    let trimmed = bytes.strip_suffix(&[0]).unwrap_or(bytes);
-    String::from_utf8_lossy(trimmed).into_owned()
-}
-
-fn decode_fast_transfer_utf16(bytes: &[u8]) -> Result<String> {
-    if bytes.len() % 2 != 0 {
-        return Err(anyhow::anyhow!("odd UTF-16 FastTransfer string length"));
-    }
-    let mut units = bytes
-        .chunks_exact(2)
-        .map(|chunk| u16::from_le_bytes(chunk.try_into().unwrap()))
-        .collect::<Vec<_>>();
-    if units.last() == Some(&0) {
-        units.pop();
-    }
-    Ok(String::from_utf16(&units)?)
 }
 
 pub(super) fn imported_property_source_key_global_counter(

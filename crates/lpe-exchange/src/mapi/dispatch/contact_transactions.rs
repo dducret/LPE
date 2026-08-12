@@ -63,6 +63,14 @@ fn validate_contact_property_values(values: &[(u32, MapiValue)]) -> Result<()> {
         .filter(|(tag, _)| !is_custom_property_tag(canonical_property_storage_tag(*tag)))
         .map(|(tag, value)| (canonical_property_storage_tag(*tag), value.clone()))
         .collect::<HashMap<_, _>>();
+    if let Some(value) = canonical_properties.get(&PID_TAG_MESSAGE_CLASS_W) {
+        let MapiValue::String(message_class) = value else {
+            bail!("MAPI Contact MessageClass must be Unicode");
+        };
+        if !message_class.eq_ignore_ascii_case("IPM.Contact") {
+            bail!("MAPI Contact MessageClass must be IPM.Contact");
+        }
+    }
     reject_unsupported_mapi_contact_properties(&canonical_properties)
 }
 

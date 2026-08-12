@@ -5,6 +5,7 @@ include!("storage_impl/ews_delegation.rs");
 include!("storage_impl/mapi_replica_ids.rs");
 include!("storage_impl/mapi_hierarchy_versions.rs");
 include!("storage_impl/mapi_metadata.rs");
+include!("storage_impl/mapi_calendar_properties.rs");
 include!("storage_impl/mapi_permissions.rs");
 include!("storage_impl/mapi_special_folder_aliases.rs");
 include!("storage_impl/public_address_im.rs");
@@ -18,6 +19,7 @@ impl ExchangeStore for Storage {
     store_impl_mapi_replica_ids!();
     store_impl_mapi_hierarchy_versions!();
     store_impl_mapi_metadata!();
+    store_impl_mapi_calendar_properties!();
     store_impl_mapi_permissions!();
     store_impl_mapi_special_folder_aliases!();
     store_impl_public_address_im!();

@@ -131,6 +131,8 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
         apply_calendar_pending_recipients(&mut input, &existing, &properties, &recipients);
     }
     let imported_event = imported_identity.is_some();
+    let custom_property_upserts =
+        mapi_event_create_property_values_from_map(&properties, imported_event);
     let create_input = MapiEventCreateInput {
         principal_account_id: principal.account_id,
         collection_id,
@@ -141,10 +143,7 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
             reminder_at,
             reminder_dismissed_at: None,
         },
-        custom_property_upserts: mapi_event_create_property_values_from_map(
-            &properties,
-            imported_event,
-        ),
+        custom_property_upserts: custom_property_upserts.clone(),
         attachment_changes,
     };
     match store.create_mapi_event(create_input).await {
@@ -159,6 +158,11 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
                 created.attachments,
             );
             snapshot.remember_event_version(version.clone());
+            snapshot.remember_event_custom_property_changes(
+                canonical_event_id,
+                &custom_property_upserts,
+                &[],
+            );
             snapshot.remember_event_reminder_state(canonical_event_id, created.reminder);
             let disposition =
                 save_disposition(request).expect("SaveFlags were validated before Event creation");
@@ -342,6 +346,8 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
         commit_input.attachment_changes = attachment_changes;
     }
     let event_input = commit_input.event.clone();
+    let custom_property_upserts = commit_input.custom_property_upserts.clone();
+    let custom_property_deletes = commit_input.custom_property_deletes.clone();
     match store.commit_mapi_event_update(commit_input).await {
         Ok(MapiEventCommitOutcome::Saved(saved)) => {
             let metric_outcome = match transaction.import_disposition {
@@ -365,6 +371,11 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
                 updated_event,
                 version.clone(),
                 saved.attachments,
+            );
+            snapshot.remember_event_custom_property_changes(
+                event.canonical_id,
+                &custom_property_upserts,
+                &custom_property_deletes,
             );
             snapshot.remember_event_reminder_state(event.canonical_id, saved.reminder);
             remember_saved_event_handle(

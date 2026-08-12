@@ -177,6 +177,12 @@ pub trait ExchangeStore: AccountAuthStore {
         canonical_id: Uuid,
     ) -> StoreFuture<'a, Vec<MapiCustomPropertyValue>>;
 
+    fn fetch_mapi_calendar_property_values<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiCalendarPropertyValue>>;
+
     #[allow(dead_code)]
     fn delete_mapi_custom_property_values<'a>(
         &'a self,

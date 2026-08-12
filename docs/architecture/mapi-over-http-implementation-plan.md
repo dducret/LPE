@@ -225,6 +225,84 @@ before it is advertised.
   readable body containing `Error synchronizing view/form` and
   `[8004010F-501-8004010F-320]`. This deliberately does not preserve rich-RTF
   formatting or claim arbitrary rich-text round-trip fidelity.
+- The `202608112137` Probe F rerun confirms that the Common Views type-5 fix,
+  imported Calendar SearchKey preservation, provider-identity omission,
+  Exchange-order content state, server-computed upload `IdsetGiven`, and RTF
+  diagnostic ingestion are active. Outlook still logs Calendar folder
+  `[8004010F-501-0-1430]` immediately after the successful create download and
+  after applying the later web update, then rejects the final local edit with
+  `[8004010F-501-0-0]` before sending an item import ROP. The readable Trash
+  reports exposed a mailbox identity contradiction: Outlook successfully
+  imports and retains its Junk default-folder alias in hierarchy
+  `MetaTagIdsetGiven` and continues using that EntryID, while LPE previously
+  returned `MetaTagIdsetDeleted` for the same alias even though it kept the
+  durable redirect valid. A successful hierarchy import now always advances
+  `MetaTagCnsetSeen`, and the alias remains resident in the originating OST's
+  `MetaTagIdsetGiven` without being emitted as a second hierarchy row, following
+  `[MS-OXCFXICS]` sections 3.2.5.9.4.3 and 3.3.5.8.8. The same trace proves the
+  root `Depth` hierarchy omitted the persisted Conflicts, Local Failures, and
+  Server Failures children even though the Inbox advertised their EntryIDs;
+  Outlook's attempt to move the failed appointment to Local Failures therefore
+  could not resolve that OST folder. Root-depth and direct Sync Issues tables
+  now expose those canonical child mailboxes and mark Sync Issues as having
+  subfolders. The exact appointment create-versus-web-download comparison also
+  found two server projection
+  defects: `PidTagMessageDeliveryTime` was replaced by the appointment start
+  instead of the server-receipt time, and the first start/end-display
+  `TZRULE.wYear` was changed from Outlook's `0x0641` to zero. Saved Calendar
+  projection now uses the durable creation time for delivery time and emits the
+  documented `0x0641` first-rule year. Probe E and F also share the same first
+  post-Save hierarchy-table divergence: the appointment-caused Calendar row
+  refresh was collapsed to folder-only flags `0x0100`. LPE now retains the
+  `[MS-OXCNOTIF]` message-cause `M` bit and its required zero row-key fields,
+  producing `0x8100` for ordinary item changes while NewMail remains `0xC100`.
+  These are protocol/state corrections; a new-profile real-client rerun is
+  still required to establish which one was causal for Outlook's local
+  `MAPI_E_NOT_FOUND`.
+- The Probe F comparison also exposed an incomplete Calendar Message-property
+  replay surface after the appointment had saved successfully. That is a server
+  contradiction worth correcting, but the trace does not establish that any
+  one property below caused Outlook's later local `MAPI_E_NOT_FOUND`. Each
+  canonical Event now has a durable, bounded passthrough bag for unmapped
+  mailbox-assigned named properties and only these standard properties:
+  `PidTagAlternateRecipientAllowed`, `PidTagImportance`,
+  `PidTagOriginatorDeliveryReportRequested`, `PidTagPriority`,
+  `PidTagReadReceiptRequested`, `PidTagSensitivity`,
+  `PidTagResponseRequested`, `PidTagConversationTopic`,
+  `PidTagConversationIndex`, `PidTagReplyRequested`,
+  `PidTagDeleteAfterSubmit`, `PidTagConversationIndexTracking`,
+  `PidTagInternetCodepage`, and `PidTagMessageLocaleId`. Set and delete changes
+  remain handle-local until the parent Message Save commits them atomically;
+  after Save they survive reconnect. Calendar `RopGetPropertiesAll` and
+  `RopGetPropertiesList` enumerate the canonical property set plus the effective
+  persisted and staged passthrough set, so a same-handle Set is visible and a
+  same-handle Delete is absent. A canonical property projection always replaces
+  any stale stored value with the same property ID, including in ICS, and the bag
+  cannot become parallel subject, body, organizer, attendee, identity, version,
+  attachment, or reminder state. This follows `[MS-OXCPRPT]` sections 2.2.3,
+  2.2.4, and 3.2.5.2 through 3.2.5.5.
+
+  `PidLidAppointmentColor` remains client-authored compatibility state because
+  the canonical Event model has no color field. LPE validates the defined
+  values `0` through `10` and preserves the selected value across Save, web
+  updates, reconnect, direct reads, and full ICS rather than acknowledging it
+  and replacing it with zero (`[MS-OXOCAL]` section 2.2.1.50).
+
+  For the current non-delegated Event model, the canonical organizer supplies
+  the complete `PidTagSender*` and `PidTagSentRepresenting*` identity families;
+  LPE does not invent a distinct delegate sender without canonical delegate
+  state. This is the same-identity case in `[MS-OXOMSG]` sections 2.2.1.48
+  through 2.2.1.59; `[MS-OXCICAL]` section 2.1.3.1.1.20.61 defines the distinct
+  `X-MS-OLK-SENDER` delegate case. Canonical body state supplies
+  `PidTagNativeBody` as undefined (`0`), plain text (`1`), or HTML (`3`) and keeps
+  `PidTagRtfInSync=FALSE` because LPE does not project a synchronized RTF body,
+  following `[MS-OXCMSG]` sections 2.2.1.58.2 and 2.2.1.58.5.
+  `PidTagIconIndex` is derived as single/recurring appointment or
+  single/recurring meeting (`0x0400` through `0x0403`) per `[MS-OXOCAL]`
+  section 2.2.1.49. Finally, an effective Calendar property set is rejected
+  unless `PidTagResponseRequested` and `PidTagReplyRequested` agree; this
+  preserves the RSVP invariant in `[MS-OXCICAL]` section 2.1.3.1.1.20.2.5,
+  `[MS-OXOCAL]` sections 2.2.1.36-2.2.1.37, and `[MS-OXOMSG]` section 2.2.1.45.
 - Durable Calendar custom-property validation, immutable SearchKey handling,
   and storage lookup are isolated in `mapi_events/custom_properties.rs`. This is
   the first split boundary for the thousand-line `mapi_events.rs`; identity
@@ -236,11 +314,19 @@ before it is advertised.
   identity helpers; move those into `mapi_store/snapshot/fallback.rs` before
   adding further snapshot behavior. This SearchKey change only supplies the new
   version field in the existing fallback constructor.
-- `mapi/properties/streams.rs` has crossed the thousand-line review threshold.
-  Its next split should move object-property stream projection and open/read
-  construction into `mapi/properties/streams/open.rs`, leaving writable-target,
-  seek, copy, commit, and mutation helpers in the parent module until a second
-  cohesive write-side split is required.
+- `mapi/properties/streams.rs` crossed the thousand-line review threshold.
+  Calendar-specific open/read overlay, ownership validation, and staged stream
+  mutation now live in `mapi/properties/streams/calendar.rs`, keeping the parent
+  below the hard production limit. Its next split should move the remaining
+  generic object-property open/read construction into `streams/open.rs`, leaving
+  writable-target, seek, copy, commit, and non-Calendar mutation helpers in the
+  parent.
+- `mapi_store.rs`, `mapi/store_adapter.rs`, and `store.rs` remain touched hubs
+  above the thousand-line threshold. Move Calendar snapshot loading and wiring
+  into the existing `mapi_store/snapshot/calendar.rs`, Calendar Event projection
+  and hydration into a focused `mapi/store_adapter/calendar.rs` helper, and the
+  Calendar custom-property trait DTOs and methods into
+  `store/calendar_properties.rs`; leave the parent files as wiring surfaces.
 - `mapi/identity.rs` has reached the thousand-line split threshold. Before
   extending identity behavior again, move the task-local request identity
   scope and `MapiIdentityCodec`, including durable/logical alias encoding and
@@ -731,7 +817,8 @@ before it is advertised.
 thousand-line split threshold. Shared `SpecialMessageSyncFact` property
 selection and FastTransfer serialization now live in
 `mapi_mailstore/special_message.rs`; associated-configuration projection lives
-in `mapi/sync/associated_config.rs`. Keep further behavior in those focused
+in `mapi/sync/associated_config.rs`, and this patch moves
+`calendar_sync_object` into `mapi/sync/calendar.rs`. Keep further behavior in those focused
 helpers and the public entry points as thin wiring. Verify changes with the
 special-message unit tests, the realistic `MessageListSettings`
 import/reconnect regression, and `cargo test -p lpe-exchange`.
@@ -1015,13 +1102,15 @@ non-canonical LPE state.
   columns use the portable `PropertyID = 0`, arbitrary `ID = 0x0022A764`, and
   GUID/name encoding from the `[MS-OXOCFG]` section 4.2.1.11 Categories example;
   Outlook resolves the mailbox property ID from the GUID and name.
-  Sync Issues remains an exact-ID Outlook special folder, but startup hierarchy
-  tables advertise it as a leaf until LPE backs its Conflicts, Local Failures,
-  and Server Failures child folders with real canonical or compatibility
-  semantics. Quick Step Settings also remains exact-ID/openable compatibility
-  state, not an IPM subtree startup hierarchy row. This keeps Outlook from
-  walking unsupported virtual hierarchy branches before opening normal Inbox
-  contents.
+  Sync Issues and its persisted Conflicts, Local Failures, and Server Failures
+  children remain exact-ID Outlook special folders. A direct IPM-subtree table
+  contains only the Sync Issues parent, while a direct Sync Issues table and a
+  root `Depth` hierarchy include the three real child mailboxes and mark the
+  parent as having subfolders. This keeps the Inbox-advertised failure-folder
+  EntryIDs resolvable in the OST hierarchy so Outlook can move failed local
+  items instead of reporting a second `MAPI_E_NOT_FOUND`. Quick Step Settings
+  remains exact-ID/openable compatibility state, not an IPM subtree startup
+  hierarchy row.
   Tasks, Notes, and Journal advertise `PidTagDefaultViewEntryId` through their
   type-specific Outlook view descriptors and contents row projections; To-Do
   search behavior remains bounded to the supported task/search projections.
@@ -1486,7 +1575,13 @@ not by itself authorize broad client publication.
   informative `TableRowModified` payload when a child-content change leaves
   its containing folder row in the table's current non-count sort order; the
   payload uses its existing column projection, current aggregate values, and
-  predecessor folder ID; separately changed folder rows are not coalesced.
+  predecessor folder ID; separately changed folder rows are not coalesced. A
+  row refresh caused by a message or collaboration-item change retains the
+  `M` notification flag and its zero message/instance key fields; a NewMail
+  cause additionally retains the Exchange search-folder flag. This follows
+  `[MS-OXCNOTIF]` section 2.2.1.4.1.2 and preserves the Exchange hierarchy-row
+  wire shape rather than collapsing every cause to a folder-only `0x0100`
+  notification.
   Explicit
   subscription deliveries, including `NewMail`, are emitted before automatic
   table notifications from the same canonical change. Restricted hierarchy
@@ -1506,11 +1601,11 @@ not by itself authorize broad client publication.
 | Client SMTP in core LPE | Forbidden. Submission must use canonical LPE submission, not a client SMTP endpoint in the core server. |
 | Protocol-local Sent/Outbox | Forbidden. Sent and submission state must be canonical. |
 | NSPI mutation | Deferred. Address-book writes and link-table mutation remain disabled. |
-| Raw FastTransfer destination upload streams | Partially implemented. Destination configure plus PutBuffer / PutBufferExtended accepts bounded FastTransfer property streams on pending canonical objects and routes them through the existing save/import paths. Exchange marker/subobject stream shapes are not implemented yet and return parseable ROP errors without creating protocol-local state. |
+| Raw FastTransfer destination upload streams | Partially implemented. Destination configure plus `RopFastTransferDestinationPutBuffer` and `RopFastTransferDestinationPutBufferExtended` accept sequential bounded property-stream buffers when request boundaries fall between MS-OXCFXICS lexical elements, and also retain an incomplete suffix when a length-delimited `varSizeValue` continues in the next request. This does not claim support for a request boundary inside a fixed-width atom or `namedPropInfo`. The decoder reads `namedPropInfo` for every wire property ID greater than or equal to `0x8000`, including IDs greater than or equal to `0xC000`; it resolves a known mapping or durably allocates the destination mailbox mapping, normalizes well-known Calendar aliases, and supports `ServerId` plus multiple-String8 and multiple-Unicode framing. Each ROP returns the complete MS-OXCROPS success or failure response shape, including the request's `InputHandleIndex` and the accepted `BufferUsedSize`. Calendar RSVP fields are an aggregate invariant, so per-chunk decode stages the individually valid fields and defers cross-field RSVP validation until the complete property set is applied or the pending object is saved. Complete properties are routed through the existing canonical save/import path; Exchange marker/subobject stream shapes remain unimplemented and return parseable ROP errors without creating protocol-local state. This follows `[MS-OXCFXICS]` sections 2.2.3.1.2.2, 2.2.3.1.2.3, 2.2.4.1-2.2.4.1.4, 3.2.5.8.2.2, and 3.2.5.8.2.3; `[MS-OXCROPS]` sections 2.2.12.2-2.2.12.3.2; and `[MS-OXCDATA]` section 2.11.1.4. |
 | Non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` is bounded to hard-deleting visible memberships in the target canonical mailbox folder through the canonical tombstone/change-log path. `RopHardDeleteMessagesAndSubfolders` recurses only through canonical mailbox descendants and does not delete non-mailbox objects. Public-folder whole-folder purge returns a parseable not-supported ROP error; public-folder item delete/move/copy remains item-scoped through canonical public-folder APIs. |
 | Recoverable Items / dumpster ROP exposure | Bounded MAPI Recoverable Items Root, Deletions, Versions, and Purges virtual folders project canonical `recoverable_items` lifecycle state for browse, restore, and purge only. `RopMoveCopyMessages` move from a concrete recoverable subfolder uses canonical recoverable restore, `RopMoveCopyMessages` copy returns a parseable not-supported error, `RopDeleteMessages` on recoverable folders returns partial completion without purging because LPE does not yet implement Exchange's Deletions-to-Purges soft-delete progression, purge and empty-folder on Deletions, Versions, or Purges use canonical recoverable purge, Recoverable Items Root message mutation and purge calls return parseable not-supported errors, retention/legal-hold failures return partial completion, and recovery state stays out of normal mailbox hierarchy/content sync. `RopGetContentsTable` with `SoftDeletes` (`0x20`) returns a parseable not-supported ROP error because canonical LPE hard delete/Trash purge removes normal folder membership and writes `recoverable_items` rows instead of keeping folder-local soft-deleted rows. `OpenSoftDeleted` and complete Exchange dumpster folder parity remain gated on canonical lifecycle semantics; any MAPI-local dumpster store is forbidden. Versions and Purges are bounded virtual projections over canonical lifecycle rows; LPE does not claim Exchange copy-on-write Versions behavior or full Purges post-recovery parity. |
 | Sync move import | `RopSynchronizationImportMessageMove` parses all five documented length-prefixed fields as GID/XID/PCL values. For an Outlook optimizing-send move, it finds the transient same-message canonical Outbox membership created from `PidTagTargetEntryId`, removes that source membership, and atomically rekeys the active MAPI identity to the imported destination SourceKey, ChangeKey, and PCL while allocating a distinct internal server ChangeNumber; the already-canonical Sent item remains the one user-visible sent message and no full content re-upload is required. An exact retry after response loss is idempotently acknowledged when that destination identity and target membership remain active while the source membership is absent, and reannounces the target change without another mutation. A no-conflict Calendar-to-Deleted-Items import moves the canonical Event to its deleted lifecycle and performs the corresponding principal-identity rekey; it does not create a generic `IPM.Appointment` mail row. This follows `[MS-OXCFXICS]` sections 2.2.3.2.4.4.1, 3.1.5.3, 3.2.5.9.4.4, 3.3.4.3.3.2.1.1, and 3.3.4.3.3.2.1.2; `[MS-OXOMSG]` sections 3.2.4.4 and 3.3.5.1.3; and `[MS-OXCROPS]` sections 2.2.13.6.1-2.2.13.6.3. Concurrent-move conflict handling and the `NewerClientChange` (`0x00040821`) response remain a separate interoperability gate. |
-| Sync hierarchy import | `RopSynchronizationImportHierarchyChange` validates the six fixed hierarchy properties before routing by SourceKey/FID. It applies the durable tuple transition above to an existing canonical reserved folder. A system-folder alias import persists only account-scoped `(alias FID, SourceKey, server CN) -> canonical FID` protocol identity metadata in `mapi_special_folder_aliases`; it does not create a shadow mailbox, Calendar, Contacts folder, or user-visible row. The client FID must use `REPLID 1`, its GLOBCNT must be inside a range previously reserved for that account by `RopGetLocalReplicaIds`, and the 22-byte SourceKey must contain the store replica GUID plus the same GLOBCNT. Canonical special-folder FIDs use `REPLID 1` and reserved GLOBCNT values `1..42`; persistable aliases are bounded to `43 <= GLOBCNT < 0x7FFF_FE00_0000`. Alias FID and SourceKey collisions with `mapi_object_identities` are rejected. Multiple alias records may share one canonical FID. Imported parent SourceKeys resolve through both canonical identities and these aliases. When the canonical target is in the configured full hierarchy projection, LPE applies an LPE-only fixed-special-folder compatibility policy: it retains a redirect for stale requests, returns Success without adding the alias CN to `MetaTagCnsetSeen`, and lets the next hierarchy download delete the alias from `MetaTagIdsetGiven` while retaining only the canonical folder identity. This is an intentional exception to ordinary successful import behavior in `[MS-OXCFXICS]` section 3.2.5.9.4.3, not a claim that a distinct client SourceKey is an Exchange hierarchy conflict. The redirect is not a hierarchy replica folder object, and no supplied Exchange reference capture includes this exact reconciliation sequence. Upload `MetaTagIdsetGiven` is ignored and not returned. Atomically preserving an imported CK/PCL/LMT tuple during first-time custom-folder creation, existing custom-folder rename/move, system-folder alias rename/move, and advancing the tuple for canonical folder mutations performed outside this import path are not implemented yet and remain required Outlook interoperability work. This follows [MS-OXCFXICS] sections 2.2.1.2.3, 2.2.1.2.7, 2.2.1.2.8, [2.2.3.2.4.3.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/9d5d9d68-775d-4ede-a14c-119bc54a6327), 2.2.3.2.4.7.2, 3.1.5.3, 3.1.5.6.2.2, 3.2.5.9.4.3, 3.3.5.2.1, and 3.3.5.8.12, plus [MS-OXCFXICS section 3.3.5.8.8](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/f3fab904-bb7d-4cf3-bbd6-65d4a34b67d2) and [MS-OXCFOLD] sections 2.2.2.2.1.9, 2.2.2.2.1.13, and 2.2.2.2.1.14. |
+| Sync hierarchy import | `RopSynchronizationImportHierarchyChange` validates the six fixed hierarchy properties before routing by SourceKey/FID. It applies the durable tuple transition above to an existing canonical reserved folder. A system-folder alias import persists only account-scoped `(alias FID, SourceKey, server CN) -> canonical FID` protocol identity metadata in `mapi_special_folder_aliases`; it does not create a shadow mailbox, Calendar, Contacts folder, or user-visible row. The client FID must use `REPLID 1`, its GLOBCNT must be inside a range previously reserved for that account by `RopGetLocalReplicaIds`, and the 22-byte SourceKey must contain the store replica GUID plus the same GLOBCNT. Canonical special-folder FIDs use `REPLID 1` and reserved GLOBCNT values `1..42`; persistable aliases are bounded to `43 <= GLOBCNT < 0x7FFF_FE00_0000`. Alias FID and SourceKey collisions with `mapi_object_identities` are rejected. Multiple alias records may share one canonical FID. Imported parent SourceKeys resolve through both canonical identities and these aliases. Successful alias import always adds its server CN to upload `MetaTagCnsetSeen`, and the imported alias FID remains resident in the originating client's hierarchy `MetaTagIdsetGiven`, following `[MS-OXCFXICS]` sections 3.2.5.9.4.3 and 3.3.5.8.8. The alias remains a durable redirect and is not emitted as a second hierarchy row when the canonical target is already projected. Upload `MetaTagIdsetGiven` is ignored rather than echoed; the later download selection retains only aliases already present in that client's state. Atomically preserving an imported CK/PCL/LMT tuple during first-time custom-folder creation, existing custom-folder rename/move, system-folder alias rename/move, and advancing the tuple for canonical folder mutations performed outside this import path are not implemented yet and remain required Outlook interoperability work. This follows [MS-OXCFXICS] sections 2.2.1.2.3, 2.2.1.2.7, 2.2.1.2.8, [2.2.3.2.4.3.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/9d5d9d68-775d-4ede-a14c-119bc54a6327), 2.2.3.2.4.7.2, 3.1.5.3, 3.1.5.6.2.2, 3.2.5.9.4.3, 3.3.5.2.1, and 3.3.5.8.12, plus [MS-OXCFXICS section 3.3.5.8.8](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/f3fab904-bb7d-4cf3-bbd6-65d4a34b67d2) and [MS-OXCFOLD] sections 2.2.2.2.1.9, 2.2.2.2.1.13, and 2.2.2.2.1.14. |
 | Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, attachment presence including `PidTagHasAttachments` existence probes, `PidNameKeywords` category property equality, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, deferred-action provider data, and `RopUpdateDeferredActionMessages` are not implemented yet because their canonical rule/deferred-action model is still missing; no MAPI-local rule store is allowed and rejected deferred actions do not activate Sieve. |
 | Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants` for mail folders and canonical `calendar_grants` for default, owned custom, and share-right delegated calendar folders, with audit and change-log writes; Exchange-only ACL subjects remain gated on canonical principal semantics, and MAPI-local ACL storage is forbidden. |
@@ -1562,7 +1657,9 @@ Durable compatibility metadata is intentionally narrower than canonical state:
   allocations; active session registries are caches.
 - `mapi_custom_property_values` stores opaque Outlook/custom MAPI property
   values only for supported canonical object kinds when no canonical field owns
-  that property.
+  that property, plus the explicitly bounded Calendar standard-property
+  passthrough set documented above. A canonical projection always overrides a
+  stale compatibility value for the same property identity.
 - `mapi_profile_settings` and `mapi_folder_profile_property_values` store
   bounded profile and folder display metadata needed for cached-mode reopen;
   they must not become arbitrary Exchange profile or folder truth.
@@ -1595,10 +1692,10 @@ this plan explicitly documents that compatibility behavior.
 | Folder identity and hierarchy | `mailboxes`, built-in projected folder roles, `search_folders`, `mapi_store_identity`, `mapi_object_identities`, and `mapi_special_folder_aliases` | Stable FIDs/source keys/change keys and bounded alternate special-folder aliases are reused across cached-mode sessions. Each default role is converted to its durable mailbox identity at the MAPI boundary; several profile/OST aliases may resolve to one canonical default folder, and the alias table contains no folder content. |
 | Custom/shared collaboration folders | `contact_books`, `calendars`, `task_lists`, grants, and `mapi_object_identities` | Non-reserved Outlook-visible collaboration folders use kind-scoped deterministic canonical identity keys and durable store-allocated MAPI object IDs. LPE must not derive folder IDs from raw collection text, owner UUID suffixes, or fallback counters. |
 | Named property IDs | `mapi_named_properties` | Durable per-account Outlook named-property ID mapping; session registry is only a cache. |
-| Opaque item custom properties | `mapi_custom_property_values` | Stored only for canonical item/attachment objects where the value is not a canonical built-in property. |
+| Opaque item custom properties | `mapi_custom_property_values` | Stored only for supported canonical item/attachment objects where no canonical field owns the value, plus the documented bounded Calendar standard-property passthrough set. Canonical projections override stale compatibility values. |
 | Navigation shortcuts | `mapi_navigation_shortcuts` | Common Views shortcut and group-header FAI rows are durable canonical profile-visible state for cached-mode profile creation and reopen. |
 | Folder display flags | `mapi_folder_profile_property_values` | Outlook-written `PidTagExtendedFolderFlags` folder UI streams are persisted per account and MAPI folder id, then overlaid on folder open so display-option writes survive reconnect. This store is bounded to Outlook profile folder flags, not arbitrary Exchange folder truth. |
-| Additional Ren Entry IDs | `mapi_folder_profile_property_values` plus `mapi_special_folder_aliases` | Inbox `PidTagAdditionalRenEntryIds` always returns canonical values at the five documented positions and preserves opaque later values across abbreviated writes. A recognized stale alternate is retained only as an unadvertised alias redirect to its canonical folder. |
+| Additional Ren Entry IDs | `mapi_folder_profile_property_values` plus `mapi_special_folder_aliases` | Inbox `PidTagAdditionalRenEntryIds` always returns canonical values at the five documented positions and preserves opaque later values across abbreviated writes. A recognized alternate remains a durable redirect and a resident identity for the OST that imported it, but is never projected as a duplicate visible hierarchy row. |
 | Associated configuration FAI | `mapi_associated_config_messages` | Outlook-created folder associated/config messages are durable MAPI-only compatibility state for view/form/client configuration sync replay. Direct associated-message deletes are supported and folder-scoped incremental content sync exports associated-config delete idsets. |
 | Sync checkpoints | `mapi_sync_checkpoints` | Durable operational EMSMDB/ICS completion cursors for hierarchy/content/read-state diagnostics; they neither store mailbox content nor select a client download delta. |
 | IPM subtree OST identity | `mapi_profile_settings.ipm_subtree_ost_id` | Outlook-written cached-mode profile identity is persisted account-wide and reloaded on IPM subtree open after reconnect. |
@@ -1698,18 +1795,14 @@ canonical `from` identity.
   `NoForeignIdentifiers` is absent, rather than LPE's internal MID. This follows
   `[MS-OXCFXICS]` sections 2.2.1.1.1, 2.2.1.2.5, 2.2.2.4.2, and 3.2.5.3.
   A durable special-folder alias successfully imported by an OST remains a
-  resident hierarchy identity only when its canonical target is not emitted in
-  the configured full hierarchy projection. If the canonical target is included
-  in that projection, LPE applies its LPE-only fixed-special-folder compatibility
-  policy: it leaves the alias CN out of `MetaTagCnsetSeen`, returns
-  `MetaTagIdsetDeleted` for the alias, and retains only the canonical folder
-  identity in `MetaTagIdsetGiven`. The redirect is not a hierarchy replica
-  folder object; opening it is only an LPE cached-request compatibility measure.
-  This intentionally differs from ordinary successful import behavior in
-  `[MS-OXCFXICS]` section 3.2.5.9.4.3 and is not asserted to be Exchange
-  behavior because the supplied Exchange capture lacks this sequence. LPE
-  therefore never exposes two visible folder identities for the same special
-  folder. This follows `[MS-OXCFXICS]` sections 2.2.3.2.4.3.1, 3.2.5.3,
+  resident identity in that client's hierarchy state even when its canonical
+  target is also in the configured projection. Its successful import advances
+  `MetaTagCnsetSeen`, and a later download does not report the imported FID in
+  `MetaTagIdsetDeleted`. The alias remains a redirect rather than a second
+  visible hierarchy row, so another client that never supplied the alias is not
+  given it. This keeps the originating OST's default-folder EntryID and
+  `MetaTagIdsetGiven` state consistent while canonical folder content remains
+  single-owned. This follows `[MS-OXCFXICS]` sections 2.2.3.2.4.3.1, 3.2.5.3,
   3.2.5.9.4.3, and 3.3.5.8.8.
   `MetaTagCnsetRead` remains client-derived unless the transfer contains a
   real separate read-state stream; the current canonical read transition is
@@ -2107,7 +2200,12 @@ properties, including common start/end aliases, the bounded
 `PidLidAllAttendeesString`, `PidLidToAttendeesString`, and
 `PidLidCcAttendeesString` plus `PidTagDisplayCc` projections from canonical attendee metadata and
 timezone description/definition projections from canonical event timezone
-state. Calendar item rows project `PidLidSideEffects` with the documented
+state. Saved Calendar items project `PidTagMessageDeliveryTime` from the
+durable server creation time rather than the appointment start, following
+`[MS-OXOMSG]` section 2.2.3.9. Start/end-display `TZDEFINITION` values use
+`0x0641` as the first `TZRULE.wYear`, following `[MS-OXCICAL]` section
+2.1.3.1.1.19 and matching the Outlook appointment upload shape. Calendar item
+rows project `PidLidSideEffects` with the documented
 open-on-delete, copy, move, and context-menu bits from `[MS-OXCMSG]` section
 2.2.1.16 so Outlook can attach normal item actions to Calendar contents rows.
 Calendar content sync also projects canonical attachment presence from
@@ -2151,12 +2249,12 @@ unsupported and are rejected with deterministic parseable errors instead of
 being stored as opaque MAPI blobs.
 
 `mapi/properties/calendar.rs` has reached the thousand-line split threshold.
-Before adding further Calendar property behavior, move read projection and
-write/import mapping into focused `calendar/projection.rs` and
-`calendar/import.rs` helpers, leaving `calendar.rs` as the shared property
-dispatch and wiring layer. Preserve the current canonical Event boundaries and
-verify the split with the focused Calendar property/integration tests followed
-by `cargo test -p lpe-exchange`.
+This patch moves Calendar read projection into `calendar/projection.rs`; before
+adding further Calendar write behavior, move write/import mapping into a focused
+`calendar/import.rs` helper and leave `calendar.rs` as shared dispatch and
+wiring. Preserve the current canonical Event boundaries and verify the split
+with the focused Calendar property/integration tests followed by
+`cargo test -p lpe-exchange`.
 
 The real Outlook 15:25 capture on 2026-07-14 isolated appointment creation
 before ICS: `RopCreateMessage` returned a pending Calendar Message object, but
@@ -2345,9 +2443,10 @@ and the zero-length `SUMMARY` case in [MS-OXCICAL] section 2.1.3.1.1.20.24.
 For the subject pair, `PidTagSubject (0x0037001F)` takes deterministic
 precedence over `PidTagNormalizedSubject (0x0E1D001F)` when both are supplied,
 independently of their wire order; because the bounded appointment model has
-an empty `PidTagSubjectPrefix`, the stored pair is kept equal. `PidTagDisplayName`
-is not treated as a Calendar subject alias. This follows the relationship in
-[MS-OXCMSG] sections 2.2.1.9, 2.2.1.10, and 2.2.1.46. Calendar location uses
+  an empty `PidTagSubjectPrefix`, the stored pair is kept equal. `PidTagDisplayName`
+  is not treated as a Calendar subject alias. This follows the relationship in
+  [MS-OXCMSG] sections 2.2.1.9, 2.2.1.10, and 2.2.1.46 and [MS-OXOMSG] section
+  2.2.1.60. Calendar location uses
 only `PidLidLocation (0x8208001F)` from [MS-OXOCAL] section 2.2.1.4; the
 unrelated address-book `PidTagLocation` and `PidTagLastModifierEntryId` IDs are
 not Calendar aliases. The two documented HTML representations,
@@ -2528,11 +2627,21 @@ allocation fails. The captured JSONL files are diagnostic records, not a
 self-contained HTTP replay, because they do not preserve the complete
 authenticated session and dynamic handle/ChangeKey chain.
 
-`dispatch/properties.rs` remains over the production line target. Before adding
-further direct property read or stream orchestration, split that behavior into
-`dispatch/property_reads.rs` and keep the existing dispatch entry point as a
-thin router. The Event save work is already split into helper modules and this
+`dispatch/properties.rs` remains over the production line target. This patch
+moves direct property reads into `dispatch/property_reads.rs`; keep the existing
+dispatch entry point as a thin router and move further cohesive read behavior to
+that helper. The Event save work is already split into helper modules and this
 correction does not add implementation to `mapi.rs`.
+`mapi/dispatch.rs` remains a baseline oversized routing hub. Before adding
+further routing behavior, move its shared imports and module re-exports into a
+focused dispatch prelude and split the remaining top-level ROP-family match
+arms into the existing dispatch modules; keep `dispatch.rs` limited to module
+declarations and request orchestration.
+`mapi/dispatch/event_transactions.rs` has crossed the thousand-line review
+threshold while consolidating Calendar Set/Delete/FastTransfer invariants. Its
+next split must move create-time/import normalization and property validation
+into `dispatch/event_transactions/import.rs`, leaving saved-event optimistic
+commit construction and post-commit projection in the parent.
 Calendar attachments are projected only through canonical
 `calendar_event_attachments`: `PidTagHasAttachments`,
 `RopGetValidAttachments`, `RopGetAttachmentTable`, and `RopOpenAttachment`

@@ -360,9 +360,7 @@ pub(super) fn serialize_advertised_special_folder_row_with_counts_and_change_num
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, content_count),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, unread_count),
             PID_TAG_DELETED_COUNT_TOTAL => write_u32(&mut row, deleted_count),
-            PID_TAG_SUBFOLDERS => {
-                row.push((has_subfolders && folder_id != SYNC_ISSUES_FOLDER_ID) as u8)
-            }
+            PID_TAG_SUBFOLDERS => row.push(has_subfolders as u8),
             PID_TAG_ATTRIBUTE_HIDDEN => row.push(matches!(
                 folder_id,
                 CONVERSATION_ACTION_SETTINGS_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID
@@ -795,9 +793,6 @@ pub(in crate::mapi) fn serialized_replid_guid_map() -> Vec<u8> {
 }
 
 pub(super) fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
-    if mapi_folder_id(mailbox) == SYNC_ISSUES_FOLDER_ID {
-        return false;
-    }
     !mailboxes.is_empty()
         && mailboxes
             .iter()

@@ -232,7 +232,7 @@ async fn mapi_over_http_findrow_rejects_invalid_microsoft_find_row_flags() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_query_rows_lists_root_hierarchy_without_ipm_children() {
+async fn mapi_over_http_depth_query_rows_lists_root_hierarchy_with_ipm_children() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 7;
     inbox.unread_emails = 2;
@@ -301,8 +301,8 @@ async fn mapi_over_http_query_rows_lists_root_hierarchy_without_ipm_children() {
         &utf16z("Top of Information Store")
     ));
     assert!(contains_bytes(response_rops, &utf16z("Common Views")));
-    assert!(!contains_bytes(response_rops, &utf16z("Inbox")));
-    assert!(!contains_bytes(response_rops, &utf16z("Archive")));
+    assert!(contains_bytes(response_rops, &utf16z("Inbox")));
+    assert!(contains_bytes(response_rops, &utf16z("Archive")));
 }
 
 #[tokio::test]

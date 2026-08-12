@@ -110,7 +110,7 @@ impl MapiSession {
 
     pub(in crate::mapi) fn normalize_named_property_tag(&self, property_tag: u32) -> u32 {
         let tag = MapiPropertyTag::new(property_tag);
-        if tag.property_id() < FIRST_NAMED_PROPERTY_ID {
+        if tag.property_id() < MIN_NAMED_PROPERTY_ID {
             return property_tag;
         }
         self.named_property_ids

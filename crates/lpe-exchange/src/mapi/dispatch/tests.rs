@@ -6,6 +6,361 @@ mod execute;
 mod folders;
 
 #[test]
+fn fast_transfer_destination_accepts_named_property_split_across_put_buffers() {
+    let mut session = test_mapi_session();
+    let property = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("Probe F chunked property".to_string()),
+    };
+    assert_eq!(
+        session.cache_named_property(0x9100, property.clone()),
+        Some(0x9100)
+    );
+    session.handles.insert(
+        1,
+        MapiObject::PendingEvent {
+            folder_id: CALENDAR_FOLDER_ID,
+            properties: HashMap::new(),
+            recipients: Vec::new(),
+            recipients_modified: false,
+            fail_on_conflict: false,
+        },
+    );
+    session.handles.insert(
+        2,
+        MapiObject::FastTransferDestination {
+            folder_id: CALENDAR_FOLDER_ID,
+            target_handle: 1,
+            buffer: Vec::new(),
+        },
+    );
+
+    // [MS-OXCFXICS] section 2.2.4.1: 0x8000 is already a named-property
+    // wire ID and namedPropInfo precedes the String8 value. Split once after
+    // the complete property definition and again inside the declared value,
+    // matching the lexical boundaries in [MS-OXCFXICS] section 2.2.4.1.
+    let mut transfer = 0x8000_001Eu32.to_le_bytes().to_vec();
+    transfer.extend_from_slice(&property.guid);
+    transfer.push(0x01);
+    transfer.extend(
+        "Probe F chunked property"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes),
+    );
+    transfer.extend_from_slice(&0u16.to_le_bytes());
+    let definition_end = transfer.len();
+    let value = b"chunked value\0";
+    transfer.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    let value_start = transfer.len();
+    transfer.extend_from_slice(value);
+    let chunks = [
+        &transfer[..definition_end],
+        &transfer[definition_end..value_start + 3],
+        &transfer[value_start + 3..],
+    ];
+
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        let mut payload = (chunk.len() as u16).to_le_bytes().to_vec();
+        payload.extend_from_slice(chunk);
+        let request = RopRequest {
+            rop_id: RopId::FastTransferDestinationPutBuffer.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+        let mut responses = Vec::new();
+        assert!(!append_fast_transfer_destination_put_buffer_response(
+            &mut session,
+            &[2],
+            &request,
+            &mut responses,
+        ));
+        assert_eq!(u32::from_le_bytes(responses[2..6].try_into().unwrap()), 0);
+        let MapiObject::PendingEvent { properties, .. } = session.handles.get(&1).unwrap() else {
+            panic!("FastTransfer destination changed object kind")
+        };
+        if index < 2 {
+            assert!(!properties.contains_key(&0x9100_001F));
+        } else {
+            assert_eq!(
+                properties.get(&0x9100_001F),
+                Some(&MapiValue::String("chunked value".to_string()))
+            );
+        }
+    }
+    let MapiObject::FastTransferDestination { buffer, .. } = session.handles.get(&2).unwrap()
+    else {
+        panic!("FastTransfer destination handle changed kind")
+    };
+    assert!(buffer.is_empty());
+
+    let unicode_property = MapiNamedProperty {
+        guid: PS_PUBLIC_STRINGS_GUID,
+        kind: MapiNamedPropertyKind::Name("Probe F high named ID".to_string()),
+    };
+    assert_eq!(
+        session.cache_named_property(0x9101, unicode_property.clone()),
+        Some(0x9101)
+    );
+    let mut high_named_transfer = 0xC000_001Fu32.to_le_bytes().to_vec();
+    high_named_transfer.extend_from_slice(&unicode_property.guid);
+    high_named_transfer.push(0x01);
+    high_named_transfer.extend(
+        "Probe F high named ID"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes),
+    );
+    high_named_transfer.extend_from_slice(&0u16.to_le_bytes());
+    let mut unicode_value = "high named value"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    unicode_value.extend_from_slice(&0u16.to_le_bytes());
+    high_named_transfer.extend_from_slice(&(unicode_value.len() as u32).to_le_bytes());
+    high_named_transfer.extend_from_slice(&unicode_value);
+    let definition_end = 4 + 16 + 1 + ("Probe F high named ID".encode_utf16().count() + 1) * 2;
+    let value_start = definition_end + 4;
+    for chunk in [
+        &high_named_transfer[..definition_end],
+        &high_named_transfer[definition_end..value_start + 3],
+        &high_named_transfer[value_start + 3..],
+    ] {
+        let mut payload = (chunk.len() as u16).to_le_bytes().to_vec();
+        payload.extend_from_slice(chunk);
+        let request = RopRequest {
+            rop_id: RopId::FastTransferDestinationPutBuffer.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+        let mut responses = Vec::new();
+        assert!(!append_fast_transfer_destination_put_buffer_response(
+            &mut session,
+            &[2],
+            &request,
+            &mut responses,
+        ));
+        assert_eq!(u32::from_le_bytes(responses[2..6].try_into().unwrap()), 0);
+    }
+    let MapiObject::PendingEvent { properties, .. } = session.handles.get(&1).unwrap() else {
+        panic!("FastTransfer destination changed object kind")
+    };
+    assert_eq!(
+        properties.get(&0x9101_001F),
+        Some(&MapiValue::String("high named value".to_string()))
+    );
+    let MapiObject::FastTransferDestination { buffer, .. } = session.handles.get(&2).unwrap()
+    else {
+        panic!("FastTransfer destination handle changed kind")
+    };
+    assert!(buffer.is_empty());
+}
+
+#[test]
+fn empty_fast_transfer_put_buffer_keeps_destination_retryable() {
+    let mut session = test_mapi_session();
+    session.handles.insert(
+        1,
+        MapiObject::PendingMessage {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+            recipients: Vec::new(),
+        },
+    );
+    session.handles.insert(
+        2,
+        MapiObject::FastTransferDestination {
+            folder_id: INBOX_FOLDER_ID,
+            target_handle: 1,
+            buffer: Vec::new(),
+        },
+    );
+    let empty_request = RopRequest {
+        rop_id: RopId::FastTransferDestinationPutBuffer.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: 0u16.to_le_bytes().to_vec(),
+    };
+    let mut responses = Vec::new();
+    assert!(append_fast_transfer_destination_put_buffer_response(
+        &mut session,
+        &[2],
+        &empty_request,
+        &mut responses,
+    ));
+    assert!(session.handles.contains_key(&1));
+    assert!(session.handles.contains_key(&2));
+
+    let subject = "retry succeeded";
+    let mut subject_bytes = subject
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    subject_bytes.extend_from_slice(&0u16.to_le_bytes());
+    let mut transfer = PID_TAG_SUBJECT_W.to_le_bytes().to_vec();
+    transfer.extend_from_slice(&(subject_bytes.len() as u32).to_le_bytes());
+    transfer.extend_from_slice(&subject_bytes);
+    let mut payload = (transfer.len() as u16).to_le_bytes().to_vec();
+    payload.extend_from_slice(&transfer);
+    let retry_request = RopRequest {
+        payload,
+        ..empty_request
+    };
+    responses.clear();
+    assert!(!append_fast_transfer_destination_put_buffer_response(
+        &mut session,
+        &[2],
+        &retry_request,
+        &mut responses,
+    ));
+    let Some(MapiObject::PendingMessage { properties, .. }) = session.handles.get(&1) else {
+        panic!("empty PutBuffer invalidated its target")
+    };
+    assert_eq!(
+        properties.get(&PID_TAG_SUBJECT_W),
+        Some(&MapiValue::String(subject.to_string()))
+    );
+}
+
+#[test]
+fn fast_transfer_destination_parser_roundtrips_server_id_and_multi_string() {
+    let mut session = test_mapi_session();
+    let mut transfer = 0x3000_00FBu32.to_le_bytes().to_vec();
+    transfer.extend_from_slice(&3u16.to_le_bytes());
+    transfer.extend_from_slice(&[0x00, 0x22, 0x33]);
+    transfer.extend_from_slice(&0x3001_101Fu32.to_le_bytes());
+    transfer.extend_from_slice(&2u32.to_le_bytes());
+    for value in ["first", "second"] {
+        let mut bytes = value
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        transfer.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        transfer.extend_from_slice(&bytes);
+    }
+
+    let split = transfer.len() - 3;
+    let (partial, consumed) =
+        fast_transfer_property_values(&mut session, &transfer[..split]).unwrap();
+    assert_eq!(
+        partial,
+        vec![(0x3000_00FB, MapiValue::Binary(vec![0x00, 0x22, 0x33]))]
+    );
+    assert_eq!(consumed, 9);
+
+    let (values, consumed) = fast_transfer_property_values(&mut session, &transfer).unwrap();
+    assert_eq!(consumed, transfer.len());
+    assert_eq!(
+        values,
+        vec![
+            (0x3000_00FB, MapiValue::Binary(vec![0x00, 0x22, 0x33])),
+            (
+                0x3001_101F,
+                MapiValue::MultiString(vec!["first".to_string(), "second".to_string()]),
+            ),
+        ]
+    );
+}
+
+#[test]
+fn fast_transfer_destination_rejects_invalid_string_and_server_id_lexemes() {
+    let mut session = test_mapi_session();
+    let mut zero_length_string = 0x3000_001Fu32.to_le_bytes().to_vec();
+    zero_length_string.extend_from_slice(&0u32.to_le_bytes());
+    assert!(fast_transfer_property_values(&mut session, &zero_length_string).is_err());
+
+    let mut zero_length_multi_string = 0x3000_101Fu32.to_le_bytes().to_vec();
+    zero_length_multi_string.extend_from_slice(&1u32.to_le_bytes());
+    zero_length_multi_string.extend_from_slice(&0u32.to_le_bytes());
+    assert!(fast_transfer_property_values(&mut session, &zero_length_multi_string).is_err());
+
+    let mut invalid_server_id = 0x3000_00FBu32.to_le_bytes().to_vec();
+    invalid_server_id.extend_from_slice(&3u16.to_le_bytes());
+    invalid_server_id.extend_from_slice(&[0x02, 0x22, 0x33]);
+    assert!(fast_transfer_property_values(&mut session, &invalid_server_id).is_err());
+
+    let mut empty_server_id = 0x3000_00FBu32.to_le_bytes().to_vec();
+    empty_server_id.extend_from_slice(&0u16.to_le_bytes());
+    assert!(fast_transfer_property_values(&mut session, &empty_server_id).is_err());
+
+    let mut malformed_ours_server_id = 0x3000_00FBu32.to_le_bytes().to_vec();
+    malformed_ours_server_id.extend_from_slice(&3u16.to_le_bytes());
+    malformed_ours_server_id.extend_from_slice(&[0x01, 0x22, 0x33]);
+    assert!(fast_transfer_property_values(&mut session, &malformed_ours_server_id).is_err());
+
+    let mut excessive_multi_string = 0x3000_101Fu32.to_le_bytes().to_vec();
+    excessive_multi_string.extend_from_slice(&(u32::from(u16::MAX) + 1).to_le_bytes());
+    assert!(fast_transfer_property_values(&mut session, &excessive_multi_string).is_err());
+}
+
+#[test]
+fn fast_transfer_destination_ignores_dn_prefix_and_rejects_delete_directives() {
+    let mut session = test_mapi_session();
+    let mut transfer = 0x4008_001Eu32.to_le_bytes().to_vec();
+    transfer.extend_from_slice(&4u32.to_le_bytes());
+    transfer.extend_from_slice(b"/o/\0");
+    transfer.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+    let mut subject = "Probe F"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    subject.extend_from_slice(&0u16.to_le_bytes());
+    transfer.extend_from_slice(&(subject.len() as u32).to_le_bytes());
+    transfer.extend_from_slice(&subject);
+
+    let (values, consumed) = fast_transfer_property_values(&mut session, &transfer).unwrap();
+    assert_eq!(consumed, transfer.len());
+    assert_eq!(
+        values,
+        vec![(PID_TAG_SUBJECT_W, MapiValue::String("Probe F".to_string()))]
+    );
+
+    assert!(fast_transfer_property_values(&mut session, &0x4016_0003u32.to_le_bytes(),).is_err());
+}
+
+#[test]
+fn fast_transfer_destination_normalizes_registered_calendar_named_property_ids() {
+    let mut session = test_mapi_session();
+    let appointment_color = MapiNamedProperty {
+        guid: PSETID_APPOINTMENT_GUID,
+        kind: MapiNamedPropertyKind::Lid(PID_LID_APPOINTMENT_COLOR),
+    };
+    assert_eq!(
+        session.cache_named_property(0x8020, appointment_color.clone()),
+        Some(0x8020)
+    );
+    let mut transfer = 0xC000_0003u32.to_le_bytes().to_vec();
+    transfer.extend_from_slice(&appointment_color.guid);
+    transfer.push(0x00);
+    transfer.extend_from_slice(&PID_LID_APPOINTMENT_COLOR.to_le_bytes());
+    transfer.extend_from_slice(&7i32.to_le_bytes());
+
+    let (values, consumed) = fast_transfer_property_values(&mut session, &transfer).unwrap();
+
+    assert_eq!(consumed, transfer.len());
+    assert_eq!(
+        values,
+        vec![(PID_LID_APPOINTMENT_COLOR_TAG, MapiValue::I32(7))]
+    );
+}
+
+#[test]
+fn fast_transfer_destination_maps_ps_mapi_lids_without_a_mailbox_registry_row() {
+    let mut session = test_mapi_session();
+    let mut transfer = 0xC000_0003u32.to_le_bytes().to_vec();
+    transfer.extend_from_slice(&PS_MAPI_GUID);
+    transfer.push(0x00);
+    transfer.extend_from_slice(&0x8503u32.to_le_bytes());
+    transfer.extend_from_slice(&7i32.to_le_bytes());
+
+    let (values, consumed) = fast_transfer_property_values(&mut session, &transfer).unwrap();
+
+    assert_eq!(consumed, transfer.len());
+    assert_eq!(values, vec![(0x8503_0003, MapiValue::I32(7))]);
+}
+
+#[test]
 fn debug_named_property_context_reports_session_and_unresolved_properties() {
     let mut session = test_mapi_session();
     session.cache_named_property(
@@ -3093,7 +3448,7 @@ fn get_properties_specific_request(property_tags: &[u32]) -> RopRequest {
     }
 }
 
-fn test_principal() -> AccountPrincipal {
+pub(super) fn test_principal() -> AccountPrincipal {
     AccountPrincipal {
         tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
         account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
@@ -3104,7 +3459,7 @@ fn test_principal() -> AccountPrincipal {
     }
 }
 
-fn test_mapi_session() -> MapiSession {
+pub(super) fn test_mapi_session() -> MapiSession {
     let principal = test_principal();
     MapiSession {
         endpoint: MapiEndpoint::Emsmdb,

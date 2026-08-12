@@ -622,7 +622,7 @@ fn mailbox_properties_report_real_subfolder_state() {
 }
 
 #[test]
-fn sync_issues_folder_properties_stay_leaf_with_persisted_children() {
+fn sync_issues_folder_properties_report_persisted_children() {
     let parent = mailbox(
         "11111111-1111-1111-1111-11111111111a",
         None,
@@ -639,7 +639,7 @@ fn sync_issues_folder_properties_stay_leaf_with_persisted_children() {
 
     assert_eq!(
         mailbox_property_value_with_context(&parent, &mailboxes, PID_TAG_SUBFOLDERS),
-        Some(MapiValue::Bool(false))
+        Some(MapiValue::Bool(true))
     );
 }
 
@@ -3858,7 +3858,7 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
     );
     assert_eq!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_APPOINTMENT_COLOR_TAG),
-        Some(MapiValue::I32(0))
+        None
     );
     assert_eq!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_SIDE_EFFECTS_TAG),
@@ -3891,6 +3891,22 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
         Some(MapiValue::Bool(true))
     );
     assert_eq!(
+        event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_ICON_INDEX),
+        Some(MapiValue::I32(0x0403))
+    );
+    let mut icon_event = event.clone();
+    icon_event.status = "confirmed".to_string();
+    icon_event.attendees.clear();
+    icon_event.attendees_json = "[]".to_string();
+    icon_event.organizer_json = "{}".to_string();
+    icon_event.recurrence_rule.clear();
+    assert_eq!(calendar_icon_index(&icon_event), 0x0400);
+    icon_event.recurrence_rule = "FREQ=WEEKLY".to_string();
+    assert_eq!(calendar_icon_index(&icon_event), 0x0401);
+    icon_event.recurrence_rule.clear();
+    icon_event.attendees = "Bob".to_string();
+    assert_eq!(calendar_icon_index(&icon_event), 0x0402);
+    assert_eq!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_COMMON_START_TAG),
         Some(MapiValue::I64(event_start_filetime(&event) as i64))
     );
@@ -3917,6 +3933,13 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
             CALENDAR_FOLDER_ID,
             PID_TAG_SENDER_EMAIL_ADDRESS_W
         ),
+        Some(MapiValue::String(
+            "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test"
+                .to_string()
+        ))
+    );
+    assert_eq!(
+        event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_SENDER_SMTP_ADDRESS_W),
         Some(MapiValue::String("alice@example.test".to_string()))
     );
     assert_eq!(
@@ -3988,15 +4011,25 @@ fn calendar_projection_uses_canonical_all_day_status_and_participants() {
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_TIME_ZONE_STRUCT_TAG),
         Some(MapiValue::Binary(value)) if value.len() == 48
     ));
-    assert!(matches!(
-        event_property_value(
-            &event,
-            1,
-            CALENDAR_FOLDER_ID,
-            PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG
-        ),
-        Some(MapiValue::Binary(value)) if value.starts_with(&[0x02, 0x01]) && value.ends_with(&[0; 16])
-    ));
+    let Some(MapiValue::Binary(time_zone_definition)) = event_property_value(
+        &event,
+        1,
+        CALENDAR_FOLDER_ID,
+        PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG,
+    ) else {
+        panic!("expected appointment start-display TZDEFINITION");
+    };
+    assert!(time_zone_definition.starts_with(&[0x02, 0x01]));
+    assert!(time_zone_definition.ends_with(&[0; 16]));
+    let rule_offset = 4 + usize::from(u16::from_le_bytes([
+        time_zone_definition[2],
+        time_zone_definition[3],
+    ]));
+    assert_eq!(
+        &time_zone_definition[rule_offset + 6..rule_offset + 8],
+        &0x0641u16.to_le_bytes(),
+        "the first TZRULE must carry the Outlook/Exchange effective year"
+    );
     assert_eq!(
         event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_HAS_ATTACHMENTS),
         Some(MapiValue::Bool(false))
@@ -6313,12 +6346,12 @@ fn pending_calendar_search_key_does_not_open_a_writable_stream() {
     )
     .is_none());
     assert_eq!(
-        property_stream_data(&mut session, 1, 0x9000_0102, 1, &[], account_id, &snapshot,),
+        property_stream_data(&mut session, 1, 0x9100_0102, 1, &[], account_id, &snapshot,),
         Some((
             Vec::new(),
             Some(StreamWriteTarget::PendingEventProperty {
                 handle: 1,
-                property_tag: 0x9000_0102,
+                property_tag: 0x9100_0102,
             })
         ))
     );

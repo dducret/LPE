@@ -187,6 +187,10 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         session: Some(FakeStore::account()),
         ..Default::default()
     };
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -403,7 +407,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(
         &payload[response_rop_size..response_rop_size + 8],
-        &[0, 0, 0, 0, 1, 0, 0, 0]
+        &[0xFE, 0xFF, 0xFF, 0x01, 1, 0, 0, 0]
     );
 
     renew_mapi_request_id(&mut execute_headers);
@@ -436,14 +440,16 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         0
     );
     assert_eq!(
-        crate::mapi::identity::object_id_from_wire_id(&response_rop[6..14]).unwrap(),
+        identity_codec
+            .object_id_from_wire_id(&response_rop[6..14])
+            .unwrap(),
         test_mapi_folder_id(5)
     );
     assert_eq!(&response_rop[14..], b"\0");
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(
         &payload[response_rop_size..response_rop_size + 8],
-        &[0, 0, 0, 0, 1, 0, 0, 0]
+        &[0xFE, 0xFF, 0xFF, 0x01, 1, 0, 0, 0]
     );
 
     renew_mapi_request_id(&mut execute_headers);
@@ -582,13 +588,13 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     );
     assert_eq!(
         u16::from_le_bytes(response_rop[6..8].try_into().unwrap()),
-        2
+        3
     );
     assert_eq!(
         u16::from_le_bytes(response_rop[8..10].try_into().unwrap()) as usize,
-        b"EX\0SMTP\0".len()
+        b"EX\0SMTP\0X400\0".len()
     );
-    assert_eq!(&response_rop[10..], b"EX\0SMTP\0");
+    assert_eq!(&response_rop[10..], b"EX\0SMTP\0X400\0");
     assert_eq!(&payload[response_rop_size..], &1u32.to_le_bytes());
 }
 
@@ -895,7 +901,9 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
 
     assert_eq!(response_rops[0], 0x27);
     assert_eq!(
-        crate::mapi::identity::object_id_from_wire_id(&response_rops[6..14]).unwrap(),
+        identity_codec
+            .object_id_from_wire_id(&response_rops[6..14])
+            .unwrap(),
         test_mapi_folder_id(5)
     );
     assert!(contains_bytes(response_rops, b"IPM.Note\0"));

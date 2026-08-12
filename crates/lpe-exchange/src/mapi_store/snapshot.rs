@@ -2,24 +2,9 @@ use super::*;
 use crate::mapi_mailstore;
 use anyhow::{anyhow, Result};
 
+mod calendar;
 mod calendar_identity;
-
-fn calendar_mapi_attachments(attachments: &[CalendarEventAttachment]) -> Vec<MapiAttachment> {
-    attachments
-        .iter()
-        .enumerate()
-        .map(|(index, attachment)| MapiAttachment {
-            attach_num: index as u32,
-            canonical_id: attachment.id,
-            file_reference: attachment.file_reference.clone(),
-            file_name: attachment.file_name.clone(),
-            media_type: attachment.media_type.clone(),
-            disposition: None,
-            content_id: None,
-            size_octets: attachment.size_octets,
-        })
-        .collect()
-}
+use calendar::*;
 
 fn navigation_shortcut_message(
     shortcut: MapiNavigationShortcutRecord,
@@ -543,6 +528,7 @@ impl MapiMailStoreSnapshot {
             event,
             version,
             attachments: calendar_mapi_attachments(&attachments),
+            stored_properties: Vec::new(),
         });
         if let Some(folder) = self
             .collaboration_folders
@@ -1607,20 +1593,5 @@ impl MapiMailStoreSnapshot {
     #[cfg(test)]
     pub(crate) fn messages(&self) -> &[MapiMessage] {
         &self.messages
-    }
-}
-
-fn fallback_event_version(event: &AccessibleEvent, event_id: u64) -> MapiEventVersion {
-    let change_number = mapi_mailstore::change_number_for_store_id(event_id);
-    let timestamp = format!("{}T{}:00Z", event.date, event.time);
-    MapiEventVersion {
-        event_id: event.id,
-        canonical_modseq: 1,
-        change_number,
-        search_key: None,
-        change_key: mapi_mailstore::change_key_for_change_number(change_number),
-        predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
-        created_at: timestamp.clone(),
-        updated_at: timestamp,
     }
 }

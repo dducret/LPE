@@ -273,10 +273,12 @@ pub(in crate::mapi) fn sort_events(
                 }
                 PID_TAG_START_DATE
                 | PID_LID_COMMON_START_TAG
-                | PID_LID_APPOINTMENT_START_WHOLE_TAG
-                | PID_TAG_MESSAGE_DELIVERY_TIME => {
+                | PID_LID_APPOINTMENT_START_WHOLE_TAG => {
                     (left.event.date.as_str(), left.event.time.as_str())
                         .cmp(&(right.event.date.as_str(), right.event.time.as_str()))
+                }
+                PID_TAG_MESSAGE_DELIVERY_TIME => {
+                    left.version.created_at.cmp(&right.version.created_at)
                 }
                 PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
                     left.version.updated_at.cmp(&right.version.updated_at)

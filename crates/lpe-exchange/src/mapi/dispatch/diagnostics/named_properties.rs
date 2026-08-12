@@ -30,7 +30,7 @@ pub(in crate::mapi::dispatch) fn format_debug_named_property_context(
 ) -> String {
     tags.iter()
         .copied()
-        .filter(|tag| MapiPropertyTag::new(*tag).property_id() >= FIRST_NAMED_PROPERTY_ID)
+        .filter(|tag| MapiPropertyTag::new(*tag).property_id() >= MIN_NAMED_PROPERTY_ID)
         .map(|tag| {
             let property_tag = MapiPropertyTag::new(tag);
             let property_id = property_tag.property_id();

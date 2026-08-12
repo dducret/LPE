@@ -321,6 +321,13 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
     ) {
         session.record_logoff_after_hierarchy_completion();
     }
+    if let (Some(handle), Some(MapiObject::FastTransferDestination { buffer, .. })) =
+        (released_handle, released_object_for_stream_persist.as_ref())
+    {
+        if !buffer.is_empty() {
+            invalidate_fast_transfer_destination(session, handle);
+        }
+    }
     if let Some(handle) = released_handle {
         if matches!(
             released_object_for_stream_persist.as_ref(),

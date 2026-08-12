@@ -17,7 +17,7 @@ use crate::mapi::permissions::{
     MapiFolderPermission,
 };
 use crate::store::ExchangeStore;
-use crate::store::{MapiAssociatedConfigRecord, MapiNamedPropertyMapping};
+use crate::store::{MapiAssociatedConfigRecord, MapiCustomPropertyValue, MapiNamedPropertyMapping};
 use crate::store::{
     MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
     MapiNavigationShortcutClientProperties, MapiNavigationShortcutRecord,
@@ -138,6 +138,7 @@ pub(crate) struct MapiEvent {
     pub(crate) event: AccessibleEvent,
     pub(crate) version: MapiEventVersion,
     pub(crate) attachments: Vec<MapiAttachment>,
+    pub(crate) stored_properties: Vec<MapiCustomPropertyValue>,
 }
 
 #[derive(Debug, Clone)]
@@ -654,6 +655,9 @@ impl<T: ExchangeStore> MapiStore for T {
             let event_versions = self
                 .fetch_mapi_event_versions(account_id, &event_ids)
                 .await?;
+            let calendar_property_values = self
+                .fetch_mapi_calendar_property_values(account_id, &event_ids)
+                .await?;
             let calendar_attachments = if event_ids.is_empty() {
                 Vec::new()
             } else {
@@ -690,6 +694,7 @@ impl<T: ExchangeStore> MapiStore for T {
             .map(|snapshot| snapshot.with_contact_modseqs(contact_versions))
             .map(|snapshot| snapshot.with_calendar_attachments(calendar_attachments))
             .and_then(|snapshot| snapshot.with_event_versions(event_versions))
+            .map(|snapshot| snapshot.with_calendar_property_values(calendar_property_values))
             .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))
             .map(|snapshot| snapshot.with_search_folder_definitions(search_folder_definitions))
             .map(|snapshot| snapshot.with_rules(rules))

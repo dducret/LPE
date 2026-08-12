@@ -654,7 +654,8 @@ pub(in crate::mapi) fn reject_unsupported_mapi_contact_properties(
     for tag in properties.keys() {
         let supported = matches!(
             canonical_property_storage_tag(*tag),
-            PID_TAG_DISPLAY_NAME_W
+            PID_TAG_MESSAGE_CLASS_W
+                | PID_TAG_DISPLAY_NAME_W
                 | PID_TAG_SUBJECT_W
                 | PID_TAG_NORMALIZED_SUBJECT_W
                 | PID_TAG_DISPLAY_NAME_PREFIX_W

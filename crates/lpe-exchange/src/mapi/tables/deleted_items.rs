@@ -64,10 +64,11 @@ pub(super) fn sort_deleted_items_content_rows(
                         deleted_items_content_row_subject(right),
                     )
                 }
-                PID_TAG_MESSAGE_DELIVERY_TIME
-                | PID_TAG_LAST_MODIFICATION_TIME
-                | PID_TAG_LOCAL_COMMIT_TIME => {
-                    deleted_items_content_row_time(left).cmp(deleted_items_content_row_time(right))
+                PID_TAG_MESSAGE_DELIVERY_TIME => deleted_items_content_row_delivery_time(left)
+                    .cmp(deleted_items_content_row_delivery_time(right)),
+                PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
+                    deleted_items_content_row_updated_time(left)
+                        .cmp(deleted_items_content_row_updated_time(right))
                 }
                 PID_TAG_MESSAGE_CLASS_W | PID_TAG_CONTAINER_CLASS_W => {
                     deleted_items_content_row_class(left)
@@ -326,7 +327,14 @@ fn deleted_items_content_row_class(row: &DeletedItemsContentRow<'_>) -> &'static
     }
 }
 
-fn deleted_items_content_row_time<'a>(row: &'a DeletedItemsContentRow<'a>) -> &'a str {
+fn deleted_items_content_row_delivery_time<'a>(row: &'a DeletedItemsContentRow<'a>) -> &'a str {
+    match row {
+        DeletedItemsContentRow::Message(email) => &email.received_at,
+        DeletedItemsContentRow::Event(event) => &event.version.created_at,
+    }
+}
+
+fn deleted_items_content_row_updated_time<'a>(row: &'a DeletedItemsContentRow<'a>) -> &'a str {
     match row {
         DeletedItemsContentRow::Message(email) => &email.received_at,
         DeletedItemsContentRow::Event(event) => &event.version.updated_at,

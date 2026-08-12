@@ -297,7 +297,7 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
     assert_eq!(deliveries[0].2.kind, MapiNotificationKind::Hierarchy);
     assert_eq!(
         deliveries[0].2.event_mask,
-        MapiNotificationEventMask::TableModified.as_u16()
+        MapiNotificationEventMask::TableModified.as_u16() | 0x8000
     );
     assert_eq!(
         deliveries[0].2.folder_id,
@@ -483,7 +483,7 @@ fn session_retains_collaboration_content_changes_for_active_root_depth_hierarchy
             *handle == hierarchy_handle
                 && *logon_id == 1
                 && event.kind == MapiNotificationKind::Hierarchy
-                && event.event_mask == MapiNotificationEventMask::TableModified.as_u16()
+                && event.event_mask == MapiNotificationEventMask::TableModified.as_u16() | 0x8000
                 && event.folder_id == crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
                 && event.parent_folder_id == Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
                 && event.message_id == Some(changed_folder_id)
@@ -1126,6 +1126,23 @@ fn cached_calendar_named_property_keeps_registered_mailbox_id() {
         Some(0x8011)
     );
     assert_eq!(session.property_name_for_id(0x8011), property);
+}
+
+#[test]
+fn named_property_id_0x8000_is_normalized_like_the_rest_of_the_named_range() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let property = MapiNamedProperty {
+        guid: PSETID_APPOINTMENT_GUID,
+        kind: MapiNamedPropertyKind::Lid(PID_LID_APPOINTMENT_COLOR),
+    };
+
+    assert_eq!(session.cache_named_property(0x8000, property), Some(0x8000));
+    assert_eq!(
+        session.normalize_named_property_tag(0x8000_0003),
+        PID_LID_APPOINTMENT_COLOR_TAG
+    );
 }
 
 #[test]

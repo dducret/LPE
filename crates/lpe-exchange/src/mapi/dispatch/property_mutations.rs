@@ -502,6 +502,15 @@ pub(super) async fn append_delete_properties_response<S>(
     } else if matches!(object, Some(MapiObject::Event { .. })) {
         stage_event_property_deletions(session, handle_slots, request, snapshot, &property_tags)
             .map(|problems| event_property_problems = problems)
+    } else if matches!(object, Some(MapiObject::PendingEvent { .. })) {
+        stage_pending_event_property_deletions(
+            session,
+            handle_slots,
+            request,
+            principal,
+            &property_tags,
+        )
+        .map(|problems| event_property_problems = problems)
     } else if matches!(object, Some(MapiObject::Contact { .. })) {
         stage_contact_property_deletions(session, handle_slots, request, snapshot, &property_tags)
     } else if matches!(object, Some(MapiObject::NavigationShortcut { .. })) {

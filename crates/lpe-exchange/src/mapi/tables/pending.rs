@@ -560,6 +560,11 @@ pub(in crate::mapi) fn serialize_pending_event_row(
     };
     let mut row = Vec::new();
     for column in columns {
+        let storage_tag = canonical_calendar_property_storage_tag(*column);
+        if let Some(value) = properties.get(&storage_tag) {
+            write_mapi_value(&mut row, *column, value);
+            continue;
+        }
         if canonical_property_storage_tag(*column) == PID_TAG_HAS_ATTACHMENTS {
             if let Some(value) = properties.get(&PID_TAG_HAS_ATTACHMENTS) {
                 write_mapi_value(&mut row, *column, value);

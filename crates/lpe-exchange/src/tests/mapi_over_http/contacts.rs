@@ -309,14 +309,16 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
         crate::mapi::identity::with_current_mapi_identity_codec(identity_codec, async {
             let mut update_rops = Vec::new();
             append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(15));
-            append_rop_open_message(
+            append_rop_open_message_with_flags(
                 &mut update_rops,
                 1,
                 2,
                 test_mapi_folder_id(15),
                 contact_mapi_id,
+                0x01,
             );
             append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+            append_rop_save_changes_message(&mut update_rops, 1, 2);
             update_rops
         })
         .await;

@@ -687,9 +687,6 @@ fn search_folder_id(definition: &SearchFolderDefinition) -> Vec<u8> {
 }
 
 fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
-    if mapi_folder_id(mailbox) == SYNC_ISSUES_FOLDER_ID {
-        return false;
-    }
     !mailboxes.is_empty()
         && mailboxes
             .iter()

@@ -22,6 +22,21 @@ async fn loaded_message_identity(
         .unwrap()
 }
 
+async fn loaded_navigation_shortcut_identity(
+    store: &FakeStore,
+    shortcut_id: Uuid,
+) -> crate::store::MapiIdentityRecord {
+    store
+        .load_mapi_mail_store(FakeStore::account().account_id, 500)
+        .await
+        .unwrap()
+        .navigation_shortcut_messages()
+        .into_iter()
+        .find(|message| message.canonical_id == shortcut_id)
+        .and_then(|message| message.durable_identity)
+        .unwrap()
+}
+
 fn append_rop_sync_import_deletes(
     rops: &mut Vec<u8>,
     input_handle_index: u8,
@@ -4301,7 +4316,7 @@ async fn mapi_over_http_outlook_mail_favorite_import_without_group_properties_pe
     let canonical_id = stored[0].id;
     drop(stored);
     let identity_codec = loaded_mapi_identity_codec(&store).await;
-    let durable_identity = loaded_message_identity(&store, canonical_id).await;
+    let durable_identity = loaded_navigation_shortcut_identity(&store, canonical_id).await;
     let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
     expected_save.extend_from_slice(
         &identity_codec
@@ -4578,7 +4593,7 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
         );
         let canonical_id = shortcuts.lock().unwrap()[index].id;
         let identity_codec = loaded_mapi_identity_codec(&store).await;
-        let durable_identity = loaded_message_identity(&store, canonical_id).await;
+        let durable_identity = loaded_navigation_shortcut_identity(&store, canonical_id).await;
         let mut expected_save = vec![0x0C, 0x00, 0, 0, 0, 0, 0x01];
         expected_save.extend_from_slice(
             &identity_codec
@@ -5132,7 +5147,7 @@ async fn mapi_over_http_outlook_common_views_ics_import_stages_wlinks_until_save
             store.mapi_identity_predecessor_change_lists.lock().unwrap()[&canonical_id].clone();
         let expected_last_modification_time =
             store.mapi_identity_last_modification_times.lock().unwrap()[&canonical_id];
-        let durable_identity = loaded_message_identity(&store, canonical_id).await;
+        let durable_identity = loaded_navigation_shortcut_identity(&store, canonical_id).await;
         assert!(change.associated);
         assert_eq!(change.mid, Some(durable_identity.object_id));
         assert_eq!(
@@ -5722,6 +5737,24 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
         emails: Arc::new(Mutex::new(vec![unchanged, changed])),
         ..Default::default()
     };
+    let snapshot = store
+        .load_mapi_mail_store(FakeStore::account().account_id, 500)
+        .await
+        .unwrap();
+    let unchanged_identity = snapshot
+        .messages()
+        .iter()
+        .find(|message| message.canonical_id == unchanged_id)
+        .and_then(|message| message.durable_identity.as_ref())
+        .cloned()
+        .unwrap();
+    let changed_identity = snapshot
+        .messages()
+        .iter()
+        .find(|message| message.canonical_id == changed_id)
+        .and_then(|message| message.durable_identity.as_ref())
+        .cloned()
+        .unwrap();
     store
         .store_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -5743,13 +5776,13 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
 
     let client_state = outlook_content_sync_state_properties(
         &[
-            mapi_message_global_counter(&unchanged_id),
-            mapi_message_global_counter(&changed_id),
+            unchanged_identity.object_id >> 16,
+            changed_identity.object_id >> 16,
             mapi_message_global_counter(&deleted_id),
         ],
-        &[40],
+        &[unchanged_identity.change_number],
         &[],
-        &[40],
+        &[unchanged_identity.change_number],
     );
     let response_rops = outlook_content_sync_response_rops_for_store(
         store.clone(),
@@ -5777,9 +5810,12 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
     assert_eq!(first_stream.message_changes.len(), 1);
     assert_eq!(
         first_stream.message_changes[0].mid.unwrap() >> 16,
-        mapi_message_global_counter(&changed_id)
+        changed_identity.object_id >> 16
     );
-    assert_eq!(first_stream.message_changes[0].change_number, Some(41));
+    assert_eq!(
+        first_stream.message_changes[0].change_number,
+        Some(changed_identity.change_number)
+    );
     assert!(first_stream.read_idset.is_none());
     assert!(first_stream.unread_idset.is_none());
     let restart_state = vec![
@@ -8499,6 +8535,25 @@ async fn mapi_over_http_fast_transfer_destination_upload_saves_canonical_email()
         ..Default::default()
     };
     let imported_emails = store.imported_emails.clone();
+    let named_properties = store.mapi_named_properties.clone();
+    let custom_property_values = store.mapi_custom_property_values.clone();
+    let account_id = store.session.as_ref().unwrap().account_id;
+    let appointment_color = MapiNamedProperty {
+        guid: [
+            0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ],
+        kind: MapiNamedPropertyKind::Lid(0x8214),
+    };
+    {
+        let mut mappings = named_properties.lock().unwrap();
+        mappings
+            .by_property
+            .insert((account_id, appointment_color.clone()), 0x8020);
+        mappings
+            .by_id
+            .insert((account_id, 0x8020), appointment_color.clone());
+    }
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -8521,6 +8576,30 @@ async fn mapi_over_http_fast_transfer_destination_upload_saves_canonical_email()
         0x1000_001F,
         "FastTransfer uploaded body",
     );
+    let dynamic_property = MapiNamedProperty {
+        guid: [
+            0x29, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ],
+        kind: MapiNamedPropertyKind::Name("Probe F FT allocation".to_string()),
+    };
+    transfer_data.extend_from_slice(&0xC000_001Fu32.to_le_bytes());
+    transfer_data.extend_from_slice(&dynamic_property.guid);
+    transfer_data.push(0x01);
+    transfer_data.extend(
+        "Probe F FT allocation"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes),
+    );
+    transfer_data.extend_from_slice(&0u16.to_le_bytes());
+    let dynamic_value = utf16z("durably mapped");
+    transfer_data.extend_from_slice(&(dynamic_value.len() as u32).to_le_bytes());
+    transfer_data.extend_from_slice(&dynamic_value);
+    transfer_data.extend_from_slice(&0xC001_0003u32.to_le_bytes());
+    transfer_data.extend_from_slice(&appointment_color.guid);
+    transfer_data.push(0x00);
+    transfer_data.extend_from_slice(&0x8214u32.to_le_bytes());
+    transfer_data.extend_from_slice(&7i32.to_le_bytes());
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
@@ -8535,6 +8614,11 @@ async fn mapi_over_http_fast_transfer_destination_upload_saves_canonical_email()
     rops.extend_from_slice(&transfer_data);
     rops.extend_from_slice(&[0x86, 0x00, 0x03]);
     rops.extend_from_slice(&[15, 20, 0, 1, 0, 0]);
+    rops.extend_from_slice(&[0x56, 0x00, 0x00, 0x00]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.push(0x00);
+    rops.extend_from_slice(&appointment_color.guid);
+    rops.extend_from_slice(&0x8214u32.to_le_bytes());
     rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x02, 0x00]);
 
     let response = service
@@ -8552,23 +8636,16 @@ async fn mapi_over_http_fast_transfer_destination_upload_saves_canonical_email()
         &response_rops,
         &[0x53, 0x03, 0x00, 0x00, 0x00, 0x00]
     ));
-    assert!(contains_bytes(
-        &response_rops,
-        &[
-            0x54,
-            0x03,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            transfer_data.len() as u8,
-            0x00,
-        ]
-    ));
+    let mut expected_put_buffer = vec![0x54, 0x03, 0, 0, 0, 0, 0x03, 0, 0, 0, 0, 0, 0];
+    expected_put_buffer.extend_from_slice(&(transfer_data.len() as u16).to_le_bytes());
+    assert!(contains_bytes(&response_rops, &expected_put_buffer));
     assert!(contains_bytes(
         &response_rops,
         &[0x86, 0x03, 0x00, 0x00, 0x00, 0x00]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0x20, 0x80]
     ));
     assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
 
@@ -8576,6 +8653,21 @@ async fn mapi_over_http_fast_transfer_destination_upload_saves_canonical_email()
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].subject, "FastTransfer uploaded subject");
     assert_eq!(recorded[0].body_text, "FastTransfer uploaded body");
+    drop(recorded);
+    let dynamic_property_id =
+        named_properties.lock().unwrap().by_property[&(account_id, dynamic_property)];
+    let saved_message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    assert_eq!(
+        custom_property_values.lock().unwrap().get(&(
+            account_id,
+            MapiCustomPropertyObjectKind::Message,
+            saved_message_id,
+            (u32::from(dynamic_property_id) << 16) | 0x001F,
+            0x001F,
+        )),
+        Some(&utf16z("durably mapped")),
+        "the named value must survive Save, not only its mailbox mapping"
+    );
 }
 
 #[tokio::test]
@@ -12899,12 +12991,10 @@ async fn mapi_over_http_persisted_associated_config_write_preserves_class_on_sav
 #[tokio::test]
 async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds() {
     let associated_object_id = crate::mapi::identity::mapi_store_id(
-        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 44,
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 0x02C0,
     );
     let associated_source_key =
         crate::mapi::identity::source_key_for_object_id(associated_object_id);
-    let parent_source_key =
-        crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::INBOX_FOLDER_ID);
     let associated_config_id = Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a7").unwrap();
     let account = FakeStore::account();
     let store = FakeStore {
@@ -12949,6 +13039,11 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
         )]))),
         ..Default::default()
     };
+    let identity_codec = loaded_mapi_identity_codec(&store).await;
+    let durable_inbox_id = identity_codec
+        .actual_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+        .unwrap();
+    let parent_source_key = crate::mapi::identity::source_key_for_object_id(durable_inbox_id);
     let service = ExchangeService::new(store);
     let reconnect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -12998,7 +13093,8 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
             .windows(expected_parent_source_key.len())
             .filter(|window| *window == expected_parent_source_key)
             .count(),
-        1
+        1,
+        "associated-config CopyTo ParentSourceKey mismatch: {transfer:02x?}"
     );
     assert!(contains_bytes(transfer, &PID_TAG_SOURCE_KEY.to_le_bytes()));
     assert!(!contains_bytes(transfer, &0x4010_0003u32.to_le_bytes()));
@@ -13140,8 +13236,9 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
     ];
     let mut predecessor_change_list = vec![change_xid.len() as u8];
     predecessor_change_list.extend_from_slice(&change_xid);
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
             "default", "calendar", "Calendar",
         )])),
@@ -13152,6 +13249,35 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
     let imported_emails = store.imported_emails.clone();
     let mapi_identities = store.mapi_identities.clone();
     let mapi_event_identity_versions = store.mapi_event_identity_versions.clone();
+    let mapi_custom_property_values = store.mapi_custom_property_values.clone();
+    let correlator_property = MapiNamedProperty {
+        guid: [0x90; 16],
+        kind: MapiNamedPropertyKind::Name("InTransitMessageCorrelator".to_string()),
+    };
+    let appointment_color_property = MapiNamedProperty {
+        guid: [
+            0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ],
+        kind: MapiNamedPropertyKind::Lid(0x0000_8214),
+    };
+    {
+        let mut mappings = store.mapi_named_properties.lock().unwrap();
+        mappings
+            .by_id
+            .insert((account.account_id, 0x9003), correlator_property.clone());
+        mappings
+            .by_property
+            .insert((account.account_id, correlator_property), 0x9003);
+        mappings.by_id.insert(
+            (account.account_id, 0x8020),
+            appointment_color_property.clone(),
+        );
+        mappings
+            .by_property
+            .insert((account.account_id, appointment_color_property), 0x8020);
+    }
+    let full_sync_store = store.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -13162,6 +13288,21 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         "cookie",
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
+
+    let mut named_rops = vec![0x55, 0x00, 0x00]; // RopGetNamesFromPropertyIds.
+    named_rops.extend_from_slice(&1u16.to_le_bytes());
+    named_rops.extend_from_slice(&0x8020u16.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&named_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    let named_response = response_rops_from_execute_response(response).await;
+    assert_eq!(&named_response[..6], &[0x55, 0x00, 0, 0, 0, 0]);
+    renew_mapi_request_id(&mut execute_headers);
 
     let mut collector_rops = Vec::new();
     append_rop_open_folder(
@@ -13191,20 +13332,24 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
     ));
     assert_ne!(collector_handles[2], u32::MAX);
 
-    // Exact uncompressed ROP sequence from request :257, excluding its handle table.
+    // Exact uncompressed ROP sequence from request :257, excluding its handle table,
+    // plus a registered-ID Calendar named property. The extra value proves that
+    // ImportMessageChange normalizes the mailbox-scoped 0x8020 mapping before
+    // the PendingEvent is saved.
     let import_rops = [
         0x75, 0x00, 0x00, 0x02, 0x01, 0x96, 0x67, 0x00, 0x00, 0x00, 0x00, 0x77, 0x00, 0x00, 0x75,
         0x00, 0x00, 0x02, 0x01, 0xda, 0x67, 0x1e, 0x00, 0x00, 0x00, 0x76, 0x00, 0x00, 0x1e, 0x00,
         0x00, 0x00, 0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45,
         0x1c, 0x8f, 0x10, 0x52, 0x0d, 0xf8, 0x97, 0x4b, 0x7f, 0x63, 0x0d, 0xf8, 0x97, 0x4b, 0x7f,
         0x65, 0x00, 0x77, 0x00, 0x00, 0x75, 0x00, 0x00, 0x02, 0x01, 0xd2, 0x67, 0x00, 0x00, 0x00,
-        0x00, 0x77, 0x00, 0x00, 0x72, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x02, 0x01, 0xe0, 0x65,
+        0x00, 0x77, 0x00, 0x00, 0x72, 0x00, 0x00, 0x01, 0x00, 0x05, 0x00, 0x02, 0x01, 0xe0, 0x65,
         0x16, 0x00, 0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45,
         0x1c, 0x8f, 0x10, 0x0d, 0xf8, 0x97, 0x4b, 0x7f, 0x66, 0x40, 0x00, 0x08, 0x30, 0x00, 0x49,
         0xaa, 0x9a, 0xc3, 0x15, 0xdd, 0x01, 0x02, 0x01, 0xe2, 0x65, 0x14, 0x00, 0x67, 0x45, 0x48,
         0x20, 0x69, 0x60, 0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2, 0xc1, 0x00, 0x00,
         0x04, 0x57, 0x02, 0x01, 0xe3, 0x65, 0x15, 0x00, 0x14, 0x67, 0x45, 0x48, 0x20, 0x69, 0x60,
-        0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2, 0xc1, 0x00, 0x00, 0x04, 0x57,
+        0xca, 0x40, 0x9d, 0x80, 0x08, 0x17, 0x06, 0x0f, 0xa2, 0xc1, 0x00, 0x00, 0x04, 0x57, 0x03,
+        0x00, 0x20, 0x80, 0x06, 0x00, 0x00, 0x00,
     ];
 
     renew_mapi_request_id(&mut execute_headers);
@@ -13260,8 +13405,77 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         0x300B_0102, // PidTagSearchKey.
         &submitted_search_key,
     );
+    let conversation_index = [
+        0x01, 0xDC, 0xD2, 0x71, 0x3E, 0x44, 0x20, 0x26, 0x08, 0x11, 0x10, 0x72, 0x70, 0x6F, 0x62,
+        0x65, 0x66, 0x00, 0x00, 0x00, 0x00, 0x01,
+    ];
+    append_mapi_bool_property(
+        &mut appointment_values,
+        PID_TAG_ALTERNATE_RECIPIENT_ALLOWED,
+        true,
+    );
+    append_mapi_i32_property(&mut appointment_values, PID_TAG_IMPORTANCE, 1);
+    append_mapi_bool_property(
+        &mut appointment_values,
+        PID_TAG_ORIGINATOR_DELIVERY_REPORT_REQUESTED,
+        false,
+    );
+    append_mapi_i32_property(&mut appointment_values, PID_TAG_PRIORITY, 0);
+    append_mapi_bool_property(
+        &mut appointment_values,
+        PID_TAG_READ_RECEIPT_REQUESTED,
+        false,
+    );
+    append_mapi_i32_property(&mut appointment_values, PID_TAG_SENSITIVITY, 0);
+    append_mapi_bool_property(&mut appointment_values, PID_TAG_RESPONSE_REQUESTED, true);
+    append_mapi_utf16_property(
+        &mut appointment_values,
+        PID_TAG_CONVERSATION_TOPIC_W,
+        "Probe F",
+    );
+    append_mapi_binary_property(
+        &mut appointment_values,
+        PID_TAG_CONVERSATION_INDEX,
+        &conversation_index,
+    );
+    append_mapi_bool_property(&mut appointment_values, PID_TAG_REPLY_REQUESTED, true);
+    append_mapi_bool_property(&mut appointment_values, PID_TAG_DELETE_AFTER_SUBMIT, false);
+    append_mapi_bool_property(
+        &mut appointment_values,
+        PID_TAG_CONVERSATION_INDEX_TRACKING,
+        true,
+    );
+    append_mapi_i32_property(&mut appointment_values, PID_TAG_INTERNET_CODEPAGE, 20127);
+    append_mapi_i32_property(&mut appointment_values, PID_TAG_MESSAGE_LOCALE_ID, 0x0809);
+
+    let current_version_name = "Outlook 16.0.20228.20158";
+    let owner_critical_change = test_filetime("2026-08-11", "10:13");
+    let correlator = b"Probe F correlator";
+    append_mapi_i32_property(&mut appointment_values, 0x8552_0003, 0x115F);
+    append_mapi_utf16_property(&mut appointment_values, 0x8554_001F, current_version_name);
+    append_mapi_i64_property(&mut appointment_values, 0x85BF_0040, owner_critical_change);
+    append_mapi_i32_property(&mut appointment_values, 0x85EB_0003, 7);
+    append_mapi_binary_property(&mut appointment_values, 0x9003_0102, correlator);
+
+    append_mapi_i64_property(
+        &mut appointment_values,
+        PID_LID_CLIP_START_TAG,
+        test_filetime("2026-07-01", "01:00"),
+    );
+    append_mapi_i64_property(
+        &mut appointment_values,
+        PID_LID_CLIP_END_TAG,
+        test_filetime("2026-07-01", "02:00"),
+    );
+    append_mapi_i32_property(&mut appointment_values, PID_LID_REMINDER_DELTA_TAG, 99);
+    append_mapi_i32_property(&mut appointment_values, PID_LID_SIDE_EFFECTS_TAG, 0x7777);
+    append_mapi_i64_property(
+        &mut appointment_values,
+        PID_TAG_CLIENT_SUBMIT_TIME,
+        test_filetime("2026-07-01", "03:00"),
+    );
     let mut save_rops = Vec::new();
-    append_rop_set_properties(&mut save_rops, 1, 6, &appointment_values);
+    append_rop_set_properties(&mut save_rops, 1, 30, &appointment_values);
     append_rop_save_changes_message_with_flags(&mut save_rops, 1, 1, 0x08);
 
     renew_mapi_request_id(&mut execute_headers);
@@ -13313,8 +13527,86 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         canonical_version.predecessor_change_list,
         predecessor_change_list
     );
+    let stored_property_tags = mapi_custom_property_values
+        .lock()
+        .unwrap()
+        .keys()
+        .filter_map(
+            |(stored_account_id, object_kind, canonical_id, property_tag, _)| {
+                (*stored_account_id == account.account_id
+                    && *object_kind == MapiCustomPropertyObjectKind::CalendarEvent
+                    && *canonical_id == event_id)
+                    .then_some(*property_tag)
+            },
+        )
+        .collect::<Vec<_>>();
+    for property_tag in [
+        PID_TAG_ALTERNATE_RECIPIENT_ALLOWED,
+        PID_TAG_IMPORTANCE,
+        PID_TAG_ORIGINATOR_DELIVERY_REPORT_REQUESTED,
+        PID_TAG_PRIORITY,
+        PID_TAG_READ_RECEIPT_REQUESTED,
+        PID_TAG_SENSITIVITY,
+        PID_TAG_RESPONSE_REQUESTED,
+        PID_TAG_REPLY_REQUESTED,
+        PID_TAG_DELETE_AFTER_SUBMIT,
+        PID_TAG_CONVERSATION_TOPIC_W,
+        PID_TAG_CONVERSATION_INDEX,
+        PID_TAG_CONVERSATION_INDEX_TRACKING,
+        PID_TAG_INTERNET_CODEPAGE,
+        PID_TAG_MESSAGE_LOCALE_ID,
+        0x8552_0003,
+        0x8554_001F,
+        0x85BF_0040,
+        0x85EB_0003,
+        0x9003_0102,
+        0x8214_0003,
+    ] {
+        assert!(
+            stored_property_tags.contains(&property_tag),
+            "Probe F property 0x{property_tag:08X} was not persisted"
+        );
+    }
+    assert!(!stored_property_tags.contains(&0x8020_0003));
+    for property_tag in [
+        PID_TAG_CLIENT_SUBMIT_TIME,
+        PID_LID_CLIP_START_TAG,
+        PID_LID_CLIP_END_TAG,
+        PID_LID_REMINDER_DELTA_TAG,
+        PID_LID_SIDE_EFFECTS_TAG,
+    ] {
+        assert!(
+            !stored_property_tags.contains(&property_tag),
+            "server/canonical property 0x{property_tag:08X} entered the passthrough bag"
+        );
+    }
+    {
+        // Probe F's live database contained legacy rows for these now-modeled
+        // named properties. Seed that upgrade shape after Save so the
+        // canonical Event remains authoritative during direct reads and ICS.
+        let mut stored = mapi_custom_property_values.lock().unwrap();
+        for (property_tag, value) in [
+            (0x8201_0003, 99i32.to_le_bytes().to_vec()),
+            (0x8214_0003, 7i32.to_le_bytes().to_vec()),
+            (0x8578_0003, 11i32.to_le_bytes().to_vec()),
+        ] {
+            stored.insert(
+                (
+                    account.account_id,
+                    MapiCustomPropertyObjectKind::CalendarEvent,
+                    event_id,
+                    property_tag,
+                    property_tag as u16,
+                ),
+                value,
+            );
+        }
+    }
 
     let mut search_key_stream_rops = Vec::new();
+    search_key_stream_rops.extend_from_slice(&[0x55, 0x00, 0x00]);
+    search_key_stream_rops.extend_from_slice(&1u16.to_le_bytes());
+    search_key_stream_rops.extend_from_slice(&0x8020u16.to_le_bytes());
     append_rop_open_folder(
         &mut search_key_stream_rops,
         0,
@@ -13331,6 +13623,18 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
     search_key_stream_rops.extend_from_slice(&[0x08, 0x00, 0x02]);
     search_key_stream_rops.extend_from_slice(&4096u16.to_le_bytes());
     search_key_stream_rops.extend_from_slice(&1u16.to_le_bytes());
+    search_key_stream_rops.extend_from_slice(&[0x09, 0x00, 0x02]);
+    append_rop_get_properties_specific(
+        &mut search_key_stream_rops,
+        2,
+        &[
+            PID_TAG_CONVERSATION_TOPIC_W,
+            0x8554_001F,
+            0x8201_0003,
+            0x8020_0003,
+            0x8578_0003,
+        ],
+    );
     search_key_stream_rops.extend_from_slice(&[0x2B, 0x00, 0x02, 0x03]);
     search_key_stream_rops.extend_from_slice(&0x300B_0102u32.to_le_bytes());
     search_key_stream_rops.push(0x00);
@@ -13357,12 +13661,79 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         contains_bytes(&response_rops, &expected_property),
         "RopGetPropertiesAll must include the persisted Calendar SearchKey: {response_rops:02x?}"
     );
+    let get_all_start = response_rops
+        .windows(6)
+        .position(|window| window == [0x08, 0x02, 0, 0, 0, 0])
+        .expect("successful Calendar RopGetPropertiesAll");
+    let get_list_start = response_rops[get_all_start + 6..]
+        .windows(6)
+        .position(|window| window == [0x09, 0x02, 0, 0, 0, 0])
+        .map(|offset| get_all_start + 6 + offset)
+        .expect("successful Calendar RopGetPropertiesList");
+    let get_all = &response_rops[get_all_start..get_list_start];
+    assert!(contains_bytes(
+        get_all,
+        &PID_TAG_CONVERSATION_TOPIC_W.to_le_bytes()
+    ));
+    assert!(contains_bytes(get_all, &utf16z("Probe F")));
+    assert!(contains_bytes(get_all, &0x8554_001Fu32.to_le_bytes()));
+    assert!(contains_bytes(get_all, &utf16z(current_version_name)));
+    for property_tag in [
+        0x0E06_0040,
+        0x0C1F_001F,
+        0x5D01_001F,
+        PID_TAG_NATIVE_BODY,
+        PID_TAG_ICON_INDEX,
+        0x825E_0102,
+    ] {
+        assert!(
+            contains_bytes(get_all, &property_tag.to_le_bytes()),
+            "RopGetPropertiesAll omitted canonical Calendar tag 0x{property_tag:08X}"
+        );
+    }
+    let get_list_end = response_rops[get_list_start + 6..]
+        .windows(2)
+        .position(|window| window == [0x07, 0x02])
+        .map(|offset| get_list_start + 6 + offset)
+        .expect("RopGetPropertiesSpecific following Calendar property list");
+    let get_list = &response_rops[get_list_start..get_list_end];
+    assert!(contains_bytes(
+        get_list,
+        &PID_TAG_CONVERSATION_TOPIC_W.to_le_bytes()
+    ));
+    assert!(contains_bytes(get_list, &0x8554_001Fu32.to_le_bytes()));
+    for property_tag in [
+        0x0E06_0040,
+        0x0C1F_001F,
+        0x5D01_001F,
+        PID_TAG_NATIVE_BODY,
+        PID_TAG_ICON_INDEX,
+        0x825E_0102,
+    ] {
+        assert!(
+            contains_bytes(get_list, &property_tag.to_le_bytes()),
+            "RopGetPropertiesList omitted canonical Calendar tag 0x{property_tag:08X}"
+        );
+    }
     let mut expected_read = vec![0x2C, 0x03, 0, 0, 0, 0];
     expected_read.extend_from_slice(&16u16.to_le_bytes());
     expected_read.extend_from_slice(&submitted_search_key);
     assert!(
         contains_bytes(&response_rops, &expected_read),
         "RopOpenStream must read the persisted Calendar SearchKey: {response_rops:02x?}"
+    );
+    let direct_row_offset =
+        mapi_get_properties_specific_standard_row_offset(&response_rops, 2).unwrap();
+    let mut expected_direct_values = vec![0];
+    expected_direct_values.extend_from_slice(&utf16z("Probe F"));
+    expected_direct_values.extend_from_slice(&utf16z(current_version_name));
+    expected_direct_values.extend_from_slice(&0i32.to_le_bytes());
+    expected_direct_values.extend_from_slice(&7i32.to_le_bytes());
+    expected_direct_values.extend_from_slice(&0i32.to_le_bytes());
+    assert_eq!(
+        &response_rops[direct_row_offset..direct_row_offset + expected_direct_values.len()],
+        expected_direct_values.as_slice(),
+        "direct Calendar GetPropertiesSpecific must resolve registered 0x8020 to the stored PidLidAppointmentColor value"
     );
 
     // [MS-OXCFXICS] sections 3.1.5.3 and 3.2.5.9.3.1: the upload
@@ -13399,10 +13770,200 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         &[],
         &[],
     );
-    assert_content_upload_final_state_includes_source_key(
-        &transfer_state,
-        &imported_source_key,
+    assert_content_upload_final_state_includes_source_key(&transfer_state, &imported_source_key);
+
+    // Simulate the canonical web edit from Probe F, then create an entirely
+    // fresh MAPI service/snapshot for the full Calendar ICS download.
+    {
+        let mut events = full_sync_store.events.lock().unwrap();
+        let event = events
+            .iter_mut()
+            .find(|event| event.id == event_id)
+            .expect("saved Probe F event");
+        event.title = "Probe F - web update".to_string();
+        event.date = "2026-08-11".to_string();
+        event.time = "12:12".to_string();
+        event.duration_minutes = 45;
+        event.body_html = "<p>Probe F web body</p>".to_string();
+    }
+    let web_change_number = canonical_version.change_number + 1;
+    full_sync_store
+        .event_versions
+        .lock()
+        .unwrap()
+        .insert(event_id, 2);
+    full_sync_store
+        .mapi_event_identity_versions
+        .lock()
+        .unwrap()
+        .insert(
+            event_id,
+            MapiEventVersion {
+                event_id,
+                canonical_modseq: 2,
+                change_number: web_change_number,
+                search_key: canonical_version.search_key.clone(),
+                change_key: mapi_mailstore::change_key_for_change_number(web_change_number),
+                predecessor_change_list: mapi_mailstore::predecessor_change_list(web_change_number),
+                created_at: canonical_version.created_at.clone(),
+                updated_at: "2026-08-11T12:12:00Z".to_string(),
+            },
+        );
+
+    let full_sync_response = outlook_content_sync_response_rops_for_store(
+        full_sync_store,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &[],
+    )
+    .await;
+    let full_sync = strict_content_sync_transfer_from_response(&full_sync_response)
+        .unwrap_or_else(|error| panic!("{error}: {full_sync_response:02x?}"));
+    let downloaded = full_sync
+        .message_changes
+        .iter()
+        .find(|message| message.source_key == imported_source_key)
+        .expect("Probe F full Calendar ICS message");
+    assert_eq!(downloaded.subject, "Probe F - web update");
+    let body_value = |property_tag| {
+        downloaded
+            .body_properties
+            .iter()
+            .find_map(|(tag, value)| (*tag == property_tag).then_some(value.as_slice()))
+    };
+
+    assert_eq!(
+        body_value(PID_TAG_ALTERNATE_RECIPIENT_ALLOWED),
+        Some(&1u16.to_le_bytes()[..])
     );
+    assert_eq!(
+        body_value(PID_TAG_IMPORTANCE),
+        Some(&1i32.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_TAG_ORIGINATOR_DELIVERY_REPORT_REQUESTED),
+        Some(&0u16.to_le_bytes()[..])
+    );
+    assert_eq!(body_value(PID_TAG_PRIORITY), Some(&0i32.to_le_bytes()[..]));
+    assert_eq!(
+        body_value(PID_TAG_READ_RECEIPT_REQUESTED),
+        Some(&0u16.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_TAG_SENSITIVITY),
+        Some(&0i32.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_TAG_RESPONSE_REQUESTED),
+        Some(&1u16.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_TAG_REPLY_REQUESTED),
+        Some(&1u16.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_TAG_DELETE_AFTER_SUBMIT),
+        Some(&0u16.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_TAG_CONVERSATION_TOPIC_W),
+        Some(utf16z("Probe F").as_slice()),
+        "the accepted conversation topic is not the later web subject"
+    );
+    assert_eq!(
+        body_value(PID_TAG_CONVERSATION_INDEX),
+        Some(conversation_index.as_slice())
+    );
+    assert_eq!(
+        body_value(PID_TAG_CONVERSATION_INDEX_TRACKING),
+        Some(&1u16.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_TAG_INTERNET_CODEPAGE),
+        Some(&20127i32.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_TAG_MESSAGE_LOCALE_ID),
+        Some(&0x0809i32.to_le_bytes()[..])
+    );
+    assert_eq!(body_value(0x8552_0003), Some(&0x115Fi32.to_le_bytes()[..]));
+    assert_eq!(
+        body_value(0x8554_001F),
+        Some(utf16z(current_version_name).as_slice())
+    );
+    assert_eq!(
+        body_value(0x85BF_0040),
+        Some(&owner_critical_change.to_le_bytes()[..])
+    );
+    assert_eq!(body_value(0x85EB_0003), Some(&7i32.to_le_bytes()[..]));
+    assert_eq!(body_value(0x9003_0102), Some(correlator.as_slice()));
+
+    let updated_start = test_filetime("2026-08-11", "12:12");
+    let updated_end = test_filetime("2026-08-11", "12:57");
+    assert_eq!(
+        body_value(PID_LID_CLIP_START_TAG),
+        Some(&updated_start.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_LID_CLIP_END_TAG),
+        Some(&updated_end.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_LID_SIDE_EFFECTS_TAG),
+        Some(&CALENDAR_EVENT_SIDE_EFFECTS.to_le_bytes()[..])
+    );
+    assert_eq!(body_value(0x8201_0003), Some(&0i32.to_le_bytes()[..]));
+    assert_eq!(body_value(0x8214_0003), Some(&7i32.to_le_bytes()[..]));
+    assert_eq!(body_value(0x8578_0003), Some(&0i32.to_le_bytes()[..]));
+    assert!(body_value(PID_LID_REMINDER_DELTA_TAG).is_none());
+    assert!(body_value(PID_TAG_CLIENT_SUBMIT_TIME).is_none());
+    assert!(body_value(PID_TAG_PARENT_SOURCE_KEY).is_some());
+    assert_eq!(
+        body_value(PID_TAG_SEARCH_KEY),
+        Some(submitted_search_key.as_slice())
+    );
+
+    for property_tag in [
+        PID_TAG_ENTRY_ID,
+        PID_TAG_PARENT_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_RECORD_KEY,
+    ] {
+        assert!(
+            !downloaded.body_tags.contains(&property_tag),
+            "identity property 0x{property_tag:08X} leaked into full-message content"
+        );
+    }
+    assert_eq!(
+        body_value(PID_TAG_SENDER_ADDRESS_TYPE_W),
+        Some(utf16z("EX").as_slice())
+    );
+    assert_eq!(
+        body_value(PID_TAG_SENT_REPRESENTING_ADDRESS_TYPE_W),
+        Some(utf16z("EX").as_slice())
+    );
+    assert_eq!(
+        body_value(PID_TAG_SENDER_ENTRY_ID),
+        body_value(PID_TAG_SENT_REPRESENTING_ENTRY_ID)
+    );
+    assert!(body_value(PID_TAG_SENDER_ENTRY_ID).is_some_and(|value| value.len() > 80));
+    assert_eq!(
+        body_value(PID_TAG_SENDER_SEARCH_KEY),
+        body_value(PID_TAG_SENT_REPRESENTING_SEARCH_KEY)
+    );
+    assert!(body_value(PID_TAG_SENDER_SEARCH_KEY).is_some_and(|value| value.starts_with(b"EX:")));
+    assert_eq!(
+        body_value(PID_TAG_ICON_INDEX),
+        Some(&0x0400i32.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_TAG_RTF_IN_SYNC),
+        Some(&0u16.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(PID_TAG_NATIVE_BODY),
+        Some(&3i32.to_le_bytes()[..])
+    );
+    assert_eq!(body_value(PID_TAG_SUBJECT_PREFIX_W), Some(&[0, 0][..]));
 }
 
 #[tokio::test]
@@ -15945,18 +16506,8 @@ async fn mapi_over_http_sync_import_move_uses_canonical_store() {
     let message_id = "44444444-4444-4444-4444-444444444444";
     let source_folder_id = test_mapi_folder_id(5);
     let source_message_id = test_mapi_message_id(message_id);
-    let destination_message_id = crate::mapi::identity::mapi_store_id(
-        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 0x178,
-    );
     let source_folder_gid = crate::mapi::identity::source_key_for_object_id(source_folder_id);
     let source_message_gid = crate::mapi::identity::source_key_for_object_id(source_message_id);
-    let destination_message_gid =
-        crate::mapi::identity::source_key_for_object_id(destination_message_id);
-    let destination_change_number =
-        mapi_mailstore::change_number_for_store_id(destination_message_id);
-    let predecessor_change_list =
-        mapi_mailstore::predecessor_change_list(destination_change_number);
-    let change_xid = mapi_mailstore::change_key_for_change_number(destination_change_number);
     let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     let archive = FakeStore::mailbox("66666666-6666-6666-6666-666666666666", "archive", "Archive");
     let store = FakeStore {
@@ -15970,6 +16521,19 @@ async fn mapi_over_http_sync_import_move_uses_canonical_store() {
         )])),
         ..Default::default()
     };
+    let reservation_start = store
+        .reserve_mapi_local_replica_ids(FakeStore::account().account_id, 0x0200)
+        .await
+        .unwrap();
+    let destination_message_id =
+        crate::mapi::identity::mapi_store_id(reservation_start + 0x0178);
+    let destination_message_gid =
+        crate::mapi::identity::source_key_for_object_id(destination_message_id);
+    let destination_change_number =
+        mapi_mailstore::change_number_for_store_id(destination_message_id);
+    let predecessor_change_list =
+        mapi_mailstore::predecessor_change_list(destination_change_number);
+    let change_xid = mapi_mailstore::change_key_for_change_number(destination_change_number);
     let moved_emails = store.moved_emails.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -16490,7 +17054,9 @@ async fn mapi_over_http_import_deletes_prevalidates_hierarchy_batch_before_mutat
 #[tokio::test]
 async fn mapi_over_http_microsoft_oxcfxics_4_1_2_hierarchy_delete_returns_transfer_state() {
     let folder_id = Uuid::parse_str("88888888-8888-4888-8888-888888888812").unwrap();
-    let folder_mapi_id = test_mapi_uuid_id(&folder_id);
+    let folder_mapi_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 0x0812,
+    );
     crate::mapi::identity::remember_mapi_identity(folder_id, folder_mapi_id);
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -17033,8 +17599,8 @@ async fn mapi_over_http_sync_import_hierarchy_change_keeps_hidden_system_folder_
 }
 
 #[tokio::test]
-async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cnset_and_deleted_when_canonical_is_emitted()
- {
+async fn mapi_over_http_sync_imported_junk_email_alias_remains_resident_when_canonical_is_emitted()
+{
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -17132,9 +17698,9 @@ async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cns
         "the imported FID remains a durable redirect for stale requests"
     );
     assert!(
-        !strict_replguid_globset_contains_counter(cnset_seen, &globcnt_bytes(alias_change_number),)
+        strict_replguid_globset_contains_counter(cnset_seen, &globcnt_bytes(alias_change_number),)
             .unwrap(),
-        "the canonical-wins reconciliation must not acknowledge the Junk Email alias in MetaTagCnsetSeen"
+        "a successful Junk Email alias import must advance MetaTagCnsetSeen"
     );
 
     let second_connect = service
@@ -17272,12 +17838,12 @@ async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cns
     let repeated_cnset_seen =
         mapi_binary_property_value(&repeated_state_chunks[0].1, META_TAG_CNSET_SEEN);
     assert!(
-        !strict_replguid_globset_contains_counter(
+        strict_replguid_globset_contains_counter(
             repeated_cnset_seen,
             &globcnt_bytes(alias_change_number),
         )
         .unwrap(),
-        "a reconnect must not mistake the resolved alias for a canonical hierarchy import"
+        "a repeated successful alias import must keep its acknowledged change number"
     );
 
     renew_mapi_request_id(&mut second_headers);
@@ -17371,22 +17937,17 @@ async fn mapi_over_http_sync_imported_junk_email_alias_is_reconciled_without_cns
     let hierarchy_response_rops = response_rops_from_execute_response(hierarchy_response).await;
     let hierarchy_stream = strict_hierarchy_sync_transfer_from_response(&hierarchy_response_rops)
         .expect("strictly decode hierarchy conflict resolution");
-    let deleted_idset = hierarchy_stream
-        .deleted_idset
-        .as_deref()
-        .expect("the client-created Junk Email FID must be deleted");
     assert!(
-        strict_replid_globset_contains_counter(deleted_idset, &globcnt_bytes(alias_counter))
-            .unwrap(),
-        "the client-created Junk Email FID must be deleted when canonical Junk E-mail is emitted"
+        hierarchy_stream.deleted_idset.is_none(),
+        "a retained default-folder alias must not be reported as deleted"
     );
     assert!(
-        !strict_replguid_globset_contains_counter(
+        strict_replguid_globset_contains_counter(
             &hierarchy_stream.idset_given,
             &globcnt_bytes(alias_counter),
         )
         .unwrap(),
-        "the deleted Junk Email alias must not remain in hierarchy MetaTagIdsetGiven"
+        "the imported Junk Email FID must remain in hierarchy MetaTagIdsetGiven"
     );
     let canonical_junk_counter = crate::mapi::identity::global_counter_from_store_id(
         identity_codec
@@ -18000,17 +18561,25 @@ async fn mapi_over_http_unknown_sync_type_terminates_current_buffer() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_unknown_fasttransfer_marker_terminates_current_buffer() {
-    let mut rops = vec![0x54, 0x00, 0x01]; // RopFastTransferDestinationPutBuffer
+async fn mapi_over_http_unsupported_fasttransfer_marker_terminates_current_buffer() {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // OpenFolder.
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x06, 0x00, 0x01, 0x02]); // CreateMessage.
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x53, 0x00, 0x02, 0x03, 0x01, 0x00]); // Configure CopyTo.
+    rops.extend_from_slice(&[0x54, 0x00, 0x03]); // PutBuffer.
     rops.extend_from_slice(&4u16.to_le_bytes());
-    rops.extend_from_slice(&0xDEAD_BEEFu32.to_le_bytes());
+    rops.extend_from_slice(&0x400C_0003u32.to_le_bytes()); // StartMessage marker.
     rops.extend_from_slice(&[0x7B, 0x00, 0x00]); // Must not execute.
 
-    let response_rops = execute_rops_response_rops(&rops, &[1]).await;
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]).await;
 
     assert!(contains_bytes(
         &response_rops,
-        &[0x54, 0x01, 0x02, 0x01, 0x04, 0x80]
+        &[0x54, 0x03, 0x02, 0x01, 0x04, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0,]
     ));
     assert!(!contains_bytes(
         &response_rops,

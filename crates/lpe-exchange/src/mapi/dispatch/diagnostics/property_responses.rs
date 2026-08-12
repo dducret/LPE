@@ -220,7 +220,7 @@ pub(in crate::mapi::dispatch) fn log_get_properties_specific_response_debug(
     ) && probe
         .property_tags
         .iter()
-        .any(|tag| MapiPropertyTag::new(*tag).property_id() >= FIRST_NAMED_PROPERTY_ID);
+        .any(|tag| MapiPropertyTag::new(*tag).property_id() >= MIN_NAMED_PROPERTY_ID);
     if contacts_associated_named_probe {
         let (config_id, message_class, subject) = match object {
             Some(MapiObject::AssociatedConfig {
@@ -345,7 +345,7 @@ fn record_outlook_umolk_getprops_materialization(
         .is_empty()
         && !property_tags
             .iter()
-            .any(|tag| MapiPropertyTag::new(*tag).property_id() >= FIRST_NAMED_PROPERTY_ID)
+            .any(|tag| MapiPropertyTag::new(*tag).property_id() >= MIN_NAMED_PROPERTY_ID)
     {
         return;
     }

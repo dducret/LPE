@@ -40,13 +40,26 @@ impl MapiPropertyTag {
 
 pub(crate) fn canonical_property_storage_tag(property_tag: u32) -> u32 {
     let tag = MapiPropertyTag::new(property_tag);
-    if tag.property_id() >= FIRST_NAMED_PROPERTY_ID {
+    if tag.property_id() >= MIN_NAMED_PROPERTY_ID {
         return property_tag;
     }
     match tag.property_type() {
         Some(MapiPropertyType::String8) => (property_tag & 0xFFFF_0000) | 0x001F,
         Some(MapiPropertyType::MultipleString8) => (property_tag & 0xFFFF_0000) | 0x101F,
         _ => property_tag,
+    }
+}
+
+pub(crate) fn canonical_calendar_property_storage_tag(property_tag: u32) -> u32 {
+    let canonical_tag = canonical_property_storage_tag(property_tag);
+    let tag = MapiPropertyTag::new(canonical_tag);
+    if tag.property_id() < MIN_NAMED_PROPERTY_ID {
+        return canonical_tag;
+    }
+    match tag.property_type() {
+        Some(MapiPropertyType::String8) => (canonical_tag & 0xFFFF_0000) | 0x001F,
+        Some(MapiPropertyType::MultipleString8) => (canonical_tag & 0xFFFF_0000) | 0x101F,
+        _ => canonical_tag,
     }
 }
 
@@ -383,6 +396,11 @@ pub(in crate::mapi) const PID_TAG_PERSONAL_HOME_PAGE_W: u32 = 0x3A50_001F;
 pub(in crate::mapi) const PID_TAG_BUSINESS_HOME_PAGE_W: u32 = 0x3A51_001F;
 pub(in crate::mapi) const PID_TAG_START_DATE: u32 = 0x0060_0040;
 pub(in crate::mapi) const PID_TAG_END_DATE: u32 = 0x0061_0040;
+// [MS-OXCFXICS] section 2.2.4.1 and [MS-OXCPRPT] section 2.2.2 define
+// 0x8000 as the start of the named-property range. LPE reserves that boundary
+// and begins its session allocation cursor at 0x8001; durable dynamic mailbox
+// mappings continue to begin at DYNAMIC_NAMED_PROPERTY_ID_START below.
+pub(crate) const MIN_NAMED_PROPERTY_ID: u16 = 0x8000;
 pub(crate) const FIRST_NAMED_PROPERTY_ID: u16 = 0x8001;
 pub(crate) const DYNAMIC_NAMED_PROPERTY_ID_START: u16 = 0x9000;
 pub(crate) const MAX_NAMED_PROPERTY_ID: u16 = 0xFFFE;
@@ -588,6 +606,8 @@ pub(in crate::mapi) const PID_LID_TO_ATTENDEES_STRING_W_TAG: u32 = 0x823B_001F;
 pub(in crate::mapi) const PID_LID_CC_ATTENDEES_STRING_W_TAG: u32 = 0x823C_001F;
 pub(in crate::mapi) const PID_LID_TIME_ZONE_STRUCT_TAG: u32 = 0x8233_0102;
 pub(in crate::mapi) const PID_LID_TIME_ZONE_DESCRIPTION_W_TAG: u32 = 0x8234_001F;
+pub(in crate::mapi) const PID_LID_CLIP_START_TAG: u32 = 0x8235_0040;
+pub(in crate::mapi) const PID_LID_CLIP_END_TAG: u32 = 0x8236_0040;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG: u32 =
     0x825E_0102;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG: u32 =

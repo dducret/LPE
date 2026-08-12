@@ -803,6 +803,16 @@ where
     } else {
         None
     };
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "fetch durable MAPI Calendar property values",
+        loaded_event_ids.len(),
+    );
+    let calendar_property_values = store
+        .fetch_mapi_calendar_property_values(account_id, &loaded_event_ids)
+        .await
+        .context("fetch durable MAPI Calendar property values")?;
     let mailbox_ids = mailboxes
         .iter()
         .map(|mailbox| mailbox.id)
@@ -874,6 +884,7 @@ where
             .with_event_versions(event_versions)
             .context("apply durable MAPI Event versions to selective snapshot")?;
     }
+    snapshot = snapshot.with_calendar_property_values(calendar_property_values);
     let snapshot = snapshot
         .with_notes_and_journal(notes, journal_entries)
         .with_search_folder_definitions(search_folder_definitions)

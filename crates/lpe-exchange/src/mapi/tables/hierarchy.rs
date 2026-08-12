@@ -52,7 +52,7 @@ pub(super) fn hierarchy_rows_excluding_deleted<'a>(
         sort_hierarchy_rows(&mut rows, sort_orders);
         return rows;
     }
-    let mut rows = if matches!(folder_id, ROOT_FOLDER_ID | SYNC_ISSUES_FOLDER_ID) {
+    let mut rows = if folder_id == ROOT_FOLDER_ID {
         Vec::new()
     } else {
         mailboxes
@@ -714,9 +714,7 @@ pub(in crate::mapi) fn special_folder_property_value_with_change_number(
         {
             default_folder_view_entry_id(mailbox_guid, folder_id, message_class)
         }
-        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(
-            has_subfolders && folder_id != SYNC_ISSUES_FOLDER_ID,
-        )),
+        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
         PID_TAG_ATTRIBUTE_HIDDEN => Some(MapiValue::Bool(matches!(
             folder_id,
             CONVERSATION_ACTION_SETTINGS_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID

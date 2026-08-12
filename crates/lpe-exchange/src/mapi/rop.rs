@@ -15,6 +15,7 @@ mod logon;
 mod named_properties;
 mod object_ids;
 mod parse;
+mod property_enumeration;
 mod property_limits;
 mod property_rows;
 mod receive_folders;
@@ -35,6 +36,7 @@ pub(in crate::mapi) use logon::*;
 pub(in crate::mapi) use named_properties::*;
 pub(in crate::mapi) use object_ids::*;
 pub(in crate::mapi) use parse::*;
+pub(in crate::mapi) use property_enumeration::*;
 use property_limits::*;
 pub(in crate::mapi) use receive_folders::*;
 #[cfg(test)]
@@ -1038,124 +1040,7 @@ fn is_modeled_empty_special_folder_class_property(folder_id: u64, storage_tag: u
     )
 }
 
-pub(in crate::mapi) fn rop_get_properties_all_response(
-    request: &RopRequest,
-    object: Option<&MapiObject>,
-    principal: &AccountPrincipal,
-    mailboxes: &[JmapMailbox],
-    emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
-) -> Vec<u8> {
-    let Some(object) = object else {
-        return rop_error_response(0x08, request.input_handle_index().unwrap_or(0), 0x8004_0102);
-    };
-    if let MapiObject::Event {
-        folder_id,
-        event_id,
-        ..
-    } = object
-    {
-        if snapshot.event_for_id(*folder_id, *event_id).is_none() {
-            return rop_error_response(
-                0x08,
-                request.input_handle_index().unwrap_or(0),
-                0x8004_010F,
-            );
-        }
-    }
-    let mut response = vec![0x08, request.input_handle_index().unwrap_or(0)];
-    write_u32(&mut response, 0);
-    let size_limit = request_property_size_limit(request);
-    let want_unicode = request_get_properties_all_want_unicode(request);
-    let tags = match object {
-        MapiObject::Logon => default_store_property_tags(),
-        MapiObject::Folder {
-            folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
-            ..
-        } => default_folder_property_tags_with_identity(),
-        MapiObject::Attachment { .. }
-        | MapiObject::PendingAttachment { .. }
-        | MapiObject::SavedAttachment { .. } => default_attachment_columns(),
-        MapiObject::Message { .. }
-        | MapiObject::PublicFolderItem { .. }
-        | MapiObject::PendingMessage { .. } => default_message_property_tags(),
-        MapiObject::Contact { .. } | MapiObject::PendingContact { .. } => {
-            default_contact_property_tags()
-        }
-        MapiObject::Event { .. } | MapiObject::PendingEvent { .. } => default_event_property_tags(),
-        MapiObject::Task { .. } | MapiObject::PendingTask { .. } => default_task_property_tags(),
-        MapiObject::Note { .. } | MapiObject::PendingNote { .. } => default_note_property_tags(),
-        MapiObject::JournalEntry { .. } | MapiObject::PendingJournalEntry { .. } => {
-            default_journal_entry_property_tags()
-        }
-        MapiObject::ConversationAction { .. } | MapiObject::PendingConversationAction { .. } => {
-            default_conversation_action_property_tags()
-        }
-        MapiObject::AssociatedConfig {
-            folder_id,
-            config_id,
-            saved_message,
-            ..
-        } => {
-            let mut tags = default_folder_property_tags();
-            if let Some(message) = saved_message
-                .clone()
-                .or_else(|| snapshot.associated_config_message_for_id(*config_id))
-                .filter(|message| message.folder_id == *folder_id)
-            {
-                // [MS-OXCMSG] section 2.2.3.1.2 requires every named
-                // property advertised by RopOpenMessage to be available via
-                // RopGetPropertiesAll on that Message object.
-                tags.extend(associated_config_named_property_tags(&message));
-                tags.sort_unstable();
-                tags.dedup();
-            }
-            tags
-        }
-        _ => default_folder_property_tags(),
-    };
-    response.extend_from_slice(&(tags.len() as u16).to_le_bytes());
-    for tag in tags {
-        let tag = get_properties_all_response_tag(tag, want_unicode);
-        let value =
-            serialize_object_property(Some(object), principal, mailboxes, emails, snapshot, tag);
-        if size_limit != 0 && value.len() > size_limit {
-            write_u32(&mut response, property_error_tag(tag));
-            write_u32(&mut response, 0x8007_000E);
-        } else {
-            write_u32(&mut response, tag);
-            response.extend_from_slice(&value);
-        }
-    }
-    response
-}
-
-fn request_get_properties_all_want_unicode(request: &RopRequest) -> bool {
-    request
-        .payload
-        .get(2..4)
-        .and_then(|bytes| bytes.try_into().ok())
-        .map(u16::from_le_bytes)
-        .unwrap_or(1)
-        != 0
-}
-
-fn get_properties_all_response_tag(property_tag: u32, want_unicode: bool) -> u32 {
-    if want_unicode {
-        return property_tag;
-    }
-    match MapiPropertyTag::new(property_tag).property_type() {
-        Some(MapiPropertyType::String) => (property_tag & 0xFFFF_0000) | 0x001E,
-        Some(MapiPropertyType::MultipleString) => (property_tag & 0xFFFF_0000) | 0x101E,
-        _ => property_tag,
-    }
-}
-
-fn property_error_tag(property_tag: u32) -> u32 {
-    (property_tag & 0xFFFF_0000) | 0x000A
-}
-
-fn default_folder_property_tags_with_identity() -> Vec<u32> {
+pub(in crate::mapi) fn default_folder_property_tags_with_identity() -> Vec<u32> {
     let mut tags = default_folder_property_tags();
     tags.extend(default_folder_identity_property_tags());
     tags

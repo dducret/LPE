@@ -94,7 +94,13 @@ where
             PropertyDispatchFlow::continue_batch()
         }
         Some(RopId::GetPropertiesList) => {
-            append_get_properties_list_response(session, handle_slots, request, responses);
+            append_get_properties_list_response(
+                session,
+                handle_slots,
+                request,
+                snapshot,
+                responses,
+            );
             PropertyDispatchFlow::continue_batch()
         }
         Some(RopId::SetProperties | RopId::SetPropertiesNoReplicate) => {

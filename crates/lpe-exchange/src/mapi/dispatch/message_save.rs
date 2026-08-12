@@ -29,6 +29,23 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
         ));
         return;
     }
+    if session.handles.values().any(|object| {
+        matches!(
+            object,
+            MapiObject::FastTransferDestination {
+                target_handle,
+                buffer,
+                ..
+            } if *target_handle == handle && !buffer.is_empty()
+        )
+    }) {
+        responses.extend_from_slice(&rop_error_response(
+            0x0C,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    }
     let save_changes_object = session.handles.get(&handle).cloned();
     session.record_recent_probe_action(format!(
         "SaveChangesMessage(in={},handle={},kind={},folder={})",

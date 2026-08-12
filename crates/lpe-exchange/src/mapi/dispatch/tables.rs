@@ -222,7 +222,7 @@ pub(super) fn normal_message_defaulted_column_detail(columns: &[u32]) -> String 
         .filter_map(|column| {
             let storage_tag = canonical_property_storage_tag(*column);
             let tag = MapiPropertyTag::new(storage_tag);
-            if tag.property_id() >= FIRST_NAMED_PROPERTY_ID
+            if tag.property_id() >= MIN_NAMED_PROPERTY_ID
                 || normal_message_table_column_is_backed(storage_tag)
             {
                 return None;
@@ -957,7 +957,7 @@ fn candidate_find_row_debug_tags(
 
 fn normalize_table_property_tag_for_session(session: &MapiSession, property_tag: u32) -> u32 {
     let tag = MapiPropertyTag::new(property_tag);
-    if tag.property_id() < FIRST_NAMED_PROPERTY_ID {
+    if tag.property_id() < MIN_NAMED_PROPERTY_ID {
         return property_tag;
     }
     if tag.property_id()
@@ -1001,7 +1001,7 @@ fn table_column_support_summary(columns: &[u32], is_backed: impl Fn(u32) -> bool
         let storage_tag = canonical_property_storage_tag(*column);
         if is_backed(storage_tag) {
             backed.push(*column);
-        } else if MapiPropertyTag::new(storage_tag).property_id() >= FIRST_NAMED_PROPERTY_ID {
+        } else if MapiPropertyTag::new(storage_tag).property_id() >= MIN_NAMED_PROPERTY_ID {
             named_or_dynamic.push(*column);
         } else {
             defaulted.push(*column);

@@ -335,7 +335,7 @@ async fn mapi_over_http_public_folder_hierarchy_table_lists_canonical_roots() {
                 .try_into()
                 .unwrap()
         ),
-        1
+        2
     );
     assert!(contains_bytes(response_rops, &utf16z("Public Root")));
     assert!(contains_bytes(response_rops, &utf16z("Team Posts")));

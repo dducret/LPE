@@ -160,6 +160,7 @@ fn test_mapi_event(canonical_id: Uuid, account_id: Uuid, object_id: u64, title: 
         },
         event,
         attachments: Vec::new(),
+        stored_properties: Vec::new(),
     }
 }
 

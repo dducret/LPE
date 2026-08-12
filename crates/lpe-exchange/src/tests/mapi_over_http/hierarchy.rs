@@ -25,6 +25,10 @@ async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_
     };
     let contacts_identity_id =
         mapi_mailstore::virtual_special_mailbox_id(crate::mapi::identity::CONTACTS_FOLDER_ID);
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
+            .await
+            .unwrap();
     let imported_change_key = vec![
         0x51, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
         0xa6, 0x00, 0x00, 0x04, 0x15,
@@ -49,10 +53,6 @@ async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_
             contacts_identity_id,
             imported_predecessor_change_list.clone(),
         );
-    let identity_codec =
-        crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
-            .await
-            .unwrap();
     let service = ExchangeService::new(store.clone());
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -95,10 +95,14 @@ async fn mapi_over_http_default_contacts_folder_properties_use_persisted_change_
     let response_rops = response_rops_from_execute_response(response).await;
     let mut row_offset =
         mapi_get_properties_specific_standard_row_offset(&response_rops, 1).unwrap() + 1;
-    let advertised_change_number = identity_codec
-        .object_id_from_wire_id(&response_rops[row_offset..row_offset + 8])
-        .and_then(crate::mapi::identity::global_counter_from_store_id)
-        .unwrap();
+    assert_eq!(
+        &response_rops[row_offset..row_offset + 2],
+        &(crate::mapi::identity::STORE_REPLICA_ID as u16).to_le_bytes()
+    );
+    let advertised_change_number = crate::mapi::identity::global_counter_from_globcnt(
+        &response_rops[row_offset + 2..row_offset + 8],
+    )
+    .unwrap();
     row_offset += 8;
     let advertised_change_key = read_rop_binary_u16(&response_rops, &mut row_offset).unwrap();
     let advertised_predecessor_change_list =
@@ -2368,10 +2372,10 @@ async fn mapi_over_http_folder_extended_flags_survive_reconnect() {
 
 #[tokio::test]
 async fn mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_across_reconnect() {
-    // Outlook sends a stale dynamic Junk EntryID in documented index 4 after
-    // accepting its hierarchy deletion. [MS-OXOSFLD] section 2.2.4 reserves
+    // Outlook sends a dynamic Junk EntryID in documented index 4 and retains
+    // it in its hierarchy state. [MS-OXOSFLD] section 2.2.4 reserves
     // indexes 0 through 4 for special folders and requires opaque later
-    // indexes to survive. Keep the stale ID as an open-only alias while the
+    // indexes to survive. Keep the alternate ID as a durable alias while the
     // persisted and returned profile value uses the canonical five entries.
     let account = FakeStore::account();
     let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
@@ -2473,7 +2477,7 @@ async fn mapi_over_http_additional_ren_entry_ids_canonicalize_reserved_slots_acr
             .get(&client_junk_alias_id)
             .map(|alias| alias.canonical_folder_id),
         Some(crate::mapi::identity::JUNK_FOLDER_ID),
-        "the stale EntryID remains an open-only redirect"
+        "the alternate EntryID remains a durable redirect"
     );
 
     // Outlook repeats the same cached vector through the Root handle. Root

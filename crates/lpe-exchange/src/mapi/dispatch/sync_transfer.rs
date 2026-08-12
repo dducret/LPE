@@ -89,12 +89,15 @@ where
         }
         Some(RopId::FastTransferDestinationPutBuffer)
         | Some(RopId::FastTransferDestinationPutBufferExtended) => {
-            append_fast_transfer_destination_put_buffer_response(
+            append_fast_transfer_destination_put_buffer_response_with_store(
+                store,
+                principal,
                 session,
                 handle_slots,
                 request,
                 responses,
             )
+            .await
         }
         Some(RopId::FastTransferSourceCopyFolder)
         | Some(RopId::FastTransferSourceCopyTo)
