@@ -6387,6 +6387,7 @@ fn already_open_common_view_missing_descriptor_uses_empty_stream_semantics() {
         execute_request_count: 0,
         next_handle: 2,
         handles,
+        issued_handles: std::collections::HashSet::new(),
         folder_profile_property_tombstones: std::collections::HashMap::new(),
         message_statuses: std::collections::HashMap::new(),
         message_save_generations: std::collections::HashMap::new(),
@@ -6476,6 +6477,7 @@ fn common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence() {
         execute_request_count: 0,
         next_handle: 2,
         handles,
+        issued_handles: std::collections::HashSet::new(),
         folder_profile_property_tombstones: std::collections::HashMap::new(),
         message_statuses: std::collections::HashMap::new(),
         message_save_generations: std::collections::HashMap::new(),
@@ -6542,7 +6544,7 @@ fn common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence() {
 }
 
 #[test]
-fn associated_config_missing_binary_property_opens_writable_stream() {
+fn associated_config_stream_rops_require_the_actual_stream_handle() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let config_id = crate::mapi::identity::mapi_store_id(0x15c);
     let mut handles = std::collections::HashMap::new();
@@ -6586,6 +6588,7 @@ fn associated_config_missing_binary_property_opens_writable_stream() {
         execute_request_count: 0,
         next_handle: 2,
         handles,
+        issued_handles: std::collections::HashSet::new(),
         folder_profile_property_tombstones: std::collections::HashMap::new(),
         message_statuses: std::collections::HashMap::new(),
         message_save_generations: std::collections::HashMap::new(),
@@ -6645,11 +6648,33 @@ fn associated_config_missing_binary_property_opens_writable_stream() {
             writable_target,
         },
     );
-    assert_eq!(resolve_writable_stream_handle(&session, 1), Some(handle));
-    assert_eq!(set_attachment_stream_size(&mut session, 1, 4), None);
-    let resolved_handle = resolve_writable_stream_handle(&session, 1).unwrap();
+    assert_eq!(exact_attachment_stream_handle(&session, 1), None);
     assert_eq!(
-        set_attachment_stream_size(&mut session, resolved_handle, 4),
+        exact_attachment_stream_handle(&session, handle),
+        Some(handle)
+    );
+    assert_eq!(set_attachment_stream_size(&mut session, 1, 4), None);
+    assert_eq!(write_stream(&mut session, 1, b"ignored"), None);
+    let Some(MapiObject::AttachmentStream { data, .. }) = session.handles.get(&handle) else {
+        panic!("expected attachment stream handle");
+    };
+    assert!(
+        data.is_empty(),
+        "parent-handle write must not mutate the stream"
+    );
+    let Some(MapiObject::AssociatedConfig {
+        saved_message: Some(message),
+        ..
+    }) = session.handles.get(&1)
+    else {
+        panic!("expected associated config handle");
+    };
+    assert!(
+        !mapi_properties_from_json(&message.properties_json).contains_key(&0x0e9a_0102),
+        "parent-handle write must not mutate the target property"
+    );
+    assert_eq!(
+        set_attachment_stream_size(&mut session, handle, 4),
         Some(())
     );
     assert_eq!(
@@ -6723,6 +6748,7 @@ fn message_list_settings_private_binary_stream_is_projected_without_widening_oth
         execute_request_count: 0,
         next_handle: 2,
         handles,
+        issued_handles: std::collections::HashSet::new(),
         folder_profile_property_tombstones: std::collections::HashMap::new(),
         message_statuses: std::collections::HashMap::new(),
         message_save_generations: std::collections::HashMap::new(),

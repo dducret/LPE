@@ -52,6 +52,7 @@ impl RopRequest {
                 | 0x1C
                 | 0x21
                 | 0x22
+                | 0x23
                 | 0x2B
                 | 0x25
                 | 0x29

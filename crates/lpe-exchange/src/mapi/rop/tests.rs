@@ -1336,6 +1336,7 @@ pub(in crate::mapi) fn session_idle_expiry_follows_cookie_max_age() {
         execute_request_count: 0,
         next_handle: 1,
         handles: HashMap::new(),
+        issued_handles: HashSet::new(),
         folder_profile_property_tombstones: HashMap::new(),
         message_statuses: HashMap::new(),
         message_save_generations: HashMap::new(),
@@ -2525,6 +2526,231 @@ fn property_enumeration_test_session() -> MapiSession {
     };
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:enum");
     remove_session(&session_id).expect("property-enumeration test session")
+}
+
+fn get_properties_specific_test_request(input_handle_index: u8, tags: &[u32]) -> RopRequest {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&4096u16.to_le_bytes());
+    payload.extend_from_slice(&(tags.len() as u16).to_le_bytes());
+    for tag in tags {
+        payload.extend_from_slice(&tag.to_le_bytes());
+    }
+    RopRequest {
+        rop_id: RopId::GetPropertiesSpecific.as_u8(),
+        input_handle_index: Some(input_handle_index),
+        output_handle_index: None,
+        payload,
+    }
+}
+
+#[test]
+fn property_reads_reject_live_non_property_objects() {
+    // [MS-OXCPRPT] sections 2.2.2, 2.2.3, and 2.2.4 describe
+    // property reads against property-bearing Server objects, not tables,
+    // streams, or FastTransfer protocol-control objects.
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "reader@example.test".to_string(),
+        display_name: "Reader".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let objects = [
+        MapiObject::PermissionTable {
+            folder_id: ROOT_FOLDER_ID,
+            columns: Vec::new(),
+            columns_set: false,
+            position: 0,
+        },
+        MapiObject::AttachmentStream {
+            data: Vec::new(),
+            position: 0,
+            writable_target: None,
+        },
+        MapiObject::FastTransferDestination {
+            folder_id: ROOT_FOLDER_ID,
+            target_handle: 1,
+            buffer: Vec::new(),
+        },
+    ];
+    let specific = get_properties_specific_test_request(2, &[PID_TAG_DISPLAY_NAME_W]);
+    let all = RopRequest {
+        rop_id: RopId::GetPropertiesAll.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: [0, 0, 1, 0].to_vec(),
+    };
+    let list = RopRequest {
+        rop_id: RopId::GetPropertiesList.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+    let expected = |rop_id| rop_error_response(rop_id, 2, MapiError::NotSupported.as_u32());
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let session = property_enumeration_test_session();
+
+    for object in &objects {
+        assert_eq!(
+            rop_get_properties_specific_response(
+                &specific,
+                Some(object),
+                &principal,
+                &[],
+                &[],
+                &snapshot,
+            ),
+            expected(RopId::GetPropertiesSpecific.as_u8())
+        );
+        assert_eq!(
+            rop_get_properties_all_response(
+                &all,
+                &session,
+                Some(object),
+                &principal,
+                &[],
+                &[],
+                &snapshot,
+            ),
+            expected(RopId::GetPropertiesAll.as_u8())
+        );
+        assert_eq!(
+            rop_get_properties_list_response(&list, &session, Some(object), &snapshot),
+            expected(RopId::GetPropertiesList.as_u8())
+        );
+    }
+}
+
+#[test]
+fn public_folder_logon_enumerates_only_private_false() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "reader@example.test".to_string(),
+        display_name: "Reader".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let object = MapiObject::PublicFolderLogon;
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let session = property_enumeration_test_session();
+    let specific = get_properties_specific_test_request(2, &[PID_TAG_PRIVATE]);
+    assert_eq!(
+        rop_get_properties_specific_response(
+            &specific,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &snapshot,
+        ),
+        [0x07, 0x02, 0, 0, 0, 0, 0, 0]
+    );
+
+    let all_request = RopRequest {
+        rop_id: RopId::GetPropertiesAll.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: [0, 0, 1, 0].to_vec(),
+    };
+    let all = rop_get_properties_all_response(
+        &all_request,
+        &session,
+        Some(&object),
+        &principal,
+        &[],
+        &[],
+        &snapshot,
+    );
+    assert_eq!(&all[..8], &[0x08, 0x02, 0, 0, 0, 0, 1, 0]);
+    assert_eq!(
+        u32::from_le_bytes(all[8..12].try_into().unwrap()),
+        PID_TAG_PRIVATE
+    );
+    assert_eq!(&all[12..], &[0]);
+
+    let list_request = RopRequest {
+        rop_id: RopId::GetPropertiesList.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+    let list = rop_get_properties_list_response(&list_request, &session, Some(&object), &snapshot);
+    assert_eq!(&list[..8], &[0x09, 0x02, 0, 0, 0, 0, 1, 0]);
+    assert_eq!(
+        u32::from_le_bytes(list[8..12].try_into().unwrap()),
+        PID_TAG_PRIVATE
+    );
+    assert_eq!(list.len(), 12);
+}
+
+#[test]
+fn fai_and_virtual_message_property_enumeration_use_message_tags() {
+    let principal = AccountPrincipal {
+        tenant_id: Uuid::nil(),
+        account_id: Uuid::nil(),
+        email: "reader@example.test".to_string(),
+        display_name: "Reader".to_string(),
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let objects = [
+        MapiObject::PendingAssociatedMessage {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+            imported_message_id: None,
+            fail_on_conflict: false,
+        },
+        MapiObject::PendingNavigationShortcut {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            properties: HashMap::new(),
+            imported_message_id: None,
+            fail_on_conflict: false,
+        },
+    ];
+    let all_request = RopRequest {
+        rop_id: RopId::GetPropertiesAll.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: [0, 0, 1, 0].to_vec(),
+    };
+    let list_request = RopRequest {
+        rop_id: RopId::GetPropertiesList.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+    let snapshot = MapiMailStoreSnapshot::empty();
+    let session = property_enumeration_test_session();
+
+    for object in &objects {
+        let all = rop_get_properties_all_response(
+            &all_request,
+            &session,
+            Some(object),
+            &principal,
+            &[],
+            &[],
+            &snapshot,
+        );
+        assert_eq!(
+            u16::from_le_bytes(all[6..8].try_into().unwrap()) as usize,
+            default_message_property_tags().len()
+        );
+
+        let list =
+            rop_get_properties_list_response(&list_request, &session, Some(object), &snapshot);
+        let count = u16::from_le_bytes(list[6..8].try_into().unwrap()) as usize;
+        let tags = list[8..]
+            .chunks_exact(4)
+            .map(|tag| u32::from_le_bytes(tag.try_into().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(count, default_message_property_tags().len());
+        assert_eq!(tags.len(), count);
+        assert!(tags.contains(&PID_TAG_SUBJECT_W));
+        assert!(!tags.contains(&PID_TAG_FOLDER_TYPE));
+    }
 }
 
 #[test]

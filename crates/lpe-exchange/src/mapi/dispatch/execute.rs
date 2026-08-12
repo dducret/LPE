@@ -1,5 +1,737 @@
 use super::*;
 
+pub(in crate::mapi) async fn execute_response<S, V>(
+    store: &S,
+    validator: &Validator<V>,
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    body: &[u8],
+    request_id: &str,
+) -> Response
+where
+    S: ExchangeStore,
+    V: Detector,
+{
+    log_session_cookie_lookup(endpoint, principal, headers, "Execute");
+    let Some(session_id) = request_cookie(endpoint, headers) else {
+        return execute_transport_failure_response(
+            request_id,
+            13,
+            "missing MAPI session cookie",
+            Vec::new(),
+        );
+    };
+    let Some(_active_request) = acquire_execute_active_session_request(&session_id).await else {
+        return execute_transport_failure_response(
+            request_id,
+            15,
+            "MAPI session already has an active request",
+            session_context_cookies(endpoint, &session_id, false),
+        );
+    };
+    let Some(mut session) = get_session(&session_id) else {
+        return execute_transport_failure_response(
+            request_id,
+            10,
+            "MAPI session context not found",
+            Vec::new(),
+        );
+    };
+    if session.endpoint != endpoint
+        || session.tenant_id != principal.tenant_id
+        || session.account_id != principal.account_id
+        || session.email != principal.email
+    {
+        return execute_transport_failure_response(
+            request_id,
+            10,
+            "MAPI authentication context changed",
+            Vec::new(),
+        );
+    }
+    session.record_transport_request("Execute", request_id);
+
+    let execute = match parse_execute_request(body) {
+        Ok(execute) => execute,
+        Err(error) => {
+            log_execute_parse_failure_debug(endpoint, principal, headers, request_id, body, &error);
+            return execute_transport_failure_response(
+                request_id,
+                12,
+                &format!("invalid Execute request body: {error}"),
+                session_context_cookies(endpoint, &session_id, false),
+            );
+        }
+    };
+    if !session_matches(&session, endpoint, principal) {
+        return execute_transport_failure_response(
+            request_id,
+            10,
+            "MAPI authentication context changed",
+            session_context_cookies(endpoint, &session_id, false),
+        );
+    }
+    let rop_fingerprint = mapi_payload_fingerprint(&execute.rop_buffer);
+    let request_debug = summarize_request_rop_buffer(&execute.rop_buffer);
+    log_execute_request_start_debug(
+        endpoint,
+        principal,
+        headers,
+        request_id,
+        body.len(),
+        &execute.rop_buffer,
+        &request_debug,
+    );
+    let hierarchy_completed_before_execute = session.hierarchy_sync_completed();
+    if let Some(cached) = session.completed_execute_requests.get(request_id).cloned() {
+        if cached.rop_fingerprint == rop_fingerprint {
+            let post_hierarchy_observation =
+                if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
+                    session.record_execute_after_hierarchy_completion(
+                        &request_debug.ids,
+                        &request_debug.names_csv,
+                    )
+                } else {
+                    PostHierarchyExecuteObservation::default()
+                };
+            let cached_rop_buffer = execute_success_rop_buffer(&cached.response_body);
+            log_execute_rop_debug(
+                endpoint,
+                principal,
+                headers,
+                &session_id,
+                request_id,
+                &request_debug,
+                &execute.rop_buffer,
+                cached_rop_buffer.unwrap_or_default(),
+                &session,
+                post_hierarchy_observation,
+            );
+            let response_debug = summarize_response_rop_buffer(
+                execute_success_rop_buffer(&cached.response_body).unwrap_or_default(),
+                &request_debug.ids,
+            );
+            session.record_last_successful_execute_context(
+                format!(
+                    "request_id={request_id};request_rops={};response_rops={};response_results={};response_rop_bytes={};cached=true",
+                    cached.request_rop_ids,
+                    cached.response_rop_ids,
+                    cached.response_rop_results,
+                    cached.response_rop_buffer_bytes
+                ),
+                request_debug.ids.iter().any(|rop_id| *rop_id != RopId::Release.as_u8()),
+            );
+            log_post_common_views_handoff_execute_response(
+                endpoint,
+                principal,
+                headers,
+                &session_id,
+                request_id,
+                &session,
+                &request_debug,
+                &response_debug,
+                cached.response_body.len(),
+                true,
+            );
+            store_session(session_id.clone(), session);
+            return mapi_response_with_cookies(
+                "Execute",
+                request_id,
+                0,
+                cached.response_body,
+                session_context_cookies(endpoint, &session_id, false),
+            );
+        }
+        store_session(session_id.clone(), session);
+        return execute_transport_failure_response(
+            request_id,
+            12,
+            "reused MAPI Execute request id with a different ROP payload",
+            session_context_cookies(endpoint, &session_id, false),
+        );
+    }
+
+    if execute_can_skip_identity_scope(&execute.rop_buffer, &session) {
+        let mut snapshot = MapiMailStoreSnapshot::empty();
+        let mailboxes = snapshot.mailboxes();
+        let emails = snapshot.emails();
+        log_execute_dispatch_start_debug(
+            endpoint,
+            principal,
+            headers,
+            request_id,
+            mailboxes.len(),
+            emails.len(),
+        );
+        let rop_buffer = execute_rops(
+            store,
+            principal,
+            request_id,
+            &mut session,
+            &mailboxes,
+            &emails,
+            &mut snapshot,
+            None,
+            validator,
+            &execute.rop_buffer,
+            execute.max_rop_out,
+            execute.flags,
+            request_debug.all_release,
+            request_debug.handle_count,
+            &request_debug.handle_table_summary,
+            &request_debug.ids_csv,
+            &request_debug.names_csv,
+            &request_debug.non_release_rops,
+        )
+        .await;
+        let post_hierarchy_observation =
+            if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
+                session.record_execute_after_hierarchy_completion(
+                    &request_debug.ids,
+                    &request_debug.names_csv,
+                )
+            } else {
+                PostHierarchyExecuteObservation::default()
+            };
+        log_execute_rop_debug(
+            endpoint,
+            principal,
+            headers,
+            &session_id,
+            request_id,
+            &request_debug,
+            &execute.rop_buffer,
+            &rop_buffer,
+            &session,
+            post_hierarchy_observation,
+        );
+        let rop_buffer = apply_execute_max_rop_out(
+            request_id,
+            &execute.rop_buffer,
+            rop_buffer,
+            execute.max_rop_out,
+        );
+        let response_body = execute_success_body(rop_buffer, Vec::new());
+        let response_debug = summarize_response_rop_buffer(
+            execute_success_rop_buffer(&response_body).unwrap_or_default(),
+            &request_debug.ids,
+        );
+        session.record_last_successful_execute_context(
+            format!(
+                "request_id={request_id};request_rops={};response_rops={};response_results={};response_rop_bytes={};cached=false",
+                request_debug.names_csv,
+                response_debug.names_csv,
+                response_debug.results_csv,
+                response_debug.response_payload_bytes
+            ),
+            request_debug.ids.iter().any(|rop_id| *rop_id != RopId::Release.as_u8()),
+        );
+        log_post_common_views_handoff_execute_response(
+            endpoint,
+            principal,
+            headers,
+            &session_id,
+            request_id,
+            &session,
+            &request_debug,
+            &response_debug,
+            response_body.len(),
+            false,
+        );
+        cache_execute_response(
+            &mut session,
+            request_id,
+            rop_fingerprint,
+            &response_body,
+            request_debug.ids_csv.clone(),
+            response_debug.ids_csv,
+            response_debug.results_csv,
+            response_debug.response_payload_bytes,
+        );
+        store_session(session_id.clone(), session);
+        return mapi_response_with_cookies(
+            "Execute",
+            request_id,
+            0,
+            response_body,
+            session_context_cookies(endpoint, &session_id, false),
+        );
+    }
+
+    let notification_cursor_before_snapshot = if session.notification_cursor.is_none()
+        && (session.has_notification_targets()
+            || request_debug.ids.iter().any(|rop_id| {
+                matches!(
+                    RopId::from_u8(*rop_id),
+                    Some(
+                        RopId::CollapseRow
+                            | RopId::ExpandRow
+                            | RopId::FindRow
+                            | RopId::QueryColumnsAll
+                            | RopId::QueryPosition
+                            | RopId::QueryRows
+                            | RopId::SeekRow
+                            | RopId::SeekRowBookmark
+                            | RopId::SeekRowFractional
+                    )
+                )
+            })) {
+        store
+            .fetch_mapi_notification_cursor(principal.account_id)
+            .await
+            .ok()
+            .map(|cursor| cursor.unwrap_or(0))
+    } else {
+        None
+    };
+    let identity_scope = match load_mapi_identity_scope(store, principal.account_id).await {
+        Ok(identity_scope) => identity_scope,
+        Err(error) => {
+            store_session(session_id.clone(), session);
+            return execute_transport_failure_response(
+                request_id,
+                1,
+                &format!("failed to load durable MAPI identity scope: {error:#}"),
+                session_context_cookies(endpoint, &session_id, false),
+            );
+        }
+    };
+    let request_identity_scope = identity_scope.request_identity_scope();
+    session.store_replica_guid = Some(Uuid::from_bytes(identity_scope.codec.replica_guid()));
+    if let Err(error) =
+        refresh_persisted_special_folder_aliases(store, principal, &mut session).await
+    {
+        store_session(session_id.clone(), session);
+        return execute_transport_failure_response(
+            request_id,
+            1,
+            &format!("failed to load persisted MAPI special-folder aliases: {error:#}"),
+            session_context_cookies(endpoint, &session_id, false),
+        );
+    }
+    let mut access_plan = crate::mapi::identity::with_current_mapi_identity_codec(
+        identity_scope.codec.clone(),
+        async { plan_mapi_store_access(&session, &execute.rop_buffer) },
+    )
+    .await;
+    // [MS-OXCMAPIHTTP] section 2.2.4.4.2: NotificationWait can already have
+    // queued a Contact or Calendar change when Outlook sends its release-only
+    // Execute. The active root
+    // hierarchy row needs the current collaboration item count, even though
+    // the ROP itself does not open that folder.
+    if session.pending_collaboration_hierarchy_notification_requires_contents() {
+        access_plan.requires_associated_contents = true;
+    }
+    log_execute_store_access_debug(endpoint, principal, headers, request_id, &access_plan);
+    let mut snapshot = match crate::mapi::identity::with_current_mapi_request_identity_scope(
+        request_identity_scope.clone(),
+        Box::pin(load_mapi_store_for_access_plan(
+            store,
+            principal.account_id,
+            &identity_scope,
+            &request_identity_scope,
+            &access_plan,
+            500,
+        )),
+    )
+    .await
+    {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            if let Some(fallback_plan) =
+                hierarchy_sync_selective_fallback_plan(&session, &execute.rop_buffer)
+            {
+                tracing::warn!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    tenant_id = %principal.tenant_id,
+                    account_id = %principal.account_id,
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = request_id,
+                    full_snapshot_error = %format!("{error:#}"),
+                    "rca debug mapi full snapshot fallback to hierarchy store view"
+                );
+                match crate::mapi::identity::with_current_mapi_request_identity_scope(
+                    request_identity_scope.clone(),
+                    Box::pin(load_mapi_store_for_access_plan(
+                        store,
+                        principal.account_id,
+                        &identity_scope,
+                        &request_identity_scope,
+                        &fallback_plan,
+                        500,
+                    )),
+                )
+                .await
+                {
+                    Ok(snapshot) => snapshot,
+                    Err(fallback_error) => {
+                        store_session(session_id.clone(), session);
+                        return execute_transport_failure_response(
+                            request_id,
+                            1,
+                            &format!(
+                                "failed to load MAPI mail store view: {error:#}; fallback failed: {fallback_error:#}"
+                            ),
+                            session_context_cookies(endpoint, &session_id, false),
+                        );
+                    }
+                }
+            } else {
+                store_session(session_id.clone(), session);
+                return execute_transport_failure_response(
+                    request_id,
+                    1,
+                    &format!("failed to load MAPI mail store view: {error:#}"),
+                    session_context_cookies(endpoint, &session_id, false),
+                );
+            }
+        }
+    };
+    let mailboxes = snapshot.mailboxes();
+    let emails = snapshot.emails();
+    log_execute_dispatch_start_debug(
+        endpoint,
+        principal,
+        headers,
+        request_id,
+        mailboxes.len(),
+        emails.len(),
+    );
+    let rop_buffer = crate::mapi::identity::with_current_mapi_request_identity_scope(
+        request_identity_scope,
+        Box::pin(crate::mapi::identity::with_current_mapi_identity_codec(
+            snapshot.identity_codec().clone(),
+            execute_rops(
+                store,
+                principal,
+                request_id,
+                &mut session,
+                &mailboxes,
+                &emails,
+                &mut snapshot,
+                notification_cursor_before_snapshot,
+                validator,
+                &execute.rop_buffer,
+                execute.max_rop_out,
+                execute.flags,
+                request_debug.all_release,
+                request_debug.handle_count,
+                &request_debug.handle_table_summary,
+                &request_debug.ids_csv,
+                &request_debug.names_csv,
+                &request_debug.non_release_rops,
+            ),
+        )),
+    )
+    .await;
+    let post_hierarchy_observation = if endpoint == MapiEndpoint::Emsmdb
+        && hierarchy_completed_before_execute
+    {
+        session
+            .record_execute_after_hierarchy_completion(&request_debug.ids, &request_debug.names_csv)
+    } else {
+        PostHierarchyExecuteObservation::default()
+    };
+    log_execute_rop_debug(
+        endpoint,
+        principal,
+        headers,
+        &session_id,
+        request_id,
+        &request_debug,
+        &execute.rop_buffer,
+        &rop_buffer,
+        &session,
+        post_hierarchy_observation,
+    );
+    let rop_buffer = apply_execute_max_rop_out(
+        request_id,
+        &execute.rop_buffer,
+        rop_buffer,
+        execute.max_rop_out,
+    );
+    let response_body = execute_success_body(rop_buffer, Vec::new());
+    let response_debug = summarize_response_rop_buffer(
+        execute_success_rop_buffer(&response_body).unwrap_or_default(),
+        &request_debug.ids,
+    );
+    session.record_last_successful_execute_context(
+        format!(
+            "request_id={request_id};request_rops={};response_rops={};response_results={};response_rop_bytes={};cached=false",
+            request_debug.names_csv,
+            response_debug.names_csv,
+            response_debug.results_csv,
+            response_debug.response_payload_bytes
+        ),
+        request_debug.ids.iter().any(|rop_id| *rop_id != RopId::Release.as_u8()),
+    );
+    log_post_common_views_handoff_execute_response(
+        endpoint,
+        principal,
+        headers,
+        &session_id,
+        request_id,
+        &session,
+        &request_debug,
+        &response_debug,
+        response_body.len(),
+        false,
+    );
+    cache_execute_response(
+        &mut session,
+        request_id,
+        rop_fingerprint,
+        &response_body,
+        request_debug.ids_csv.clone(),
+        response_debug.ids_csv,
+        response_debug.results_csv,
+        response_debug.response_payload_bytes,
+    );
+    store_session(session_id.clone(), session);
+    mapi_response_with_cookies(
+        "Execute",
+        request_id,
+        0,
+        response_body,
+        session_context_cookies(endpoint, &session_id, false),
+    )
+}
+
+fn log_post_common_views_handoff_execute_response(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    session_id: &str,
+    request_id: &str,
+    session: &MapiSession,
+    request: &RopRequestDebugSummary,
+    response: &RopResponseDebugSummary,
+    response_body_bytes: usize,
+    cached_execute_response: bool,
+) {
+    if endpoint != MapiEndpoint::Emsmdb {
+        return;
+    }
+    let state = &session.post_hierarchy_actions;
+    if state.last_common_views_inbox_shortcut_context.is_empty()
+        || state.inbox_associated_contents_table_observed
+        || state.inbox_normal_contents_table_observed
+    {
+        return;
+    }
+
+    let notification_registered = !state
+        .last_inbox_notification_registration_context
+        .is_empty();
+    let handoff_phase = if notification_registered {
+        "post_common_views_notification_handoff"
+    } else {
+        "post_common_views_inbox_handoff"
+    };
+    let next_expected_client_step = if notification_registered {
+        "notification_wait_or_open_inbox_associated_or_normal_contents_table"
+    } else {
+        "open_inbox_or_register_notification"
+    };
+    let cookie_debug = request_cookie_transport_debug(endpoint, headers);
+    let session_cookie_debug = cookie_value_debug(Some(session_id));
+    let request_sequence_cookie_matches =
+        request_sequence_cookie_matches(endpoint, headers, session_id);
+    let notification_subscription_count = session
+        .handles
+        .values()
+        .filter(|object| matches!(object, MapiObject::NotificationSubscription { .. }))
+        .count();
+    let startup_gates = outlook_startup_gate_summary(session);
+    let normal_inbox_missing_reason = normal_inbox_visible_row_missing_reason(session);
+    let normal_inbox_release_request_shape =
+        normal_inbox_visible_row_release_request_shape(session);
+    let advertised_default_view_pending_open = session.advertised_default_view_pending_open();
+    let default_view_advertisement_state = session.default_view_advertisement_state();
+    let default_view_advertisement_summary = session.default_view_advertisement_summary();
+    let post_handoff_context = format_inbox_post_fai_handoff_context(state);
+    let live_handle_summaries = format_live_handle_debug_summary(session);
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        handoff_phase = handoff_phase,
+        request_rop_names = %request.names_csv,
+        response_rop_names = %response.names_csv,
+        response_rop_results = %response.results_csv,
+        response_body_bytes = response_body_bytes,
+        cached_execute_response = cached_execute_response,
+        selected_context_hash = %cookie_debug.selected_context_hash,
+        selected_sequence_hash = %cookie_debug.selected_sequence_hash,
+        session_id_hash = %session_cookie_debug.hash,
+        request_sequence_cookie_matches = request_sequence_cookie_matches,
+        notification_subscription_count = notification_subscription_count,
+        outlook_startup_last_successful_gate = startup_gates.last_successful_gate,
+        outlook_startup_first_missing_gate = startup_gates.first_missing_gate,
+        outlook_startup_passed_gate_count = startup_gates.passed_count,
+        normal_inbox_visible_row_missing_reason = normal_inbox_missing_reason,
+        normal_inbox_visible_row_release_request_shape =
+            %normal_inbox_release_request_shape,
+        normal_inbox_table_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_observed,
+        normal_inbox_setcolumns_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_setcolumns_observed,
+        normal_inbox_query_rows_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_query_rows_observed,
+        normal_inbox_find_row_observed =
+            session
+                .post_hierarchy_actions
+                .inbox_normal_contents_table_find_row_observed,
+        advertised_default_view_pending_open,
+        default_view_advertisement_state = %default_view_advertisement_state,
+        default_view_advertisement_summary = %default_view_advertisement_summary,
+        post_handoff_context = %post_handoff_context,
+        live_handle_summaries = %live_handle_summaries,
+        next_expected_client_step = next_expected_client_step,
+        "rca debug mapi post common views execute response handoff transport"
+    );
+
+    let tenant_id = principal.tenant_id.to_string();
+    let account_id = principal.account_id.to_string();
+    write_outlook_trace(&OutlookTraceEvent {
+        component: "mapi",
+        endpoint: "emsmdb",
+        session_key: session_id,
+        direction: OutlookTraceDirection::Outbound,
+        phase: "ExecutePostCommonViewsHandoff",
+        remote_peer: None,
+        tenant_id: Some(&tenant_id),
+        account: Some(&principal.email),
+        status: Some(200),
+        metadata: vec![
+            ("protocol_event", "false".to_string()),
+            ("diagnostic_stream", "post_common_views_handoff".to_string()),
+            ("account_id", account_id),
+            ("mapi_request_id", request_id.to_string()),
+            ("handoff_phase", handoff_phase.to_string()),
+            ("request_rop_ids", request.ids_csv.clone()),
+            ("request_rop_names", request.names_csv.clone()),
+            ("response_rop_ids", response.ids_csv.clone()),
+            ("response_rop_names", response.names_csv.clone()),
+            ("response_rop_results", response.results_csv.clone()),
+            ("response_body_bytes", response_body_bytes.to_string()),
+            (
+                "cached_execute_response",
+                cached_execute_response.to_string(),
+            ),
+            (
+                "cookie_header_count",
+                cookie_debug.cookie_header_count.to_string(),
+            ),
+            (
+                "mapi_context_candidate_count",
+                cookie_debug.context_candidate_count.to_string(),
+            ),
+            (
+                "mapi_sequence_candidate_count",
+                cookie_debug.sequence_candidate_count.to_string(),
+            ),
+            ("selected_context_hash", cookie_debug.selected_context_hash),
+            (
+                "selected_sequence_hash",
+                cookie_debug.selected_sequence_hash,
+            ),
+            ("session_id_hash", session_cookie_debug.hash),
+            (
+                "request_sequence_cookie_matches",
+                request_sequence_cookie_matches.to_string(),
+            ),
+            (
+                "notification_subscription_count",
+                notification_subscription_count.to_string(),
+            ),
+            (
+                "outlook_startup_last_successful_gate",
+                startup_gates.last_successful_gate.to_string(),
+            ),
+            (
+                "outlook_startup_first_missing_gate",
+                startup_gates.first_missing_gate.to_string(),
+            ),
+            (
+                "outlook_startup_passed_gate_count",
+                startup_gates.passed_count.to_string(),
+            ),
+            (
+                "normal_inbox_visible_row_missing_reason",
+                normal_inbox_missing_reason.to_string(),
+            ),
+            (
+                "normal_inbox_visible_row_release_request_shape",
+                normal_inbox_release_request_shape,
+            ),
+            (
+                "normal_inbox_table_observed",
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_observed
+                    .to_string(),
+            ),
+            (
+                "normal_inbox_setcolumns_observed",
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_setcolumns_observed
+                    .to_string(),
+            ),
+            (
+                "normal_inbox_query_rows_observed",
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_query_rows_observed
+                    .to_string(),
+            ),
+            (
+                "normal_inbox_find_row_observed",
+                session
+                    .post_hierarchy_actions
+                    .inbox_normal_contents_table_find_row_observed
+                    .to_string(),
+            ),
+            (
+                "advertised_default_view_pending_open",
+                advertised_default_view_pending_open.to_string(),
+            ),
+            (
+                "default_view_advertisement_state",
+                default_view_advertisement_state,
+            ),
+            (
+                "default_view_advertisement_summary",
+                default_view_advertisement_summary,
+            ),
+            ("post_handoff_context", post_handoff_context),
+            ("live_handle_summaries", live_handle_summaries),
+            (
+                "next_expected_client_step",
+                next_expected_client_step.to_string(),
+            ),
+        ],
+        payload: None,
+    });
+}
+
 const EXECUTE_ACTIVE_SESSION_RETRY_ATTEMPTS: usize = 50;
 const EXECUTE_ACTIVE_SESSION_RETRY_DELAY_MS: u64 = 10;
 pub(in crate::mapi) const EXECUTE_FLAG_CHAIN: u32 = 0x0000_0004;

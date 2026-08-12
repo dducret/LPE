@@ -1,6 +1,7 @@
 use super::super::sync::DRAFTS_FOLDER_ID;
 use super::*;
-use std::collections::{HashMap, VecDeque};
+use crate::mapi::wire::RopId;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::SystemTime;
 
 fn empty_session() -> MapiSession {
@@ -20,6 +21,7 @@ fn empty_session() -> MapiSession {
         execute_request_count: 0,
         next_handle: 1,
         handles: HashMap::new(),
+        issued_handles: HashSet::new(),
         folder_profile_property_tombstones: HashMap::new(),
         message_statuses: HashMap::new(),
         message_save_generations: HashMap::new(),
@@ -513,6 +515,7 @@ fn access_plan_normal_mail_contents_seek_uses_content_window_total() {
             position: 0,
         },
     );
+    let mut issued_handles = handles.keys().copied().collect();
     let mut plan = MapiAccessPlan {
         requires_full_snapshot: false,
         requires_associated_contents: false,
@@ -535,6 +538,7 @@ fn access_plan_normal_mail_contents_seek_uses_content_window_total() {
         &mut plan,
         &session,
         &mut handles,
+        &mut issued_handles,
         &mut next_handle,
         &mut handle_slots,
         &request,
@@ -1014,6 +1018,7 @@ fn access_plan_associated_contents_find_row_stays_selective() {
             position: 0,
         },
     );
+    let mut issued_handles = handles.keys().copied().collect();
     let mut plan = MapiAccessPlan {
         requires_full_snapshot: false,
         requires_associated_contents: false,
@@ -1034,6 +1039,7 @@ fn access_plan_associated_contents_find_row_stays_selective() {
         &mut plan,
         &session,
         &mut handles,
+        &mut issued_handles,
         &mut next_handle,
         &mut handle_slots,
         &request,
@@ -1062,6 +1068,7 @@ fn access_plan_normal_contents_find_row_still_requires_full_snapshot() {
             position: 0,
         },
     );
+    let mut issued_handles = handles.keys().copied().collect();
     let mut plan = MapiAccessPlan {
         requires_full_snapshot: false,
         requires_associated_contents: false,
@@ -1081,11 +1088,72 @@ fn access_plan_normal_contents_find_row_still_requires_full_snapshot() {
         &mut plan,
         &session,
         &mut handles,
+        &mut issued_handles,
         &mut next_handle,
         &mut handle_slots,
         &request,
     );
     assert!(plan.requires_full_snapshot, "plan={plan:?}");
+}
+
+#[test]
+fn access_plan_simulated_allocator_preserves_released_handle_history() {
+    let session = empty_session();
+    let mut handles = HashMap::from([(
+        1,
+        MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            properties: HashMap::new(),
+        },
+    )]);
+    let mut issued_handles = HashSet::from([1, 2]);
+    let mut next_handle = u32::MAX;
+    let mut handle_slots = vec![1, u32::MAX];
+    let mut plan = MapiAccessPlan {
+        requires_full_snapshot: false,
+        requires_associated_contents: false,
+        object_ids: Vec::new(),
+        content_queries: Vec::new(),
+    };
+    let release = RopRequest {
+        rop_id: RopId::Release.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+
+    simulate_table_access(
+        &mut plan,
+        &session,
+        &mut handles,
+        &mut issued_handles,
+        &mut next_handle,
+        &mut handle_slots,
+        &release,
+    );
+    assert_eq!(handle_slots[0], u32::MAX);
+    assert!(!handles.contains_key(&1));
+    assert!(issued_handles.contains(&1));
+
+    let open_folder = RopRequest {
+        rop_id: RopId::OpenFolder.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: Some(1),
+        payload: Vec::new(),
+    };
+    simulate_table_access(
+        &mut plan,
+        &session,
+        &mut handles,
+        &mut issued_handles,
+        &mut next_handle,
+        &mut handle_slots,
+        &open_folder,
+    );
+
+    assert_eq!(handle_slots[1], 3);
+    assert_eq!(next_handle, 4);
+    assert!(issued_handles.contains(&3));
 }
 
 #[test]

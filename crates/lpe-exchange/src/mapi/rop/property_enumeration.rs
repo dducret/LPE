@@ -5,6 +5,53 @@ struct EffectiveEventProperties {
     values_by_property_id: HashMap<u16, (u32, MapiValue)>,
 }
 
+// [MS-OXCPRPT] sections 2.2.2, 2.2.3, and 2.2.4 operate on a
+// property-bearing Server object. Protocol-control, table, and stream handles
+// are live objects, but they are not property sources for these three ROPs.
+pub(in crate::mapi) fn object_supports_property_reads(object: &MapiObject) -> bool {
+    match object {
+        MapiObject::Logon
+        | MapiObject::PublicFolderLogon
+        | MapiObject::Folder { .. }
+        | MapiObject::Message { .. }
+        | MapiObject::Contact { .. }
+        | MapiObject::Event { .. }
+        | MapiObject::Task { .. }
+        | MapiObject::Note { .. }
+        | MapiObject::JournalEntry { .. }
+        | MapiObject::ConversationAction { .. }
+        | MapiObject::NavigationShortcut { .. }
+        | MapiObject::CommonViewNamedView { .. }
+        | MapiObject::SearchFolderDefinitionMessage { .. }
+        | MapiObject::AssociatedConfig { .. }
+        | MapiObject::DelegateFreeBusyMessage { .. }
+        | MapiObject::RecoverableItem { .. }
+        | MapiObject::PublicFolderItem { .. }
+        | MapiObject::PendingMessage { .. }
+        | MapiObject::PendingAssociatedMessage { .. }
+        | MapiObject::PendingContact { .. }
+        | MapiObject::PendingEvent { .. }
+        | MapiObject::PendingTask { .. }
+        | MapiObject::PendingNote { .. }
+        | MapiObject::PendingJournalEntry { .. }
+        | MapiObject::PendingConversationAction { .. }
+        | MapiObject::PendingNavigationShortcut { .. }
+        | MapiObject::Attachment { .. }
+        | MapiObject::PendingAttachment { .. }
+        | MapiObject::SavedAttachment { .. } => true,
+        MapiObject::HierarchyTable { .. }
+        | MapiObject::ContentsTable { .. }
+        | MapiObject::AttachmentTable { .. }
+        | MapiObject::PermissionTable { .. }
+        | MapiObject::RuleTable { .. }
+        | MapiObject::AttachmentStream { .. }
+        | MapiObject::NotificationSubscription { .. }
+        | MapiObject::SynchronizationSource { .. }
+        | MapiObject::SynchronizationCollector { .. }
+        | MapiObject::FastTransferDestination { .. } => false,
+    }
+}
+
 pub(in crate::mapi) fn rop_get_properties_all_response(
     request: &RopRequest,
     session: &MapiSession,
@@ -15,8 +62,19 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
     let Some(object) = object else {
-        return rop_error_response(0x08, request.input_handle_index().unwrap_or(0), 0x8004_0102);
+        return rop_error_response(
+            0x08,
+            request.input_handle_index().unwrap_or(0),
+            MapiError::NullObject.as_u32(),
+        );
     };
+    if !object_supports_property_reads(object) {
+        return rop_error_response(
+            0x08,
+            request.input_handle_index().unwrap_or(0),
+            MapiError::NotSupported.as_u32(),
+        );
+    }
     if let MapiObject::Event {
         folder_id,
         event_id,
@@ -90,8 +148,19 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
     let Some(object) = object else {
-        return rop_error_response(0x09, request.response_handle_index(), 0x8004_0102);
+        return rop_error_response(
+            0x09,
+            request.response_handle_index(),
+            MapiError::NullObject.as_u32(),
+        );
     };
+    if !object_supports_property_reads(object) {
+        return rop_error_response(
+            0x09,
+            request.response_handle_index(),
+            MapiError::NotSupported.as_u32(),
+        );
+    }
     if let MapiObject::Event {
         folder_id,
         event_id,
@@ -321,6 +390,7 @@ fn finalize_effective_event_properties(
 fn get_properties_all_tags(object: &MapiObject, snapshot: &MapiMailStoreSnapshot) -> Vec<u32> {
     match object {
         MapiObject::Logon => default_store_property_tags(),
+        MapiObject::PublicFolderLogon => vec![PID_TAG_PRIVATE],
         MapiObject::Folder {
             folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
             ..
@@ -329,8 +399,15 @@ fn get_properties_all_tags(object: &MapiObject, snapshot: &MapiMailStoreSnapshot
         | MapiObject::PendingAttachment { .. }
         | MapiObject::SavedAttachment { .. } => default_attachment_columns(),
         MapiObject::Message { .. }
+        | MapiObject::NavigationShortcut { .. }
+        | MapiObject::CommonViewNamedView { .. }
+        | MapiObject::SearchFolderDefinitionMessage { .. }
+        | MapiObject::DelegateFreeBusyMessage { .. }
+        | MapiObject::RecoverableItem { .. }
         | MapiObject::PublicFolderItem { .. }
-        | MapiObject::PendingMessage { .. } => default_message_property_tags(),
+        | MapiObject::PendingMessage { .. }
+        | MapiObject::PendingAssociatedMessage { .. }
+        | MapiObject::PendingNavigationShortcut { .. } => default_message_property_tags(),
         MapiObject::Contact { .. } | MapiObject::PendingContact { .. } => {
             default_contact_property_tags()
         }
@@ -348,7 +425,7 @@ fn get_properties_all_tags(object: &MapiObject, snapshot: &MapiMailStoreSnapshot
             saved_message,
             ..
         } => {
-            let mut tags = default_folder_property_tags();
+            let mut tags = default_message_property_tags();
             if let Some(message) = saved_message
                 .clone()
                 .or_else(|| snapshot.associated_config_message_for_id(*config_id))
@@ -367,6 +444,7 @@ fn get_properties_all_tags(object: &MapiObject, snapshot: &MapiMailStoreSnapshot
 fn get_properties_list_tags(object: &MapiObject) -> Vec<u32> {
     match object {
         MapiObject::Logon => default_store_property_tags(),
+        MapiObject::PublicFolderLogon => vec![PID_TAG_PRIVATE],
         MapiObject::Folder {
             folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
             ..
@@ -386,10 +464,60 @@ fn get_properties_list_tags(object: &MapiObject) -> Vec<u32> {
             default_conversation_action_property_tags()
         }
         MapiObject::Message { .. }
+        | MapiObject::NavigationShortcut { .. }
+        | MapiObject::PendingNavigationShortcut { .. }
+        | MapiObject::CommonViewNamedView { .. }
+        | MapiObject::SearchFolderDefinitionMessage { .. }
         | MapiObject::AssociatedConfig { .. }
+        | MapiObject::DelegateFreeBusyMessage { .. }
+        | MapiObject::RecoverableItem { .. }
         | MapiObject::PublicFolderItem { .. }
         | MapiObject::PendingAssociatedMessage { .. }
         | MapiObject::PendingMessage { .. } => default_message_property_tags(),
+        _ => default_folder_property_tags(),
+    }
+}
+
+pub(in crate::mapi) fn get_properties_specific_candidate_tags(
+    object: Option<&MapiObject>,
+) -> Vec<u32> {
+    match object {
+        Some(MapiObject::Logon) => default_store_property_tags(),
+        Some(MapiObject::PublicFolderLogon) => vec![PID_TAG_PRIVATE],
+        Some(MapiObject::Contact { .. } | MapiObject::PendingContact { .. }) => {
+            default_contact_property_tags()
+        }
+        Some(MapiObject::Event { .. } | MapiObject::PendingEvent { .. }) => {
+            default_event_property_tags()
+        }
+        Some(MapiObject::Task { .. } | MapiObject::PendingTask { .. }) => {
+            default_task_property_tags()
+        }
+        Some(MapiObject::Note { .. } | MapiObject::PendingNote { .. }) => {
+            default_note_property_tags()
+        }
+        Some(MapiObject::JournalEntry { .. } | MapiObject::PendingJournalEntry { .. }) => {
+            default_journal_entry_property_tags()
+        }
+        Some(MapiObject::Attachment { .. })
+        | Some(MapiObject::PendingAttachment { .. })
+        | Some(MapiObject::SavedAttachment { .. }) => default_attachment_columns(),
+        Some(
+            MapiObject::Message { .. }
+            | MapiObject::NavigationShortcut { .. }
+            | MapiObject::PendingNavigationShortcut { .. }
+            | MapiObject::CommonViewNamedView { .. }
+            | MapiObject::SearchFolderDefinitionMessage { .. }
+            | MapiObject::AssociatedConfig { .. }
+            | MapiObject::DelegateFreeBusyMessage { .. }
+            | MapiObject::RecoverableItem { .. }
+            | MapiObject::PublicFolderItem { .. }
+            | MapiObject::PendingAssociatedMessage { .. }
+            | MapiObject::PendingMessage { .. },
+        ) => default_message_property_tags(),
+        Some(
+            MapiObject::ConversationAction { .. } | MapiObject::PendingConversationAction { .. },
+        ) => default_conversation_action_property_tags(),
         _ => default_folder_property_tags(),
     }
 }

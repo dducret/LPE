@@ -13,12 +13,16 @@ pub(super) fn append_get_rules_table_response(
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
 ) {
-    let Some(folder_id) =
-        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
+    let Some(MapiObject::Folder { folder_id, .. }) = input_object(session, handle_slots, request)
     else {
-        responses.extend_from_slice(&rop_handle_index_error_response(request));
+        responses.extend_from_slice(&rop_error_response(
+            0x3F,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
         return;
     };
+    let folder_id = *folder_id;
     if folder_row_for_id(folder_id, mailboxes).is_none()
         && role_for_folder_id(folder_id).is_none()
         && snapshot.public_folder_for_id(folder_id).is_none()
@@ -55,12 +59,16 @@ pub(super) async fn append_modify_rules_response<S>(
 ) where
     S: ExchangeStore,
 {
-    let Some(folder_id) =
-        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
+    let Some(MapiObject::Folder { folder_id, .. }) = input_object(session, handle_slots, request)
     else {
-        responses.extend_from_slice(&rop_handle_index_error_response(request));
+        responses.extend_from_slice(&rop_error_response(
+            0x41,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
         return;
     };
+    let folder_id = *folder_id;
     if folder_row_for_id(folder_id, mailboxes).is_none() && role_for_folder_id(folder_id).is_none()
     {
         responses.extend_from_slice(&rop_error_response(

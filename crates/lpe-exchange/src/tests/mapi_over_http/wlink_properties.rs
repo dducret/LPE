@@ -11,8 +11,8 @@ const PID_TAG_WLINK_ADDRESS_BOOK_STORE_EID: u32 = 0x6891_0102;
 const PID_TAG_WLINK_RO_GROUP_TYPE: u32 = 0x6892_0003;
 
 #[tokio::test]
-async fn mapi_over_http_wlink_client_properties_round_trip_postgresql_table_and_ics_after_reload()
--> anyhow::Result<()> {
+async fn mapi_over_http_wlink_client_properties_round_trip_postgresql_table_and_ics_after_reload(
+) -> anyhow::Result<()> {
     // [MS-OXOCFG] section 2.2.9.7 defines PidTagWlinkOrdinal as a
     // variable-length PtypBinary value sorted lexicographically. Sections
     // 2.2.9.15 through 2.2.9.19 and 3.1.4.10.2 define optional client-owned

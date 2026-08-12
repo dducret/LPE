@@ -256,7 +256,7 @@ pub(super) fn append_save_changes_message_response(
 }
 
 pub(super) fn restore_save_changes_containing_folder_response_handle(
-    session: &MapiSession,
+    session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
     folder_id: u64,
@@ -266,7 +266,22 @@ pub(super) fn restore_save_changes_containing_folder_response_handle(
         .get(response_handle_index as usize)
         .copied()
         .unwrap_or(u32::MAX);
-    let folder_handle = folder_handle_for_id(session, handle_slots, previous_handle, folder_id)?;
+    let folder_handle = folder_handle_for_id(session, handle_slots, previous_handle, folder_id)
+        .unwrap_or_else(|| {
+            let reserved_handles = handle_slots
+                .iter()
+                .copied()
+                .filter(|handle| *handle != u32::MAX)
+                .collect::<HashSet<_>>();
+            session.allocate_output_handle_avoiding(
+                Some(response_handle_index),
+                MapiObject::Folder {
+                    folder_id,
+                    properties: HashMap::new(),
+                },
+                &reserved_handles,
+            )
+        });
     set_handle_slot(handle_slots, Some(response_handle_index), folder_handle);
     if previous_handle != folder_handle {
         tracing::info!(
@@ -293,7 +308,7 @@ pub(super) enum SaveChangesResponseHandleTarget {
 }
 
 pub(super) fn restore_save_changes_response_handle(
-    session: &MapiSession,
+    session: &mut MapiSession,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
     target: SaveChangesResponseHandleTarget,

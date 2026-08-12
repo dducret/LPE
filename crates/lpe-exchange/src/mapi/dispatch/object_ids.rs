@@ -202,12 +202,27 @@ pub(super) fn append_id_from_long_term_id_response(
 
 pub(super) fn append_object_id_conversion_response(
     principal: &AccountPrincipal,
+    input_object: Option<&MapiObject>,
     request: &RopRequest,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
+    // [MS-OXCROPS] sections 2.2.3.8 and 2.2.3.9 require a Logon object.
+    // The shared pre-dispatch gate has already distinguished absent and
+    // released handles, so only reject an incompatible live Server object.
+    if !matches!(
+        input_object,
+        Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
+    ) {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            MapiError::NotSupported.as_u32(),
+        ));
+        return;
+    }
     match RopId::from_u8(request.rop_id) {
         Some(RopId::LongTermIdFromId) => append_long_term_id_from_id_response(
             principal, request, mailboxes, emails, snapshot, responses,

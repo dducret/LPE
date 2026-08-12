@@ -964,7 +964,7 @@ fn response_handle_table_can_echo_released_input_slots() {
 }
 
 #[test]
-fn release_handle_slot_forgets_folder_profile_property_tombstones() {
+fn release_handle_slot_forgets_all_per_handle_metadata() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
     let mut session = remove_session(&session_id).unwrap();
@@ -980,6 +980,10 @@ fn release_handle_slot_forgets_folder_profile_property_tombstones() {
         folder_handle,
         HashSet::from([PID_TAG_EXTENDED_FOLDER_FLAGS]),
     );
+    session.message_handle_generations.insert(folder_handle, 3);
+    session
+        .pending_sync_import_source_keys
+        .insert(folder_handle, (11, INBOX_FOLDER_ID, vec![0x01, 0x02]));
     let request = RopRequest {
         rop_id: RopId::Release.as_u8(),
         input_handle_index: Some(0),
@@ -995,6 +999,13 @@ fn release_handle_slot_forgets_folder_profile_property_tombstones() {
     assert!(!session
         .folder_profile_property_tombstones
         .contains_key(&folder_handle));
+    assert!(!session
+        .message_handle_generations
+        .contains_key(&folder_handle));
+    assert!(!session
+        .pending_sync_import_source_keys
+        .contains_key(&folder_handle));
+    assert!(session.issued_handles.contains(&folder_handle));
 }
 
 #[test]
@@ -1084,6 +1095,29 @@ fn allocate_output_handle_does_not_reuse_old_low_slot_handle() {
 
     assert_eq!(released_handle, 3);
     assert_eq!(handle, 4);
+}
+
+#[test]
+fn allocate_output_handle_never_uses_reserved_or_previously_issued_values() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    session.next_handle = u32::MAX;
+    session.issued_handles.insert(1);
+
+    let handle = session.allocate_output_handle(
+        Some(u8::MAX),
+        MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        },
+    );
+
+    assert_eq!(handle, 2);
+    assert_ne!(handle, 0);
+    assert_ne!(handle, u32::MAX);
+    assert!(session.issued_handles.contains(&handle));
+    assert_eq!(session.next_handle, 3);
 }
 
 #[test]

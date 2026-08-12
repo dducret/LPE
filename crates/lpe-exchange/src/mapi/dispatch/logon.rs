@@ -158,6 +158,19 @@ pub(super) fn private_logon_request_handle(
             && input_handle(handle_slots, request).is_some())
 }
 
+pub(super) fn exact_private_logon_request_handle(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+) -> bool {
+    // Store/transport callers use this for the exact Logon contracts in
+    // [MS-OXCSTOR] section 2.2.1.5.1 and [MS-OXOMSG] section 2.2.5.
+    matches!(
+        input_object(session, handle_slots, request),
+        Some(MapiObject::Logon)
+    )
+}
+
 pub(super) fn logon_request_handle(
     session: &MapiSession,
     handle_slots: &[u32],
@@ -170,8 +183,8 @@ pub(super) fn logon_request_handle(
         )
 }
 
-pub(super) fn address_types_response(request: &RopRequest, has_input_object: bool) -> Vec<u8> {
-    if has_input_object {
+pub(super) fn address_types_response(request: &RopRequest, has_logon_object: bool) -> Vec<u8> {
+    if has_logon_object {
         rop_get_address_types_response(request)
     } else {
         rop_error_response(0x49, request.response_handle_index(), 0x8004_0102)
@@ -185,7 +198,10 @@ pub(super) fn append_address_types_response(
     request: &RopRequest,
     responses: &mut Vec<u8>,
 ) {
-    if object.is_none() {
+    if !matches!(
+        object,
+        Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
+    ) {
         responses.extend_from_slice(&address_types_response(request, false));
         return;
     }
@@ -230,8 +246,8 @@ pub(super) fn append_address_types_dispatch_response(
     true
 }
 
-pub(super) fn store_state_response(request: &RopRequest, has_input_handle: bool) -> Vec<u8> {
-    if has_input_handle {
+pub(super) fn store_state_response(request: &RopRequest, has_private_logon: bool) -> Vec<u8> {
+    if has_private_logon {
         rop_get_store_state_response(request)
     } else {
         rop_error_response(0x7B, request.response_handle_index(), 0x8004_0102)
@@ -239,10 +255,11 @@ pub(super) fn store_state_response(request: &RopRequest, has_input_handle: bool)
 }
 
 pub(super) fn append_store_state_response(
+    session: &MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
     responses: &mut Vec<u8>,
 ) {
-    let has_input_handle = input_handle(handle_slots, request).is_some();
-    responses.extend_from_slice(&store_state_response(request, has_input_handle));
+    let has_private_logon = exact_private_logon_request_handle(session, handle_slots, request);
+    responses.extend_from_slice(&store_state_response(request, has_private_logon));
 }

@@ -111,15 +111,7 @@ async fn mapi_over_http_public_folder_replica_rops_validate_canonical_folder_ids
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = vec![0x42, 0x00, 0x00];
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
@@ -132,7 +124,7 @@ async fn mapi_over_http_public_folder_replica_rops_validate_canonical_folder_ids
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -160,11 +152,15 @@ async fn mapi_over_http_public_folder_replica_rops_validate_canonical_folder_ids
 #[tokio::test]
 async fn mapi_over_http_microsoft_public_folder_replica_rops_require_logon_handle_and_shape() {
     let public_root_id = crate::mapi::identity::PUBLIC_FOLDERS_ROOT_FOLDER_ID;
-    let mut rops = vec![
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x00]; // Public-folder RopLogon.
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&[
         0x42, 0x00, 0x01, // RopGetOwningServers on missing handle 1.
-    ];
+    ]);
     append_mapi_wire_id(&mut rops, public_root_id);
-    append_rop_open_folder(&mut rops, 0, 2, test_mapi_folder_id(5));
+    append_rop_open_folder(&mut rops, 0, 2, public_root_id); // A real Folder wrong-object handle.
     rops.extend_from_slice(&[
         0x45, 0x00, 0x02, // RopPublicFolderIsGhosted on folder handle 2.
     ]);
@@ -178,11 +174,13 @@ async fn mapi_over_http_microsoft_public_folder_replica_rops_require_logon_handl
     ]);
     append_mapi_wire_id(&mut rops, public_root_id);
 
-    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX, u32::MAX]).await;
+    let response_rops = execute_rops_response_rops(&rops, &[u32::MAX, u32::MAX, u32::MAX]).await;
 
+    assert!(contains_bytes(&response_rops, &[0xFE, 0x00, 0, 0, 0, 0]));
+    // [MS-OXCROPS] section 3.2.5.4: a never-assigned slot is ecNullObject.
     assert!(contains_bytes(
         &response_rops,
-        &[0x42, 0x01, 0x02, 0x01, 0x04, 0x80]
+        &[0x42, 0x01, 0xB9, 0x04, 0x00, 0x00]
     ));
     assert!(contains_bytes(
         &response_rops,
@@ -220,16 +218,33 @@ async fn mapi_over_http_public_folder_logon_exposes_empty_public_hierarchy_table
     rops.extend_from_slice(&0u32.to_le_bytes());
     rops.extend_from_slice(&0u32.to_le_bytes());
     rops.extend_from_slice(&0u16.to_le_bytes());
+    // [MS-OXCFOLD] sections 2.2.1.13.1 and 3.2.5.13 require a Folder Server object.
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::PUBLIC_FOLDERS_ROOT_FOLDER_ID,
+    );
     rops.extend_from_slice(&[
-        0x04, 0x00, 0x00, 0x01, 0x04, // RopGetHierarchyTable on public logon.
+        0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable on public root Folder.
     ]);
 
-    let response_rops = execute_rops_response_rops(&rops, &[u32::MAX, u32::MAX]).await;
-    let hierarchy_offset = 70;
+    let response_rops = execute_rops_response_rops(&rops, &[u32::MAX, u32::MAX, u32::MAX]).await;
+    let open_folder_offset = 70;
+    let hierarchy_offset = open_folder_offset + 8;
 
     assert_eq!(response_rops[0], 0xFE);
+    assert_eq!(response_rops[open_folder_offset], 0x02);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[open_folder_offset + 2..open_folder_offset + 6]
+                .try_into()
+                .unwrap()
+        ),
+        0
+    );
     assert_eq!(response_rops[hierarchy_offset], 0x04);
-    assert_eq!(response_rops[hierarchy_offset + 1], 0x01);
+    assert_eq!(response_rops[hierarchy_offset + 1], 0x02);
     assert_eq!(
         u32::from_le_bytes(
             response_rops[hierarchy_offset + 2..hierarchy_offset + 6]
@@ -285,17 +300,28 @@ async fn mapi_over_http_public_folder_hierarchy_table_lists_canonical_roots() {
         .unwrap();
     assert_eq!(logon_response.status(), StatusCode::OK);
     let logon_cookie = mapi_cookie_header(&logon_response);
+    let logon_body = response_bytes(logon_response).await;
+    let (_, logon_handles) = response_rops_and_handles_from_execute_body(&logon_body);
+    let public_logon_handle = logon_handles[0];
 
-    let mut hierarchy_rops = vec![
-        0x04, 0x00, 0x00, 0x01, 0x04, // RopGetHierarchyTable on public logon.
-        0x12, 0x00, 0x01, 0x00, // RopSetColumns
-    ];
+    // [MS-OXCFOLD] sections 2.2.1.13.1 and 3.2.5.13 require a Folder Server object.
+    let mut hierarchy_rops = Vec::new();
+    append_rop_open_folder(
+        &mut hierarchy_rops,
+        0,
+        1,
+        crate::mapi::identity::PUBLIC_FOLDERS_ROOT_FOLDER_ID,
+    );
+    hierarchy_rops.extend_from_slice(&[
+        0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable on public root Folder.
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
     hierarchy_rops.extend_from_slice(&3u16.to_le_bytes());
     hierarchy_rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
     hierarchy_rops.extend_from_slice(&0x3602_0003u32.to_le_bytes());
     hierarchy_rops.extend_from_slice(&0x3603_0003u32.to_le_bytes());
     hierarchy_rops.extend_from_slice(&[
-        0x15, 0x00, 0x01, 0x00, 0x01, // RopQueryRows
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
     ]);
     hierarchy_rops.extend_from_slice(&50u16.to_le_bytes());
     let mut execute_headers = mapi_headers("Execute");
@@ -304,7 +330,10 @@ async fn mapi_over_http_public_folder_hierarchy_table_lists_canonical_roots() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &hierarchy_rops,
+                &[public_logon_handle, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -317,17 +346,23 @@ async fn mapi_over_http_public_folder_hierarchy_table_lists_canonical_roots() {
         u16::from_le_bytes(response_rop_buffer[0..2].try_into().unwrap()) as usize;
     let response_rops = &response_rop_buffer[2..2 + response_rop_size];
 
-    assert_eq!(response_rops[0], 0x04);
-    assert_eq!(response_rops[1], 0x01);
+    assert_eq!(response_rops[0], 0x02);
     assert_eq!(
         u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
         0
     );
+    let hierarchy_offset = 8;
+    assert_eq!(response_rops[hierarchy_offset], 0x04);
+    assert_eq!(response_rops[hierarchy_offset + 1], 0x02);
     assert_eq!(
-        u32::from_le_bytes(response_rops[6..10].try_into().unwrap()),
+        u32::from_le_bytes(
+            response_rops[hierarchy_offset + 6..hierarchy_offset + 10]
+                .try_into()
+                .unwrap()
+        ),
         2
     );
-    let query_offset = 10 + 7;
+    let query_offset = hierarchy_offset + 10 + 7;
     assert_eq!(response_rops[query_offset], 0x15);
     assert_eq!(
         u16::from_le_bytes(
@@ -365,7 +400,10 @@ async fn mapi_over_http_public_folder_hierarchy_table_lists_canonical_roots() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&child_hierarchy_rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &child_hierarchy_rops,
+                &[public_logon_handle, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -845,11 +883,9 @@ async fn mapi_over_http_microsoft_public_folder_copy_folder_is_not_supported_wit
     ));
     let folders = public_folders.lock().unwrap();
     assert_eq!(folders.len(), 3);
-    assert!(
-        folders
-            .iter()
-            .all(|folder| folder.display_name != "Copied Public")
-    );
+    assert!(folders
+        .iter()
+        .all(|folder| folder.display_name != "Copied Public"));
     let items = public_folder_items.lock().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].id, Uuid::parse_str(item_id).unwrap());
@@ -1017,15 +1053,26 @@ async fn mapi_over_http_public_folder_contents_table_lists_canonical_items() {
         .unwrap();
     assert_eq!(logon_response.status(), StatusCode::OK);
     let cookie = mapi_cookie_header(&logon_response);
+    let logon_body = response_bytes(logon_response).await;
+    let (_, logon_handles) = response_rops_and_handles_from_execute_body(&logon_body);
+    let public_logon_handle = logon_handles[0];
 
-    let mut hierarchy_rops = vec![
-        0x04, 0x00, 0x00, 0x01, 0x04, // RopGetHierarchyTable on public logon.
-        0x12, 0x00, 0x01, 0x00, // RopSetColumns
-    ];
+    // [MS-OXCFOLD] sections 2.2.1.13.1 and 3.2.5.13 require a Folder Server object.
+    let mut hierarchy_rops = Vec::new();
+    append_rop_open_folder(
+        &mut hierarchy_rops,
+        0,
+        1,
+        crate::mapi::identity::PUBLIC_FOLDERS_ROOT_FOLDER_ID,
+    );
+    hierarchy_rops.extend_from_slice(&[
+        0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable on public root Folder.
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
     hierarchy_rops.extend_from_slice(&1u16.to_le_bytes());
     hierarchy_rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
     hierarchy_rops.extend_from_slice(&[
-        0x15, 0x00, 0x01, 0x00, 0x01, // RopQueryRows
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
     ]);
     hierarchy_rops.extend_from_slice(&10u16.to_le_bytes());
     let mut execute_headers = mapi_headers("Execute");
@@ -1034,7 +1081,10 @@ async fn mapi_over_http_public_folder_contents_table_lists_canonical_items() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &hierarchy_rops,
+                &[public_logon_handle, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -1071,7 +1121,10 @@ async fn mapi_over_http_public_folder_contents_table_lists_canonical_items() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &rops,
+                &[public_logon_handle, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -1787,13 +1840,11 @@ async fn mapi_over_http_public_folder_modify_permissions_writes_canonical_grants
         &remove_response_rops,
         &[0x40, 0x01, 0, 0, 0, 0]
     ));
-    assert!(
-        observed_permissions
-            .lock()
-            .unwrap()
-            .iter()
-            .all(|permission| permission.principal_account_id != delegate.account_id)
-    );
+    assert!(observed_permissions
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|permission| permission.principal_account_id != delegate.account_id));
     let audits = observed_audits.lock().unwrap();
     assert_eq!(audits[0].action, "mapi-modify-public-folder-permissions");
     assert_eq!(audits[1].action, "mapi-modify-public-folder-permissions");
@@ -2424,12 +2475,10 @@ async fn mapi_over_http_public_folder_content_sync_exports_canonical_read_state(
     assert!(contains_bytes(&response_rops, &unread_flags_property));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 2);
-    assert!(
-        stream
-            .message_changes
-            .iter()
-            .all(|message| message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS))
-    );
+    assert!(stream
+        .message_changes
+        .iter()
+        .all(|message| message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS)));
     assert!(stream.read_idset.is_none());
     assert!(stream.unread_idset.is_none());
     assert_eq!(stream.cnset_read, client_cnset_read);
@@ -4031,6 +4080,127 @@ async fn mapi_over_http_public_folder_per_user_lookup_returns_canonical_folder_i
 }
 
 #[tokio::test]
+async fn mapi_over_http_public_folder_per_user_information_requires_logon_before_store_access() {
+    let root_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let item_id = "cccccccc-dddd-eeee-ffff-000000000000";
+    let items = Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+        item_id,
+        root_id,
+        "Read state post",
+    )]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            root_id,
+            None,
+            "Public Root",
+        )])),
+        public_folder_items: items.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut logon_rops = vec![0xFE, 0x00, 0x00, 0x00]; // Public-folder RopLogon.
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&logon_rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&logon_response);
+
+    let mut hierarchy_rops = vec![
+        0x04, 0x00, 0x00, 0x01, 0x04, // RopGetHierarchyTable on public logon.
+        0x12, 0x00, 0x01, 0x00, // RopSetColumns
+    ];
+    hierarchy_rops.extend_from_slice(&1u16.to_le_bytes());
+    hierarchy_rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    hierarchy_rops.extend_from_slice(&[
+        0x15, 0x00, 0x01, 0x00, 0x01, // RopQueryRows
+    ]);
+    hierarchy_rops.extend_from_slice(&10u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hierarchy_response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&hierarchy_response);
+
+    let root_mapi_id =
+        crate::mapi::identity::mapped_mapi_object_id(&Uuid::parse_str(root_id).unwrap()).unwrap();
+    let root_long_term_id = crate::mapi::identity::long_term_id_from_object_id(root_mapi_id)
+        .expect("public folder MAPI identity should have a LongTermID");
+    let mut per_user_stream = b"LPEPFU1\0".to_vec();
+    per_user_stream.extend_from_slice(&1u16.to_le_bytes());
+    per_user_stream.extend_from_slice(Uuid::parse_str(item_id).unwrap().as_bytes());
+    per_user_stream.push(1);
+    per_user_stream.extend_from_slice(&1i64.to_le_bytes());
+
+    let mut wrong_object_rops = vec![
+        0x02, 0x00, 0x00, 0x02, // Open the public root as a Folder in slot 2.
+    ];
+    append_mapi_wire_id(&mut wrong_object_rops, root_mapi_id);
+    wrong_object_rops.push(0);
+    wrong_object_rops.extend_from_slice(&[
+        0x04, 0x00, 0x02, 0x01, 0x04, // Create a live HierarchyTable in slot 1.
+        0x63, 0x00, 0x01, // RopReadPerUserInformation on that table.
+    ]);
+    wrong_object_rops.extend_from_slice(&root_long_term_id);
+    wrong_object_rops.push(0);
+    wrong_object_rops.extend_from_slice(&0u32.to_le_bytes());
+    wrong_object_rops.extend_from_slice(&1024u16.to_le_bytes());
+    wrong_object_rops.extend_from_slice(&[
+        0x64, 0x00, 0x01, // RopWritePerUserInformation on that table.
+    ]);
+    wrong_object_rops.extend_from_slice(&root_long_term_id);
+    wrong_object_rops.push(1);
+    wrong_object_rops.extend_from_slice(&0u32.to_le_bytes());
+    wrong_object_rops.extend_from_slice(&(per_user_stream.len() as u16).to_le_bytes());
+    wrong_object_rops.extend_from_slice(&per_user_stream);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&wrong_object_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x63, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x64, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(!items.lock().unwrap()[0].is_read);
+}
+
+#[tokio::test]
 async fn mapi_over_http_public_folder_per_user_information_round_trips_canonical_read_state() {
     let root_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     let item_id = "cccccccc-dddd-eeee-ffff-000000000000";
@@ -4211,8 +4381,8 @@ async fn mapi_over_http_public_folder_per_user_information_round_trips_canonical
 }
 
 #[tokio::test]
-async fn mapi_over_http_public_folder_per_user_information_rejects_exchange_blob_without_state_change()
- {
+async fn mapi_over_http_public_folder_per_user_information_rejects_exchange_blob_without_state_change(
+) {
     let root_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     let item_id = "cccccccc-dddd-eeee-ffff-000000000000";
     let items = Arc::new(Mutex::new(vec![FakeStore::public_folder_item(

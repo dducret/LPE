@@ -184,7 +184,7 @@ pub(in crate::mapi) fn rop_read_stream_response(
 ) -> Vec<u8> {
     let input_handle_index = request.input_handle_index().unwrap_or(0);
     let MapiObject::AttachmentStream { data, position, .. } = stream else {
-        return rop_error_response(0x2C, input_handle_index, 0x8004_010F);
+        return rop_read_stream_error_response(request, 0x8004_010F);
     };
     let requested = request
         .read_byte_count()
@@ -199,6 +199,17 @@ pub(in crate::mapi) fn rop_read_stream_response(
     response.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
     response.extend_from_slice(&chunk);
     response
+}
+
+pub(in crate::mapi) fn rop_read_stream_error_response(
+    request: &RopRequest,
+    error_code: u32,
+) -> Vec<u8> {
+    rop_error_response(
+        RopId::ReadStream.as_u8(),
+        request.response_handle_index(),
+        error_code,
+    )
 }
 
 pub(in crate::mapi) fn rop_seek_stream_response(
@@ -244,6 +255,13 @@ pub(in crate::mapi) fn rop_write_stream_response(request: &RopRequest, written: 
     response
 }
 
+pub(in crate::mapi) fn rop_write_stream_error_response(
+    request: &RopRequest,
+    error_code: u32,
+) -> Vec<u8> {
+    rop_error_response(request.rop_id, request.response_handle_index(), error_code)
+}
+
 pub(in crate::mapi) fn rop_copy_to_stream_response(
     request: &RopRequest,
     read: usize,
@@ -253,6 +271,31 @@ pub(in crate::mapi) fn rop_copy_to_stream_response(
     write_u32(&mut response, 0);
     write_u64(&mut response, read as u64);
     write_u64(&mut response, written as u64);
+    response
+}
+
+pub(in crate::mapi) fn rop_copy_to_stream_error_response(
+    request: &RopRequest,
+    error_code: u32,
+) -> Vec<u8> {
+    rop_error_response(
+        RopId::CopyToStream.as_u8(),
+        request.response_handle_index(),
+        error_code,
+    )
+}
+
+pub(in crate::mapi) fn rop_copy_to_stream_null_destination_response(
+    request: &RopRequest,
+) -> Vec<u8> {
+    let mut response = vec![RopId::CopyToStream.as_u8(), request.response_handle_index()];
+    write_u32(&mut response, 0x0000_0503);
+    write_u32(
+        &mut response,
+        request.output_handle_index().map(u32::from).unwrap_or(0),
+    );
+    write_u64(&mut response, 0);
+    write_u64(&mut response, 0);
     response
 }
 
@@ -300,6 +343,25 @@ pub(in crate::mapi) fn rop_partial_completion_response(
     let mut response = vec![rop_id, handle_index];
     write_u32(&mut response, 0);
     response.push(partial_completion as u8);
+    response
+}
+
+pub(in crate::mapi) fn rop_partial_completion_error_response(
+    rop_id: u8,
+    handle_index: u8,
+    error_code: u32,
+) -> Vec<u8> {
+    rop_error_response(rop_id, handle_index, error_code)
+}
+
+pub(in crate::mapi) fn rop_move_copy_null_destination_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![request.rop_id, request.response_handle_index()];
+    write_u32(&mut response, 0x0000_0503);
+    write_u32(
+        &mut response,
+        request.output_handle_index().map(u32::from).unwrap_or(0),
+    );
+    response.push(0);
     response
 }
 
@@ -466,6 +528,17 @@ pub(in crate::mapi) fn rop_fast_transfer_put_buffer_response(
     write_u16(&mut response, if complete { 0x0003 } else { 0x0001 });
     write_fast_transfer_put_buffer_progress(&mut response, request, used_size);
     response
+}
+
+pub(in crate::mapi) fn rop_fast_transfer_source_get_buffer_error_response(
+    request: &RopRequest,
+    error_code: u32,
+) -> Vec<u8> {
+    rop_error_response(
+        RopId::FastTransferSourceGetBuffer.as_u8(),
+        request.response_handle_index(),
+        error_code,
+    )
 }
 
 pub(in crate::mapi) fn rop_fast_transfer_put_buffer_error_response(

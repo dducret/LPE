@@ -3208,7 +3208,7 @@ fn save_changes_associated_message_restores_containing_folder_response_handle_sl
     let mut handle_slots = vec![u32::MAX, 26, 25, 26];
 
     let restored = restore_save_changes_containing_folder_response_handle(
-        &session,
+        &mut session,
         &mut handle_slots,
         &request,
         INBOX_FOLDER_ID,
@@ -3246,7 +3246,7 @@ fn save_changes_navigation_shortcut_restores_common_views_folder_response_handle
     let mut response_handle_slots = vec![26, 76];
 
     let restored = restore_save_changes_containing_folder_response_handle(
-        &session,
+        &mut session,
         &mut response_handle_slots,
         &request,
         COMMON_VIEWS_FOLDER_ID,
@@ -3448,6 +3448,315 @@ fn get_properties_specific_request(property_tags: &[u32]) -> RopRequest {
     }
 }
 
+#[test]
+fn pre_dispatch_distinguishes_never_assigned_and_released_handles() {
+    let mut session = test_mapi_session();
+    let request = get_properties_specific_request(&[PID_TAG_DISPLAY_NAME_W]);
+
+    assert_eq!(
+        pre_dispatch_input_handle_error(&session, &[0x1234_5678], &HashSet::new(), &request),
+        Some(MapiError::NullObject.as_u32())
+    );
+
+    let released_handle = session.allocate_output_handle(
+        Some(0),
+        MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        },
+    );
+    session.forget_handle(released_handle);
+    assert_eq!(
+        pre_dispatch_input_handle_error(&session, &[released_handle], &HashSet::new(), &request),
+        Some(MapiError::InvalidObject.as_u32())
+    );
+}
+
+#[test]
+fn pre_dispatch_preserves_released_index_until_successful_rebind() {
+    let mut session = test_mapi_session();
+    let request = get_properties_specific_request(&[PID_TAG_DISPLAY_NAME_W]);
+    let mut released_indexes = HashSet::from([0]);
+
+    assert_eq!(
+        pre_dispatch_input_handle_error(&session, &[u32::MAX], &released_indexes, &request),
+        Some(MapiError::InvalidObject.as_u32())
+    );
+
+    let rebound_handle = session.allocate_output_handle(
+        Some(0),
+        MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        },
+    );
+    let rebind = RopRequest {
+        rop_id: RopId::OpenFolder.as_u8(),
+        input_handle_index: Some(1),
+        output_handle_index: Some(0),
+        payload: Vec::new(),
+    };
+    clear_released_index_after_rebind(
+        &session,
+        &[rebound_handle],
+        &mut released_indexes,
+        Some(rebound_handle),
+        &rebind,
+    );
+    assert_eq!(released_indexes, HashSet::from([0]));
+
+    clear_released_index_after_rebind(
+        &session,
+        &[rebound_handle],
+        &mut released_indexes,
+        Some(u32::MAX),
+        &rebind,
+    );
+
+    assert!(released_indexes.is_empty());
+    assert_eq!(
+        pre_dispatch_input_handle_error(&session, &[rebound_handle], &released_indexes, &request),
+        None
+    );
+}
+
+#[test]
+fn pre_dispatch_preserves_fast_transfer_put_buffer_error_shape() {
+    for (rop_id, expected_len) in [
+        (RopId::FastTransferDestinationPutBuffer, 15),
+        (RopId::FastTransferDestinationPutBufferExtended, 19),
+    ] {
+        let request = RopRequest {
+            rop_id: rop_id.as_u8(),
+            input_handle_index: Some(3),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let response =
+            pre_dispatch_input_handle_error_response(&request, MapiError::InvalidObject.as_u32());
+
+        assert_eq!(response.len(), expected_len);
+        assert_eq!(&response[..2], &[rop_id.as_u8(), 3]);
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            MapiError::InvalidObject.as_u32()
+        );
+        assert_eq!(&response[6..8], &[0, 0]);
+        assert!(response[8..].iter().all(|byte| *byte == 0));
+    }
+}
+
+#[test]
+fn pre_dispatch_preserves_fixed_failure_response_shapes() {
+    let cases = [
+        (RopId::FastTransferSourceGetBuffer, 15),
+        (RopId::ReadStream, 8),
+        (RopId::WriteStream, 8),
+        (RopId::WriteAndCommitStream, 8),
+        (RopId::WriteStreamExtended, 10),
+        (RopId::CopyToStream, 22),
+        (RopId::DeleteFolder, 7),
+        (RopId::DeleteMessages, 7),
+        (RopId::MoveCopyMessages, 7),
+        (RopId::MoveFolder, 7),
+        (RopId::CopyFolder, 7),
+        (RopId::EmptyFolder, 7),
+        (RopId::SetReadFlags, 7),
+        (RopId::HardDeleteMessages, 7),
+        (RopId::HardDeleteMessagesAndSubfolders, 7),
+    ];
+
+    for (rop_id, expected_len) in cases {
+        let request = RopRequest {
+            rop_id: rop_id.as_u8(),
+            input_handle_index: Some(3),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let response =
+            pre_dispatch_input_handle_error_response(&request, MapiError::InvalidObject.as_u32());
+
+        assert_eq!(response.len(), expected_len, "{rop_id:?}");
+        assert_eq!(&response[..2], &[rop_id.as_u8(), 3], "{rop_id:?}");
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            MapiError::InvalidObject.as_u32(),
+            "{rop_id:?}"
+        );
+        assert!(response[6..].iter().all(|byte| *byte == 0), "{rop_id:?}");
+    }
+}
+
+#[test]
+fn pre_dispatch_uses_rop_specific_failure_header_indexes() {
+    let create_attachment = RopRequest {
+        rop_id: RopId::CreateAttachment.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: Some(5),
+        payload: Vec::new(),
+    };
+    assert_eq!(
+        pre_dispatch_input_handle_error_response(
+            &create_attachment,
+            MapiError::InvalidObject.as_u32(),
+        ),
+        vec![0x23, 0x05, 0x08, 0x01, 0x04, 0x80]
+    );
+
+    let get_message_status = RopRequest {
+        rop_id: RopId::GetMessageStatus.as_u8(),
+        input_handle_index: Some(2),
+        output_handle_index: None,
+        payload: Vec::new(),
+    };
+    assert_eq!(
+        pre_dispatch_input_handle_error_response(
+            &get_message_status,
+            MapiError::InvalidObject.as_u32(),
+        ),
+        vec![0x20, 0x02, 0x08, 0x01, 0x04, 0x80]
+    );
+}
+
+#[test]
+fn copy_destination_distinguishes_never_assigned_and_released_handles() {
+    let mut session = test_mapi_session();
+    let request = RopRequest {
+        rop_id: RopId::CopyToStream.as_u8(),
+        input_handle_index: Some(0),
+        output_handle_index: Some(1),
+        payload: Vec::new(),
+    };
+
+    let never_assigned = pre_dispatch_copy_destination_handle_error_response(
+        &session,
+        &[1, 0x1234_5678],
+        &HashSet::new(),
+        &request,
+    )
+    .unwrap();
+    assert_eq!(never_assigned.len(), 22);
+    assert_eq!(
+        u32::from_le_bytes(never_assigned[2..6].try_into().unwrap()),
+        MapiError::NullObject.as_u32()
+    );
+    assert!(never_assigned[6..].iter().all(|byte| *byte == 0));
+
+    let unassigned_slot = pre_dispatch_copy_destination_handle_error_response(
+        &session,
+        &[1, u32::MAX],
+        &HashSet::new(),
+        &request,
+    )
+    .unwrap();
+    assert_eq!(unassigned_slot.len(), 26);
+    assert_eq!(
+        u32::from_le_bytes(unassigned_slot[2..6].try_into().unwrap()),
+        0x0000_0503
+    );
+    assert_eq!(&unassigned_slot[6..10], &1u32.to_le_bytes());
+    assert!(unassigned_slot[10..].iter().all(|byte| *byte == 0));
+
+    let released_handle = session.allocate_output_handle(
+        Some(1),
+        MapiObject::AttachmentStream {
+            data: Vec::new(),
+            position: 0,
+            writable_target: None,
+        },
+    );
+    session.forget_handle(released_handle);
+    let released = pre_dispatch_copy_destination_handle_error_response(
+        &session,
+        &[1, released_handle],
+        &HashSet::new(),
+        &request,
+    )
+    .unwrap();
+    assert_eq!(released.len(), 22);
+    assert_eq!(
+        u32::from_le_bytes(released[2..6].try_into().unwrap()),
+        MapiError::InvalidObject.as_u32()
+    );
+    assert!(released[6..].iter().all(|byte| *byte == 0));
+}
+
+#[test]
+fn move_copy_destination_distinguishes_null_unassigned_and_released_handles() {
+    let mut session = test_mapi_session();
+    let released_handle = session.allocate_output_handle(
+        Some(5),
+        MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        },
+    );
+    session.forget_handle(released_handle);
+
+    for rop_id in [
+        RopId::MoveCopyMessages,
+        RopId::MoveFolder,
+        RopId::CopyFolder,
+    ] {
+        let request = RopRequest {
+            rop_id: rop_id.as_u8(),
+            input_handle_index: Some(2),
+            output_handle_index: Some(5),
+            payload: Vec::new(),
+        };
+        for (destination_handle, expected_error, expected_len) in [
+            (0x1234_5678, MapiError::NullObject.as_u32(), 7),
+            (released_handle, MapiError::InvalidObject.as_u32(), 7),
+        ] {
+            let response = pre_dispatch_copy_destination_handle_error_response(
+                &session,
+                &[1, 1, 1, 1, 1, destination_handle],
+                &HashSet::new(),
+                &request,
+            )
+            .unwrap();
+            assert_eq!(response.len(), expected_len, "{rop_id:?}");
+            assert_eq!(
+                u32::from_le_bytes(response[2..6].try_into().unwrap()),
+                expected_error,
+                "{rop_id:?}"
+            );
+            assert_eq!(response[6], 0, "{rop_id:?}");
+        }
+
+        let response = pre_dispatch_copy_destination_handle_error_response(
+            &session,
+            &[1, 1, 1, 1, 1, u32::MAX],
+            &HashSet::new(),
+            &request,
+        )
+        .unwrap();
+        assert_eq!(response.len(), 11, "{rop_id:?}");
+        assert_eq!(
+            u32::from_le_bytes(response[2..6].try_into().unwrap()),
+            0x0000_0503,
+            "{rop_id:?}"
+        );
+        assert_eq!(&response[6..10], &5u32.to_le_bytes(), "{rop_id:?}");
+        assert_eq!(response[10], 0, "{rop_id:?}");
+
+        let same_execute_released = pre_dispatch_copy_destination_handle_error_response(
+            &session,
+            &[1, 1, 1, 1, 1, u32::MAX],
+            &HashSet::from([5]),
+            &request,
+        )
+        .unwrap();
+        assert_eq!(same_execute_released.len(), 7, "{rop_id:?}");
+        assert_eq!(
+            u32::from_le_bytes(same_execute_released[2..6].try_into().unwrap()),
+            MapiError::InvalidObject.as_u32(),
+            "{rop_id:?}"
+        );
+        assert_eq!(same_execute_released[6], 0, "{rop_id:?}");
+    }
+}
+
 pub(super) fn test_principal() -> AccountPrincipal {
     AccountPrincipal {
         tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
@@ -3477,6 +3786,7 @@ pub(super) fn test_mapi_session() -> MapiSession {
         execute_request_count: 0,
         next_handle: 1,
         handles: HashMap::new(),
+        issued_handles: HashSet::new(),
         folder_profile_property_tombstones: HashMap::new(),
         message_statuses: HashMap::new(),
         message_save_generations: HashMap::new(),

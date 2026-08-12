@@ -19,15 +19,7 @@ async fn mapi_over_http_sync_import_deletes_success_response_is_exactly_six_byte
     };
     let deleted_emails = store.deleted_emails.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
@@ -47,7 +39,7 @@ async fn mapi_over_http_sync_import_deletes_success_response_is_exactly_six_byte
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();

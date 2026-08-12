@@ -64,16 +64,14 @@ pub(super) async fn save_pending_contact<S: ExchangeStore>(
                 last_modification_time: created.version.last_modification_time,
             };
             snapshot.remember_created_contact(folder_id, created.contact, identity);
-            session.handles.insert(
+            remember_saved_contact_handle(
+                session,
                 handle,
-                MapiObject::Contact {
-                    folder_id,
-                    contact_id,
-                    transaction: MapiContactTransaction::new(
-                        0x01,
-                        created.version.canonical_modseq,
-                    ),
-                },
+                folder_id,
+                contact_id,
+                save_disposition(request)
+                    .expect("SaveFlags were validated before Contact creation"),
+                created.version.canonical_modseq,
             );
             if changes_server_replica {
                 session.record_notification(MapiNotificationEvent::content(
@@ -261,10 +259,7 @@ fn remember_saved_contact_handle(
     disposition: SaveDisposition,
     canonical_modseq: i64,
 ) {
-    let Some(open_mode_flags) = event_open_mode_after_save(disposition) else {
-        session.handles.remove(&handle);
-        return;
-    };
+    let open_mode_flags = event_open_mode_after_save(disposition).unwrap_or(0x00);
     session.handles.insert(
         handle,
         MapiObject::Contact {

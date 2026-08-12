@@ -2330,6 +2330,33 @@ fn navigation_shortcut_direct_copy_projects_its_account_scoped_entry_id() {
 }
 
 #[test]
+fn fast_transfer_copy_folder_rejects_message_objects() {
+    let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+    let shortcut_id = crate::mapi::identity::mapi_store_id(0x7800);
+    let snapshot = MapiMailStoreSnapshot::empty()
+        .with_navigation_shortcuts(persisted_common_views_shortcuts(account_id));
+    let object = MapiObject::NavigationShortcut {
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        shortcut_id,
+        pending_properties: HashMap::new(),
+        deleted_properties: HashSet::new(),
+    };
+
+    assert!(fast_transfer_manifest_for_object(
+        RopId::FastTransferSourceCopyFolder.as_u8(),
+        0x09,
+        0,
+        &[],
+        &object,
+        &sync_principal(account_id),
+        &[],
+        &[],
+        &snapshot,
+    )
+    .is_none());
+}
+
+#[test]
 fn fast_transfer_manifest_rejects_unbacked_common_views_shortcut() {
     let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
     let shortcut_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);

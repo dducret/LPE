@@ -1033,29 +1033,56 @@ impl MapiSession {
 
     pub(in crate::mapi) fn allocate_output_handle_avoiding(
         &mut self,
-        output_handle_index: Option<u8>,
+        _output_handle_index: Option<u8>,
         object: MapiObject,
         reserved_handles: &HashSet<u32>,
     ) -> u32 {
-        while self.handles.contains_key(&self.next_handle)
-            || reserved_handles.contains(&self.next_handle)
-        {
-            self.next_handle = self.next_handle.saturating_add(1).max(1);
+        let mut candidate = valid_server_handle(self.next_handle);
+        let max_attempts = self
+            .issued_handles
+            .len()
+            .saturating_add(self.handles.len())
+            .saturating_add(reserved_handles.len())
+            .saturating_add(1);
+        for _ in 0..max_attempts {
+            if !self.issued_handles.contains(&candidate)
+                && !self.handles.contains_key(&candidate)
+                && !reserved_handles.contains(&candidate)
+            {
+                self.next_handle = next_server_handle(candidate);
+                // Keep the tombstone for the lifetime of the session so a
+                // stale client handle remains distinguishable after Release.
+                self.issued_handles.insert(candidate);
+                self.handles.insert(candidate, object);
+                return candidate;
+            }
+            candidate = next_server_handle(candidate);
         }
-        let preferred = output_handle_index.map(|index| index as u32 + 1);
-        let handle = preferred
-            .filter(|handle| {
-                *handle >= self.next_handle
-                    && !self.handles.contains_key(handle)
-                    && !reserved_handles.contains(handle)
-            })
-            .unwrap_or(self.next_handle);
-        self.next_handle = self.next_handle.saturating_add(1).max(1);
-        if handle >= self.next_handle {
-            self.next_handle = handle.saturating_add(1).max(1);
+        // The union of blocked handles has at most max_attempts - 1 entries,
+        // so max_attempts distinct candidates must contain a free value. A
+        // session cannot populate the entire 2^32 - 2 valid-handle namespace;
+        // reaching this branch means that allocator state violated that
+        // cardinality invariant rather than ordinary handle exhaustion.
+        panic!("MAPI session server-object handle space exhausted")
+    }
+
+    pub(in crate::mapi) fn forget_handle(&mut self, handle: u32) {
+        if self.handles.contains_key(&handle) {
+            self.issued_handles.insert(handle);
         }
-        self.handles.insert(handle, object);
-        handle
+        self.forget_table_notification_handle(handle);
+        self.handles.remove(&handle);
+        self.folder_profile_property_tombstones.remove(&handle);
+        self.message_handle_generations.remove(&handle);
+        self.pending_sync_import_source_keys.remove(&handle);
+        self.pending_message_recipient_replacements.remove(&handle);
+        self.pending_message_attachments.remove(&handle);
+        self.pending_attachment_parent_messages.remove(&handle);
+        self.pending_event_attachment_transactions.remove(&handle);
+        self.pending_embedded_message_ids.remove(&handle);
+        self.pending_embedded_message_attachments.remove(&handle);
+        self.inbox_associated_config_stream_handles.remove(&handle);
+        self.inbox_rule_organizer_stream_handles.remove(&handle);
     }
 
     pub(in crate::mapi) fn hierarchy_sync_completed(&self) -> bool {
@@ -1351,6 +1378,22 @@ pub(in crate::mapi) fn synchronization_context_state(
     }
 }
 
+fn valid_server_handle(handle: u32) -> u32 {
+    if matches!(handle, 0 | u32::MAX) {
+        1
+    } else {
+        handle
+    }
+}
+
+fn next_server_handle(handle: u32) -> u32 {
+    if handle >= u32::MAX - 1 {
+        1
+    } else {
+        handle + 1
+    }
+}
+
 pub(in crate::mapi) fn input_handle(input_handles: &[u32], request: &RopRequest) -> Option<u32> {
     input_handles
         .get(request.input_handle_index()? as usize)
@@ -1384,11 +1427,7 @@ pub(in crate::mapi) fn release_handle_slot(
         return;
     };
     if *handle != u32::MAX {
-        session.forget_table_notification_handle(*handle);
-        session.handles.remove(handle);
-        session.folder_profile_property_tombstones.remove(handle);
-        session.message_handle_generations.remove(handle);
-        session.pending_sync_import_source_keys.remove(handle);
+        session.forget_handle(*handle);
     }
     *handle = u32::MAX;
 }

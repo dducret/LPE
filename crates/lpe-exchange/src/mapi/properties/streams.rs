@@ -616,39 +616,15 @@ pub(in crate::mapi) fn write_stream(
     Some(written)
 }
 
-pub(in crate::mapi) fn resolve_writable_stream_handle(
+pub(in crate::mapi) fn exact_attachment_stream_handle(
     session: &MapiSession,
     requested_handle: u32,
 ) -> Option<u32> {
-    if matches!(
+    matches!(
         session.handles.get(&requested_handle),
         Some(MapiObject::AttachmentStream { .. })
-    ) {
-        return Some(requested_handle);
-    }
-    if !matches!(
-        session.handles.get(&requested_handle),
-        Some(MapiObject::AssociatedConfig { .. })
-    ) {
-        return None;
-    }
-
-    let mut matches = session
-        .handles
-        .iter()
-        .filter_map(|(handle, object)| match object {
-            MapiObject::AttachmentStream {
-                writable_target:
-                    Some(StreamWriteTarget::AssociatedConfigProperty {
-                        handle: target_handle,
-                        ..
-                    }),
-                ..
-            } if *target_handle == requested_handle => Some(*handle),
-            _ => None,
-        });
-    let handle = matches.next()?;
-    matches.next().is_none().then_some(handle)
+    )
+    .then_some(requested_handle)
 }
 
 pub(in crate::mapi) fn stream_write_error(
@@ -1105,6 +1081,7 @@ mod tests {
             execute_request_count: 0,
             next_handle: 2,
             handles,
+            issued_handles: HashSet::new(),
             folder_profile_property_tombstones: HashMap::new(),
             message_statuses: HashMap::new(),
             message_save_generations: HashMap::new(),

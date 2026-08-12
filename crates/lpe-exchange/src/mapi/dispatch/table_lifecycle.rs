@@ -1,5 +1,36 @@
 use super::*;
 
+pub(super) fn is_status_or_bookmark_rop(rop_id: RopId) -> bool {
+    matches!(
+        rop_id,
+        RopId::GetStoreState
+            | RopId::Abort
+            | RopId::Progress
+            | RopId::ResetTable
+            | RopId::FreeBookmark
+    )
+}
+
+pub(super) fn append_status_or_bookmark_dispatch_response(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    responses: &mut Vec<u8>,
+) {
+    match RopId::from_u8(request.rop_id) {
+        Some(RopId::GetStoreState) => {
+            append_store_state_response(session, handle_slots, request, responses)
+        }
+        Some(RopId::Abort | RopId::Progress | RopId::ResetTable) => {
+            append_execute_status_response(session, handle_slots, request, responses)
+        }
+        Some(RopId::FreeBookmark) => {
+            append_free_bookmark_response(session, handle_slots, request, responses)
+        }
+        _ => {}
+    }
+}
+
 pub(super) struct VisibleInboxProjectionAudit {
     pub(super) summary: String,
     pub(super) valid: bool,

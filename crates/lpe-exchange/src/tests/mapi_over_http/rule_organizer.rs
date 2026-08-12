@@ -6,15 +6,7 @@ async fn mapi_over_http_exchange_rule_organizer_query_rows_opens_returned_messag
         session: Some(FakeStore::account()),
         ..Default::default()
     });
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     // Exchange 2016 raw/551 in test1_202608031300.saz restricts the Inbox
     // associated-contents table to this FAI, then raw/554 opens the returned
@@ -70,7 +62,10 @@ async fn mapi_over_http_exchange_rule_organizer_query_rows_opens_returned_messag
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&query_rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &query_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -132,7 +127,10 @@ async fn mapi_over_http_exchange_rule_organizer_query_rows_opens_returned_messag
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&open_rops, &[1, folder_handle, table_handle])),
+            &execute_body(&rop_buffer(
+                &open_rops,
+                &[logon_handle, folder_handle, table_handle],
+            )),
         )
         .await
         .unwrap();
@@ -184,7 +182,7 @@ async fn mapi_over_http_exchange_rule_organizer_query_rows_opens_returned_messag
             &execute_headers,
             &execute_body(&rop_buffer(
                 &stream_rops,
-                &[1, folder_handle, message_handle, u32::MAX],
+                &[logon_handle, folder_handle, message_handle, u32::MAX],
             )),
         )
         .await

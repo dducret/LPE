@@ -19,6 +19,19 @@ pub(super) fn append_folder_open_dispatch_response(
     output_handles: &mut Vec<u32>,
 ) {
     if matches!(RopId::from_u8(request.rop_id), Some(RopId::OpenFolder)) {
+        // [MS-OXCFOLD] section 2.2.1.1.1 requires the input Server object
+        // to be a Logon object or Folder object.
+        if !matches!(
+            input_object(session, handle_slots, request),
+            Some(MapiObject::Logon | MapiObject::PublicFolderLogon | MapiObject::Folder { .. })
+        ) {
+            responses.extend_from_slice(&rop_error_response(
+                0x02,
+                request.output_handle_index.unwrap_or(0),
+                0x8004_0102,
+            ));
+            return;
+        }
         append_open_folder_response(
             principal,
             request_id,

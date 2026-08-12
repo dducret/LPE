@@ -362,6 +362,45 @@ pub(in crate::mapi) fn special_sync_objects_for(
     objects
 }
 
+pub(in crate::mapi) fn associated_sync_message_exists(
+    folder_id: u64,
+    message_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> bool {
+    if folder_id != COMMON_VIEWS_FOLDER_ID
+        && snapshot
+            .associated_config_message_for_folder_and_source_key_id(folder_id, message_id)
+            .is_some()
+    {
+        return true;
+    }
+    match folder_id {
+        COMMON_VIEWS_FOLDER_ID => snapshot
+            .common_views_messages()
+            .any(|message| match message {
+                crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(message) => {
+                    message.id == message_id
+                }
+                crate::mapi_store::MapiCommonViewsMessage::NamedView(message) => {
+                    message.id == message_id
+                }
+                crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(message) => {
+                    crate::mapi::identity::mapped_mapi_object_id(&message.id) == Some(message_id)
+                }
+                crate::mapi_store::MapiCommonViewsMessage::AssociatedConfig(message) => {
+                    message.id == message_id
+                }
+            }),
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID => snapshot
+            .conversation_action_message_for_id(message_id)
+            .is_some(),
+        FREEBUSY_DATA_FOLDER_ID => snapshot
+            .delegate_freebusy_message_for_id(message_id)
+            .is_some(),
+        _ => false,
+    }
+}
+
 fn populate_special_message_named_property_definitions(
     object: &mut mapi_mailstore::SpecialMessageSyncFact,
     snapshot: &MapiMailStoreSnapshot,
@@ -1082,6 +1121,14 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Option<(u64, Vec<u8>)> {
+    if RopId::from_u8(rop_id) == Some(RopId::FastTransferSourceCopyFolder)
+        && !matches!(object, MapiObject::Folder { .. })
+    {
+        // [MS-OXCFXICS] section 2.2.3.1.1.4.1 requires a Folder object for
+        // RopFastTransferSourceCopyFolder. A Message's containing folder is
+        // lineage, not permission to serialize that Message as a folder copy.
+        return None;
+    }
     let message_children = fast_transfer_message_children(rop_id, level, property_tags);
     let direct_property_filter =
         mapi_mailstore::FastTransferDirectPropertyFilter::for_rop(rop_id, property_tags);

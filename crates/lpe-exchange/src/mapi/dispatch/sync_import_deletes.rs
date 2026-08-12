@@ -22,21 +22,38 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
-    let hierarchy_collector_folder_id = match input_object(session, handle_slots, request) {
-        Some(MapiObject::SynchronizationCollector {
-            folder_id,
-            sync_type: 0x02,
-            ..
-        }) => Some(*folder_id),
-        _ => None,
+    let import_delete_flags = request.import_delete_flags();
+    if import_delete_flags & !0x03 != 0 {
+        // [MS-OXCFXICS] section 3.2.5.9.4.5 recommends failing the
+        // complete ROP when ImportDeleteFlags contains unknown bits.
+        responses.extend_from_slice(&synchronization_import_deletes_response(request, true));
+        return;
+    }
+    let Some(MapiObject::SynchronizationCollector {
+        folder_id,
+        sync_type,
+        ..
+    }) = input_object(session, handle_slots, request)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x74,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
     };
-    if hierarchy_collector_folder_id.is_some() {
-        if request.import_delete_flags() & !0x03 != 0 {
-            // [MS-OXCFXICS] section 3.2.5.9.4.5 recommends failing the
-            // complete ROP when ImportDeleteFlags contains unknown bits.
-            responses.extend_from_slice(&synchronization_import_deletes_response(request, true));
-            return;
-        }
+    let folder_id = *folder_id;
+    let hierarchy_delete = import_delete_flags & 0x01 != 0;
+    let expected_sync_type = if hierarchy_delete { 0x02 } else { 0x01 };
+    if *sync_type != expected_sync_type {
+        responses.extend_from_slice(&rop_error_response(
+            0x74,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    }
+    if hierarchy_delete {
         let mut seen_folder_ids = HashSet::new();
         let folder_ids = request
             .import_delete_message_ids()
@@ -81,20 +98,6 @@ pub(super) async fn append_synchronization_import_deletes_response<S: ExchangeSt
             request,
             had_failure,
         ));
-        return;
-    }
-    let Some(folder_id) =
-        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
-    else {
-        responses.extend_from_slice(&rop_error_response(
-            0x74,
-            request.response_handle_index(),
-            0x8004_010F,
-        ));
-        return;
-    };
-    if request.import_delete_flags() & !0x03 != 0 {
-        responses.extend_from_slice(&synchronization_import_deletes_response(request, true));
         return;
     }
     let mut had_failure = false;

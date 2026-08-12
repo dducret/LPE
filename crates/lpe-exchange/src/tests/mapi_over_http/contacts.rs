@@ -56,6 +56,18 @@ async fn mapi_over_http_outlook_contacts_open_resolves_standard_named_properties
         "cookie",
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let logon_body = response_bytes(logon).await;
+    let (_, logon_handles) = response_rops_and_handles_from_execute_body(&logon_body);
+    let logon_handle = logon_handles[0];
+    renew_mapi_request_id(&mut execute_headers);
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CONTACTS_FOLDER_ID);
@@ -75,7 +87,7 @@ async fn mapi_over_http_outlook_contacts_open_resolves_standard_named_properties
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -121,15 +133,7 @@ async fn mapi_over_http_contact_link_copy_to_uses_message_content_root() {
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = Vec::new();
     append_rop_create_associated_message(
@@ -163,7 +167,10 @@ async fn mapi_over_http_contact_link_copy_to_uses_message_content_root() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &rops,
+                &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -208,15 +215,7 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
             .unwrap();
     let contacts = store.contacts.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let address_guid = [
         0x04, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -234,7 +233,7 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&named_rops, &[1])),
+            &execute_body(&rop_buffer(&named_rops, &[logon_handle])),
         )
         .await
         .unwrap();
@@ -266,7 +265,7 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -288,18 +287,14 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
     assert_eq!(stored[0].name, "Élodie Müller");
     assert_eq!(stored[0].email, "elodie@example.test");
     assert_eq!(stored[0].organization_name, "Société Zürich");
-    assert!(
-        stored[0]
-            .emails_json
-            .to_string()
-            .contains("elodie@example.test")
-    );
-    assert!(
-        stored[0]
-            .emails_json
-            .to_string()
-            .contains("e.mueller@example.test")
-    );
+    assert!(stored[0]
+        .emails_json
+        .to_string()
+        .contains("elodie@example.test"));
+    assert!(stored[0]
+        .emails_json
+        .to_string()
+        .contains("e.mueller@example.test"));
     drop(stored);
 
     let mut update_values = Vec::new();
@@ -327,24 +322,23 @@ async fn mapi_over_http_outlook_contact_create_resolves_named_email_addresses() 
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&update_rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &update_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(
-        !response_rops
-            .windows(4)
-            .any(|window| window == 0x8004_0102u32.to_le_bytes())
-    );
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
     let stored = contacts.lock().unwrap();
     assert_eq!(stored[0].email, "elodie.updated@example.test");
-    assert!(
-        stored[0]
-            .emails_json
-            .to_string()
-            .contains("e.updated@example.test")
-    );
+    assert!(stored[0]
+        .emails_json
+        .to_string()
+        .contains("e.updated@example.test"));
 }
 
 #[tokio::test]
@@ -401,6 +395,19 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let logon_body = response_bytes(logon).await;
+    let (_, logon_handles) = response_rops_and_handles_from_execute_body(&logon_body);
+    let logon_handle = logon_handles[0];
+    renew_mapi_request_id(&mut execute_headers);
+
     let collector_rops =
         crate::mapi::identity::with_current_mapi_identity_codec(identity_codec.clone(), async {
             let mut collector_rops = Vec::new();
@@ -420,7 +427,10 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &collector_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -487,6 +497,7 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
     let mut save_rops = Vec::new();
     append_rop_set_properties(&mut save_rops, 1, 5, &contact_values);
     append_rop_save_changes_message_with_flags(&mut save_rops, 1, 1, 0x08);
+    append_rop_get_properties_specific(&mut save_rops, 1, &[PID_TAG_CHANGE_KEY]);
 
     renew_mapi_request_id(&mut execute_headers);
     let response = service
@@ -508,6 +519,16 @@ async fn mapi_over_http_replays_outlook_contact_sync_import_then_save() {
     assert!(
         contains_bytes(&save_response, &expected_save),
         "RopSaveChangesMessage must commit the imported Contact MID; expected {expected_save:02x?}, got {save_response:02x?}"
+    );
+    let get_properties_row =
+        mapi_get_properties_specific_standard_row_offset(&save_response, 1).unwrap();
+    let mut expected_change_key_row = vec![0];
+    expected_change_key_row.extend_from_slice(&(change_key.len() as u16).to_le_bytes());
+    expected_change_key_row.extend_from_slice(&change_key);
+    assert_eq!(
+        &save_response[get_properties_row..get_properties_row + expected_change_key_row.len()],
+        expected_change_key_row,
+        "same-Execute Contact read must return the committed imported ChangeKey"
     );
 
     let stored_contacts = contacts.lock().unwrap();
@@ -769,15 +790,7 @@ async fn mapi_over_http_contact_sync_import_save_reports_deleted_source_key() {
 
     let contacts = store.contacts.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut collector_rops = Vec::new();
     append_rop_open_folder(
@@ -791,7 +804,10 @@ async fn mapi_over_http_contact_sync_import_save_reports_deleted_source_key() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&collector_rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &collector_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -871,11 +887,7 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
     let contacts = store.contacts.clone();
     let deleted_contacts = store.deleted_contacts.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut property_values = Vec::new();
     append_mapi_utf16_property(&mut property_values, 0x3001_001F, "RCA Contact");
@@ -889,13 +901,11 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
     append_rop_set_properties(&mut rops, 1, 6, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 1);
     append_rop_get_properties_specific(&mut rops, 1, &[0x3001_001F, 0x39FE_001F, 0x3A1C_001F]);
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -934,16 +944,17 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&update_rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &update_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(
-        !response_rops
-            .windows(4)
-            .any(|window| window == 0x8004_0102u32.to_le_bytes())
-    );
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
     {
         let stored = contacts.lock().unwrap();
         assert_eq!(stored[0].name, "Updated RCA Contact");
@@ -965,7 +976,7 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&read_rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&read_rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -987,16 +998,17 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&delete_rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &delete_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(
-        !response_rops
-            .windows(4)
-            .any(|window| window == 0x8004_0102u32.to_le_bytes())
-    );
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
     assert!(contacts.lock().unwrap().is_empty());
     assert_eq!(deleted_contacts.lock().unwrap().as_slice(), &[contact_id]);
 }
@@ -1052,15 +1064,7 @@ async fn mapi_over_http_shared_contact_read_only_rights_reject_mutations() {
         .id;
     let contacts = store.contacts.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut properties = Vec::new();
     append_mapi_utf16_property(&mut properties, 0x3001_001F, "Forbidden update");
@@ -1075,7 +1079,7 @@ async fn mapi_over_http_shared_contact_read_only_rights_reject_mutations() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -1116,11 +1120,7 @@ async fn mapi_over_http_set_properties_rejects_unsupported_canonical_contact_pro
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap();
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut property_values = Vec::new();
     append_mapi_utf16_property(&mut property_values, 0x3613_001F, "IPF.Note");
@@ -1134,13 +1134,11 @@ async fn mapi_over_http_set_properties_rejects_unsupported_canonical_contact_pro
         test_mapi_uuid_id(&contact_id),
     );
     append_rop_set_properties(&mut rops, 2, 1, &property_values);
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", cookie);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -1240,20 +1238,16 @@ async fn mapi_over_http_contacts_sync_exports_associated_config_deletes() {
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     let deleted_idset = stream.deleted_idset.as_deref().unwrap();
-    assert!(
-        strict_replid_globset_contains_counter(
-            deleted_idset,
-            &globcnt_bytes(config_object_id >> 16)
-        )
-        .unwrap()
-    );
-    assert!(
-        strict_replid_globset_contains_counter(
-            deleted_idset,
-            &globcnt_bytes(contact_object_id >> 16)
-        )
-        .unwrap()
-    );
+    assert!(strict_replid_globset_contains_counter(
+        deleted_idset,
+        &globcnt_bytes(config_object_id >> 16)
+    )
+    .unwrap());
+    assert!(strict_replid_globset_contains_counter(
+        deleted_idset,
+        &globcnt_bytes(contact_object_id >> 16)
+    )
+    .unwrap());
 }
 
 #[tokio::test]
@@ -1518,21 +1512,15 @@ async fn mapi_over_http_contacts_search_content_sync_uses_search_folder_parent()
     assert_eq!(stream.message_changes.len(), 1);
     assert_eq!(stream.message_changes[0].subject, "Contact Search One");
     assert!(!stream.message_changes[0].associated);
-    assert!(
-        stream.message_changes[0]
-            .body_tags
-            .contains(&PID_TAG_DISPLAY_NAME_W)
-    );
-    assert!(
-        stream.message_changes[0]
-            .body_tags
-            .contains(&PID_TAG_SUBJECT_W)
-    );
-    assert!(
-        stream.message_changes[0]
-            .body_tags
-            .contains(&0x001A_001Fu32)
-    );
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&PID_TAG_DISPLAY_NAME_W));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&PID_TAG_SUBJECT_W));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&0x001A_001Fu32));
     assert_eq!(
         stream.message_changes[0].parent_source_key,
         identity_codec
@@ -1583,15 +1571,7 @@ async fn mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags(
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let dictionary = br#"<?xml version="1.0"?><UserConfiguration><Info version="Outlook.16"/><Data><e k="18-piImportedContactNickNames" v="3-True"/><e k="18-OLPrefsVersion" v="9-1"/></Data></UserConfiguration>"#;
     let mut class_value = Vec::new();
@@ -1631,7 +1611,7 @@ async fn mapi_over_http_outlook_contact_prefs_save_accepts_combined_force_flags(
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -1685,11 +1665,7 @@ async fn mapi_over_http_created_contact_link_config_accepts_outlook_marker_prope
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    let (headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut property_values = Vec::new();
     append_mapi_utf16_property(
@@ -1714,13 +1690,11 @@ async fn mapi_over_http_created_contact_link_config_accepts_outlook_marker_prope
     append_rop_set_properties(&mut rops, 1, 3, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 1);
 
-    let mut headers = mapi_headers("Execute");
-    headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -1772,15 +1746,7 @@ async fn mapi_over_http_builtin_contacts_search_get_search_criteria_uses_fixed_f
         .await
         .unwrap();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let rops =
         crate::mapi::identity::with_current_mapi_identity_codec(identity_codec.clone(), async {
@@ -1799,7 +1765,7 @@ async fn mapi_over_http_builtin_contacts_search_get_search_criteria_uses_fixed_f
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();

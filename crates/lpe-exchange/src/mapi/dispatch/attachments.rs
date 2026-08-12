@@ -1,5 +1,9 @@
 use super::*;
 
+mod save_contract;
+
+use save_contract::save_attachment_parent_handle;
+
 pub(super) fn is_attachment_rop(rop_id: RopId) -> bool {
     matches!(
         rop_id,
@@ -716,7 +720,7 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
     store: &S,
     principal: &AccountPrincipal,
     session: &mut MapiSession,
-    handle_slots: &[u32],
+    handle_slots: &mut Vec<u32>,
     request: &RopRequest,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
@@ -778,6 +782,24 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
             0x0000_04B9,
         ));
         return;
+    };
+    let parent_handle = match save_attachment_parent_handle(
+        session,
+        handle_slots,
+        request,
+        handle,
+        folder_id,
+        message_id,
+    ) {
+        Ok(parent_handle) => parent_handle,
+        Err(error) => {
+            responses.extend_from_slice(&rop_error_response(
+                0x25,
+                request.response_handle_index(),
+                error.as_u32(),
+            ));
+            return;
+        }
     };
     if !snapshot
         .folder_access_for_principal(folder_id, principal.account_id)
@@ -908,6 +930,11 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
                 size_octets: attachment.blob_bytes.len() as u64,
             },
         );
+        set_handle_slot(
+            handle_slots,
+            Some(request.response_handle_index()),
+            parent_handle,
+        );
         responses.extend_from_slice(&rop_simple_success_response(request));
         return;
     }
@@ -956,6 +983,11 @@ pub(super) async fn append_save_changes_attachment_response<S, V>(
                         content_id: stored.content_id,
                         size_octets: stored.size_octets,
                     },
+                );
+                set_handle_slot(
+                    handle_slots,
+                    Some(request.response_handle_index()),
+                    parent_handle,
                 );
                 responses.extend_from_slice(&rop_simple_success_response(request));
             }
@@ -1168,7 +1200,7 @@ pub(super) fn abandon_event_attachment_transaction(session: &mut MapiSession, pa
         .collect::<Vec<_>>();
     clear_event_attachment_transaction(session, parent_handle);
     for child_handle in child_handles {
-        session.handles.remove(&child_handle);
+        session.forget_handle(child_handle);
     }
 }
 

@@ -167,18 +167,20 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
         ));
         return;
     };
-    let Some(folder_id) = session
-        .handles
-        .get(&collector_handle)
-        .and_then(MapiObject::folder_id)
+    let Some(MapiObject::SynchronizationCollector {
+        folder_id,
+        sync_type: 0x01,
+        ..
+    }) = session.handles.get(&collector_handle)
     else {
         responses.extend_from_slice(&rop_error_response(
             0x72,
             request.response_handle_index(),
-            0x8004_010F,
+            0x8004_0102,
         ));
         return;
     };
+    let folder_id = *folder_id;
     let property_values = match request.import_property_values() {
         Ok(values) => values,
         Err(_) => {

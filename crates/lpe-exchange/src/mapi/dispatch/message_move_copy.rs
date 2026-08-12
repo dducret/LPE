@@ -16,7 +16,7 @@ pub(super) async fn append_move_copy_messages_response<S>(
     if request.move_copy_want_asynchronous().is_none()
         || request.move_copy_want_copy_raw().is_none()
     {
-        responses.extend_from_slice(&rop_error_response(
+        responses.extend_from_slice(&rop_partial_completion_error_response(
             0x33,
             request.response_handle_index(),
             0x8007_0057,
@@ -38,7 +38,7 @@ pub(super) async fn append_move_copy_messages_response<S>(
                 failure = "source_handle_not_folder",
                 "rca debug mapi move copy messages failure"
             );
-            responses.extend_from_slice(&rop_error_response(
+            responses.extend_from_slice(&rop_partial_completion_error_response(
                 0x33,
                 request.response_handle_index(),
                 0x0000_04B9,
@@ -48,13 +48,9 @@ pub(super) async fn append_move_copy_messages_response<S>(
     };
     let target_folder_id = match request
         .move_copy_target_handle(handle_slots)
-        .and_then(|handle| {
-            session
-                .handles
-                .get(&handle)
-                .and_then(|object| object.folder_id())
-        }) {
-        Some(folder_id) => folder_id,
+        .and_then(|handle| session.handles.get(&handle))
+    {
+        Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
         None => {
             tracing::info!(
                 adapter = "mapi",
@@ -68,7 +64,15 @@ pub(super) async fn append_move_copy_messages_response<S>(
                 failure = "target_handle_not_folder",
                 "rca debug mapi move copy messages failure"
             );
-            responses.extend_from_slice(&rop_error_response(
+            responses.extend_from_slice(&rop_partial_completion_error_response(
+                0x33,
+                request.response_handle_index(),
+                0x8004_010F,
+            ));
+            return;
+        }
+        Some(_) => {
+            responses.extend_from_slice(&rop_partial_completion_error_response(
                 0x33,
                 request.response_handle_index(),
                 0x8004_010F,
@@ -120,7 +124,7 @@ pub(super) async fn append_move_copy_messages_response<S>(
             failure = "recoverable_items_root_source",
             "rca debug mapi move copy messages failure"
         );
-        responses.extend_from_slice(&rop_error_response(
+        responses.extend_from_slice(&rop_partial_completion_error_response(
             0x33,
             request.response_handle_index(),
             0x8004_0102,
@@ -224,7 +228,7 @@ pub(super) async fn append_move_copy_messages_response<S>(
     }
     if crate::mapi_store::recoverable_storage_folder(source_folder_id).is_some() {
         if request.move_copy_want_copy() {
-            responses.extend_from_slice(&rop_error_response(
+            responses.extend_from_slice(&rop_partial_completion_error_response(
                 0x33,
                 request.response_handle_index(),
                 0x8004_0102,
@@ -232,7 +236,7 @@ pub(super) async fn append_move_copy_messages_response<S>(
             return;
         }
         let Some(target_mailbox) = folder_row_for_id(target_folder_id, mailboxes) else {
-            responses.extend_from_slice(&rop_error_response(
+            responses.extend_from_slice(&rop_partial_completion_error_response(
                 0x33,
                 request.response_handle_index(),
                 0x8004_010F,
@@ -274,7 +278,7 @@ pub(super) async fn append_move_copy_messages_response<S>(
     }
     if snapshot.public_folder_for_id(source_folder_id).is_some() {
         let Some(target_folder) = snapshot.public_folder_for_id(target_folder_id) else {
-            responses.extend_from_slice(&rop_error_response(
+            responses.extend_from_slice(&rop_partial_completion_error_response(
                 0x33,
                 request.response_handle_index(),
                 0x8004_010F,
@@ -360,7 +364,7 @@ pub(super) async fn append_move_copy_messages_response<S>(
         return;
     }
     let Some(target_mailbox) = folder_row_for_id(target_folder_id, mailboxes) else {
-        responses.extend_from_slice(&rop_error_response(
+        responses.extend_from_slice(&rop_partial_completion_error_response(
             0x33,
             request.response_handle_index(),
             0x8004_010F,

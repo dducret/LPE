@@ -118,8 +118,8 @@ pub(super) fn submitted_message_handle_object(
     }
 }
 
-pub(super) fn transport_folder_response(request: &RopRequest, has_input_object: bool) -> Vec<u8> {
-    if has_input_object {
+pub(super) fn transport_folder_response(request: &RopRequest, has_private_logon: bool) -> Vec<u8> {
+    if has_private_logon {
         rop_get_transport_folder_response(request)
     } else {
         rop_error_response(0x6D, request.response_handle_index(), 0x8004_0102)
@@ -140,8 +140,8 @@ pub(super) fn append_transport_folder_response(
     request: &RopRequest,
     responses: &mut Vec<u8>,
 ) {
-    let has_input_object = input_object(session, handle_slots, request).is_some();
-    responses.extend_from_slice(&transport_folder_response(request, has_input_object));
+    let has_private_logon = exact_private_logon_request_handle(session, handle_slots, request);
+    responses.extend_from_slice(&transport_folder_response(request, has_private_logon));
 }
 
 pub(super) fn append_options_data_response(
@@ -203,10 +203,15 @@ pub(super) async fn append_submission_dispatch_response<S>(
 {
     match RopId::from_u8(request.rop_id) {
         Some(RopId::SetSpooler | RopId::SpoolerLockMessage | RopId::TransportNewMail) => {
-            append_spooler_advisory_dispatch_response(handle_slots, request, responses);
+            append_spooler_advisory_dispatch_response(session, handle_slots, request, responses);
         }
         Some(RopId::UpdateDeferredActionMessages) => {
-            append_deferred_action_messages_dispatch_response(handle_slots, request, responses);
+            append_deferred_action_messages_dispatch_response(
+                session,
+                handle_slots,
+                request,
+                responses,
+            );
         }
         Some(RopId::SubmitMessage | RopId::TransportSend) => {
             append_submit_message_response(
@@ -224,8 +229,17 @@ pub(super) async fn append_submission_dispatch_response<S>(
             .await;
         }
         Some(RopId::AbortSubmit) => {
-            append_abort_submit_response(store, principal, request, mailboxes, emails, responses)
-                .await;
+            append_abort_submit_response(
+                store,
+                principal,
+                session,
+                handle_slots,
+                request,
+                mailboxes,
+                emails,
+                responses,
+            )
+            .await;
         }
         Some(RopId::GetTransportFolder | RopId::OptionsData) => {
             append_transport_info_dispatch_response(session, handle_slots, request, responses);
@@ -282,41 +296,38 @@ pub(super) fn abort_submit_cancel_response(
     }
 }
 
-pub(super) fn spooler_advisory_response(request: &RopRequest, has_input_handle: bool) -> Vec<u8> {
-    if has_input_handle {
+pub(super) fn spooler_advisory_response(request: &RopRequest, has_private_logon: bool) -> Vec<u8> {
+    if has_private_logon {
         rop_simple_success_response(request)
     } else {
-        rop_error_response(request.rop_id, request.response_handle_index(), 0x8004_010F)
+        rop_error_response(request.rop_id, request.response_handle_index(), 0x8004_0102)
     }
 }
 
 pub(super) fn deferred_action_messages_response(
     request: &RopRequest,
-    has_input_handle: bool,
+    _has_private_logon: bool,
 ) -> Vec<u8> {
-    if has_input_handle {
-        rop_error_response(request.rop_id, request.response_handle_index(), 0x8004_0102)
-    } else {
-        rop_error_response(request.rop_id, request.response_handle_index(), 0x8004_010F)
-    }
+    rop_error_response(request.rop_id, request.response_handle_index(), 0x8004_0102)
 }
 
 pub(super) fn append_spooler_advisory_response(
     request: &RopRequest,
-    has_input_handle: bool,
+    has_private_logon: bool,
     responses: &mut Vec<u8>,
 ) {
-    responses.extend_from_slice(&spooler_advisory_response(request, has_input_handle));
+    responses.extend_from_slice(&spooler_advisory_response(request, has_private_logon));
 }
 
 pub(super) fn append_spooler_advisory_dispatch_response(
+    session: &MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
     responses: &mut Vec<u8>,
 ) {
     append_spooler_advisory_response(
         request,
-        input_handle(handle_slots, request).is_some(),
+        exact_private_logon_request_handle(session, handle_slots, request),
         responses,
     );
 }
@@ -333,15 +344,20 @@ pub(super) fn append_deferred_action_messages_response(
 }
 
 pub(super) fn append_deferred_action_messages_dispatch_response(
+    session: &MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
     responses: &mut Vec<u8>,
 ) {
-    append_deferred_action_messages_response(
-        request,
-        input_handle(handle_slots, request).is_some(),
-        responses,
-    );
+    if !exact_private_logon_request_handle(session, handle_slots, request) {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            MapiError::NotSupported.as_u32(),
+        ));
+        return;
+    }
+    append_deferred_action_messages_response(request, true, responses);
 }
 
 pub(super) async fn append_submit_message_response<S>(
@@ -796,6 +812,8 @@ pub(super) async fn append_submit_message_response<S>(
 pub(super) async fn append_abort_submit_response<S>(
     store: &S,
     principal: &AccountPrincipal,
+    session: &MapiSession,
+    handle_slots: &[u32],
     request: &RopRequest,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
@@ -803,6 +821,14 @@ pub(super) async fn append_abort_submit_response<S>(
 ) where
     S: ExchangeStore,
 {
+    if !exact_private_logon_request_handle(session, handle_slots, request) {
+        responses.extend_from_slice(&rop_error_response(
+            0x34,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    }
     let Some(folder_id) = request.abort_submit_folder_id() else {
         responses.extend_from_slice(&rop_error_response(
             0x34,

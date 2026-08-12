@@ -11,18 +11,19 @@ pub(super) async fn append_create_folder_response<S: ExchangeStore>(
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
 ) {
-    let parent_folder_id =
-        match input_object(session, handle_slots, request).and_then(MapiObject::folder_id) {
-            Some(folder_id) => folder_id,
-            None => {
-                responses.extend_from_slice(&rop_error_response(
-                    0x1C,
-                    request.output_handle_index.unwrap_or(0),
-                    0x0000_04B9,
-                ));
-                return;
-            }
-        };
+    let Some(MapiObject::Folder {
+        folder_id: parent_folder_id,
+        ..
+    }) = input_object(session, handle_slots, request)
+    else {
+        responses.extend_from_slice(&rop_error_response(
+            0x1C,
+            request.output_handle_index.unwrap_or(0),
+            0x8004_0102,
+        ));
+        return;
+    };
+    let parent_folder_id = *parent_folder_id;
     let parent_mailbox = folder_row_for_id(parent_folder_id, mailboxes);
     let parent_public_folder_id = snapshot
         .public_folder_for_id(parent_folder_id)

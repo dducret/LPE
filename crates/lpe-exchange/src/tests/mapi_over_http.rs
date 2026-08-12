@@ -4,12 +4,14 @@ mod calendar;
 mod calendar_identity_scope;
 mod connect;
 mod contacts;
+mod exact_object_contracts;
 mod free_busy;
 mod hierarchy;
 mod local_replica_ids;
 mod logon_profile;
 mod notifications;
 mod nspi;
+mod object_contracts;
 mod permissions;
 mod properties;
 mod public_folders;
@@ -237,11 +239,7 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
         .await
         .unwrap();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let calendar_reminder_at = "2026-05-21T08:45:00Z";
     let task_reminder_at = "2026-05-21T11:45:00Z";
@@ -308,15 +306,13 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
     append_rop_set_properties(&mut rops, 4, 2, &task_values);
     append_rop_save_changes_message(&mut rops, 3, 4);
 
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
             &execute_body(&rop_buffer(
                 &rops,
-                &[u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+                &[logon_handle, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
             )),
         )
         .await
@@ -357,15 +353,7 @@ async fn modify_rules_response(
     };
     let active_sieve = store.active_sieve_script.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
@@ -385,7 +373,7 @@ async fn modify_rules_response(
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -407,11 +395,7 @@ async fn mapi_over_http_reminders_folder_open_uses_canonical_search_projection()
             .await
             .unwrap();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -431,9 +415,7 @@ async fn mapi_over_http_reminders_folder_open_uses_canonical_search_projection()
     rops.extend_from_slice(&0x3601_0003u32.to_le_bytes());
     rops.extend_from_slice(&0x3613_001Fu32.to_le_bytes());
 
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let request = execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX]));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -458,11 +440,7 @@ async fn mapi_over_http_root_rem_online_entry_id_projects_reminders_folder() {
         .await
         .unwrap();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -481,9 +459,7 @@ async fn mapi_over_http_root_rem_online_entry_id_projects_reminders_folder() {
     rops.extend_from_slice(&1u16.to_le_bytes());
     rops.extend_from_slice(&0x36D5_0102u32.to_le_bytes());
 
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let request = execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX]));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -611,11 +587,7 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
         .await
         .unwrap();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(
@@ -657,9 +629,10 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
             .unwrap(),
     );
 
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]));
+    let request = execute_body(&rop_buffer(
+        &rops,
+        &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+    ));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -738,22 +711,16 @@ async fn abort_submit_response(status: &str) -> (Vec<u8>, Vec<Uuid>) {
     };
     let cancelled_submissions = store.cancelled_submissions.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
     let mut rops = Vec::new();
     rops.extend_from_slice(&[0x34, 0x00, 0x00]);
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(7));
     append_mapi_wire_id(&mut rops, mapi_message_id);
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle])),
         )
         .await
         .unwrap();

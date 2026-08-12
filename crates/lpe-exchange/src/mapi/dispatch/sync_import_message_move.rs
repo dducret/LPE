@@ -34,16 +34,20 @@ pub(super) async fn append_synchronization_import_message_move_response<S: Excha
         change_key: import_move.change_key.to_vec(),
         predecessor_change_list: import_move.predecessor_change_list.to_vec(),
     };
-    let Some(target_folder_id) =
-        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
+    let Some(MapiObject::SynchronizationCollector {
+        folder_id: target_folder_id,
+        sync_type: 0x01,
+        ..
+    }) = input_object(session, handle_slots, request)
     else {
         responses.extend_from_slice(&rop_error_response(
             0x78,
             request.response_handle_index(),
-            0x8004_010F,
+            0x8004_0102,
         ));
         return;
     };
+    let target_folder_id = *target_folder_id;
     let source_is_calendar = source_folder_id == CALENDAR_FOLDER_ID
         || snapshot
             .collaboration_folder_for_id(source_folder_id)

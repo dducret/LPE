@@ -1,5 +1,9 @@
 use super::*;
 
+mod copy_contract;
+
+use copy_contract::property_copy_objects_are_compatible;
+
 pub(super) async fn append_stream_response<S>(
     store: &S,
     principal: &AccountPrincipal,
@@ -456,7 +460,7 @@ pub(super) fn append_get_stream_size_response(
 ) {
     let requested_handle = input_handle(handle_slots, request);
     let stream_handle =
-        requested_handle.and_then(|handle| resolve_writable_stream_handle(session, handle));
+        requested_handle.and_then(|handle| exact_attachment_stream_handle(session, handle));
     match stream_handle.and_then(|handle| session.handles.get(&handle)) {
         Some(MapiObject::AttachmentStream { data, .. }) => {
             responses.extend_from_slice(&rop_get_stream_size_response(request, data.len()));
@@ -660,7 +664,7 @@ pub(super) fn append_read_stream_response(
 ) {
     let read_input_handle = input_handle(handle_slots, request);
     let resolved_stream_handle =
-        read_input_handle.and_then(|handle| resolve_writable_stream_handle(session, handle));
+        read_input_handle.and_then(|handle| exact_attachment_stream_handle(session, handle));
     let is_rule_organizer_stream_read = resolved_stream_handle
         .is_some_and(|handle| session.is_inbox_rule_organizer_stream_handle(handle));
     if let Some(stream_handle) = resolved_stream_handle {
@@ -698,11 +702,7 @@ pub(super) fn append_read_stream_response(
             stream_read_result = "missing_input_object",
             message = "rca debug mapi read stream"
         );
-        responses.extend_from_slice(&rop_error_response(
-            0x2C,
-            request.response_handle_index(),
-            0x8004_010F,
-        ));
+        responses.extend_from_slice(&rop_read_stream_error_response(request, 0x8004_010F));
         return;
     };
     let (before_position, stream_len) = match stream {
@@ -792,7 +792,7 @@ pub(super) fn append_clone_stream_response(
 ) {
     let requested_handle = input_handle(handle_slots, request);
     let stream_handle =
-        requested_handle.and_then(|handle| resolve_writable_stream_handle(session, handle));
+        requested_handle.and_then(|handle| exact_attachment_stream_handle(session, handle));
     match stream_handle
         .and_then(|handle| session.handles.get(&handle))
         .cloned()
@@ -832,8 +832,8 @@ pub(super) fn append_stream_region_response(
     responses: &mut Vec<u8>,
 ) {
     let requested_handle = input_handle(handle_slots, request);
-    match requested_handle.and_then(|handle| session.handles.get(&handle)) {
-        Some(MapiObject::AttachmentStream { .. }) => {
+    match requested_handle.and_then(|handle| exact_attachment_stream_handle(session, handle)) {
+        Some(_) => {
             responses.extend_from_slice(&rop_simple_success_response(request));
         }
         _ => responses.extend_from_slice(&rop_error_response(
@@ -853,7 +853,7 @@ pub(super) fn append_seek_stream_response(
 ) {
     let requested_handle = input_handle(handle_slots, request);
     let stream_handle =
-        requested_handle.and_then(|handle| resolve_writable_stream_handle(session, handle));
+        requested_handle.and_then(|handle| exact_attachment_stream_handle(session, handle));
     let Some(stream) = stream_handle.and_then(|handle| session.handles.get_mut(&handle)) else {
         responses.extend_from_slice(&rop_error_response(
             0x2E,
@@ -897,7 +897,7 @@ pub(super) fn append_set_stream_size_response(
         ));
         return;
     };
-    let stream_handle = resolve_writable_stream_handle(session, requested_handle);
+    let stream_handle = exact_attachment_stream_handle(session, requested_handle);
     if stream_handle.is_some_and(|handle| session.is_inbox_associated_config_stream_handle(handle))
     {
         session.record_outlook_view_failure_trace_event(format!(
@@ -928,11 +928,9 @@ pub(super) fn append_set_stream_size_response(
             .unwrap_or("none"),
         message = "rca debug mapi set stream size"
     );
-    match set_attachment_stream_size(
-        session,
-        stream_handle.unwrap_or(requested_handle),
-        request.stream_size().unwrap_or(u64::MAX),
-    ) {
+    match stream_handle.and_then(|handle| {
+        set_attachment_stream_size(session, handle, request.stream_size().unwrap_or(u64::MAX))
+    }) {
         Some(()) => responses.extend_from_slice(&rop_simple_success_response(request)),
         None => responses.extend_from_slice(&rop_error_response(
             0x2F,
@@ -951,14 +949,10 @@ pub(super) fn append_write_stream_response(
     responses: &mut Vec<u8>,
 ) {
     let Some(requested_handle) = input_handle(handle_slots, request) else {
-        responses.extend_from_slice(&rop_error_response(
-            request.rop_id,
-            request.response_handle_index(),
-            0x8004_010F,
-        ));
+        responses.extend_from_slice(&rop_write_stream_error_response(request, 0x8004_010F));
         return;
     };
-    let stream_handle = resolve_writable_stream_handle(session, requested_handle);
+    let stream_handle = exact_attachment_stream_handle(session, requested_handle);
     if stream_handle.is_some_and(|handle| session.is_inbox_associated_config_stream_handle(handle))
     {
         session.record_outlook_view_failure_trace_event(format!(
@@ -989,18 +983,16 @@ pub(super) fn append_write_stream_response(
             .unwrap_or("none"),
         message = "rca debug mapi write stream"
     );
-    let stream_handle = stream_handle.unwrap_or(requested_handle);
-    match write_stream(session, stream_handle, request.stream_write_data()) {
+    match stream_handle
+        .and_then(|handle| write_stream(session, handle, request.stream_write_data()))
+    {
         Some(written) => responses.extend_from_slice(&rop_write_stream_response(request, written)),
         None => {
-            let error_code = stream_write_error_code(
-                stream_write_error(session, stream_handle).unwrap_or(StreamWriteError::NotFound),
-            );
-            responses.extend_from_slice(&rop_error_response(
-                request.rop_id,
-                request.response_handle_index(),
-                error_code,
-            ))
+            let error_code = stream_handle
+                .and_then(|handle| stream_write_error(session, handle))
+                .map(stream_write_error_code)
+                .unwrap_or(MapiError::NotSupported.as_u32());
+            responses.extend_from_slice(&rop_write_stream_error_response(request, error_code))
         }
     }
 }
@@ -1012,25 +1004,31 @@ pub(super) fn append_copy_to_stream_response(
     responses: &mut Vec<u8>,
 ) {
     let Some(source_handle) = input_handle(handle_slots, request) else {
-        responses.extend_from_slice(&rop_error_response(
-            0x3A,
-            request.response_handle_index(),
-            0x8004_010F,
+        responses.extend_from_slice(&rop_copy_to_stream_error_response(
+            request,
+            MapiError::NullObject.as_u32(),
         ));
         return;
     };
-    let source_handle =
-        resolve_writable_stream_handle(session, source_handle).unwrap_or(source_handle);
+    let Some(source_handle) = exact_attachment_stream_handle(session, source_handle) else {
+        responses.extend_from_slice(&rop_copy_to_stream_error_response(
+            request,
+            MapiError::NotSupported.as_u32(),
+        ));
+        return;
+    };
     let Some(destination_handle) = request.move_copy_target_handle(handle_slots) else {
-        responses.extend_from_slice(&rop_error_response(
-            0x3A,
-            request.response_handle_index(),
-            0x8004_010F,
+        responses.extend_from_slice(&rop_copy_to_stream_null_destination_response(request));
+        return;
+    };
+    let Some(destination_handle) = exact_attachment_stream_handle(session, destination_handle)
+    else {
+        responses.extend_from_slice(&rop_copy_to_stream_error_response(
+            request,
+            MapiError::NotSupported.as_u32(),
         ));
         return;
     };
-    let destination_handle =
-        resolve_writable_stream_handle(session, destination_handle).unwrap_or(destination_handle);
     match copy_stream(
         session,
         source_handle,
@@ -1040,10 +1038,9 @@ pub(super) fn append_copy_to_stream_response(
         Some((read, written)) => {
             responses.extend_from_slice(&rop_copy_to_stream_response(request, read, written));
         }
-        None => responses.extend_from_slice(&rop_error_response(
-            0x3A,
-            request.response_handle_index(),
-            0x8004_0102,
+        None => responses.extend_from_slice(&rop_copy_to_stream_error_response(
+            request,
+            MapiError::NotSupported.as_u32(),
         )),
     }
 }
@@ -1081,11 +1078,15 @@ pub(super) async fn append_copy_to_response<S>(
         return;
     }
     let source_object = input_object(session, handle_slots, request).cloned();
-    if source_object.is_none() {
+    if !matches!(
+        (source_object.as_ref(), destination_object.as_ref()),
+        (Some(source), Some(destination))
+            if property_copy_objects_are_compatible(source, destination)
+    ) {
         responses.extend_from_slice(&rop_error_response(
             0x39,
             request.response_handle_index(),
-            0x8004_0102,
+            MapiError::NotSupported.as_u32(),
         ));
         return;
     }
@@ -1167,12 +1168,24 @@ pub(super) async fn append_copy_properties_response<S>(
         responses.extend_from_slice(&rop_copy_properties_null_destination_response(request));
         return;
     }
+    let source_object = input_object(session, handle_slots, request).cloned();
+    let destination_object = session.handles.get(&destination_handle).cloned();
+    if !matches!(
+        (source_object.as_ref(), destination_object.as_ref()),
+        (Some(source), Some(destination))
+            if property_copy_objects_are_compatible(source, destination)
+    ) {
+        responses.extend_from_slice(&rop_error_response(
+            0x67,
+            request.response_handle_index(),
+            MapiError::NotSupported.as_u32(),
+        ));
+        return;
+    }
     if request.copy_properties_property_tags().is_empty() {
         responses.extend_from_slice(&rop_copy_properties_success_response(request));
         return;
     }
-    let source_object = input_object(session, handle_slots, request).cloned();
-    let destination_object = session.handles.get(&destination_handle).cloned();
     if let Some(problems) = copy_message_followup_property_values_for_request(
         store,
         principal,
@@ -1232,7 +1245,7 @@ pub(super) async fn append_commit_stream_response<S>(
 {
     let requested_handle = input_handle(handle_slots, request);
     let stream_handle =
-        requested_handle.and_then(|handle| resolve_writable_stream_handle(session, handle));
+        requested_handle.and_then(|handle| exact_attachment_stream_handle(session, handle));
     if stream_handle.is_some_and(|handle| session.is_inbox_associated_config_stream_handle(handle))
     {
         session.record_outlook_view_failure_trace_event(format!(
@@ -1263,7 +1276,6 @@ pub(super) async fn append_commit_stream_response<S>(
     );
     let commit_object = stream_handle
         .and_then(|handle| session.handles.get(&handle))
-        .or_else(|| input_object(session, handle_slots, request))
         .cloned();
     let commit_result = match commit_object {
         Some(MapiObject::AttachmentStream {

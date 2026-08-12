@@ -11,16 +11,20 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
     snapshot: &mut MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
-    let Some(folder_id) =
-        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
+    let Some(MapiObject::SynchronizationCollector {
+        folder_id,
+        sync_type: 0x02,
+        ..
+    }) = input_object(session, handle_slots, request)
     else {
         responses.extend_from_slice(&rop_error_response(
             0x73,
             request.response_handle_index(),
-            0x8004_010F,
+            0x8004_0102,
         ));
         return;
     };
+    let folder_id = *folder_id;
     let (hierarchy_values, property_values) = match request.import_hierarchy_values() {
         Ok(values) => values,
         Err(_) => {

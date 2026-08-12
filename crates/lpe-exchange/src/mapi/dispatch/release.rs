@@ -4,6 +4,184 @@ pub(super) fn is_release_dispatch_rop(rop_id: RopId) -> bool {
     matches!(rop_id, RopId::Release)
 }
 
+pub(super) fn pre_dispatch_input_handle_error(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    same_execute_released_handle_indexes: &HashSet<u8>,
+    request: &RopRequest,
+) -> Option<u32> {
+    // [MS-OXCROPS] section 3.2.5.4 distinguishes a released Server object
+    // (ecInvalidObject) from a handle that was never assigned (ecNullObject).
+    let rop_id = RopId::from_u8(request.rop_id)?;
+    if !rop_id.is_supported_by_dispatch() || matches!(rop_id, RopId::Logon | RopId::Release) {
+        return None;
+    }
+    let input_index = request.input_handle_index()?;
+    if same_execute_released_handle_indexes.contains(&input_index) {
+        return Some(MapiError::InvalidObject.as_u32());
+    }
+    let Some(handle) = handle_slots
+        .get(usize::from(input_index))
+        .copied()
+        .filter(|handle| *handle != u32::MAX)
+    else {
+        return Some(MapiError::NullObject.as_u32());
+    };
+    if session.handles.contains_key(&handle) {
+        None
+    } else if session.issued_handles.contains(&handle) {
+        Some(MapiError::InvalidObject.as_u32())
+    } else {
+        Some(MapiError::NullObject.as_u32())
+    }
+}
+
+pub(super) fn pre_dispatch_input_handle_error_response(
+    request: &RopRequest,
+    error: u32,
+) -> Vec<u8> {
+    match RopId::from_u8(request.rop_id) {
+        Some(
+            RopId::FastTransferDestinationPutBuffer
+            | RopId::FastTransferDestinationPutBufferExtended,
+        ) => rop_fast_transfer_put_buffer_error_response(request, error, 0),
+        Some(RopId::CopyToStream) => rop_copy_to_stream_error_response(request, error),
+        Some(RopId::FastTransferSourceGetBuffer) => {
+            rop_fast_transfer_source_get_buffer_error_response(request, error)
+        }
+        Some(RopId::ReadStream) => rop_read_stream_error_response(request, error),
+        Some(RopId::WriteStream | RopId::WriteAndCommitStream | RopId::WriteStreamExtended) => {
+            rop_write_stream_error_response(request, error)
+        }
+        Some(
+            RopId::DeleteFolder
+            | RopId::DeleteMessages
+            | RopId::MoveCopyMessages
+            | RopId::MoveFolder
+            | RopId::CopyFolder
+            | RopId::EmptyFolder
+            | RopId::SetReadFlags
+            | RopId::HardDeleteMessages
+            | RopId::HardDeleteMessagesAndSubfolders,
+        ) => rop_partial_completion_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            error,
+        ),
+        _ => rop_error_response(request.rop_id, request.response_handle_index(), error),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CopyDestinationHandleError {
+    InvalidObject,
+    NullObject,
+    NullDestination,
+}
+
+pub(super) fn pre_dispatch_copy_destination_handle_error_response(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    same_execute_released_handle_indexes: &HashSet<u8>,
+    request: &RopRequest,
+) -> Option<Vec<u8>> {
+    let rop_id = RopId::from_u8(request.rop_id)?;
+    if !matches!(
+        rop_id,
+        RopId::CopyToStream
+            | RopId::CopyTo
+            | RopId::CopyProperties
+            | RopId::MoveCopyMessages
+            | RopId::MoveFolder
+            | RopId::CopyFolder
+    ) {
+        return None;
+    }
+    let destination_index = request.output_handle_index()?;
+    let error = if same_execute_released_handle_indexes.contains(&destination_index) {
+        CopyDestinationHandleError::InvalidObject
+    } else {
+        match handle_slots.get(usize::from(destination_index)).copied() {
+            Some(handle) if session.handles.contains_key(&handle) => return None,
+            Some(handle) if session.issued_handles.contains(&handle) => {
+                CopyDestinationHandleError::InvalidObject
+            }
+            Some(u32::MAX) | None => CopyDestinationHandleError::NullDestination,
+            Some(_) => CopyDestinationHandleError::NullObject,
+        }
+    };
+
+    Some(match (rop_id, error) {
+        (RopId::CopyToStream, CopyDestinationHandleError::InvalidObject) => {
+            rop_copy_to_stream_error_response(request, MapiError::InvalidObject.as_u32())
+        }
+        (RopId::CopyToStream, CopyDestinationHandleError::NullObject) => {
+            rop_copy_to_stream_error_response(request, MapiError::NullObject.as_u32())
+        }
+        (RopId::CopyToStream, CopyDestinationHandleError::NullDestination) => {
+            rop_copy_to_stream_null_destination_response(request)
+        }
+        (RopId::CopyTo, CopyDestinationHandleError::InvalidObject)
+        | (RopId::CopyProperties, CopyDestinationHandleError::InvalidObject) => rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            MapiError::InvalidObject.as_u32(),
+        ),
+        (RopId::CopyTo | RopId::CopyProperties, CopyDestinationHandleError::NullObject) => {
+            rop_error_response(
+                request.rop_id,
+                request.response_handle_index(),
+                MapiError::NullObject.as_u32(),
+            )
+        }
+        (RopId::CopyTo, CopyDestinationHandleError::NullDestination) => {
+            rop_copy_to_null_destination_response(request)
+        }
+        (RopId::CopyProperties, CopyDestinationHandleError::NullDestination) => {
+            rop_copy_properties_null_destination_response(request)
+        }
+        (
+            RopId::MoveCopyMessages | RopId::MoveFolder | RopId::CopyFolder,
+            CopyDestinationHandleError::InvalidObject,
+        ) => rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            MapiError::InvalidObject.as_u32(),
+        ),
+        (
+            RopId::MoveCopyMessages | RopId::MoveFolder | RopId::CopyFolder,
+            CopyDestinationHandleError::NullObject,
+        ) => rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            MapiError::NullObject.as_u32(),
+        ),
+        (
+            RopId::MoveCopyMessages | RopId::MoveFolder | RopId::CopyFolder,
+            CopyDestinationHandleError::NullDestination,
+        ) => rop_move_copy_null_destination_response(request),
+        _ => unreachable!("copy destination validation called for a non-copy ROP"),
+    })
+}
+
+pub(super) fn clear_released_index_after_rebind(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    same_execute_released_handle_indexes: &mut HashSet<u8>,
+    output_handle_before: Option<u32>,
+    request: &RopRequest,
+) {
+    let Some(output_index) = request.output_handle_index() else {
+        return;
+    };
+    let output_handle_after = handle_slots.get(usize::from(output_index)).copied();
+    if output_handle_after != output_handle_before
+        && output_handle_after.is_some_and(|handle| session.handles.contains_key(&handle))
+    {
+        same_execute_released_handle_indexes.remove(&output_index);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn append_release_dispatch_response<S: ExchangeStore>(
     _store: &S,
@@ -17,6 +195,7 @@ pub(super) async fn append_release_dispatch_response<S: ExchangeStore>(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
     same_execute_released_handles: &mut HashSet<u32>,
+    same_execute_released_handle_indexes: &mut HashSet<u8>,
     post_hierarchy_release_events: &mut Vec<PostHierarchyReleaseDebugEvent>,
 ) -> bool {
     if matches!(RopId::from_u8(request.rop_id), Some(RopId::Release)) {
@@ -32,6 +211,7 @@ pub(super) async fn append_release_dispatch_response<S: ExchangeStore>(
             emails,
             snapshot,
             same_execute_released_handles,
+            same_execute_released_handle_indexes,
             post_hierarchy_release_events,
         )
         .await;
@@ -53,10 +233,14 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
     same_execute_released_handles: &mut HashSet<u32>,
+    same_execute_released_handle_indexes: &mut HashSet<u8>,
     post_hierarchy_release_events: &mut Vec<PostHierarchyReleaseDebugEvent>,
 ) {
     let released_handle = input_handle(&handle_slots, &request);
     let released_object = input_object(session, &handle_slots, &request);
+    let released_assigned_object = released_handle.is_some_and(|handle| {
+        released_object.is_some() || session.issued_handles.contains(&handle)
+    });
     let released_object_for_stream_persist = released_object.cloned();
     let released_object_kind = mapi_object_debug_kind(released_object);
     let released_folder_id = mapi_object_debug_folder_id(released_object);
@@ -341,6 +525,9 @@ pub(super) async fn append_release_response<S: ExchangeStore>(
     release_handle_slot(session, handle_slots, &request);
     if let Some(handle) = released_handle {
         same_execute_released_handles.insert(handle);
+    }
+    if released_assigned_object {
+        same_execute_released_handle_indexes.insert(request.input_handle_index().unwrap_or(0));
     }
     if let Some(context) = inbox_related_release_context {
         session.record_last_inbox_related_release_context(context);

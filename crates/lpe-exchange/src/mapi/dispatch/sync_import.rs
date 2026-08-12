@@ -68,11 +68,8 @@ pub(super) fn invalidate_fast_transfer_destination(session: &mut MapiSession, ha
     else {
         return;
     };
-    session.handles.remove(&handle);
-    session.handles.remove(&target_handle);
-    session
-        .pending_sync_import_source_keys
-        .remove(&target_handle);
+    session.forget_handle(handle);
+    session.forget_handle(target_handle);
 }
 
 fn reject_ft(
@@ -97,9 +94,15 @@ pub(super) fn append_tell_version_response(
     request: &RopRequest,
     responses: &mut Vec<u8>,
 ) {
+    // [MS-OXCFXICS] sections 2.2.3 and 2.2.3.1.1.6 apply TellVersion only
+    // to FastTransfer contexts. LPE reserves sync_type 0 for direct
+    // FastTransfer sources; ICS download types are 1 and 2.
     match input_object(session, handle_slots, request) {
-        Some(MapiObject::SynchronizationSource { .. })
-        | Some(MapiObject::SynchronizationCollector { .. })
+        Some(MapiObject::SynchronizationSource {
+            sync_type: 0,
+            transfer_state_source: false,
+            ..
+        })
         | Some(MapiObject::FastTransferDestination { .. }) => {
             responses.extend_from_slice(&rop_simple_success_response(request));
         }
@@ -210,6 +213,7 @@ where
                 request,
                 mailboxes,
                 emails,
+                snapshot,
                 responses,
             )
             .await;
@@ -240,16 +244,16 @@ pub(super) fn append_fast_transfer_source_copy_messages_response(
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
 ) {
-    let Some(folder_id) =
-        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
+    let Some(MapiObject::Folder { folder_id, .. }) = input_object(session, handle_slots, request)
     else {
         responses.extend_from_slice(&rop_error_response(
             0x4B,
             request.response_handle_index(),
-            0x8004_010F,
+            0x8004_0102,
         ));
         return;
     };
+    let folder_id = *folder_id;
     let requested_ids = request.fast_transfer_message_ids();
     let mut selected = emails_for_folder(folder_id, mailboxes, emails)
         .into_iter()
@@ -545,16 +549,16 @@ pub(super) fn append_synchronization_open_collector_response(
     responses: &mut Vec<u8>,
     output_handles: &mut Vec<u32>,
 ) {
-    let Some(folder_id) =
-        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
+    let Some(MapiObject::Folder { folder_id, .. }) = input_object(session, handle_slots, request)
     else {
         responses.extend_from_slice(&rop_error_response(
             0x7E,
             request.response_handle_index(),
-            0x8004_010F,
+            0x8004_0102,
         ));
         return;
     };
+    let folder_id = *folder_id;
     let sync_type = request.collector_sync_type();
     let handle = session.allocate_output_handle(
         request.output_handle_index,

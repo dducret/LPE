@@ -59,7 +59,26 @@ pub(super) async fn append_property_dispatch_response<S>(
 where
     S: ExchangeStore,
 {
-    match RopId::from_u8(request.rop_id) {
+    let rop_id = RopId::from_u8(request.rop_id);
+    if input_object(session, handle_slots, request)
+        .is_some_and(|object| !object_supports_property_reads(object))
+    {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            MapiError::NotSupported.as_u32(),
+        ));
+        return match rop_id {
+            Some(
+                RopId::GetPropertiesSpecific
+                | RopId::SetProperties
+                | RopId::SetPropertiesNoReplicate,
+            ) => PropertyDispatchFlow::echo_input_handle_table(),
+            _ => PropertyDispatchFlow::continue_batch(),
+        };
+    }
+
+    match rop_id {
         Some(RopId::GetPropertiesSpecific) => {
             append_get_properties_specific_response(
                 store,

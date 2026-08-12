@@ -759,7 +759,22 @@ pub(super) async fn append_named_property_dispatch_response<S>(
 where
     S: ExchangeStore,
 {
-    match RopId::from_u8(request.rop_id) {
+    let rop_id = RopId::from_u8(request.rop_id);
+    // [MS-OXCPRPT] sections 2.2.9, 2.2.12, and 2.2.13 limit named-property
+    // mapping ROPs to Logon, Folder, Message, and Attachment objects. Central
+    // pre-dispatch validation owns absent and released handle errors.
+    if input_object(session, handle_slots, request)
+        .is_some_and(|object| !object_supports_property_reads(object))
+    {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            MapiError::NotSupported.as_u32(),
+        ));
+        return matches!(rop_id, Some(RopId::GetPropertyIdsFromNames));
+    }
+
+    match rop_id {
         Some(RopId::GetNamesFromPropertyIds) => {
             append_get_names_from_property_ids_response(
                 store, principal, session, request, responses,

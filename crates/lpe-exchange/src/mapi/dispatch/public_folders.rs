@@ -485,7 +485,22 @@ pub(super) async fn append_public_folder_per_user_response<S: ExchangeStore>(
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
-    match RopId::from_u8(request.rop_id) {
+    let rop_id = RopId::from_u8(request.rop_id);
+    if matches!(
+        rop_id,
+        Some(RopId::ReadPerUserInformation | RopId::WritePerUserInformation)
+    ) && !matches!(
+        input_object(session, handle_slots, request),
+        Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
+    ) {
+        responses.extend_from_slice(&rop_error_response(
+            request.rop_id,
+            request.response_handle_index(),
+            0x8004_0102,
+        ));
+        return;
+    }
+    match rop_id {
         Some(RopId::GetPerUserLongTermIds) => {
             append_get_per_user_long_term_ids_response(
                 store,

@@ -17,6 +17,7 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) execute_request_count: usize,
     pub(in crate::mapi) next_handle: u32,
     pub(in crate::mapi) handles: HashMap<u32, MapiObject>,
+    pub(in crate::mapi) issued_handles: HashSet<u32>,
     pub(in crate::mapi) folder_profile_property_tombstones: HashMap<u32, HashSet<u32>>,
     pub(in crate::mapi) message_statuses: HashMap<(u64, u64), u32>,
     pub(in crate::mapi) message_save_generations: HashMap<(u64, u64), u64>,

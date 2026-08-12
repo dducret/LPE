@@ -39,11 +39,7 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = Vec::new();
     append_rop_open_folder(
@@ -69,13 +65,14 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
     );
     append_rop_get_properties_specific(&mut rops, 3, &[0x0037_001F, 0x001A_001F, 0x1000_001F]);
 
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &rops,
+                &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -168,8 +165,8 @@ async fn mapi_over_http_sharing_8aa6_named_property_no_create_is_well_known() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_grant()
--> anyhow::Result<()> {
+async fn mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_grant(
+) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
@@ -202,15 +199,7 @@ async fn mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_g
     let delegate_member_id = identities[0].object_id;
 
     let service = ExchangeService::new(storage.clone());
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
     rops.extend_from_slice(&[0x40, 0x00, 0x01, 0x00]); // RopModifyPermissions.
@@ -229,7 +218,7 @@ async fn mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_g
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -393,6 +382,27 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
         .await
         .unwrap();
     let cookie = mapi_cookie_header(&connect);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        axum::http::header::AUTHORIZATION,
+        HeaderValue::from_static("Bearer delegate-token"),
+    );
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &mapi_private_logon_rops("delegate"),
+                &[u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let logon_body = response_bytes(logon).await;
+    let (_, logon_handles) = response_rops_and_handles_from_execute_body(&logon_body);
+    let logon_handle = logon_handles[0];
+    renew_mapi_request_id(&mut execute_headers);
     let mut rops = Vec::new();
     append_rop_open_folder(
         &mut rops,
@@ -409,17 +419,11 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        axum::http::header::AUTHORIZATION,
-        HeaderValue::from_static("Bearer delegate-token"),
-    );
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -429,24 +433,18 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 2)));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 2);
-    assert!(
-        stream
-            .message_changes
-            .iter()
-            .all(|message| message.associated)
-    );
-    assert!(
-        stream
-            .message_changes
-            .iter()
-            .any(|message| message.subject == "Delegate access for alice@example.test")
-    );
-    assert!(
-        stream
-            .message_changes
-            .iter()
-            .any(|message| message.subject == "alice@example.test: busy")
-    );
+    assert!(stream
+        .message_changes
+        .iter()
+        .all(|message| message.associated));
+    assert!(stream
+        .message_changes
+        .iter()
+        .any(|message| message.subject == "Delegate access for alice@example.test"));
+    assert!(stream
+        .message_changes
+        .iter()
+        .any(|message| message.subject == "alice@example.test: busy"));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.Delegate")
@@ -495,15 +493,7 @@ async fn mapi_over_http_permissions_table_maps_delegate_folder_access() {
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
@@ -521,7 +511,7 @@ async fn mapi_over_http_permissions_table_maps_delegate_folder_access() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -543,15 +533,7 @@ async fn mapi_over_http_ipm_subtree_permissions_table_is_empty_not_not_found() {
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(&mut rops, crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
@@ -569,7 +551,7 @@ async fn mapi_over_http_ipm_subtree_permissions_table_is_empty_not_not_found() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -613,15 +595,7 @@ async fn mapi_over_http_modify_permissions_maps_acl_rows_to_canonical_grants() {
     let observed_permissions = store.mapi_folder_permissions.clone();
     let observed_audits = store.mapi_folder_permission_audits.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
@@ -642,7 +616,7 @@ async fn mapi_over_http_modify_permissions_maps_acl_rows_to_canonical_grants() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -686,15 +660,7 @@ async fn mapi_over_http_calendar_modify_permissions_maps_acl_rows_to_calendar_gr
     let observed_permissions = store.mapi_calendar_permissions.clone();
     let observed_audits = store.mapi_folder_permission_audits.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
@@ -714,7 +680,7 @@ async fn mapi_over_http_calendar_modify_permissions_maps_acl_rows_to_calendar_gr
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -774,15 +740,7 @@ async fn mapi_over_http_custom_calendar_modify_permissions_maps_acl_rows_to_cale
     let observed_permissions = store.mapi_calendar_permissions.clone();
     let observed_audits = store.mapi_folder_permission_audits.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, custom_folder_id);
@@ -801,7 +759,7 @@ async fn mapi_over_http_custom_calendar_modify_permissions_maps_acl_rows_to_cale
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -821,16 +779,14 @@ async fn mapi_over_http_custom_calendar_modify_permissions_maps_acl_rows_to_cale
     );
     let audits = observed_audits.lock().unwrap();
     assert_eq!(audits[0].action, "mapi-modify-calendar-permissions");
-    assert!(
-        audits[0]
-            .subject
-            .contains(&calendar_collection_id.to_string())
-    );
+    assert!(audits[0]
+        .subject
+        .contains(&calendar_collection_id.to_string()));
 }
 
 #[tokio::test]
-async fn mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps_acl_rows_to_calendar_grants()
- {
+async fn mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps_acl_rows_to_calendar_grants(
+) {
     let account = FakeStore::account();
     let owner_account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
     let calendar_collection_id = Uuid::parse_str("cccccccc-cccc-4ccc-8ccc-cccccccccccd").unwrap();
@@ -877,15 +833,7 @@ async fn mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps
         .id;
     let observed_permissions = store.mapi_calendar_permissions.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, shared_folder_id);
@@ -905,7 +853,7 @@ async fn mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -969,15 +917,7 @@ async fn mapi_over_http_custom_calendar_modify_permissions_remove_deletes_calend
         .id;
     let observed_permissions = store.mapi_calendar_permissions.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, custom_folder_id);
@@ -992,7 +932,7 @@ async fn mapi_over_http_custom_calendar_modify_permissions_remove_deletes_calend
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -1055,15 +995,7 @@ async fn mapi_over_http_shared_calendar_without_share_right_rejects_modify_permi
         .id;
     let observed_permissions = store.mapi_calendar_permissions.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, shared_folder_id);
@@ -1083,7 +1015,7 @@ async fn mapi_over_http_shared_calendar_without_share_right_rejects_modify_permi
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX])),
         )
         .await
         .unwrap();
@@ -1120,15 +1052,7 @@ async fn mapi_over_http_denies_mutation_without_folder_write_permission() {
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
@@ -1139,7 +1063,7 @@ async fn mapi_over_http_denies_mutation_without_folder_write_permission() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -1170,15 +1094,7 @@ async fn mapi_over_http_denies_contents_table_without_folder_read_permission() {
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
@@ -1189,7 +1105,7 @@ async fn mapi_over_http_denies_contents_table_without_folder_read_permission() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -1222,15 +1138,7 @@ async fn mapi_over_http_empty_folder_rejects_unsupported_and_permission_denied_t
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(&mut rops, crate::mapi::identity::TRASH_FOLDER_ID);
@@ -1259,7 +1167,7 @@ async fn mapi_over_http_empty_folder_rejects_unsupported_and_permission_denied_t
             &execute_body(&rop_buffer(
                 &rops,
                 &[
-                    1,
+                    logon_handle,
                     u32::MAX,
                     u32::MAX,
                     u32::MAX,

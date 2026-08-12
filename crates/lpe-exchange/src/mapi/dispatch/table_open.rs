@@ -96,9 +96,17 @@ pub(super) async fn append_open_table_response<S>(
                 mapi_object_debug_folder_id(input_object(session, handle_slots, request));
             let input_debug_context =
                 format_handle_lineage_context(input_object(session, handle_slots, request));
-            let folder_id = input_object(session, handle_slots, request)
-                .and_then(|object| object.folder_id())
-                .unwrap_or(ROOT_FOLDER_ID);
+            let Some(MapiObject::Folder { folder_id, .. }) =
+                input_object(session, handle_slots, request)
+            else {
+                responses.extend_from_slice(&rop_error_response(
+                    0x04,
+                    request.output_handle_index.unwrap_or(0),
+                    0x8004_0102,
+                ));
+                return;
+            };
+            let folder_id = *folder_id;
             let table_flags = request.payload.first().copied().unwrap_or(0);
             let depth = table_flags & 0x04 != 0;
             let depth_folder_ids = if depth {

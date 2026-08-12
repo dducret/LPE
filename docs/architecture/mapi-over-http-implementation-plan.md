@@ -130,6 +130,13 @@ before it is advertised.
   private-logon-only reserved counters still fail with `ecNotFound`.
 - `RopLongTermIdFromId` failures for unmapped or unusable `REPLID` values use
   the documented `ecNotFound` result, not a generic invalid-parameter result.
+- `RopLongTermIdFromId` and `RopIdFromLongTermId` require the exact live
+  private-mailbox or public-folder Logon object. A Folder, Message, table, or
+  other live object cannot borrow replica-mapping authority through
+  containing-folder lineage and returns `ecNotSupported`. The operations are
+  Logon ROPs under `[MS-OXCROPS]` sections 2.2.3.8 and 2.2.3.9, with the
+  conversion semantics in `[MS-OXCSTOR]` sections 2.2.1.8 and 2.2.1.9;
+  `ecNotSupported` is LPE's explicit wrong-live-object policy.
 
 ### EMSMDB, NSPI, and FastTransfer
 
@@ -259,6 +266,115 @@ before it is advertised.
   These are protocol/state corrections; a new-profile real-client rerun is
   still required to establish which one was causal for Outlook's local
   `MAPI_E_NOT_FOUND`.
+- The clean-database, clean-profile `202608121206` Probe G rerun falsifies the
+  Probe F hierarchy and special-folder-alias corrections as sufficient causes.
+  Outlook opens and content-synchronizes Sync Issues and Local Failures, and
+  its `PidTagAdditionalRenEntryIds` writes repeat the canonical first four
+  Sync-Issues-family EntryIDs; only the Junk EntryID is a client alias. The
+  first readable Trash report instead records that the new appointment was
+  added to the online Calendar and then immediately reports folder
+  `[8004010F-501-0-1430]`. The zero-change content download in that interval is
+  Exchange-shaped and state-only. The preceding upload request exposes the
+  concrete contradiction: after importing and saving the appointment with a
+  foreign `PidTagChangeKey`, Outlook issues `RopSaveChangesMessage` and an
+  immediate `RopGetPropertiesSpecific` for only `PidTagChangeKey` against the
+  same aliased input/response handle. LPE committed and correctly snapshotted
+  the imported identity, but the Event path treated the request's unrecognized
+  `0x08` SaveFlags bit as an effective no-keep-open save and removed the Message
+  object before the later ROP in the same request buffer. Property projection
+  then treated the missing object as the Root folder and returned the Root
+  ChangeKey, which was neither the committed imported ChangeKey nor a
+  predecessor later recorded for the appointment.
+
+  LPE now applies a bounded compatibility policy to successful Event and
+  Contact saves with no recognized keep-open flag: retain the committed Message
+  object read-only until the remaining ROPs in that Execute buffer have run,
+  then close it and clear all per-handle state. This is an LPE end-of-Execute
+  lifetime rule, not a protocol claim that every no-keep-open save MUST close at
+  that boundary. It lets Probe G's post-save read return the exact committed
+  appointment ChangeKey without leaving the Message open across requests. If
+  the input and response indexes alias, containing-Folder projection is deferred
+  until the read has run; a distinct response index is projected immediately.
+  Explicit keep-open flags and other message-object types retain their existing
+  behavior. `[MS-OXCROPS]` section 3.2.5.1 requires in-order ROP processing,
+  `[MS-OXCMSG]` sections 2.2.3.3.1 and 3.2.5.3 define SaveFlags and successful
+  Message-save processing, and `[MS-OXOCNTC]` sections 3.1.1, 3.1.4.1.1, and
+  3.1.4.1.3 define Contact objects as Message extensions saved through that
+  Message path. `[MS-OXCFXICS]` section 3.3.4.3.3.2.2.2 separately documents a
+  post-save `RopGetPropertiesSpecific` pattern for new PCL and change-number
+  values; Probe G's actual follow-up request was only for `PidTagChangeKey`.
+
+  For every successful non-embedded `RopSaveChangesMessage`, the response
+  handle index identifies the containing Folder even when an earlier
+  `RopRelease` removed the original parent handle. LPE reuses a live handle for
+  that exact Folder when one exists; otherwise it allocates a fresh Folder
+  handle and writes it into the response slot. It does not resurrect the
+  released numeric handle or substitute the saved Message or a different
+  Folder. `[MS-OXCMSG]` section 3.2.5.3 defines the containing-Folder response
+  object, and `[MS-OXCROPS]` sections 2.2.6.3.1 and 2.2.6.3.2 define the two
+  handle indexes and success response. Reuse versus allocation is LPE's
+  handle-table implementation policy, not a protocol-mandated allocation
+  algorithm.
+
+  The Root fallback was not confined to Probe G. Direct
+  `RopGetPropertiesSpecific`, `RopGetPropertiesAll`, and
+  `RopGetPropertiesList` now require a live property-bearing Logon, Folder,
+  Message, or Attachment handle. Live table, stream, notification,
+  synchronization, and FastTransfer control objects return `ecNotSupported`
+  instead of projecting Root or containing-Folder properties.
+  `PublicFolderLogon` remains a Logon property object rather than being
+  projected as Root, and FAI and LPE's other message-object variants enumerate
+  Message tags rather than Folder tags. These object-type boundaries follow
+  `[MS-OXCPRPT]` sections 1.1, 1.5, 1.6, and 3.2.5.1 through 3.2.5.3;
+  `ecNotSupported` is LPE's explicit failure policy for a live handle outside
+  those property-object types.
+
+  Stream continuation ROPs require the actual live Stream server object that
+  `RopOpenStream` returned; in LPE that object is the `AttachmentStream` handle
+  variant for both attachment and property streams. `RopReadStream`, the write
+  and write-and-commit variants, `RopCommitStream`, size and seek operations,
+  region lock/unlock, and `RopCloneStream` never coerce a parent Message into
+  its child stream. `RopCopyToStream` requires exact live Stream objects at
+  both its source and destination handles. A different live object returns
+  `ecNotSupported`. The Stream-only object contract follows `[MS-OXCPRPT]`
+  sections 2.2.15 through 2.2.22 and 2.2.24 through 2.2.27; the selected error
+  is LPE's explicit wrong-live-object policy.
+
+  Folder and synchronization ROPs enforce the same object boundary before
+  looking at an object's containing-folder lineage. `RopOpenFolder`,
+  `RopOpenMessage`, and `RopCreateMessage` accept only a Logon or Folder input;
+  Folder-only create/delete/move/copy, permissions, rules, hierarchy-table,
+  synchronization-configure, source-copy-messages, and collector-open ROPs
+  accept only a Folder. Upload ROPs accept only a synchronization collector of
+  the required content or hierarchy type. A different live object returns
+  `ecNotSupported` without binding an output handle or mutating canonical
+  state, except that `[MS-OXCMSG]` section 3.2.5.1 explicitly requires
+  `RopOpenMessage` to return `ecNullObject` for the wrong input-object type.
+  This prevents a Message's containing Folder from accidentally
+  authorizing a Folder or upload operation (`[MS-OXCFOLD]` section 2.2.1.1.1,
+  `[MS-OXCMSG]` sections 2.2.3.1 and 2.2.3.2, and `[MS-OXCFXICS]` sections
+  2.2.3.2.1.1.1 and 2.2.3.2.4.1.1).
+
+  Input-handle validation is also centralized across dispatched ROPs. A handle
+  value never assigned to an open object returns `ecNullObject`; a previously
+  issued handle whose object has been released or closed and not recycled
+  returns `ecInvalidObject`, including a later ROP in the same buffer after
+  `RopRelease`. Server-handle allocation no longer advances from untrusted
+  client handle-table values and never assigns reserved `0xFFFFFFFF`. The error
+  distinction and Release lifecycle follow `[MS-OXCROPS]` sections 3.2.5.1,
+  3.2.5.3, and 3.2.5.4; allocator independence from client numeric high-water is
+  an LPE hardening rule, while the prohibition on assigning `0xFFFFFFFF` is
+  specified in section 3.2.5.1.
+
+  `RopReadPerUserInformation`, `RopWritePerUserInformation`, and
+  `RopGetAddressTypes` likewise require an exact live private-mailbox or
+  public-folder Logon object. They do not accept a Folder, table, Message, or
+  other live object merely because it belongs to the same store. The per-user
+  ROPs are explicitly issued against private-mailbox or public-folder logons in
+  `[MS-OXCSTOR]` sections 2.2.1.12 and 2.2.1.13; `[MS-OXOMSG]` section 2.2.4.3
+  specifies a Logon object for `RopGetAddressTypes` even though the server
+  ignores that object's value. LPE returns `ecNotSupported` for a different
+  live object.
 - The Probe F comparison also exposed an incomplete Calendar Message-property
   replay surface after the appointment had saved successfully. That is a server
   contradiction worth correcting, but the trace does not establish that any
@@ -1286,6 +1402,20 @@ Until those prerequisites exist, all three ROPs are parsed to their documented
 request lengths and return ROP-specific protocol errors without modifying
 mailbox, submission, notification, or LPE-CT state.
 
+The transport-folder, spooler-advisory, abort-submit, and store-state ROPs that
+are defined on a private Store object require an actual private Logon handle.
+A live Message, Folder, table, public-folder Logon, or other server object is
+not coerced into that Store role and cannot cancel a queued submission. This
+follows `[MS-OXOMSG]` sections 2.2.5.1.1, 2.2.5.2.1, 2.2.5.3.1, 2.2.5.5.1,
+and 3.3.5.2 and `[MS-OXCSTOR]` sections 2.2.1.5.1 and 3.2.5.5.
+
+The transport-folder, spooler-advisory, abort-submit, and store-state ROPs that
+are defined on a private Store object require an actual private Logon handle.
+A live Message, Folder, table, public-folder Logon, or other server object is
+not coerced into that Store role and cannot cancel a queued submission. This
+follows `[MS-OXOMSG]` sections 2.2.5.1.1, 2.2.5.2.1, 2.2.5.3.1, 2.2.5.5.1,
+and 3.3.5.2 and `[MS-OXCSTOR]` sections 2.2.1.5.1 and 3.2.5.5.
+
 ## Implemented Coverage
 
 The implemented coverage described here is the guarded local surface and does
@@ -1529,7 +1659,20 @@ not by itself authorize broad client publication.
 - FastTransfer source buffering emits parseable transfer chunks and validates
   strict ICS/FastTransfer value encoding. Message-object CopyTo/CopyProperties
   buffering starts with the first `messageContent` property and contains no
-  outer message marker.
+  outer message marker. `RopFastTransferSourceCopyFolder` accepts only a live
+  Folder object; a Message object's containing-folder lineage never authorizes
+  folder-copy serialization (`[MS-OXCFXICS]` section 2.2.3.1.1.4.1).
+- `RopTellVersion` accepts only a genuine FastTransfer download or upload
+  context. An ICS download `SynchronizationSource` or upload
+  `SynchronizationCollector` returns `ecNotSupported` without changing that
+  context, so later ROPs in the same buffer remain aligned and usable. This
+  follows the operation-applicability table and FastTransfer sequencing in
+  `[MS-OXCFXICS]` sections 2.2.3, 2.2.3.1.1.6, 3.3.4.1, and 3.3.4.2.
+- Property `RopCopyTo` and `RopCopyProperties` require compatible live
+  Message, Folder, or Attachment object families before an empty property list
+  can report success or a custom value can be copied. Incompatible live object
+  families return `ecNotSupported` before mutation, following `[MS-OXCPRPT]`
+  sections 2.2.10, 2.2.11, and 3.2.5.8.
 
 ### Canonical Projection Coverage
 
@@ -1890,6 +2033,14 @@ canonical `from` identity.
   message-body facts.
 - Import, save, delete, move, copy, and read-state ROPs mutate canonical mailbox
   state and rely on the same change-log/tombstone path used by other protocols.
+- `RopSynchronizationImportReadStateChanges` preflights every resolvable
+  message before mutation and returns the exact six-byte response defined by
+  `[MS-OXCROPS]` section 2.2.13.3.2. It has no `PartialCompletion` field;
+  predictable missing-message failures reject the batch instead of applying a
+  successful prefix that cannot be represented on the wire, while requests for
+  durable or transient FAI message identities are ignored rather than treated
+  as missing normal messages. This follows `[MS-OXCFXICS]` section
+  3.2.5.9.4.6.
 - MAPI state must remain consistent with JMAP and IMAP-visible state where those
   protocols expose the same user-visible fact.
 - `RopModifyRules` is bounded to canonical Sieve-backed mailbox rules. The
@@ -2217,7 +2368,11 @@ mutations are staged on the owning Event or pending-Event handle:
 `RopSaveChangesAttachment` does not persist the child independently; the
 parent `RopSaveChangesMessage (0x0C)` atomically commits the attachment
 upserts/deletions with the canonical Event transaction, and `RopRelease`
-abandons them. This follows [MS-OXCMSG] sections 2.2.3.13 through 2.2.3.15 and
+abandons them. The response-handle slot must contain the exact owning Message
+object before validation or mutation; on success it remains bound to that
+parent Message as required by `RopSaveChangesAttachment`, so another live
+Folder or Message cannot authorize or receive the staged child. This follows
+[MS-OXCMSG] sections 2.2.3.13 through 2.2.3.15 and
 3.2.5.13 through 3.2.5.15, and [MS-OXCROPS] sections 2.2.6.13 through
 2.2.6.15.
 Bounded `PidLidTimeZoneDescription` and start/end-display `TZDEFINITION`
@@ -2632,11 +2787,31 @@ moves direct property reads into `dispatch/property_reads.rs`; keep the existing
 dispatch entry point as a thin router and move further cohesive read behavior to
 that helper. The Event save work is already split into helper modules and this
 correction does not add implementation to `mapi.rs`.
-`mapi/dispatch.rs` remains a baseline oversized routing hub. Before adding
-further routing behavior, move its shared imports and module re-exports into a
-focused dispatch prelude and split the remaining top-level ROP-family match
-arms into the existing dispatch modules; keep `dispatch.rs` limited to module
-declarations and request orchestration.
+`mapi/dispatch.rs` is now below the hard production limit. Execute transport
+response orchestration and its post-CommonViews handoff logging live in the
+existing `dispatch/execute.rs` helper; `dispatch.rs` retains the module wiring,
+shared dispatch context, and top-level `execute_rops` ROP orchestration.
+`mapi/dispatch/table_controls.rs` is also below the hard production limit;
+status and bookmark lifecycle routing now lives with the existing
+`dispatch/table_lifecycle.rs` helper while table mutation/query behavior stays
+in `table_controls.rs`.
+`mapi/dispatch/folders.rs` has crossed the thousand-line review threshold. Its
+next split must move delete, empty, and move/copy mutation handlers into
+`dispatch/folders/mutations.rs`, leaving folder lookup and response-routing
+helpers in the parent.
+`mapi/dispatch/attachments.rs` has crossed the thousand-line review threshold.
+The SaveChangesAttachment response-handle contract already lives in
+`dispatch/attachments/save_contract.rs`; the next split must move attachment
+open/read/table projection into `dispatch/attachments/read.rs`, leaving staged
+mutation routing in the parent.
+`mapi/rop.rs` has crossed the thousand-line review threshold. Its next split
+must move Message, Folder, Attachment, and Logon property serialization into
+`mapi/rop/property_serialization.rs`, retaining only shared ROP response wiring
+in the parent.
+`mapi/store_adapter/access_plan.rs` has crossed the thousand-line review
+threshold. Its next split must move request-handle simulation and issued-handle
+tracking into `mapi/store_adapter/access_plan/handles.rs`, leaving access-plan
+construction and store-load selection in the parent.
 `mapi/dispatch/event_transactions.rs` has crossed the thousand-line review
 threshold while consolidating Calendar Set/Delete/FastTransfer invariants. Its
 next split must move create-time/import normalization and property validation

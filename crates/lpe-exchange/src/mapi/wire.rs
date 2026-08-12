@@ -876,6 +876,7 @@ pub(in crate::mapi) enum MapiError {
     InvalidBookmark = 0x8004_0405,
     InvalidParameter = 0x8007_0057,
     GeneralFailure = 0x8000_4005,
+    InvalidObject = 0x8004_0108,
     NullObject = 0x0000_04B9,
 }
 

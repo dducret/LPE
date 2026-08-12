@@ -450,11 +450,10 @@ fn remember_saved_event_handle(
     disposition: SaveDisposition,
     canonical_modseq: i64,
 ) {
-    // [MS-OXCMSG] section 2.2.3.3.1: zero SaveFlags closes the Message object.
-    let Some(open_mode_flags) = event_open_mode_after_save(disposition) else {
-        session.handles.remove(&handle);
-        return;
-    };
+    // The default disposition has no KeepOpen flag. Retain a read-only object
+    // until this Execute finishes so a later ROP in the same buffer can read
+    // the committed Message state ([MS-OXCFXICS] section 3.3.4.3.3.2.2.2).
+    let open_mode_flags = event_open_mode_after_save(disposition).unwrap_or(0x00);
     session.handles.insert(
         handle,
         MapiObject::Event {

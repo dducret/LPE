@@ -70,6 +70,69 @@ cargo check
 
 For installation and reset workflows on `Debian Trixie`, see [installation/README.md](installation/README.md).
 
+### Focused `lpe-exchange` test areas
+
+Named Cargo aliases let protocol work run the smallest relevant
+`lpe-exchange` area instead of the complete suite after every change. The areas
+overlap intentionally; run the full gate before a release or interoperability
+deployment.
+
+```text
+# Exact regressions and contracts
+cargo test-lpe-exchange-probe-g
+cargo test-lpe-exchange-object-contracts
+
+# Complete MAPI over HTTP request-level suite
+cargo test-lpe-exchange-mapi-http
+
+# MAPI over HTTP request-level subareas
+cargo test-lpe-exchange-mapi-calendar
+cargo test-lpe-exchange-mapi-connect
+cargo test-lpe-exchange-mapi-contacts
+cargo test-lpe-exchange-mapi-free-busy
+cargo test-lpe-exchange-mapi-hierarchy
+cargo test-lpe-exchange-mapi-local-replica-ids
+cargo test-lpe-exchange-mapi-logon-profile
+cargo test-lpe-exchange-mapi-notifications
+cargo test-lpe-exchange-mapi-nspi
+cargo test-lpe-exchange-mapi-permissions
+cargo test-lpe-exchange-mapi-properties
+cargo test-lpe-exchange-mapi-public-folders
+cargo test-lpe-exchange-mapi-recoverable-items
+cargo test-lpe-exchange-mapi-reminders
+cargo test-lpe-exchange-mapi-rules
+cargo test-lpe-exchange-mapi-save-changes
+cargo test-lpe-exchange-mapi-submission
+cargo test-lpe-exchange-mapi-sync
+cargo test-lpe-exchange-mapi-tables
+cargo test-lpe-exchange-mapi-tasks
+cargo test-lpe-exchange-mapi-transport
+cargo test-lpe-exchange-mapi-wlink-properties
+
+# Broader implementation and protocol areas
+cargo test-lpe-exchange-mapi-core
+cargo test-lpe-exchange-calendar
+cargo test-lpe-exchange-sync
+cargo test-lpe-exchange-transport
+cargo test-lpe-exchange-ews
+cargo test-lpe-exchange-nspi
+cargo test-lpe-exchange-rpc
+
+# Complete lpe-exchange gate
+cargo test-lpe-exchange
+```
+
+All aliases run serially to keep session, handle-map, and shared-store tests
+deterministic. The MAPI Calendar alias also includes `calendar_identity_scope`,
+and the MAPI sync alias also includes `sync_import_deletes`; those prefix
+overlaps are intentional. The broader area aliases overlap the request-level
+subareas and implementation-unit tests by name. They reduce the tests executed;
+because the crate still uses one Rust unit-test binary, a source change can
+still require that binary to be relinked. A physical binary split is a separate
+test-support refactor. The broad EWS alias targets the `ews` module; the one
+crate-root `ews_types` enum test remains in the complete gate. Autodiscover publication tests belong to
+`lpe-admin-api`, not `lpe-exchange`.
+
 ## Repository Checks
 
 Run the lightweight repository maintenance checks before review:

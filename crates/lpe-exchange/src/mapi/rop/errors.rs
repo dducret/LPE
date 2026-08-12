@@ -67,12 +67,37 @@ pub(in crate::mapi) fn rop_error_response(
     handle_index: u8,
     error_code: u32,
 ) -> Vec<u8> {
-    RopResponseError {
-        rop_id,
+    let response_rop_id = if rop_id == RopId::GetMessageStatus.as_u8() {
+        RopId::SetMessageStatus.as_u8()
+    } else {
+        rop_id
+    };
+    let mut response = RopResponseError {
+        rop_id: response_rop_id,
         handle_index,
         error_code,
     }
-    .serialize()
+    .serialize();
+    // These ROPs retain mandatory trailing fields when ReturnValue is nonzero;
+    // omitting them shifts every later response in the same Execute buffer.
+    // See [MS-OXCROPS] sections 2.2.4, 2.2.6.10, 2.2.9, and 2.2.12.4.
+    match rop_id {
+        0x1D | 0x1E | 0x33 | 0x35 | 0x36 | 0x58 | 0x66 | 0x91 | 0x92 => response.push(0),
+        0x2C | 0x2D | 0x90 => {
+            write_u16(&mut response, 0);
+        }
+        0xA3 => write_u32(&mut response, 0),
+        0x3A => {
+            write_u64(&mut response, 0);
+            write_u64(&mut response, 0);
+        }
+        0x4E | 0x54 => response.resize(response.len() + 9, 0),
+        0x9D => {
+            response.resize(response.len() + 13, 0);
+        }
+        _ => {}
+    }
+    response
 }
 
 pub(in crate::mapi) fn rop_parse_error_response() -> Vec<u8> {

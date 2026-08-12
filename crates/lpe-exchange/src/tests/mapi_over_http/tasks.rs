@@ -48,15 +48,7 @@ async fn mapi_over_http_shared_task_read_only_rights_reject_mutations() {
         .id;
     let tasks = store.tasks.clone();
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert(
-        "cookie",
-        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
-    );
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut properties = Vec::new();
     append_mapi_utf16_property(&mut properties, 0x0037_001F, "Forbidden update");
@@ -71,7 +63,7 @@ async fn mapi_over_http_shared_task_read_only_rights_reject_mutations() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();

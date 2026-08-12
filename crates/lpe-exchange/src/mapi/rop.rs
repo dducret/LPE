@@ -78,6 +78,21 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
     custom_values: &HashMap<u32, Vec<u8>>,
     response_size_limit: usize,
 ) -> Vec<u8> {
+    let Some(object) = object else {
+        return rop_error_response(
+            0x07,
+            request.input_handle_index().unwrap_or(0),
+            MapiError::NullObject.as_u32(),
+        );
+    };
+    if !object_supports_property_reads(object) {
+        return rop_error_response(
+            0x07,
+            request.input_handle_index().unwrap_or(0),
+            MapiError::NotSupported.as_u32(),
+        );
+    }
+    let object = Some(object);
     let mut response = vec![0x07, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
     let columns = request.property_tags();
@@ -105,6 +120,15 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             write_logon_property_row(&mut response, principal, &columns);
             return response;
         }
+        Some(MapiObject::PublicFolderLogon) => serialize_object_property_row_with_custom(
+            object,
+            principal,
+            mailboxes,
+            emails,
+            snapshot,
+            &columns,
+            custom_values,
+        ),
         Some(MapiObject::Message {
             folder_id,
             message_id,
@@ -508,40 +532,11 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             &columns,
         ),
         _ => {
-            let folder_id = object
-                .and_then(MapiObject::folder_id)
-                .unwrap_or(ROOT_FOLDER_ID);
-            folder_row_for_id(folder_id, mailboxes)
-                .map(|mailbox| {
-                    serialize_folder_row_with_context_and_version(
-                        mailbox,
-                        mailboxes,
-                        &columns,
-                        principal.account_id,
-                        snapshot.folder_version(folder_id),
-                    )
-                })
-                .or_else(|| {
-                    snapshot
-                        .collaboration_folder_for_id(folder_id)
-                        .map(|folder| {
-                            serialize_collaboration_folder_row_with_context_and_version(
-                                folder,
-                                &columns,
-                                associated_folder_message_count(folder_id, snapshot),
-                                snapshot.folder_version(folder_id),
-                            )
-                        })
-                })
-                .unwrap_or_else(|| {
-                    serialize_special_folder_row_with_version(
-                        folder_id,
-                        mailboxes,
-                        &columns,
-                        Some(principal),
-                        snapshot.folder_version(folder_id),
-                    )
-                })
+            return rop_error_response(
+                0x07,
+                request.input_handle_index().unwrap_or(0),
+                MapiError::NotSupported.as_u32(),
+            );
         }
     };
     log_get_properties_specific_debug(
@@ -905,42 +900,6 @@ fn get_properties_specific_typed_value_tag(
     Some((value_tag, (value_tag & 0xFFFF) as u16))
 }
 
-fn get_properties_specific_candidate_tags(object: Option<&MapiObject>) -> Vec<u32> {
-    match object {
-        Some(MapiObject::Logon) => default_store_property_tags(),
-        Some(MapiObject::PublicFolderLogon) => vec![PID_TAG_PRIVATE],
-        Some(MapiObject::Contact { .. } | MapiObject::PendingContact { .. }) => {
-            default_contact_property_tags()
-        }
-        Some(MapiObject::Event { .. } | MapiObject::PendingEvent { .. }) => {
-            default_event_property_tags()
-        }
-        Some(MapiObject::Task { .. } | MapiObject::PendingTask { .. }) => {
-            default_task_property_tags()
-        }
-        Some(MapiObject::Note { .. } | MapiObject::PendingNote { .. }) => {
-            default_note_property_tags()
-        }
-        Some(MapiObject::JournalEntry { .. } | MapiObject::PendingJournalEntry { .. }) => {
-            default_journal_entry_property_tags()
-        }
-        Some(MapiObject::Attachment { .. })
-        | Some(MapiObject::PendingAttachment { .. })
-        | Some(MapiObject::SavedAttachment { .. }) => default_attachment_columns(),
-        Some(
-            MapiObject::Message { .. }
-            | MapiObject::AssociatedConfig { .. }
-            | MapiObject::PublicFolderItem { .. }
-            | MapiObject::PendingAssociatedMessage { .. }
-            | MapiObject::PendingMessage { .. },
-        ) => default_message_property_tags(),
-        Some(
-            MapiObject::ConversationAction { .. } | MapiObject::PendingConversationAction { .. },
-        ) => default_conversation_action_property_tags(),
-        _ => default_folder_property_tags(),
-    }
-}
-
 fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bool {
     let storage_tag = canonical_property_storage_tag(tag);
     match object {
@@ -1212,6 +1171,37 @@ pub(in crate::mapi) fn serialize_object_property(
                 write_property_default(&mut value, tag);
                 value
             }),
+        Some(MapiObject::SearchFolderDefinitionMessage {
+            folder_id,
+            message_id,
+        }) => (folder_id == &COMMON_VIEWS_FOLDER_ID)
+            .then(|| {
+                snapshot.common_views_table_messages().find_map(|message| {
+                    if let crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(
+                        definition,
+                    ) = message
+                    {
+                        (crate::mapi::identity::mapped_mapi_object_id(&definition.id)
+                            == Some(*message_id))
+                        .then_some(definition)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .flatten()
+            .map(|definition| {
+                serialize_search_folder_definition_row_with_mailbox_guid(
+                    &definition,
+                    principal.account_id,
+                    &[tag],
+                )
+            })
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
         Some(MapiObject::AssociatedConfig {
             folder_id,
             config_id,
@@ -1333,40 +1323,9 @@ pub(in crate::mapi) fn serialize_object_property(
             &[tag],
         ),
         _ => {
-            let folder_id = object
-                .and_then(MapiObject::folder_id)
-                .unwrap_or(ROOT_FOLDER_ID);
-            folder_row_for_id(folder_id, mailboxes)
-                .map(|mailbox| {
-                    serialize_folder_row_with_context_and_version(
-                        mailbox,
-                        mailboxes,
-                        &[tag],
-                        principal.account_id,
-                        snapshot.folder_version(folder_id),
-                    )
-                })
-                .or_else(|| {
-                    snapshot
-                        .collaboration_folder_for_id(folder_id)
-                        .map(|folder| {
-                            serialize_collaboration_folder_row_with_context_and_version(
-                                folder,
-                                &[tag],
-                                associated_folder_message_count(folder_id, snapshot),
-                                snapshot.folder_version(folder_id),
-                            )
-                        })
-                })
-                .unwrap_or_else(|| {
-                    serialize_special_folder_row_with_version(
-                        folder_id,
-                        mailboxes,
-                        &[tag],
-                        Some(principal),
-                        snapshot.folder_version(folder_id),
-                    )
-                })
+            let mut value = Vec::new();
+            write_property_default(&mut value, tag);
+            value
         }
     }
 }

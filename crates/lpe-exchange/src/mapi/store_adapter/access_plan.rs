@@ -45,6 +45,7 @@ pub(in crate::mapi) fn plan_mapi_store_access(
         content_queries: Vec::new(),
     };
     let mut simulated_handles = session.handles.clone();
+    let mut simulated_issued_handles = session.issued_handles.clone();
     let mut simulated_next_handle = session.next_handle;
 
     let mut cursor = Cursor::new(requests);
@@ -61,6 +62,7 @@ pub(in crate::mapi) fn plan_mapi_store_access(
             &mut plan,
             session,
             &mut simulated_handles,
+            &mut simulated_issued_handles,
             &mut simulated_next_handle,
             &mut handle_slots,
             &request,
@@ -76,6 +78,7 @@ fn extend_access_plan_for_request(
     plan: &mut MapiAccessPlan,
     session: &MapiSession,
     simulated_handles: &mut HashMap<u32, MapiObject>,
+    simulated_issued_handles: &mut HashSet<u32>,
     simulated_next_handle: &mut u32,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
@@ -124,7 +127,7 @@ fn extend_access_plan_for_request(
         push_unique(&mut plan.object_ids, folder_id);
     }
     if let Some(target_handle) = request.move_copy_target_handle(&handle_slots) {
-        if let Some(object) = session.handles.get(&target_handle) {
+        if let Some(object) = simulated_handles.get(&target_handle) {
             add_object_ids_for_handle(plan, object);
         }
     }
@@ -137,6 +140,7 @@ fn extend_access_plan_for_request(
         plan,
         session,
         simulated_handles,
+        simulated_issued_handles,
         simulated_next_handle,
         handle_slots,
         request,
@@ -156,6 +160,7 @@ pub(in crate::mapi) fn hierarchy_sync_selective_fallback_plan(
         content_queries: Vec::new(),
     };
     let mut simulated_handles = session.handles.clone();
+    let mut simulated_issued_handles = session.issued_handles.clone();
     let mut simulated_next_handle = session.next_handle;
     let mut hierarchy_sync_handle_indexes = HashSet::new();
     let mut saw_hierarchy_configure = false;
@@ -178,6 +183,7 @@ pub(in crate::mapi) fn hierarchy_sync_selective_fallback_plan(
             &mut plan,
             session,
             &mut simulated_handles,
+            &mut simulated_issued_handles,
             &mut simulated_next_handle,
             &mut handle_slots,
             &request,
@@ -280,18 +286,31 @@ pub(in crate::mapi) fn simulate_table_access(
     plan: &mut MapiAccessPlan,
     session: &MapiSession,
     handles: &mut HashMap<u32, MapiObject>,
+    issued_handles: &mut HashSet<u32>,
     next_handle: &mut u32,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
 ) {
     match request.rop_id {
+        0x01 => {
+            if let Some(input_index) = request.input_handle_index() {
+                if let Some(handle) = handle_slots.get_mut(usize::from(input_index)) {
+                    if *handle != u32::MAX {
+                        if handles.remove(handle).is_some() {
+                            issued_handles.insert(*handle);
+                        }
+                        *handle = u32::MAX;
+                    }
+                }
+            }
+        }
         0x02 => {
             let folder_id =
                 session.resolve_special_folder_alias(request.folder_id().unwrap_or(ROOT_FOLDER_ID));
             let handle = simulate_allocate_handle(
                 handles,
+                issued_handles,
                 next_handle,
-                request.output_handle_index,
                 MapiObject::Folder {
                     folder_id,
                     properties: HashMap::new(),
@@ -306,8 +325,8 @@ pub(in crate::mapi) fn simulate_table_access(
                 .unwrap_or(ROOT_FOLDER_ID);
             let handle = simulate_allocate_handle(
                 handles,
+                issued_handles,
                 next_handle,
-                request.output_handle_index,
                 MapiObject::HierarchyTable {
                     folder_id,
                     depth: request
@@ -345,8 +364,8 @@ pub(in crate::mapi) fn simulate_table_access(
             let sort_orders = simulated_default_view_content_sort(folder_id, associated);
             let handle = simulate_allocate_handle(
                 handles,
+                issued_handles,
                 next_handle,
-                request.output_handle_index,
                 MapiObject::ContentsTable {
                     folder_id,
                     associated,
@@ -385,8 +404,7 @@ pub(in crate::mapi) fn simulate_table_access(
                         recipients: Vec::new(),
                     }
                 };
-            let handle =
-                simulate_allocate_handle(handles, next_handle, request.output_handle_index, object);
+            let handle = simulate_allocate_handle(handles, issued_handles, next_handle, object);
             set_handle_slot(handle_slots, request.output_handle_index, handle);
         }
         0x0C => {
@@ -635,8 +653,8 @@ pub(in crate::mapi) fn simulate_table_access(
             };
             let handle = simulate_allocate_handle(
                 handles,
+                issued_handles,
                 next_handle,
-                request.output_handle_index,
                 MapiObject::SynchronizationSource {
                     folder_id,
                     mailbox_id,
@@ -699,20 +717,37 @@ fn simulated_default_view_content_sort(folder_id: u64, associated: bool) -> Vec<
 
 fn simulate_allocate_handle(
     handles: &mut HashMap<u32, MapiObject>,
+    issued_handles: &mut HashSet<u32>,
     next_handle: &mut u32,
-    output_handle_index: Option<u8>,
     object: MapiObject,
 ) -> u32 {
-    let preferred = output_handle_index.map(|index| index as u32 + 1);
-    let handle = preferred
-        .filter(|handle| !handles.contains_key(handle))
-        .unwrap_or(*next_handle);
-    *next_handle = next_handle.saturating_add(1).max(1);
-    if handle >= *next_handle {
-        *next_handle = handle.saturating_add(1).max(1);
+    let mut candidate = if matches!(*next_handle, 0 | u32::MAX) {
+        1
+    } else {
+        *next_handle
+    };
+    let max_attempts = issued_handles
+        .len()
+        .saturating_add(handles.len())
+        .saturating_add(1);
+    for _ in 0..max_attempts {
+        if !issued_handles.contains(&candidate) && !handles.contains_key(&candidate) {
+            *next_handle = if candidate >= u32::MAX - 1 {
+                1
+            } else {
+                candidate + 1
+            };
+            issued_handles.insert(candidate);
+            handles.insert(candidate, object);
+            return candidate;
+        }
+        candidate = if candidate >= u32::MAX - 1 {
+            1
+        } else {
+            candidate + 1
+        };
     }
-    handles.insert(handle, object);
-    handle
+    panic!("simulated MAPI server-object handle space exhausted")
 }
 
 pub(in crate::mapi) fn add_content_query(

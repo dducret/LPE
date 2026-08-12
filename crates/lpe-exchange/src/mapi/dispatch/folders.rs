@@ -193,15 +193,24 @@ pub(super) async fn append_empty_folder_response<S: ExchangeStore>(
         ));
         return;
     }
-    let Some(folder_id) =
-        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
-    else {
-        responses.extend_from_slice(&rop_error_response(
-            request.rop_id,
-            request.response_handle_index(),
-            0x0000_04B9,
-        ));
-        return;
+    let folder_id = match input_object(session, handle_slots, request) {
+        Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
+        Some(_) => {
+            responses.extend_from_slice(&rop_error_response(
+                request.rop_id,
+                request.response_handle_index(),
+                MapiError::NotSupported.as_u32(),
+            ));
+            return;
+        }
+        None => {
+            responses.extend_from_slice(&rop_error_response(
+                request.rop_id,
+                request.response_handle_index(),
+                MapiError::NullObject.as_u32(),
+            ));
+            return;
+        }
     };
 
     if folder_id == crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID {
@@ -264,15 +273,24 @@ pub(super) async fn append_delete_folder_response<S: ExchangeStore>(
         ));
         return;
     }
-    let Some(parent_folder_id) =
-        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
-    else {
-        responses.extend_from_slice(&rop_error_response(
-            0x1D,
-            request.response_handle_index(),
-            0x0000_04B9,
-        ));
-        return;
+    let parent_folder_id = match input_object(session, handle_slots, request) {
+        Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
+        Some(_) => {
+            responses.extend_from_slice(&rop_error_response(
+                0x1D,
+                request.response_handle_index(),
+                MapiError::NotSupported.as_u32(),
+            ));
+            return;
+        }
+        None => {
+            responses.extend_from_slice(&rop_error_response(
+                0x1D,
+                request.response_handle_index(),
+                MapiError::NullObject.as_u32(),
+            ));
+            return;
+        }
     };
     let Some(folder_id) = request.delete_folder_id() else {
         responses.extend_from_slice(&rop_error_response(
@@ -537,32 +555,40 @@ pub(super) async fn append_folder_move_copy_response<S: ExchangeStore>(
         ));
         return;
     }
-    let Some(source_parent_folder_id) =
-        input_object(session, handle_slots, request).and_then(MapiObject::folder_id)
-    else {
-        responses.extend_from_slice(&rop_error_response(
-            rop_id,
-            response_handle_index,
-            0x0000_04B9,
-        ));
-        return;
+    let source_parent_folder_id = match input_object(session, handle_slots, request) {
+        Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
+        Some(_) => {
+            responses.extend_from_slice(&rop_error_response(
+                rop_id,
+                response_handle_index,
+                MapiError::NotSupported.as_u32(),
+            ));
+            return;
+        }
+        None => {
+            responses.extend_from_slice(&rop_error_response(
+                rop_id,
+                response_handle_index,
+                MapiError::NullObject.as_u32(),
+            ));
+            return;
+        }
     };
-    let Some(target_folder_id) = request
+    let Some(MapiObject::Folder {
+        folder_id: target_folder_id,
+        ..
+    }) = request
         .move_copy_target_handle(handle_slots)
-        .and_then(|handle| {
-            session
-                .handles
-                .get(&handle)
-                .and_then(|object| object.folder_id())
-        })
+        .and_then(|handle| session.handles.get(&handle))
     else {
-        responses.extend_from_slice(&rop_error_response(
+        responses.extend_from_slice(&rop_partial_completion_error_response(
             rop_id,
             response_handle_index,
             0x8004_010F,
         ));
         return;
     };
+    let target_folder_id = *target_folder_id;
     let Some(folder_id) = request.folder_move_copy_folder_id() else {
         responses.extend_from_slice(&rop_error_response(
             rop_id,

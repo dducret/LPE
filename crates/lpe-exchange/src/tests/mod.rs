@@ -12904,13 +12904,13 @@ fn mapi_submit_execute_body(subject: &str) -> Vec<u8> {
     append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Transport gate body");
     let to_row = mapi_recipient_row("Bob", "bob@example.test", 0x01);
 
-    let mut rops = Vec::new();
+    let mut rops = mapi_private_logon_rops("alice");
     append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
     append_rop_create_message(&mut rops, 1, 2, test_mapi_folder_id(5));
     append_rop_set_properties(&mut rops, 2, 2, &property_values);
     append_rop_modify_recipients(&mut rops, 2, &[(1, 0x01, to_row.as_slice())]);
     append_rop_submit_message(&mut rops, 2);
-    execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]))
+    execute_body(&rop_buffer(&rops, &[u32::MAX, u32::MAX, u32::MAX]))
 }
 
 fn rop_buffer(rops: &[u8], handles: &[u32]) -> Vec<u8> {
@@ -13075,6 +13075,41 @@ fn mapi_cookie_header(response: &axum::response::Response) -> String {
         .filter_map(|value| value.split(';').next())
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+async fn mapi_connect_with_private_logon<S, V>(service: &ExchangeService<S, V>) -> (HeaderMap, u32)
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    assert_eq!(connect.status(), StatusCode::OK);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&mapi_private_logon_rops("alice"), &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&logon);
+    let body = response_bytes(logon).await;
+    let (response_rops, response_handles) = response_rops_and_handles_from_execute_body(&body);
+    assert!(contains_bytes(&response_rops, &[0xFE, 0x00, 0, 0, 0, 0]));
+    let logon_handle = response_handles[0];
+    assert_ne!(logon_handle, u32::MAX);
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    renew_mapi_request_id(&mut execute_headers);
+    (execute_headers, logon_handle)
 }
 
 fn mapi_cookie_header_with_mismatched_sequence(response: &axum::response::Response) -> String {
@@ -15596,7 +15631,7 @@ fn saved_message_id_from_response(response_rops: &[u8], response_handle_index: u
 }
 
 fn append_rop_open_folder(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: u64) {
-    rops.extend_from_slice(&[0x02, input, 0x00, output]);
+    rops.extend_from_slice(&[0x02, 0x00, input, output]);
     append_mapi_wire_id(rops, folder_id);
     rops.push(0);
 }
@@ -15731,14 +15766,14 @@ fn append_search_exists(restriction: &mut Vec<u8>, property_tag: u32) {
 }
 
 fn append_rop_create_message(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: u64) {
-    rops.extend_from_slice(&[0x06, input, 0x01, output]);
+    rops.extend_from_slice(&[0x06, 0x00, input, output]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
     append_mapi_wire_id(rops, folder_id);
     rops.push(0);
 }
 
 fn append_rop_create_associated_message(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: u64) {
-    rops.extend_from_slice(&[0x06, input, 0x01, output]);
+    rops.extend_from_slice(&[0x06, 0x00, input, output]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
     append_mapi_wire_id(rops, folder_id);
     rops.push(1);
@@ -15793,17 +15828,19 @@ fn append_rop_modify_recipients_with_columns(
     }
 }
 
-fn append_rop_save_changes_message(rops: &mut Vec<u8>, input: u8, response: u8) {
-    append_rop_save_changes_message_with_flags(rops, input, response, 0x00);
+fn append_rop_save_changes_message(rops: &mut Vec<u8>, response: u8, input: u8) {
+    append_rop_save_changes_message_with_flags(rops, response, input, 0x00);
 }
 
 fn append_rop_save_changes_message_with_flags(
     rops: &mut Vec<u8>,
-    input: u8,
     response: u8,
+    input: u8,
     save_flags: u8,
 ) {
-    rops.extend_from_slice(&[0x0C, 0x00, input, response, save_flags]);
+    // [MS-OXCROPS] section 2.2.6.3.1 places ResponseHandleIndex before
+    // InputHandleIndex in the request buffer.
+    rops.extend_from_slice(&[0x0C, 0x00, response, input, save_flags]);
 }
 
 fn test_conversation_index(conversation_id: Uuid) -> Vec<u8> {
@@ -15980,11 +16017,7 @@ where
     S: ExchangeStore + Clone + Send + Sync + 'static,
 {
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, folder_id);
@@ -16001,13 +16034,11 @@ where
         client_state,
         synchronization_flags,
     );
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -16055,18 +16086,12 @@ where
     S: ExchangeStore + Clone + Send + Sync + 'static,
 {
     let service = ExchangeService::new(store);
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[logon_handle, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -16230,18 +16255,30 @@ async fn execute_rops_response_rops(rops: &[u8], handles: &[u32]) -> Vec<u8> {
         session: Some(FakeStore::account()),
         ..Default::default()
     });
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    let cookie = mapi_cookie_header(&connect);
-    let mut execute_headers = mapi_headers("Execute");
-    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let (execute_headers, request_handles) = if handles.first() == Some(&1) {
+        let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+        let mut request_handles = handles.to_vec();
+        request_handles[0] = logon_handle;
+        (execute_headers, request_handles)
+    } else {
+        // Some protocol-shape tests deliberately carry RopLogon in this
+        // Execute buffer or exercise pre-Logon null-handle behavior.
+        let connect = service
+            .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+            .await
+            .unwrap();
+        let mut execute_headers = mapi_headers("Execute");
+        execute_headers.insert(
+            "cookie",
+            HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+        );
+        (execute_headers, handles.to_vec())
+    };
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(rops, handles)),
+            &execute_body(&rop_buffer(rops, &request_handles)),
         )
         .await
         .unwrap();

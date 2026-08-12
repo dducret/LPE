@@ -19,16 +19,16 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     output_handles: &mut Vec<u32>,
     content_sync_configure_observed: &mut bool,
 ) -> SyncConfigureFlow {
-    let Some(folder_id) =
-        input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+    let Some(MapiObject::Folder { folder_id, .. }) = input_object(session, &handle_slots, &request)
     else {
         responses.extend_from_slice(&rop_error_response(
             0x70,
             request.response_handle_index(),
-            0x8004_010F,
+            0x8004_0102,
         ));
         return SyncConfigureFlow::Continue;
     };
+    let folder_id = *folder_id;
     let sync_type = request.sync_type();
     if MapiSyncType::from_u8(sync_type).is_none() {
         responses.extend_from_slice(&rop_error_response(
