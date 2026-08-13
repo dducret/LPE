@@ -162,17 +162,21 @@ pub(super) fn hex_to_bytes(value: &str) -> Option<Vec<u8>> {
 pub(in crate::mapi) fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, value: &MapiValue) {
     match MapiPropertyTag::new(property_tag).property_type() {
         Some(MapiPropertyType::Null) => {}
-        Some(MapiPropertyType::Integer16) => write_u16(
-            row,
-            value
-                .clone()
-                .into_u32()
-                .and_then(|value| u16::try_from(value).ok())
-                .unwrap_or_default(),
-        ),
-        Some(MapiPropertyType::Integer32) => {
-            write_u32(row, value.clone().into_u32().unwrap_or_default())
-        }
+        Some(MapiPropertyType::Integer16) => match value {
+            MapiValue::I16(value) => row.extend_from_slice(&value.to_le_bytes()),
+            _ => write_u16(
+                row,
+                value
+                    .clone()
+                    .into_u32()
+                    .and_then(|value| u16::try_from(value).ok())
+                    .unwrap_or_default(),
+            ),
+        },
+        Some(MapiPropertyType::Integer32) => match value {
+            MapiValue::I32(value) => row.extend_from_slice(&value.to_le_bytes()),
+            _ => write_u32(row, value.clone().into_u32().unwrap_or_default()),
+        },
         Some(MapiPropertyType::Floating32) => {
             let value = match value {
                 MapiValue::F64(value) if f64::from_bits(*value).is_finite() => {
@@ -195,18 +199,27 @@ pub(in crate::mapi) fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, va
             write_u32(row, value.clone().into_u32().unwrap_or(0x8004_0102))
         }
         Some(MapiPropertyType::Boolean) => row.push(value.as_bool().unwrap_or_default() as u8),
-        Some(MapiPropertyType::Integer64) | Some(MapiPropertyType::Time) => {
-            let value = value.as_i64().unwrap_or_default().max(0) as u64;
-            match property_tag {
-                PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID | PID_TAG_MID => {
-                    write_object_id(row, value)
-                }
-                PID_TAG_CHANGE_NUMBER => {
-                    write_object_id(row, crate::mapi::identity::mapi_store_id(value))
-                }
-                _ => write_u64(row, value),
+        Some(MapiPropertyType::Integer64) | Some(MapiPropertyType::Time) => match property_tag {
+            PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID | PID_TAG_MID => {
+                let value = match value {
+                    MapiValue::U64(value) => *value,
+                    _ => value.as_i64().unwrap_or_default().max(0) as u64,
+                };
+                write_object_id(row, value);
             }
-        }
+            PID_TAG_CHANGE_NUMBER => {
+                let value = match value {
+                    MapiValue::U64(value) => *value,
+                    _ => value.as_i64().unwrap_or_default().max(0) as u64,
+                };
+                write_object_id(row, crate::mapi::identity::mapi_store_id(value));
+            }
+            _ => match value {
+                MapiValue::I64(value) => row.extend_from_slice(&value.to_le_bytes()),
+                MapiValue::U64(value) => write_u64(row, *value),
+                _ => write_u64(row, value.as_i64().unwrap_or_default().max(0) as u64),
+            },
+        },
         Some(MapiPropertyType::String8) => {
             write_ascii_z(row, &value.clone().into_text().unwrap_or_default())
         }

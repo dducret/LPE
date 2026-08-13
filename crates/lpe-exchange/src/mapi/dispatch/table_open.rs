@@ -132,6 +132,7 @@ pub(super) async fn append_open_table_response<S>(
                 handle,
                 logon_id,
                 table_flags & 0x10 == 0,
+                table_flags & 0x80 != 0,
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
             let row_count = if folder_id == PUBLIC_FOLDERS_ROOT_FOLDER_ID
@@ -309,6 +310,7 @@ pub(super) async fn append_open_table_response<S>(
                 handle,
                 logon_id,
                 table_flags & 0x10 == 0,
+                false,
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
             let row_count = contents_table_open_row_count(

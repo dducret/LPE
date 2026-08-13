@@ -2255,6 +2255,41 @@ fn typed_scalar_property_values_round_trip() {
 }
 
 #[test]
+fn signed_scalar_property_values_preserve_their_wire_bits() {
+    for value in [i16::MIN, -1, i16::MAX] {
+        assert_eq!(
+            round_trip(0x3000_0002, &MapiValue::I16(value)),
+            MapiValue::I16(value)
+        );
+    }
+    for value in [i32::MIN, -1, i32::MAX] {
+        assert_eq!(
+            round_trip(0x3000_0003, &MapiValue::I32(value)),
+            MapiValue::I32(value)
+        );
+    }
+    for value in [i64::MIN, -1, i64::MAX] {
+        assert_eq!(
+            round_trip(0x3000_0014, &MapiValue::I64(value)),
+            MapiValue::I64(value)
+        );
+    }
+
+    assert_eq!(
+        round_trip(0x3000_0002, &MapiValue::U32(u16::MAX.into())),
+        MapiValue::I16(-1)
+    );
+    assert_eq!(
+        round_trip(0x3000_0003, &MapiValue::U32(u32::MAX)),
+        MapiValue::I32(-1)
+    );
+    assert_eq!(
+        round_trip(0x3000_0014, &MapiValue::U64(u64::MAX)),
+        MapiValue::I64(-1)
+    );
+}
+
+#[test]
 fn object_id_properties_use_mapi_wire_ids() {
     let mut encoded = Vec::new();
     write_mapi_value(
@@ -6410,6 +6445,7 @@ fn already_open_common_view_missing_descriptor_uses_empty_stream_semantics() {
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
         notification_cursor: None,
         pending_notifications: std::collections::VecDeque::new(),
+        execute_notification_origins: None,
         table_notification_eligible_handles: std::collections::HashMap::new(),
         table_notification_active_handles: std::collections::HashSet::new(),
         completed_execute_requests: std::collections::HashMap::new(),
@@ -6500,6 +6536,7 @@ fn common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence() {
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
         notification_cursor: None,
         pending_notifications: std::collections::VecDeque::new(),
+        execute_notification_origins: None,
         table_notification_eligible_handles: std::collections::HashMap::new(),
         table_notification_active_handles: std::collections::HashSet::new(),
         completed_execute_requests: std::collections::HashMap::new(),
@@ -6611,6 +6648,7 @@ fn associated_config_stream_rops_require_the_actual_stream_handle() {
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
         notification_cursor: None,
         pending_notifications: std::collections::VecDeque::new(),
+        execute_notification_origins: None,
         table_notification_eligible_handles: std::collections::HashMap::new(),
         table_notification_active_handles: std::collections::HashSet::new(),
         completed_execute_requests: std::collections::HashMap::new(),
@@ -6771,6 +6809,7 @@ fn message_list_settings_private_binary_stream_is_projected_without_widening_oth
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
         notification_cursor: None,
         pending_notifications: std::collections::VecDeque::new(),
+        execute_notification_origins: None,
         table_notification_eligible_handles: std::collections::HashMap::new(),
         table_notification_active_handles: std::collections::HashSet::new(),
         completed_execute_requests: std::collections::HashMap::new(),

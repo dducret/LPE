@@ -1,5 +1,6 @@
 use std::time::{Duration, SystemTime};
 
+use super::table_notifications::notification_events_have_same_origin;
 use super::*;
 use crate::mapi::wire::MapiNotificationEventMask;
 
@@ -248,9 +249,12 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
     session.handles.insert(
         hierarchy_handle,
         MapiObject::HierarchyTable {
-            folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
-            depth: false,
-            depth_folder_ids: Default::default(),
+            folder_id: ROOT_FOLDER_ID,
+            depth: true,
+            depth_folder_ids: HashSet::from([
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                crate::mapi::identity::CALENDAR_FOLDER_ID,
+            ]),
             columns: Vec::new(),
             columns_set: true,
             sort_orders: Vec::new(),
@@ -264,7 +268,7 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
             position: 0,
         },
     );
-    session.remember_table_notification_eligibility(hierarchy_handle, 1, true);
+    session.remember_table_notification_eligibility(hierarchy_handle, 1, true, false);
     session
         .table_notification_active_handles
         .insert(hierarchy_handle);
@@ -306,6 +310,118 @@ fn session_retains_folder_count_change_for_active_parent_hierarchy_table() {
 }
 
 #[test]
+fn session_suppresses_only_own_action_notifications_for_0x80_hierarchy_table() {
+    let principal = principal();
+    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let mut session = remove_session(&session_id).unwrap();
+    let hierarchy_handle = 77;
+    session.handles.insert(
+        hierarchy_handle,
+        MapiObject::HierarchyTable {
+            folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            depth: false,
+            depth_folder_ids: Default::default(),
+            columns: Vec::new(),
+            columns_set: true,
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            deleted_advertised_special_folders: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        },
+    );
+    session.remember_table_notification_eligibility(hierarchy_handle, 0, true, true);
+    session
+        .table_notification_active_handles
+        .insert(hierarchy_handle);
+
+    let subscription_handle = 78;
+    session.handles.insert(
+        subscription_handle,
+        MapiObject::NotificationSubscription {
+            registration: crate::mapi::notifications::MapiNotificationRegistration {
+                logon_id: 0,
+                notification_types: MapiNotificationEventMask::ObjectCreated.as_u16(),
+                folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+            },
+        },
+    );
+
+    // RopSaveChangesMessage first records the sparse local event. The durable
+    // poll then supplies its canonical echo in the same Execute.
+    session.begin_execute_notification_origin_tracking();
+    session.record_notification(MapiNotificationEvent::content(
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        Some(0x0000_0000_065d_0001),
+    ));
+    let mut own_action_events = session.take_execute_notification_origins();
+    let own_action_echo = MapiNotificationEvent::canonical(
+        MapiNotificationKind::Content,
+        MapiNotificationEventMask::ObjectCreated.as_u16(),
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        Some(0x0000_0000_065d_0001),
+        None,
+        65_667,
+        65_667,
+        Some(1),
+        Some(0),
+        "created".to_string(),
+        None,
+        None,
+        Some("Probe H".to_string()),
+        Some("IPM.Appointment".to_string()),
+    )
+    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID));
+    session.record_polled_notification(own_action_echo, &mut own_action_events);
+
+    // A concurrent external edit of the same item is a distinct durable
+    // version and must not inherit the local event's suppression marker.
+    let concurrent_external = MapiNotificationEvent::canonical(
+        MapiNotificationKind::Content,
+        MapiNotificationEventMask::ObjectModified.as_u16(),
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        Some(0x0000_0000_065d_0001),
+        None,
+        65_668,
+        65_668,
+        Some(2),
+        Some(0),
+        "updated".to_string(),
+        None,
+        None,
+        Some("Probe H - concurrent edit".to_string()),
+        Some("IPM.Appointment".to_string()),
+    )
+    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID));
+    session.record_polled_notification(concurrent_external, &mut own_action_events);
+
+    let (own_deliveries, _) =
+        session.take_pending_notification_delivery_batch_for_execute(&own_action_events);
+    assert!(own_deliveries.iter().any(|(handle, _, event)| {
+        *handle == subscription_handle
+            && event.event_mask == MapiNotificationEventMask::ObjectCreated.as_u16()
+    }));
+    assert!(own_deliveries.iter().any(|(handle, _, event)| {
+        *handle == hierarchy_handle
+            && event.kind == MapiNotificationKind::Hierarchy
+            && event.event_mask == MapiNotificationEventMask::TableModified.as_u16() | 0x8000
+            && event.modseq == Some(65_668)
+    }));
+}
+
+#[test]
+fn session_does_not_correlate_identityless_same_folder_events() {
+    let first = MapiNotificationEvent::content(crate::mapi::identity::INBOX_FOLDER_ID, None);
+    let second = MapiNotificationEvent::content(crate::mapi::identity::INBOX_FOLDER_ID, None);
+
+    assert!(!notification_events_have_same_origin(&first, &second));
+}
+
+#[test]
 fn session_new_mail_hierarchy_row_survives_preceding_basic_table_change() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
@@ -330,7 +446,7 @@ fn session_new_mail_hierarchy_row_survives_preceding_basic_table_change() {
             position: 0,
         },
     );
-    session.remember_table_notification_eligibility(hierarchy_handle, 0, true);
+    session.remember_table_notification_eligibility(hierarchy_handle, 0, true, false);
     session
         .table_notification_active_handles
         .insert(hierarchy_handle);
@@ -442,7 +558,7 @@ fn session_retains_collaboration_content_changes_for_active_root_depth_hierarchy
             position: 0,
         },
     );
-    session.remember_table_notification_eligibility(hierarchy_handle, 1, true);
+    session.remember_table_notification_eligibility(hierarchy_handle, 1, true, false);
     session
         .table_notification_active_handles
         .insert(hierarchy_handle);
@@ -645,7 +761,7 @@ fn hierarchy_move_notifies_the_source_subscription_and_refreshes_both_parent_tab
                 position: 0,
             },
         );
-        session.remember_table_notification_eligibility(handle, 0, true);
+        session.remember_table_notification_eligibility(handle, 0, true, false);
         session.table_notification_active_handles.insert(handle);
     }
 

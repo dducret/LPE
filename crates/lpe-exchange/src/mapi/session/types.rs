@@ -43,7 +43,9 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) next_named_property_id: u16,
     pub(in crate::mapi) notification_cursor: Option<i64>,
     pub(in crate::mapi) pending_notifications: VecDeque<MapiNotificationEvent>,
-    pub(in crate::mapi) table_notification_eligible_handles: HashMap<u32, u8>,
+    pub(in crate::mapi) execute_notification_origins: Option<Vec<MapiNotificationEvent>>,
+    pub(in crate::mapi) table_notification_eligible_handles:
+        HashMap<u32, MapiTableNotificationEligibility>,
     pub(in crate::mapi) table_notification_active_handles: HashSet<u32>,
     pub(in crate::mapi) completed_execute_requests: HashMap<String, CachedExecuteResponse>,
     pub(in crate::mapi) completed_execute_request_order: VecDeque<String>,
@@ -55,6 +57,12 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) store_replica_guid: Option<Uuid>,
     pub(in crate::mapi) outlook_smart_input_variant: String,
     pub(in crate::mapi) outlook_smart_input_variant_applied: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct MapiTableNotificationEligibility {
+    pub(in crate::mapi) logon_id: u8,
+    pub(in crate::mapi) suppresses_own_action_notifications: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

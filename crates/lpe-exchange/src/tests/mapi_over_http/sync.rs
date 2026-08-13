@@ -12815,6 +12815,13 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         ],
         kind: MapiNamedPropertyKind::Lid(0x0000_8214),
     };
+    let intended_busy_status_property = MapiNamedProperty {
+        guid: [
+            0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ],
+        kind: MapiNamedPropertyKind::Lid(0x0000_8224),
+    };
     {
         let mut mappings = store.mapi_named_properties.lock().unwrap();
         mappings
@@ -12830,6 +12837,13 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         mappings
             .by_property
             .insert((account.account_id, appointment_color_property), 0x8020);
+        mappings.by_id.insert(
+            (account.account_id, 0x8224),
+            intended_busy_status_property.clone(),
+        );
+        mappings
+            .by_property
+            .insert((account.account_id, intended_busy_status_property), 0x8224);
     }
     let full_sync_store = store.clone();
     let service = ExchangeService::new(store);
@@ -13025,6 +13039,7 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
     append_mapi_i64_property(&mut appointment_values, 0x85BF_0040, owner_critical_change);
     append_mapi_i32_property(&mut appointment_values, 0x85EB_0003, 7);
     append_mapi_binary_property(&mut appointment_values, 0x9003_0102, correlator);
+    append_mapi_i32_property(&mut appointment_values, 0x8224_0003, -1);
 
     append_mapi_i64_property(
         &mut appointment_values,
@@ -13141,6 +13156,7 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         0x85EB_0003,
         0x9003_0102,
         0x8214_0003,
+        0x8224_0003,
     ] {
         assert!(
             stored_property_tags.contains(&property_tag),
@@ -13148,6 +13164,16 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         );
     }
     assert!(!stored_property_tags.contains(&0x8020_0003));
+    assert_eq!(
+        mapi_custom_property_values.lock().unwrap()[&(
+            account.account_id,
+            MapiCustomPropertyObjectKind::CalendarEvent,
+            event_id,
+            0x8224_0003,
+            0x0003,
+        )],
+        (-1i32).to_le_bytes()
+    );
     for property_tag in [
         PID_TAG_CLIENT_SUBMIT_TIME,
         PID_LID_CLIP_START_TAG,
@@ -13443,6 +13469,11 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
     assert_eq!(
         body_value(PID_TAG_DELETE_AFTER_SUBMIT),
         Some(&0u16.to_le_bytes()[..])
+    );
+    assert_eq!(
+        body_value(0x8224_0003),
+        Some(&(-1i32).to_le_bytes()[..]),
+        "Probe H PidLidIntendedBusyStatus must survive import, snapshot reload, web edit, and full Calendar ICS"
     );
     assert_eq!(
         body_value(PID_TAG_CONVERSATION_TOPIC_W),

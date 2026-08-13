@@ -26,7 +26,7 @@ fn execute_preserves_pending_table_notification_after_releasing_its_table() {
             position: 0,
         },
     );
-    session.remember_table_notification_eligibility(table_handle, 0, true);
+    session.remember_table_notification_eligibility(table_handle, 0, true, false);
     session
         .table_notification_active_handles
         .insert(table_handle);

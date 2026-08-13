@@ -3,7 +3,10 @@ use crate::mapi::wire::MapiNotificationEventMask;
 
 // [MS-OXCNOTIF] section 3.1.4.3 automatically subscribes a table after a
 // view-creating table ROP. [MS-OXCFOLD] sections 2.2.1.13.1 and 2.2.1.14.1
-// exclude tables opened with NoNotifications (0x10).
+// exclude tables opened with NoNotifications (0x10). A hierarchy table's
+// SuppressesNotifications flag (0x80) is narrower: it suppresses automatic
+// table notifications caused by this client's own actions, not explicit
+// subscriptions or changes replayed from another actor.
 
 impl MapiSession {
     pub(in crate::mapi) fn remember_table_notification_eligibility(
@@ -11,11 +14,17 @@ impl MapiSession {
         handle: u32,
         logon_id: u8,
         notifications_enabled: bool,
+        suppresses_own_action_notifications: bool,
     ) {
         self.table_notification_active_handles.remove(&handle);
         if notifications_enabled {
-            self.table_notification_eligible_handles
-                .insert(handle, logon_id);
+            self.table_notification_eligible_handles.insert(
+                handle,
+                MapiTableNotificationEligibility {
+                    logon_id,
+                    suppresses_own_action_notifications,
+                },
+            );
         } else {
             self.table_notification_eligible_handles.remove(&handle);
         }
@@ -70,9 +79,42 @@ impl MapiSession {
     }
 
     pub(in crate::mapi) fn record_notification(&mut self, event: MapiNotificationEvent) {
+        if let Some(origins) = self.execute_notification_origins.as_mut() {
+            origins.push(event.clone());
+        }
         if self.has_notification_target(&event) {
             self.pending_notifications.push_back(event);
         }
+    }
+
+    pub(in crate::mapi) fn begin_execute_notification_origin_tracking(&mut self) {
+        self.execute_notification_origins = Some(Vec::new());
+    }
+
+    pub(in crate::mapi) fn take_execute_notification_origins(
+        &mut self,
+    ) -> Vec<MapiNotificationEvent> {
+        self.execute_notification_origins.take().unwrap_or_default()
+    }
+
+    pub(in crate::mapi) fn record_polled_notification(
+        &mut self,
+        event: MapiNotificationEvent,
+        own_action_events: &mut [MapiNotificationEvent],
+    ) {
+        if let Some(origin) = own_action_events
+            .iter()
+            .position(|origin| notification_events_have_same_origin(origin, &event))
+            .map(|position| &mut own_action_events[position])
+        {
+            self.pending_notifications
+                .retain(|pending| !notification_events_have_same_origin(pending, &event));
+            // Replace a sparse direct marker with the durable event, including
+            // its exact modseq. A later external update of the same object in
+            // this poll will therefore no longer match this own-action origin.
+            *origin = event.clone();
+        }
+        self.record_notification(event);
     }
 
     pub(in crate::mapi) fn pending_notification_count(&self) -> usize {
@@ -114,11 +156,24 @@ impl MapiSession {
         Vec<(u32, u8, MapiNotificationEvent)>,
         VecDeque<MapiNotificationEvent>,
     ) {
+        self.take_pending_notification_delivery_batch_for_execute(&[])
+    }
+
+    pub(in crate::mapi) fn take_pending_notification_delivery_batch_for_execute(
+        &mut self,
+        own_action_events: &[MapiNotificationEvent],
+    ) -> (
+        Vec<(u32, u8, MapiNotificationEvent)>,
+        VecDeque<MapiNotificationEvent>,
+    ) {
         let events: Vec<_> = self.pending_notifications.drain(..).collect();
         let mut deliveries = Vec::new();
         let mut delivered_events = VecDeque::new();
         let mut delivered_table_changes = HashSet::new();
         for event in events {
+            let is_own_action = own_action_events
+                .iter()
+                .any(|origin| notification_events_have_same_origin(origin, &event));
             let table_event = table_changed_event(&event);
             let folder_event = folder_counts_modified_event(&event);
             let hierarchy_table_event = folder_event
@@ -160,13 +215,17 @@ impl MapiSession {
                         }
                     }
                     _ if self.table_notification_active_handles.contains(handle) => {
-                        let Some(logon_id) = self
+                        let Some(eligibility) = self
                             .table_notification_eligible_handles
                             .get(handle)
                             .copied()
                         else {
                             continue;
                         };
+                        if is_own_action && eligibility.suppresses_own_action_notifications {
+                            continue;
+                        }
+                        let logon_id = eligibility.logon_id;
                         if table_matches_event(object, &event) {
                             event_deliveries.push((*handle, logon_id, table_event.clone(), true));
                         } else if let Some(hierarchy_table_event) = &hierarchy_table_event {
@@ -260,6 +319,33 @@ impl MapiSession {
             }
         })
     }
+}
+
+pub(super) fn notification_events_have_same_origin(
+    origin: &MapiNotificationEvent,
+    event: &MapiNotificationEvent,
+) -> bool {
+    if origin.kind != event.kind || origin.folder_id != event.folder_id {
+        return false;
+    }
+
+    let canonical_message_matches = matches!(
+        (origin.canonical_message_id, event.canonical_message_id),
+        (Some(origin_id), Some(event_id)) if origin_id == event_id
+    );
+    let message_matches = matches!(
+        (origin.message_id, event.message_id),
+        (Some(origin_id), Some(event_id)) if origin_id == event_id
+    );
+    let either_identifies_message = origin.canonical_message_id.is_some()
+        || event.canonical_message_id.is_some()
+        || origin.message_id.is_some()
+        || event.message_id.is_some();
+    if !either_identifies_message || (!canonical_message_matches && !message_matches) {
+        return false;
+    }
+
+    !matches!((origin.modseq, event.modseq), (Some(left), Some(right)) if left != right)
 }
 
 fn table_changed_event(event: &MapiNotificationEvent) -> MapiNotificationEvent {

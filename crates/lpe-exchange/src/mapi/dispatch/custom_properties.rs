@@ -712,6 +712,22 @@ mod calendar_passthrough_tests {
     use super::*;
 
     #[test]
+    fn imported_intended_busy_status_preserves_negative_signed_value() {
+        let intended_busy_status_tag = 0x8224_0003;
+        assert_eq!(
+            mapi_event_create_property_values_from_map(
+                &HashMap::from([(intended_busy_status_tag, MapiValue::I32(-1))]),
+                true,
+            ),
+            vec![MapiEventCustomPropertyValue {
+                property_tag: intended_busy_status_tag,
+                property_type: 0x0003,
+                property_value: (-1i32).to_le_bytes().to_vec(),
+            }]
+        );
+    }
+
+    #[test]
     fn calendar_named_property_ownership_rejects_alias_types_and_unserializable_values() {
         let location_string8 = (PID_LID_LOCATION_W_TAG & 0xFFFF_0000) | 0x001E;
         let location_i32 = (PID_LID_LOCATION_W_TAG & 0xFFFF_0000) | 0x0003;

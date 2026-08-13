@@ -1104,6 +1104,7 @@ mod tests {
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,
             notification_cursor: None,
             pending_notifications: VecDeque::new(),
+            execute_notification_origins: None,
             table_notification_eligible_handles: HashMap::new(),
             table_notification_active_handles: HashSet::new(),
             completed_execute_requests: HashMap::new(),

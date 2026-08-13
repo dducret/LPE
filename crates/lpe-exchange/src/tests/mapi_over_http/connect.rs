@@ -4327,7 +4327,8 @@ async fn mapi_over_http_depth_root_hierarchy_includes_persisted_sync_issue_child
 #[tokio::test]
 async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows() {
     let folder_id = crate::mapi::identity::INBOX_FOLDER_ID;
-    let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
+    let local_message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
+    let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999996");
     let contact_message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999998");
     let calendar_message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999997");
     let account = FakeStore::account();
@@ -4351,7 +4352,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
         mapi_notification_polls: Arc::new(Mutex::new(vec![
             MapiNotificationPoll {
                 event_pending: true,
-                cursor: Some(10),
+                cursor: Some(11),
                 events: vec![
                     crate::mapi::notifications::MapiNotificationEvent::canonical(
                         crate::mapi::notifications::MapiNotificationKind::Content,
@@ -4359,7 +4360,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
                         folder_id,
                         Some(message_id),
                         None,
-                        8,
+                        9,
                         44,
                         Some(3),
                         Some(2),
@@ -4376,7 +4377,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
                         crate::mapi::identity::CONTACTS_FOLDER_ID,
                         Some(contact_message_id),
                         None,
-                        9,
+                        10,
                         45,
                         Some(1),
                         Some(1),
@@ -4394,7 +4395,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
                         crate::mapi::identity::CALENDAR_FOLDER_ID,
                         Some(calendar_message_id),
                         None,
-                        10,
+                        11,
                         46,
                         Some(1),
                         Some(1),
@@ -4409,9 +4410,27 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
                 ],
             },
             MapiNotificationPoll {
-                event_pending: false,
-                cursor: Some(7),
-                events: Vec::new(),
+                event_pending: true,
+                cursor: Some(8),
+                events: vec![
+                    crate::mapi::notifications::MapiNotificationEvent::canonical(
+                        crate::mapi::notifications::MapiNotificationKind::Content,
+                        0x0004,
+                        folder_id,
+                        Some(local_message_id),
+                        None,
+                        8,
+                        43,
+                        Some(4),
+                        Some(2),
+                        "created".to_string(),
+                        Some("Inbox".to_string()),
+                        None,
+                        Some("Same-context save".to_string()),
+                        Some("IPM.Note".to_string()),
+                    )
+                    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+                ],
             },
         ])),
         ..Default::default()
@@ -4427,6 +4446,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     let scoped_calendar_folder_id = identity_codec
         .actual_object_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
         .unwrap();
+    let imported_emails = store.imported_emails.clone();
     let service = ExchangeService::new(store);
     let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
     let cookie = execute_headers
@@ -4475,6 +4495,12 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     // Match Outlook's pending-notification follow-up: release a live folder
     // while retaining the root hierarchy table and its subscription.
     append_rop_open_folder(&mut rops, 0, 4, scoped_inbox_folder_id);
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Same-context save");
+    append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Notification body");
+    append_rop_create_message(&mut rops, 4, 5, scoped_inbox_folder_id);
+    append_rop_set_properties(&mut rops, 5, 2, &property_values);
+    append_rop_save_changes_message(&mut rops, 5, 5);
 
     let response = service
         .handle_mapi(
@@ -4482,7 +4508,14 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
             &execute_headers,
             &execute_body(&rop_buffer(
                 &rops,
-                &[logon_handle, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+                &[
+                    logon_handle,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                ],
             )),
         )
         .await
@@ -4490,6 +4523,11 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
+    assert_eq!(imported_emails.lock().unwrap().len(), 1);
+    assert!(
+        !contains_bytes(&response_rops, &[0x2A, 0x03, 0, 0, 0, 0]),
+        "same-context save notified its 0x84 hierarchy table: {response_rops:02x?}"
+    );
 
     // The root hierarchy table was opened before these external collaboration
     // changes. Its Release-only notification follow-up must load current folder

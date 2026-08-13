@@ -254,6 +254,7 @@ where
     // the pending indication.
     let (preexisting_notification_deliveries, mut delivered_notification_events) =
         session.take_pending_notification_delivery_batch();
+    session.begin_execute_notification_origin_tracking();
     let preexisting_notification_targets = preexisting_notification_deliveries
         .iter()
         .filter_map(|(notification_handle, _, _)| {
@@ -807,6 +808,11 @@ where
             }
         }
     }
+    // Direct events queued while processing this Execute are own-action
+    // origins. The store poll below can replay the same durable change with
+    // richer metadata, so retain the stable origin identities through the
+    // final delivery pass without persisting client-origin state.
+    let mut own_action_notification_events = session.take_execute_notification_origins();
     if session.notification_cursor.is_none() && session.has_notification_targets() {
         // [MS-OXCNOTIF] section 3.1.4.3 creates an automatic subscription
         // for an active table view. Adopt the cursor captured before this
@@ -822,7 +828,7 @@ where
             let matching_events = session.matching_notifications(poll.events);
             let matching_event_count = matching_events.len();
             for event in matching_events {
-                session.record_notification(event);
+                session.record_polled_notification(event, &mut own_action_notification_events);
             }
             session.notification_cursor = poll.cursor.or(Some(cursor));
             if poll.event_pending || polled_event_count != 0 {
@@ -842,8 +848,8 @@ where
             }
         }
     }
-    let (notification_deliveries, mut newly_delivered_notification_events) =
-        session.take_pending_notification_delivery_batch();
+    let (notification_deliveries, mut newly_delivered_notification_events) = session
+        .take_pending_notification_delivery_batch_for_execute(&own_action_notification_events);
     delivered_notification_events.append(&mut newly_delivered_notification_events);
     let new_mail_notification_delivery_count = preexisting_notification_deliveries
         .iter()

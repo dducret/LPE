@@ -404,6 +404,22 @@ before it is advertised.
   updates, reconnect, direct reads, and full ICS rather than acknowledging it
   and replacing it with zero (`[MS-OXOCAL]` section 2.2.1.50).
 
+  Probe H (`202608122016`) exposed a generic typed-value corruption in that
+  passthrough path: Outlook imported `PidLidIntendedBusyStatus`
+  (`0x82240003`) as `-1`, but the common MAPI encoder attempted an unsigned
+  conversion and silently persisted zero. The first state-only Calendar replay
+  already returned zero, before the later web edit. LPE now writes signed
+  `PtypInteger16`, `PtypInteger32`, and `PtypInteger64` values with their exact
+  two's-complement wire bits; unsigned representations and the separate
+  FolderId, ParentFolderId, MessageId, and ChangeNumber object-ID encodings keep
+  their existing semantics. The imported value must survive Save, snapshot
+  reload, a canonical Event update, and a fresh full Calendar ICS projection.
+  This follows `[MS-OXCDATA]` section 2.11.1, `[MS-OXPROPS]` section 2.151,
+  and `[MS-OXOCAL]` section 2.2.6.4. A complete comparison of the Probe H
+  upload and returned appointment found no other unexplained property loss;
+  a fresh Outlook run is still required to establish whether preserving this
+  value removes the remaining client-side `MAPI_E_NOT_FOUND` sync report.
+
   For the current non-delegated Event model, the canonical organizer supplies
   the complete `PidTagSender*` and `PidTagSentRepresenting*` identity families;
   LPE does not invent a distinct delegate sender without canonical delegate
@@ -1704,7 +1720,19 @@ not by itself authorize broad client publication.
   cursor before the containing Execute's mail-store snapshot and adopts it when
   the compatible table becomes active, allowing its automatic subscription to
   replay a canonical change that arrives during that request; a
-  `NoNotifications` table is excluded. Registrations,
+  `NoNotifications` (`0x10`) table is excluded. A hierarchy table opened with
+  `SuppressesNotifications` (`0x80`) remains automatically subscribed to
+  external changes, but an automatic table notification caused by a ROP in the
+  same client Execute is suppressed; an explicit `RopRegisterNotification`
+  subscription remains independent and can still receive that event. The
+  Execute captures sparse direct mutation events before polling the durable
+  change log, correlates a richer polled echo by event kind, folder, stable
+  canonical/message identity, and modseq when both sides provide one, and then
+  discards the origin set. It therefore cannot suppress a later external
+  change. This boundary matches the Exchange 2016 `202608041041.saz` control:
+  raw 147/151 kept a root `0x84` hierarchy table live and queried through raw
+  221, while the same `MapiContext` message save changed a folder count without
+  emitting a notification for that table. Registrations,
   automatic table subscriptions, and pending event delivery remain session-local;
   after process restart or movement to a different worker, the session must
   re-register and resume from canonical sync/checkpoint behavior rather than
