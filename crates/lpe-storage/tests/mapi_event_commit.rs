@@ -1917,7 +1917,7 @@ async fn mapi_event_create_rolls_back_every_artifact_and_retry_creates_one_event
 }
 
 #[tokio::test]
-async fn microsoft_oxcfxics_imported_event_keeps_client_xids_and_allocates_server_cn() -> Result<()>
+async fn exchange_product_imported_event_save_rotates_ck_and_retains_client_ancestry() -> Result<()>
 {
     let _guard = database_test_lock().lock().await;
     let Some(fixture) = event_fixture().await? else {
@@ -1948,8 +1948,11 @@ async fn microsoft_oxcfxics_imported_event_keeps_client_xids_and_allocates_serve
 
     assert_eq!(created.mapi_object_id, mapi_store_id(source_counter));
     assert_ne!(created.version.change_number, source_counter);
-    assert_eq!(created.version.change_key, client_change_key);
-    assert_eq!(created.version.predecessor_change_list, client_pcl);
+    let server_change_key = change_key(created.version.change_number);
+    assert_eq!(created.version.change_key, server_change_key);
+    let mut expected_pcl = client_pcl;
+    expected_pcl.extend_from_slice(&predecessor_change_list(&server_change_key));
+    assert_eq!(created.version.predecessor_change_list, expected_pcl);
     let identity = sqlx::query(
         r#"
         SELECT mapi_global_counter, mapi_object_id, source_key, change_key,
@@ -2174,8 +2177,7 @@ async fn microsoft_oxcfxics_imported_calendar_move_is_atomic_and_keeps_destinati
 }
 
 #[tokio::test]
-async fn microsoft_oxcfxics_imported_deleted_event_update_keeps_identity_and_is_atomic(
-) -> Result<()> {
+async fn exchange_product_imported_deleted_event_rotates_version_atomically() -> Result<()> {
     let _guard = database_test_lock().lock().await;
     let Some(fixture) = event_fixture().await? else {
         return Ok(());
@@ -2406,8 +2408,11 @@ async fn microsoft_oxcfxics_imported_deleted_event_update_keeps_identity_and_is_
         saved.version.canonical_modseq,
         before_event.get::<i64, _>("modseq") + 1
     );
-    assert_eq!(saved.version.change_key, update_change_key);
-    assert_eq!(saved.version.predecessor_change_list, update_pcl);
+    let server_change_key = change_key(saved.version.change_number);
+    assert_eq!(saved.version.change_key, server_change_key);
+    let mut expected_pcl = update_pcl;
+    expected_pcl.extend_from_slice(&predecessor_change_list(&server_change_key));
+    assert_eq!(saved.version.predecessor_change_list, expected_pcl);
     assert!(
         saved.version.change_number > before_identity.get::<i64, _>("mapi_change_number") as u64
     );

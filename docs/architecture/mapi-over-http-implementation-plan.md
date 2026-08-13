@@ -277,21 +277,23 @@ before it is advertised.
   concrete contradiction: after importing and saving the appointment with a
   foreign `PidTagChangeKey`, Outlook issues `RopSaveChangesMessage` and an
   immediate `RopGetPropertiesSpecific` for only `PidTagChangeKey` against the
-  same aliased input/response handle. LPE committed and correctly snapshotted
-  the imported identity, but the Event path treated the request's unrecognized
+  same aliased input/response handle. LPE committed the imported SourceKey but
+  incorrectly kept the imported ChangeKey current beside a distinct server CN;
+  independently, the Event path treated the request's unrecognized
   `0x08` SaveFlags bit as an effective no-keep-open save and removed the Message
   object before the later ROP in the same request buffer. Property projection
   then treated the missing object as the Root folder and returned the Root
-  ChangeKey, which was neither the committed imported ChangeKey nor a
-  predecessor later recorded for the appointment.
+  ChangeKey, which was neither the required server ChangeKey for the new server
+  CN nor part of the appointment's imported ChangeKey ancestry.
 
   LPE now applies a bounded compatibility policy to successful Event and
   Contact saves with no recognized keep-open flag: retain the committed Message
   object read-only until the remaining ROPs in that Execute buffer have run,
   then close it and clear all per-handle state. This is an LPE end-of-Execute
   lifetime rule, not a protocol claim that every no-keep-open save MUST close at
-  that boundary. It lets Probe G's post-save read return the exact committed
-  appointment ChangeKey without leaving the Message open across requests. If
+  that boundary. It lets Probe G's post-save read return the committed server
+  ChangeKey matching the newly allocated server CN without leaving the Message
+  open across requests. If
   the input and response indexes alias, containing-Folder projection is deferred
   until the read has run; a distinct response index is projected immediately.
   Explicit keep-open flags and other message-object types retain their existing
@@ -437,6 +439,34 @@ before it is advertised.
   after a successful import as described by section 3.3.5.8.7. This removes a
   definite protocol violation at the first failing boundary; a fresh Outlook
   run remains required to prove end-to-end symptom elimination.
+
+  Probe J (`202608130853`) confirms that upload GetTransferState now omits
+  `MetaTagIdsetGiven`, but exposes the next earlier wire contradiction. Calendar
+  import `:132` supplied a client ChangeKey, Save/GetProps `:136` returned that
+  same 20-byte client ChangeKey, and final state `:137` advertised a distinct
+  server CN. Exchange's normal-content control in `logs/202608041041.saz`
+  establishes the required product behavior: raw 216 imports a normal Message
+  with a foreign ChangeKey, raw 221 Save/GetProps returns a new 22-byte server
+  ChangeKey whose GLOBCNT is the new server CN, and raw 223 adds that exact CN
+  to `MetaTagCnsetSeen`. The raw 221 Save request does not set ChangeKey; its
+  only ChangeKey tag is the following GetProps request. For a new or existing
+  normal Calendar Event import, LPE must therefore preserve MID and SourceKey,
+  allocate the server CN, make its matching server XID the current ChangeKey,
+  and merge that server XID with the imported ChangeKey/PCL ancestry. The
+  generic normal Message path already allocates such a server ChangeKey; this
+  Probe J correction does not claim that Contact import is aligned.
+
+  This is an Exchange-product interoperability rule layered on the
+  `[MS-OXCFXICS]` section 3.1.5.3 baseline, which describes successful ICS
+  import as assigning a distinct internal CN while assigning the supplied
+  ChangeKey and `PCL{ChangeKey}`. The product boundary is object-class-sensitive:
+  associated/FAI imports preserve the imported ChangeKey. The controls in
+  `logs/test1_202608031300.saz` prove that boundary byte-for-byte: raw
+  306->307 preserves the initial associated import ChangeKey, and raw
+  467->468, 513->514, and 689->690 preserve each later imported associated
+  ChangeKey. In all four Save requests, the only ChangeKey tag belongs to the
+  trailing GetProps request rather than SetProps. A fix for Calendar normal
+  content must not rotate associated/FAI ChangeKeys.
 
   For the current non-delegated Event model, the canonical organizer supplies
   the complete `PidTagSender*` and `PidTagSentRepresenting*` identity families;
@@ -1670,20 +1700,32 @@ not by itself authorize broad client publication.
   delivery time is absent. This follows `[MS-OXCFXICS]` section 3.2.5.9.1.1,
   `[MS-OXOMSG]` section 2.2.3.9, and `[MS-OXPROPS]` section 2.766.
 - A Calendar `RopSynchronizationImportMessageChange` creates a pending canonical
-  Event. Its following property/stream writes and `RopSaveChangesMessage` commit
-  that Event with the imported SourceKey, ChangeKey, and PCL while allocating a
-  distinct internal server change number, as required by `[MS-OXCFXICS]`
-  sections 2.2.3.2.4.2.1, 3.1.5.3, and 3.2.5.9.4.2. It must never fall through
-  to generic mail persistence for an `IPM.Appointment`.
+  Event. Its following property/stream writes and `RopSaveChangesMessage`
+  preserve the imported SourceKey and client-reserved MID, allocate a distinct
+  internal server CN, make the matching server XID the current ChangeKey, and
+  merge that XID with the imported ChangeKey/PCL ancestry. This is the bounded
+  Exchange normal-content product behavior proven by
+  `logs/202608041041.saz` raw 216->221->223, layered on the
+  `[MS-OXCFXICS]` sections 2.2.3.2.4.2.1, 3.1.5.3, and 3.2.5.9.4.2 baseline.
+  It must never fall through to generic mail persistence for an
+  `IPM.Appointment`.
 - The same import ROP for an existing active or deleted Event returns a writable
   handle for that canonical Event. The imported SourceKey has to match its
   current identity; the following property writes and Save update the same
-  Event and preserve its MID/SourceKey while persisting the imported ChangeKey
-  and PCL beside a distinct server CN. This includes Outlook's required
+  Event and preserve its MID/SourceKey while committing a server ChangeKey that
+  matches the distinct server CN and a PCL containing both that server XID and
+  the imported ancestry. This includes Outlook's required
   move-then-modify sequence and is atomic through the parent Save; invalid
   identity material leaves the Event unchanged. This follows `[MS-OXCFXICS]`
   sections 3.1.5.3, 3.3.4.3.3.2.1.1, and 3.3.4.3.3.2.2.1 and
   `[MS-OXCMSG]` sections 2.2.3.3.1 and 3.2.5.3.
+- Associated/FAI Save retains the imported ChangeKey instead of applying the
+  normal-Calendar rotation rule. Exchange controls
+  `logs/test1_202608031300.saz` raw 306->307, 467->468, 513->514, and
+  689->690 preserve the imported associated ChangeKey on initial creation and
+  later updates. This class boundary is deliberate and differs from the normal
+  Message control above; it must not be generalized to Contact without a
+  matching product capture.
 - Existing-Event imports compare the incoming and current PCLs as specified by
   `[MS-OXCFXICS]` section 3.1.5.6.1. An older or equal client version is
   acknowledged without mutating the Event. A conflict with `FailOnConflict`
@@ -2709,10 +2751,13 @@ monotonic under the Event row lock. Direct property reads and Calendar
 ICS/FastTransfer consume this persisted time and CK/CN/PCL
 state, so the version observed after Save is also the version loaded after
 restart. Identity-material repair keeps SourceKey/InstanceKey tied to the
-immutable object counter, preserves a structurally valid imported ChangeKey,
-and repairs the former object-counter ChangeKey only when the persisted PCL
-contains the exact XID of the current local CN; optimistic row predicates keep
-that repair from overwriting a concurrent version rotation. This implements
+immutable object counter and respects the identity-class boundary: a normal
+Calendar import uses the server ChangeKey matching its current server CN and
+retains the imported version in PCL ancestry, while associated/FAI import keeps
+its structurally valid imported ChangeKey current. Repair of a former
+object-counter ChangeKey proceeds only when the persisted PCL contains the
+exact XID of the current local CN; optimistic row predicates keep that repair
+from overwriting a concurrent version rotation. This implements
 the identity/version contracts in [MS-OXCFXICS]
 sections 2.2.1.2.3, 2.2.1.2.5, 2.2.1.2.7, 2.2.1.2.8, 2.2.2.1, 2.2.2.2, 2.2.2.3,
 2.2.2.3.1, 2.2.2.5, and 3.1.5.3. Source-key generation follows

@@ -1271,16 +1271,14 @@ async fn rotate_mapi_event_identities_in_tx(
             imported_identity.filter(|_| imported_principal_account_id == Some(account_id));
         let (change_key, predecessor_change_list) =
             if let Some(imported) = principal_imported_identity {
-                // [MS-OXCFXICS] section 3.1.5.3: retain the client CK/PCL while
-                // assigning a distinct server-side CN to the imported change.
                 if source_key != imported.source_key {
                     bail!("MAPI Event SourceKey changed before the imported update");
                 }
                 imported_identity_applied = true;
-                (
-                    imported.change_key.clone(),
-                    imported.predecessor_change_list.clone(),
-                )
+                let change_key = mapi_change_key(store_identity.replica_guid, change_number);
+                let predecessor_change_list =
+                    merge_predecessor_change_list(&imported.predecessor_change_list, &change_key)?;
+                (change_key, predecessor_change_list)
             } else {
                 let change_key = mapi_change_key(store_identity.replica_guid, change_number);
                 let predecessor_change_list =

@@ -88,19 +88,24 @@ pub(super) async fn allocate_mapi_event_identity_in_tx(
     }
     let (_, change_number) = allocate_mapi_store_global_counter_in_tx(tx).await?;
 
-    // [MS-OXCFXICS] 3.1.5.3: an imported message keeps the client SourceKey,
-    // ChangeKey and PCL{ChangeKey}, but receives a server-internal CN.
+    // [MS-OXCFXICS] 3.1.5.3 assigns the imported version its client CK. The
+    // subsequent normal-Message Save observed from Exchange advances that
+    // version again: keep the imported SourceKey/MID, return a server CK that
+    // matches the allocated CN, and retain the imported CK in the PCL.
     let (source_global_counter, source_key, change_key, predecessor_change_list) =
         match (imported_source_counter, imported_identity) {
             (Some(source_global_counter), Some(identity)) => {
                 if source_global_counter == change_number {
                     bail!("MAPI Event imported SourceKey and server ChangeNumber must differ");
                 }
+                let change_key = mapi_change_key(replica_guid, change_number);
+                let predecessor_change_list =
+                    merge_predecessor_change_list(&identity.predecessor_change_list, &change_key)?;
                 (
                     source_global_counter,
                     identity.source_key.clone(),
-                    identity.change_key.clone(),
-                    identity.predecessor_change_list.clone(),
+                    change_key,
+                    predecessor_change_list,
                 )
             }
             (None, None) => {
