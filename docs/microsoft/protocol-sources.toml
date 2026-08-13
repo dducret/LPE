@@ -1384,6 +1384,7 @@ local_cache = "docs/microsoft/cache/MS-OXCTABL.pdf"
 sha256 = "8e45ff7e78cd9c468508c36dde59eda28b7f6d92f27c8734d8d369479ad2ed27"
 used_for = [
   "Folder hierarchy, contents table, sort, restriction, categorized view, and row semantics",
+  "LocalFreebusy normal contents-table FolderId, Mid, PidTagInstID, and PidTagInstanceNum row identity",
   "Custom bookmark create, seek, and free table behavior",
   "Collapsed categorized table state restore and returned bookmark lifetime",
   "Outlook Inbox SetColumns, Release-before-QueryRows, QueryPosition, SeekRow, and QueryRows window diagnostics",

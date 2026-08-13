@@ -485,6 +485,14 @@ before it is advertised.
   and identity rotation share one revision-fenced transaction so a concurrent
   write cannot consume a revision with stale property content. Ordinary
   Calendar item changes do not rotate it.
+  Probe L (`202608131831`) proves the durable identity and normal-content
+  partition are active, but also exposes a missing table-row boundary: Outlook
+  asks the FreeBusy Data contents table for `PidTagFolderId`, `PidTagMid`,
+  `PidTagInstID`, and `PidTagInstanceNum`; all four identify the same durable
+  `LocalFreebusy` row. LPE therefore returns the FreeBusy Data FID, the durable
+  MID for both MID and instance ID, and instance number zero, following
+  `[MS-OXCTABL]` sections 2.2.1.1 and 2.2.1.2 rather than flagging three of the
+  requested cells as `ecNotFound`.
   The projection has no parallel content table and its private identity is not
   exposed through REST or JMAP. REST mailbox delegation and JMAP mailbox
   `Share` instead read and patch the same canonical `delegate_preferences`

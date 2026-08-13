@@ -454,7 +454,11 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
         0x05, 0x00, 0x01, 0x02, 0x00, // normal RopGetContentsTable
         0x12, 0x00, 0x02, 0x00, // RopSetColumns
     ]);
-    normal_table_rops.extend_from_slice(&3u16.to_le_bytes());
+    normal_table_rops.extend_from_slice(&7u16.to_le_bytes());
+    normal_table_rops.extend_from_slice(&PID_TAG_FOLDER_ID.to_le_bytes());
+    normal_table_rops.extend_from_slice(&PID_TAG_MID.to_le_bytes());
+    normal_table_rops.extend_from_slice(&PID_TAG_INST_ID.to_le_bytes());
+    normal_table_rops.extend_from_slice(&PID_TAG_INSTANCE_NUM.to_le_bytes());
     normal_table_rops.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
     normal_table_rops.extend_from_slice(&PID_TAG_MESSAGE_FLAGS.to_le_bytes());
     normal_table_rops.extend_from_slice(&PID_TAG_ASSOCIATED.to_le_bytes());
@@ -495,6 +499,34 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
     let mut row_offset = query_offset + 9;
     assert_eq!(response_rops[row_offset], 0);
     row_offset += 1;
+    assert_eq!(
+        identity_codec.object_id_from_wire_id(&response_rops[row_offset..row_offset + 8]),
+        Some(crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID)
+    );
+    row_offset += 8;
+    assert_eq!(
+        identity_codec.object_id_from_wire_id(&response_rops[row_offset..row_offset + 8]),
+        Some(local_freebusy_id)
+    );
+    row_offset += 8;
+    assert_eq!(
+        u64::from_le_bytes(
+            response_rops[row_offset..row_offset + 8]
+                .try_into()
+                .unwrap()
+        ),
+        local_freebusy_id
+    );
+    row_offset += 8;
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[row_offset..row_offset + 4]
+                .try_into()
+                .unwrap()
+        ),
+        0
+    );
+    row_offset += 4;
     assert_eq!(
         read_rop_utf16z(&response_rops, &mut row_offset).unwrap(),
         "LocalFreebusy"

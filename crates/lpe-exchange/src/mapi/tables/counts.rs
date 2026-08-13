@@ -214,7 +214,7 @@ pub(in crate::mapi) fn restricted_associated_folder_message_count(
             .filter(|message| delegate_freebusy_message_is_associated(message))
             .filter(|message| {
                 restriction_matches(restriction, |property_tag| {
-                    delegate_freebusy_property_value(message, mailbox_guid, property_tag)
+                    delegate_freebusy_table_property_value(message, mailbox_guid, property_tag)
                 })
             })
             .count()
@@ -277,7 +277,11 @@ pub(in crate::mapi) fn table_position_and_count(
                     })
                     .filter(|message| {
                         restriction_matches(restriction.as_ref(), |property_tag| {
-                            delegate_freebusy_property_value(message, mailbox_guid, property_tag)
+                            delegate_freebusy_table_property_value(
+                                message,
+                                mailbox_guid,
+                                property_tag,
+                            )
                         })
                     })
                     .count()

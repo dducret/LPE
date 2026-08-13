@@ -111,9 +111,22 @@ pub(in crate::mapi) fn serialize_delegate_freebusy_property_row(
         columns,
         columns
             .iter()
-            .map(|column| delegate_freebusy_property_value(message, mailbox_guid, *column))
+            .map(|column| delegate_freebusy_table_property_value(message, mailbox_guid, *column))
             .collect(),
     )
+}
+
+pub(in crate::mapi) fn delegate_freebusy_table_property_value(
+    message: &MapiDelegateFreeBusyMessage,
+    mailbox_guid: Uuid,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(FREEBUSY_DATA_FOLDER_ID)),
+        PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
+        PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
+        _ => delegate_freebusy_property_value(message, mailbox_guid, property_tag),
+    }
 }
 
 pub(in crate::mapi) fn delegate_freebusy_message_is_associated(

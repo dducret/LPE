@@ -185,7 +185,11 @@ fn rop_query_rows_response_inner(
                     })
                     .filter(|message| {
                         restriction_matches(restriction.as_ref(), |property_tag| {
-                            delegate_freebusy_property_value(message, mailbox_guid, property_tag)
+                            delegate_freebusy_table_property_value(
+                                message,
+                                mailbox_guid,
+                                property_tag,
+                            )
                         })
                     })
                     .map(|message| {
