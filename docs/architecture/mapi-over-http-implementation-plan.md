@@ -176,9 +176,7 @@ before it is advertised.
   state writers now use that Exchange order, including the client-state-selected
   delta path exercised by Outlook. Hierarchy state remains
   `CnsetSeen, IdsetGiven`. Ordinary upload state remains
-  `CnsetSeen, CnsetSeenFAI, CnsetRead`; the successful content-import product
-  exception described below inserts a server-computed `IdsetGiven` between
-  `CnsetSeenFAI` and `CnsetRead`.
+  `CnsetSeen, CnsetSeenFAI, CnsetRead` and never contains `IdsetGiven`.
 - The later `202608111553` rerun in the Probe-B Outlook profile confirms that
   the Exchange-order state correction is active on both the initial and
   web-update Calendar downloads, but it does not eliminate the Outlook error.
@@ -234,7 +232,8 @@ before it is advertised.
   formatting or claim arbitrary rich-text round-trip fidelity.
 - The `202608112137` Probe F rerun confirms that the Common Views type-5 fix,
   imported Calendar SearchKey preservation, provider-identity omission,
-  Exchange-order content state, server-computed upload `IdsetGiven`, and RTF
+  Exchange-order content state, the then-enabled server-computed upload
+  `IdsetGiven`, and RTF
   diagnostic ingestion are active. Outlook still logs Calendar folder
   `[8004010F-501-0-1430]` immediately after the successful create download and
   after applying the later web update, then rejects the final local edit with
@@ -419,6 +418,25 @@ before it is advertised.
   upload and returned appointment found no other unexplained property loss;
   a fresh Outlook run is still required to establish whether preserving this
   value removes the remaining client-side `MAPI_E_NOT_FOUND` sync report.
+
+  Probe I (`202608130758`) confirms that the signed-value fix is active, but
+  the Calendar errors persist. Its first remaining server contradiction occurs
+  immediately after Outlook imports and saves the new appointment: upload
+  collector request `:145` returns `MetaTagIdsetGiven` containing the newly
+  assigned MID, and Outlook reports the item added online followed by
+  `MAPI_E_NOT_FOUND` in the same second. `[MS-OXCFXICS]` sections 3.1.5.2.1 and
+  3.2.5.2.1 explicitly require an upload context to ignore this state property and not
+  return it through `RopSynchronizationGetTransferState`. The matching normal
+  content-import Exchange control (`202608041041.saz` raw 216, 221, and 223)
+  returns `CnsetSeen`, `CnsetSeenFAI`, and `CnsetRead`, but no `IdsetGiven`.
+  An earlier capture used to justify LPE's exception instead followed
+  `RopSynchronizationImportMessageMove` operations and was not a valid normal
+  `ImportMessageChange` comparator. LPE therefore no longer stages imported
+  SourceKeys for upload-state generation: successful imports advance only the
+  applicable server CN sets, while the client updates its local `IdsetGiven`
+  after a successful import as described by section 3.3.5.8.7. This removes a
+  definite protocol violation at the first failing boundary; a fresh Outlook
+  run remains required to prove end-to-end symptom elimination.
 
   For the current non-delegated Event model, the canonical organizer supplies
   the complete `PidTagSender*` and `PidTagSentRepresenting*` identity families;
@@ -815,14 +833,12 @@ before it is advertised.
   real Exchange divergence even though the tag remains absent from public
   `[MS-OXPROPS]`. LPE now computes that bounded property only for
   `IPM.Configuration.MessageListSettings` GetProps, table, and stream access.
-  Those two Exchange captures do not contain `RopFastTransferSourceCopyTo`,
-  but the later Exchange 2016 reference capture `test1_202607281754.saz`
-  contains the exact `RopFastTransferSourceCopyTo` ->
-  `RopFastTransferSourceGetBuffer` sequence. The direct FastTransfer stream is
-  therefore governed by that reference sequence; the two earlier captures
-  establish only the post-save GetProps result. The next clean Outlook rerun
-  must determine whether the aligned GetProps and CopyTo behavior prevents the
-  synchronization report.
+  Those two Exchange captures do not contain `RopFastTransferSourceCopyTo`.
+  Contrary to an earlier reading, neither does the later Exchange 2016
+  reference capture `test1_202607281754.saz`; it exercises the normal
+  synchronization and client-save path but contains no `0x4D` ROP. Those
+  captures therefore establish only the post-save GetProps result, not a
+  corresponding direct FastTransfer property.
 - The `202607312152` LPE trace shows that recovery path directly: Outlook opens
   the persisted Inbox `IPM.Configuration.MessageListSettings` FAI, sends
   `RopFastTransferSourceCopyTo` with an empty exclusion list, and immediately
@@ -830,14 +846,11 @@ before it is advertised.
   account-scoped 46-byte value to GetProps but omitted it from the preceding
   direct `messageContent`; all ROP return values were successful, so Outlook
   wrote its own `Synchronization Log:` report to Deleted Items while merging
-  the inconsistent payload. LPE now uses the same scoped projection for this
-  property in direct associated-configuration CopyTo as in GetProps, while
-  retaining the normal CopyTo exclusion and CopyProperties inclusion rules.
-  This is a bounded cross-surface consistency repair inferred from the LPE
-  trace and Exchange GetProps reference, not a claim that the Exchange capture
-  contained an equivalent CopyTo request. It follows the direct message-content
-  and property-filter rules in `[MS-OXCFXICS]` sections 2.2.3.1.1.1.1,
-  2.2.4.3.16, and 3.2.5.8.1.1. The raw `CnsetSeenFAI` state was also checked:
+  the inconsistent payload. LPE temporarily used the same scoped projection
+  for this property in direct associated-configuration CopyTo as in GetProps.
+  That was a bounded cross-surface consistency inference from the Exchange
+  GetProps result, not an observed or protocol-defined FastTransfer
+  requirement. The raw `CnsetSeenFAI` state was also checked:
   the earlier diagnostic range summary was truncated, but the wire blob already
   acknowledged every imported FAI change number, so no state-handling change is
   justified from this trace.
@@ -850,6 +863,28 @@ before it is advertised.
   to zero only for `IPM.Configuration.MessageListSettings`. The same
   projection applies to direct `CopyTo`, preventing a persisted client value
   from contradicting the subsequent `GetProps` response.
+- Probe I (`202608130758`) falsifies the temporary direct `0x0E0B0102`
+  projection. Outlook's requests `:9` through `:13` open the persisted Inbox
+  `IPM.Configuration.MessageListSettings`, request direct CopyTo with
+  `CopyFlags=0x00002000`, `SendOptions=0x09`, and an empty exclusion list, read
+  one complete 919-byte `messageContent`, then successfully read the private
+  property through `RopGetPropertiesSpecific`; every ROP succeeds, but Outlook
+  still records local `80004002-501-0-0`. The direct stream contains the
+  computed 46-byte `0x0E0B0102` even though Outlook did not persist it. The
+  actual Exchange direct associated-configuration controls in
+  `202608041041.saz` raw exchanges `081` and `178` use the identical CopyTo
+  request and emit the same general FAI and named content metadata without
+  `0x0E0B0102`. Those controls open `IPM.Configuration.Autocomplete`, so they do
+  not establish the exact MessageListSettings property set, but they refute the
+  claim that this undocumented GetProps property was observed in an Exchange
+  direct CopyTo. LPE therefore retains the independently observed
+  MessageListSettings GetProps/table projection while no longer synthesizing
+  it on direct FastTransfer surfaces. A client-persisted value remains ordinary
+  canonical FAI content. This follows the direct `messageContent` root and
+  property-selection rules in `[MS-OXCFXICS]` sections 2.2.3.1.1.1.1,
+  2.2.4.3.16, 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12. A fresh Outlook run is
+  required to determine whether the speculative property caused the local
+  view/form merge failure.
 - The Exchange 15.1.2507.34 root-store probes in `202607281134` return
   `MAPI_E_NOT_FOUND` for `PidTagServerTypeDisplayName` (`0x341D001F`),
   `PidTagServerConnectedIcon` (`0x341E0102`),
@@ -1658,18 +1693,10 @@ not by itself authorize broad client publication.
   3.2.5.9.4.2.
 - After a new or changed Calendar import is saved, its upload collector unions
   the Event's distinct server CN into `MetaTagCnsetSeen`; it does not add that
-  CN to `MetaTagCnsetSeenFAI` or `MetaTagCnsetRead`. Exchange 2016 product
-  captures additionally return, on the originating upload collector, a
-  server-computed `MetaTagIdsetGiven` containing the exact imported Event
-  SourceKey GID after `SaveChangesMessage` succeeds.
-  LPE mirrors that Outlook compatibility behavior even though
-  `[MS-OXCFXICS]` section 3.2.5.2.1
-  normatively says upload `MetaTagIdsetGiven` is ignored and omitted. This is
-  an Exchange product exception, not a protocol `MUST`: client-uploaded Given
-  is never echoed, and pending/failed saves, deletes, read-state imports, moves,
-  hierarchy imports, foreign-replica SourceKeys, and imports whose conflicting
-  or out-of-range SourceKey is remapped to a different committed MID never add
-  an identifier. The separate server CN follows `[MS-OXCFXICS]` section 3.1.5.3.
+  CN to `MetaTagCnsetSeenFAI` or `MetaTagCnsetRead`, and the upload collector
+  never returns `MetaTagIdsetGiven`. The client advances its local Given set
+  after a successful import. This follows `[MS-OXCFXICS]` sections 3.1.5.2.1,
+  3.1.5.3, 3.2.5.2.1, and 3.3.5.8.7.
 - Content and hierarchy manifests are selected from canonical folder membership
   and canonical change tracking rather than from primary mailbox fields alone.
 - FastTransfer source buffering emits parseable transfer chunks and validates
@@ -1889,11 +1916,8 @@ canonical `from` identity.
 - Final and checkpoint ICS download state generated by LPE uses REPLGUID-scoped
   IDSET/CNSET encoding for `MetaTagIdsetGiven`, `MetaTagCnsetSeen`,
   `MetaTagCnsetSeenFAI`, and `MetaTagCnsetRead` as applicable to the download
-  scope. Final or checkpoint ICS upload state uses the applicable CN sets. A
-  content collector additionally returns a server-computed `MetaTagIdsetGiven`
-  only for exact SourceKeys imported through that same collector whose Message
-  Save succeeded, following the bounded Exchange 2016 product behavior above;
-  concurrent collectors, hierarchy, and all other upload transitions omit it.
+  scope. Final or checkpoint ICS upload state uses only the applicable CN sets
+  and never returns `MetaTagIdsetGiven`.
 - A successful hierarchy `RopSynchronizationImportDeletes` applies the
   canonical deletion without fabricating a CN from the deleted FID or adding
   that FID to `MetaTagCnsetSeen`. This follows the deletion behavior in
@@ -2006,19 +2030,12 @@ canonical `from` identity.
   server-generated checkpoint state. After successful imported message,
   note, journal, read-state, move, delete, or hierarchy changes, the collector
   state is advanced with the server-assigned change numbers in the applicable
-  CN sets. A successful content `ImportMessageChange` plus
-  `SaveChangesMessage` also adds that import's exact SourceKey to the originating
-  collector's bounded server-computed `MetaTagIdsetGiven` when the SourceKey
-  uses the current mailbox replica GUID and the committed MID retains the same
-  GLOBCNT; the import remains pending until Save, and a failed or
-  identity-remapped Save contributes nothing. Successful delete and
-  source-move uploads still produce an explicit server checkpoint without
-  adding Given, so the transfer-state path does not fall back to a stale
-  pre-upload folder snapshot. This follows `[MS-OXCFXICS]` sections
-  2.2.3.2.3.1, 2.2.4.4,
-  3.2.5.9.3.1, and 3.2.5.2.1 and `[MS-OXCROPS]` sections 2.2.13.8.1 and
-  2.2.13.8.2, with the explicitly non-normative Exchange 2016 product exception
-  above.
+  CN sets. No successful or failed upload adds `MetaTagIdsetGiven`; that state
+  remains client-owned. Successful delete and source-move uploads still produce
+  an explicit server checkpoint, so the transfer-state path does not fall back
+  to a stale pre-upload folder snapshot. This follows `[MS-OXCFXICS]` sections
+  2.2.3.2.3.1, 2.2.4.4, 3.2.5.2.1, and 3.2.5.9.3.1 and `[MS-OXCROPS]`
+  sections 2.2.13.8.1 and 2.2.13.8.2.
 - `RopSaveChangesMessage` for an Outlook-uploaded message with an imported
   `PidTagSourceKey`, including uploads into Deleted Items, persists the message
   through canonical mail storage and returns a server-assigned Message ID/change

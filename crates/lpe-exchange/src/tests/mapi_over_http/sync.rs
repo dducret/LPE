@@ -9259,7 +9259,7 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
     // saving a new normal Message advances CnsetSeen only. No read-state ROP
     // is issued by this request, so CnsetRead remains empty.
     assert_content_upload_final_state_includes(&response_rops, &[imported_change_number], &[], &[]);
-    assert_content_upload_final_state_includes_source_key(&response_rops, &imported_source_key);
+    assert_content_upload_final_state_omits_given(&response_rops);
     let upload_state = &mapi_fast_transfer_chunks(&response_rops)[0].1;
     assert!(
         mapi_binary_property_value(upload_state, META_TAG_CNSET_READ).is_empty(),
@@ -9366,7 +9366,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_2_1_message_upload_returns_transfer
     let saved_email = emails.lock().unwrap().last().unwrap().clone();
     let saved_change_number = identity_change_numbers.lock().unwrap()[&saved_email.id];
     assert_content_upload_final_state_includes(&response_rops, &[saved_change_number], &[], &[]);
-    assert_content_upload_final_state_includes_source_key(&response_rops, &imported_source_key);
+    assert_content_upload_final_state_omits_given(&response_rops);
     let upload_state = &mapi_fast_transfer_chunks(&response_rops)[0].1;
     assert!(
         mapi_binary_property_value(upload_state, META_TAG_CNSET_READ).is_empty(),
@@ -9439,7 +9439,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_2_2_message_delete_returns_transfer
     assert_eq!(state_chunks.len(), 1);
     assert!(
         !contains_bytes(&state_chunks[0].1, &META_TAG_IDSET_GIVEN.to_le_bytes()),
-        "a delete-only upload must not fabricate a server-computed MetaTagIdsetGiven"
+        "an upload collector must not return MetaTagIdsetGiven"
     );
     assert!(contains_bytes(
         &state_chunks[0].1,
@@ -11453,20 +11453,9 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         .iter()
         .filter(|property| property.tag == 0x0E0B_0102)
         .collect::<Vec<_>>();
-    assert_eq!(
-        config_binary.len(),
-        1,
-        "direct CopyTo must project exactly one MessageListSettings 0x0E0B value: {transfer:02x?}"
-    );
-    assert_eq!(
-        config_binary[0].value,
-        identity_codec
-            .outlook_message_list_settings_entry_id(
-                account.account_id,
-                crate::mapi::identity::INBOX_FOLDER_ID,
-            )
-            .unwrap(),
-        "direct CopyTo must match the account-scoped MessageListSettings 0x0E0B projection"
+    assert!(
+        config_binary.is_empty(),
+        "direct FastTransfer must not synthesize the GetProps-only MessageListSettings 0x0E0B projection: {transfer:02x?}"
     );
     // Exchange advertises named properties when opening this MList FAI. LPE's
     // configuration projection supplies its canonical content-class/type
@@ -13342,9 +13331,10 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         "direct Calendar GetPropertiesSpecific must resolve registered 0x8020 to the stored PidLidAppointmentColor value"
     );
 
-    // [MS-OXCFXICS] sections 3.1.5.3 and 3.2.5.9.3.1: the upload
-    // collector acknowledges the imported MID with the fresh server CN. A
-    // Calendar content save is neither an FAI nor a read-state mutation.
+    // [MS-OXCFXICS] sections 3.1.5.3 and 3.2.5.2.1: the upload collector
+    // acknowledges the Save with the fresh server CN, but never returns
+    // MetaTagIdsetGiven. A Calendar Save is neither an FAI nor a read-state
+    // mutation.
     let mut transfer_state_rops = vec![
         0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
         0x4e, 0x00, 0x03, // RopFastTransferSourceGetBuffer
@@ -13376,7 +13366,7 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         &[],
         &[],
     );
-    assert_content_upload_final_state_includes_source_key(&transfer_state, &imported_source_key);
+    assert_content_upload_final_state_omits_given(&transfer_state);
 
     // Simulate the canonical web edit from Probe F, then create an entirely
     // fresh MAPI service/snapshot for the full Calendar ICS download.
@@ -14482,7 +14472,7 @@ async fn mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_li
     // [MS-OXCFXICS] sections 2.2.1.1.4 and 3.2.5.6: an Event content
     // update advances the normal CNSET, not the FAI or read-state CNSET.
     assert_content_upload_final_state_includes(&response, &[version.change_number], &[], &[]);
-    assert_content_upload_final_state_includes_source_key(&response, &source_key);
+    assert_content_upload_final_state_omits_given(&response);
 }
 
 #[tokio::test]
@@ -16136,7 +16126,7 @@ async fn mapi_over_http_sync_import_soft_delete_moves_to_trash() {
             &upload_state_chunks[0].1,
             &META_TAG_IDSET_GIVEN.to_le_bytes()
         ),
-        "a move-only upload must not fabricate a server-computed MetaTagIdsetGiven"
+        "an upload collector must not return MetaTagIdsetGiven"
     );
     assert_eq!(
         moved_emails.lock().unwrap().as_slice(),
@@ -16638,7 +16628,7 @@ async fn mapi_over_http_microsoft_oxcfxics_4_1_1_hierarchy_upload_returns_transf
             &upload_state_chunks[0].1,
             &META_TAG_IDSET_GIVEN.to_le_bytes()
         ),
-        "hierarchy upload state must not contain the content-import compatibility Given"
+        "an upload collector must not return MetaTagIdsetGiven"
     );
     assert!(contains_bytes(
         &upload_state_chunks[0].1,

@@ -481,7 +481,6 @@ pub(super) async fn append_pending_navigation_shortcut_save_response<S: Exchange
                 ));
             }
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 request,
@@ -526,14 +525,7 @@ pub(super) async fn append_existing_navigation_shortcut_save_response<S: Exchang
     deleted_properties: HashSet<u32>,
 ) {
     if pending_properties.is_empty() && deleted_properties.is_empty() {
-        append_save_changes_message_response(
-            session,
-            responses,
-            handle_slots,
-            request,
-            handle,
-            shortcut_id,
-        );
+        append_save_changes_message_response(responses, handle_slots, request, handle, shortcut_id);
         return;
     }
     let Some(existing) = snapshot
@@ -618,7 +610,6 @@ pub(super) async fn append_existing_navigation_shortcut_save_response<S: Exchang
             session
                 .record_notification(MapiNotificationEvent::content(folder_id, Some(shortcut_id)));
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 request,

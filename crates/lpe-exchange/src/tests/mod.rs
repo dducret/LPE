@@ -13299,21 +13299,6 @@ fn assert_content_upload_final_state_omits_given(bytes: &[u8]) {
     }
 }
 
-fn assert_content_upload_final_state_includes_source_key(bytes: &[u8], source_key: &[u8]) {
-    assert_eq!(source_key.len(), 22, "SourceKey must be one complete XID");
-    let state_chunks = mapi_fast_transfer_chunks(bytes);
-    assert_eq!(state_chunks.len(), 1);
-    let idset_given = mapi_binary_property_value(&state_chunks[0].1, META_TAG_IDSET_GIVEN);
-    assert!(
-        idset_given.starts_with(&source_key[..16]),
-        "upload IdsetGiven did not preserve the imported SourceKey REPLGUID"
-    );
-    assert!(
-        strict_replguid_globset_contains_counter(idset_given, &source_key[16..22]).unwrap(),
-        "upload IdsetGiven is missing the imported SourceKey GLOBCNT"
-    );
-}
-
 fn mapi_binary_property_value(bytes: &[u8], property_tag: u32) -> &[u8] {
     let tag = property_tag.to_le_bytes();
     let offset = bytes

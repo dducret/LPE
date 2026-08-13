@@ -73,30 +73,6 @@ pub(super) fn associated_config_sync_object(
     }
 }
 
-pub(super) fn associated_config_direct_fast_transfer_object(
-    message: &crate::mapi_store::MapiAssociatedConfigMessage,
-    mailbox_guid: Uuid,
-) -> mapi_mailstore::SpecialMessageSyncFact {
-    let mut object = associated_config_sync_object(message);
-    object.named_properties.retain(|(tag, _)| {
-        canonical_property_storage_tag(*tag) != OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B
-    });
-    if let Some(value) = associated_config_property_value_with_mailbox_guid(
-        message,
-        mailbox_guid,
-        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
-    )
-    .and_then(special_message_property_value)
-    {
-        // Exchange 2016 returns this account-scoped value from the same
-        // MessageListSettings CopyTo and GetProps sequence.
-        object
-            .named_properties
-            .push((OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B, value));
-    }
-    object
-}
-
 fn associated_config_default_sync_tags(
     message: &crate::mapi_store::MapiAssociatedConfigMessage,
 ) -> &'static [u32] {

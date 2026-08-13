@@ -176,9 +176,9 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
             );
             clear_event_attachment_transaction(session, handle);
             session.record_notification(MapiNotificationEvent::content(folder_id, Some(event_id)));
-            // [MS-OXCFXICS] sections 3.1.5.3 and 3.2.5.9.3.1: after the
-            // imported Event is persisted, acknowledge its MID and fresh
-            // server CN in the content upload collector transfer state.
+            // [MS-OXCFXICS] sections 3.1.5.3 and 3.2.5.2.1: after the
+            // imported Event is persisted, acknowledge its fresh server CN in
+            // the content upload collector. Upload state never returns Given.
             record_sync_upload_content_change(
                 session,
                 folder_id,
@@ -188,7 +188,6 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
                 false,
             );
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 request,
@@ -332,14 +331,7 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
             disposition,
             transaction.base_modseq,
         );
-        append_save_changes_message_response(
-            session,
-            responses,
-            handle_slots,
-            request,
-            handle,
-            event_id,
-        );
+        append_save_changes_message_response(responses, handle_slots, request, handle, event_id);
         return;
     };
     if transaction.import_disposition == MapiEventImportDisposition::Apply {
@@ -399,7 +391,6 @@ pub(super) async fn save_existing_event<S: ExchangeStore>(
                 false,
             );
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 request,

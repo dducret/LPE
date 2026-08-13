@@ -244,11 +244,15 @@ tags and types; [MS-OXCFXICS] section 2.2.3.1.1.5.2 defines the
 `RopFastTransferSourceGetBuffer` `TransferBuffer` carrying the wire portion.
 
 The same single-bag rule applies to persisted `IPM.Configuration` FAI
-messages. In particular, an absent private `0x0E0B0102` property remains
-absent in `GetProps`, `OpenStream`, direct `CopyTo`, and ICS; it is not
-derived from a zero `PidTagRoamingDatatypes` value. `RopGetPropertiesSpecific`
-therefore keeps the requested position as a flagged `MAPI_E_NOT_FOUND`
-(`0x8004010F`) cell while the ROP retains `ReturnValue=Success`.
+messages. The bounded Exchange-observed `0x0E0B0102` GetProps/table/stream
+projection for `IPM.Configuration.MessageListSettings` and
+`IPM.ExtendedRule.Message` is the only exception. It is not copied into direct
+FastTransfer or ICS when the client did not persist it. For other configuration
+messages an absent private `0x0E0B0102` remains absent in every surface and is
+not derived from a zero `PidTagRoamingDatatypes` value.
+`RopGetPropertiesSpecific` therefore keeps the requested position as a flagged
+`MAPI_E_NOT_FOUND` (`0x8004010F`) cell while the ROP retains
+`ReturnValue=Success`.
 `PidTagRoamingDatatypes` describes only the roaming dictionary and XML
 streams. This follows [MS-OXOCFG] section 2.2.2.1, [MS-OXCROPS] sections
 2.2.8.3.2 and 2.2.8.3.3, and [MS-OXCDATA] sections 2.4.2, 2.8.1.2, and

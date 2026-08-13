@@ -22,7 +22,6 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) message_statuses: HashMap<(u64, u64), u32>,
     pub(in crate::mapi) message_save_generations: HashMap<(u64, u64), u64>,
     pub(in crate::mapi) message_handle_generations: HashMap<u32, u64>,
-    pub(in crate::mapi) pending_sync_import_source_keys: HashMap<u32, (u32, u64, Vec<u8>)>,
     pub(in crate::mapi) pending_message_recipient_replacements: HashMap<u32, Vec<PendingRecipient>>,
     pub(in crate::mapi) pending_message_attachments:
         HashMap<u32, Vec<(u32, AttachmentUploadInput)>>,
@@ -643,7 +642,6 @@ pub(in crate::mapi) enum MapiObject {
         client_state_uploaded_bytes: usize,
         client_state_uploaded_marker_mask: u8,
         uploaded_object_ids: Vec<u64>,
-        saved_import_source_keys: Vec<Vec<u8>>,
         uploaded_normal_change_numbers: Vec<u64>,
         uploaded_fai_change_numbers: Vec<u64>,
         uploaded_read_change_numbers: Vec<u64>,

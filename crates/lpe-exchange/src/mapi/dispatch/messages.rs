@@ -214,24 +214,12 @@ pub(super) fn append_create_message_response(
 }
 
 pub(super) fn append_save_changes_message_response(
-    session: &mut MapiSession,
     responses: &mut Vec<u8>,
     handle_slots: &mut Vec<u32>,
     request: &RopRequest,
     handle: u32,
     message_id: u64,
 ) {
-    if let Some((collector_handle, folder_id, source_key)) =
-        session.pending_sync_import_source_keys.remove(&handle)
-    {
-        record_sync_upload_saved_import_source_key(
-            session,
-            collector_handle,
-            folder_id,
-            message_id,
-            &source_key,
-        );
-    }
     // MS-OXCMSG 2.2.3.3 and 3.2.5.3: ResponseHandleIndex references the containing folder.
     let response_handle_index = request.response_handle_index();
     let response_slot_handle = handle_slots

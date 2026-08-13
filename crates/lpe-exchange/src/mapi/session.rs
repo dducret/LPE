@@ -1074,7 +1074,6 @@ impl MapiSession {
         self.handles.remove(&handle);
         self.folder_profile_property_tombstones.remove(&handle);
         self.message_handle_generations.remove(&handle);
-        self.pending_sync_import_source_keys.remove(&handle);
         self.pending_message_recipient_replacements.remove(&handle);
         self.pending_message_attachments.remove(&handle);
         self.pending_attachment_parent_messages.remove(&handle);

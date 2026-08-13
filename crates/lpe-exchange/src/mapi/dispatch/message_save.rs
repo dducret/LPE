@@ -72,7 +72,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
     match session.handles.get(&handle).cloned() {
         Some(MapiObject::CommonViewNamedView { view_id, .. }) => {
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 &request,
@@ -198,7 +197,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         Some(task_id),
                     ));
                     append_save_changes_message_response(
-                        session,
                         responses,
                         handle_slots,
                         &request,
@@ -279,7 +277,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         Some(note_id),
                     ));
                     append_save_changes_message_response(
-                        session,
                         responses,
                         handle_slots,
                         &request,
@@ -364,7 +361,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         Some(journal_entry_id),
                     ));
                     append_save_changes_message_response(
-                        session,
                         responses,
                         handle_slots,
                         &request,
@@ -454,7 +450,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                         Some(conversation_action_id),
                     ));
                     append_save_changes_message_response(
-                        session,
                         responses,
                         handle_slots,
                         &request,
@@ -516,7 +511,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 }
             }
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 &request,
@@ -707,7 +701,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 },
             );
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 &request,
@@ -819,7 +812,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             ..
         }) => {
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 &request,
@@ -856,7 +848,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 *pending_appointment_tombstone = None;
             }
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 &request,
@@ -922,7 +913,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 false,
             );
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 &request,
@@ -1021,7 +1011,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                     false,
                 );
                 append_save_changes_message_response(
-                    session,
                     responses,
                     handle_slots,
                     &request,
@@ -1047,14 +1036,7 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
     };
     if pending_message_is_trash_sync_artifact(folder_id, &properties, &recipients) {
         let message_id = transient_associated_message_id(folder_id, &properties);
-        append_save_changes_message_response(
-            session,
-            responses,
-            handle_slots,
-            &request,
-            handle,
-            message_id,
-        );
+        append_save_changes_message_response(responses, handle_slots, &request, handle, message_id);
         return;
     }
     if pending_message_is_sync_metadata_only(&properties, &recipients) {
@@ -1070,7 +1052,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 },
             );
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 &request,
@@ -1298,7 +1279,6 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 "rca debug mapi save changes message"
             );
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 &request,

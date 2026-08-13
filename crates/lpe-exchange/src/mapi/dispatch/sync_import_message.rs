@@ -5,20 +5,8 @@ fn allocate_sync_import_message_handle(
     session: &mut MapiSession,
     output_handle_index: Option<u8>,
     object: MapiObject,
-    collector_handle: u32,
-    source_key: Option<&[u8]>,
 ) -> u32 {
-    let folder_id = object.folder_id();
-    let handle = session.allocate_output_handle(output_handle_index, object);
-    if let (Some(folder_id), Some(source_key)) = (
-        folder_id,
-        source_key.filter(|source_key| source_key.len() == 22),
-    ) {
-        session
-            .pending_sync_import_source_keys
-            .insert(handle, (collector_handle, folder_id, source_key.to_vec()));
-    }
-    handle
+    session.allocate_output_handle(output_handle_index, object)
 }
 
 pub(super) fn imported_fai_identity(
@@ -316,8 +304,6 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             session,
             request.output_handle_index,
             pending_object,
-            collector_handle,
-            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         tracing::info!(
@@ -350,8 +336,6 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             session,
             request.output_handle_index,
             pending_object,
-            collector_handle,
-            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         responses.extend_from_slice(&rop_synchronization_import_message_change_response(
@@ -418,8 +402,6 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                     event_id: message_id,
                     transaction,
                 },
-                collector_handle,
-                staged_import_source_key.as_deref(),
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
             responses
@@ -486,8 +468,6 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                 saved_email: None,
                 pending_properties: HashMap::new(),
             },
-            collector_handle,
-            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         record_sync_upload_content_change(
@@ -533,8 +513,6 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                 item_id: message_id,
                 properties: HashMap::new(),
             },
-            collector_handle,
-            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         record_sync_upload_content_change(
@@ -575,8 +553,6 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                 folder_id,
                 note_id: message_id,
             },
-            collector_handle,
-            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         record_sync_upload_content_change(
@@ -621,8 +597,6 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                 folder_id,
                 journal_entry_id: message_id,
             },
-            collector_handle,
-            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         record_sync_upload_content_change(
@@ -720,8 +694,6 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
             session,
             request.output_handle_index,
             pending_object,
-            collector_handle,
-            staged_import_source_key.as_deref(),
         );
         set_handle_slot(handle_slots, request.output_handle_index, handle);
         responses.extend_from_slice(&rop_synchronization_import_message_change_response(

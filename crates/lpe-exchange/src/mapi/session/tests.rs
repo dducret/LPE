@@ -1097,9 +1097,6 @@ fn release_handle_slot_forgets_all_per_handle_metadata() {
         HashSet::from([PID_TAG_EXTENDED_FOLDER_FLAGS]),
     );
     session.message_handle_generations.insert(folder_handle, 3);
-    session
-        .pending_sync_import_source_keys
-        .insert(folder_handle, (11, INBOX_FOLDER_ID, vec![0x01, 0x02]));
     let request = RopRequest {
         rop_id: RopId::Release.as_u8(),
         input_handle_index: Some(0),
@@ -1117,9 +1114,6 @@ fn release_handle_slot_forgets_all_per_handle_metadata() {
         .contains_key(&folder_handle));
     assert!(!session
         .message_handle_generations
-        .contains_key(&folder_handle));
-    assert!(!session
-        .pending_sync_import_source_keys
         .contains_key(&folder_handle));
     assert!(session.issued_handles.contains(&folder_handle));
 }

@@ -4317,13 +4317,8 @@ fn sync_state_writers_match_exchange_download_and_upload_orders() {
         ],
     );
 
-    let content_upload = upload_sync_state_stream_from_raw_properties(
-        SYNC_TYPE_CONTENTS,
-        &[],
-        b"seen",
-        b"fai",
-        b"read",
-    );
+    let content_upload =
+        upload_sync_state_stream_from_raw_properties(SYNC_TYPE_CONTENTS, b"seen", b"fai", b"read");
     assert_tag_sequence(
         &content_upload,
         &[
@@ -4335,41 +4330,6 @@ fn sync_state_writers_match_exchange_download_and_upload_orders() {
         ],
     );
     assert_absent_property(&content_upload, META_TAG_IDSET_GIVEN);
-}
-
-#[test]
-fn later_upload_state_streams_preserve_only_server_computed_given() {
-    let imported_source_key = source_key_for_store_id(crate::mapi::identity::mapi_store_id(65));
-    let initial = content_upload_sync_state_stream_from_sets_with_saved_imports(
-        std::slice::from_ref(&imported_source_key),
-        &[101],
-        &[],
-        &[],
-    );
-    let initial_given = sync_state_property_value(&initial, META_TAG_IDSET_GIVEN).unwrap();
-    let uploaded_seen = replguid_idset_from_counters(&[101, 102]);
-    let after_seen = upload_sync_state_stream_with_uploaded_property(
-        SYNC_TYPE_CONTENTS,
-        &initial,
-        META_TAG_CNSET_SEEN,
-        &uploaded_seen,
-    );
-    assert_eq!(
-        sync_state_property_value(&after_seen, META_TAG_IDSET_GIVEN),
-        Some(initial_given)
-    );
-
-    let client_given = replguid_idset_from_counters(&[999]);
-    assert_eq!(
-        upload_sync_state_stream_with_uploaded_property(
-            SYNC_TYPE_CONTENTS,
-            &after_seen,
-            META_TAG_IDSET_GIVEN,
-            &client_given,
-        ),
-        after_seen,
-        "client-uploaded Given must be ignored rather than echoed"
-    );
 }
 
 #[test]

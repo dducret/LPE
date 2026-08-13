@@ -92,7 +92,6 @@ pub(super) async fn save_pending_contact<S: ExchangeStore>(
                 false,
             );
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 request,
@@ -226,7 +225,6 @@ pub(super) async fn save_existing_contact<S: ExchangeStore>(
                 false,
             );
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 request,

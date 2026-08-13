@@ -389,7 +389,6 @@ pub(super) async fn append_pending_associated_config_save_response<S: ExchangeSt
                 ));
             }
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 request,
@@ -480,14 +479,7 @@ pub(super) async fn append_existing_associated_config_save_response<S: ExchangeS
         && subject == current_subject
         && properties == current_properties
     {
-        append_save_changes_message_response(
-            session,
-            responses,
-            handle_slots,
-            request,
-            handle,
-            config_id,
-        );
+        append_save_changes_message_response(responses, handle_slots, request, handle, config_id);
         return;
     }
     match store
@@ -525,7 +517,6 @@ pub(super) async fn append_existing_associated_config_save_response<S: ExchangeS
             session
                 .record_notification(MapiNotificationEvent::content(folder_id, Some(message_id)));
             append_save_changes_message_response(
-                session,
                 responses,
                 handle_slots,
                 request,

@@ -2183,10 +2183,6 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
         (PID_TAG_MESSAGE_CLASS_W, "PidTagMessageClass"),
         (PID_TAG_BODY_W, "PidTagBody"),
         (PID_TAG_MESSAGE_SIZE, "PidTagMessageSize"),
-        (
-            OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B,
-            "OutlookAssociatedConfigBinary0E0B",
-        ),
         (0x7C06_0003, "PidTagRoamingDatatypes"),
         (PID_NAME_CONTENT_CLASS_W_TAG, "PidNameContentClass"),
         (PID_NAME_CONTENT_TYPE_W_TAG, "PidNameContentType"),
@@ -2257,30 +2253,11 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
             .any(|property| property == expected_status),
         "direct CopyTo must match the MessageListSettings GetProps status projection"
     );
-    let config_binary =
-        crate::mapi::identity::outlook_message_list_settings_entry_id(account_id, INBOX_FOLDER_ID)
-            .unwrap();
-    let mut expected_config_binary = OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B.to_le_bytes().to_vec();
-    expected_config_binary.extend_from_slice(&(config_binary.len() as u32).to_le_bytes());
-    expected_config_binary.extend_from_slice(&config_binary);
-    assert!(
-        direct_copy
-            .windows(expected_config_binary.len())
-            .any(|property| property == expected_config_binary),
-        "direct CopyTo must match the MessageListSettings GetProps 0x0E0B projection"
-    );
-    let nil_config_binary =
-        crate::mapi::identity::outlook_message_list_settings_entry_id(Uuid::nil(), INBOX_FOLDER_ID)
-            .unwrap();
-    let mut unexpected_nil_config_binary =
-        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B.to_le_bytes().to_vec();
-    unexpected_nil_config_binary.extend_from_slice(&(nil_config_binary.len() as u32).to_le_bytes());
-    unexpected_nil_config_binary.extend_from_slice(&nil_config_binary);
     assert!(
         !direct_copy
-            .windows(unexpected_nil_config_binary.len())
-            .any(|property| property == unexpected_nil_config_binary),
-        "direct CopyTo must not use the unscoped MessageListSettings 0x0E0B value"
+            .windows(4)
+            .any(|property| property == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B.to_le_bytes()),
+        "direct FastTransfer must not synthesize the GetProps-only MessageListSettings 0x0E0B projection"
     );
 }
 
