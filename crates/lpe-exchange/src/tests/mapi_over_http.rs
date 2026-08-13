@@ -7,6 +7,7 @@ mod contacts;
 mod exact_object_contracts;
 mod free_busy;
 mod hierarchy;
+mod local_freebusy_identity;
 mod local_replica_ids;
 mod logon_profile;
 mod notifications;

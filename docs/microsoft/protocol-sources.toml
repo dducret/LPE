@@ -2375,7 +2375,7 @@ local_cache = "docs/microsoft/cache/MS-OXODLGT.pdf"
 sha256 = "0511b5479a9823944db7246046aa61af208d7cdac8cd298abba04706a5eddde5"
 used_for = [
   "Bounded delegate access projection through canonical mailbox delegation, calendar grants, sender rights, and free/busy objects",
-  "Read-only LocalFreebusy Delegate Information projection required by Root/Inbox PidTagFreeBusyEntryIds",
+  "LocalFreebusy Delegate Information projection, durable MAPI identity/version metadata, absent-property cells, and canonical delegate preference arrays required by Root/Inbox PidTagFreeBusyEntryIds",
   "RopSaveChangesMessage example labeling combined SaveFlags 0x0A as KeepOpenReadWrite DelayedCall",
 ]
 sections = [
@@ -2386,6 +2386,7 @@ sections = [
   "2.2.2.1.2 PidTagNormalizedSubject Property",
   "2.2.2.2 Delegate Information Properties",
   "2.2.2.2.1 PidTagScheduleInfoDelegatorWantsCopy Property",
+  "2.2.2.2.2 PidTagScheduleInfoDelegatorWantsInfo Property",
   "2.2.2.2.3 PidTagScheduleInfoDelegateNames Property",
   "2.2.2.2.5 PidTagScheduleInfoDelegateEntryIds Property",
   "2.2.2.2.6 PidTagDelegateFlags Property",
@@ -2394,6 +2395,9 @@ sections = [
   "3.1.4.1 Creating a Delegate Data Folder",
   "3.1.4.2 Creating a Delegate Information Object",
   "3.1.4.3 Creating a Delegation Relationship",
+  "3.1.4.3.4 Setting the Delegate Information Object Properties",
+  "3.1.4.3.4.1 Setting the PidTagScheduleInfoDelegatorWantsCopy Property",
+  "3.1.4.3.4.2 Setting the PidTagScheduleInfoDelegatorWantsInfo Property",
   "4.1 Create Delegation Relationship with Multiple Delegates",
   "4.1.3.1 Open the Delegator Information Object",
   "4.1.3.2 Update the Delegator Information Object Properties",

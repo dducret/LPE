@@ -705,6 +705,7 @@ WITH expected(relname, relkind) AS (
     ('account_sync_state', 'r'),
     ('calendar_events', 'r'),
     ('canonical_change_journal', 'r'),
+    ('delegation_projection_state', 'r'),
     ('mail_change_log', 'r'),
     ('mailboxes', 'r'),
     ('mapi_associated_config_messages', 'r'),
@@ -750,6 +751,60 @@ SELECT CASE WHEN NOT EXISTS (
   EXCEPT
   SELECT * FROM actual
 ) THEN 1 ELSE 0 END;
+SQL
+}
+
+delegation_projection_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+WITH required_triggers(trigger_name) AS (
+  VALUES
+    ('mailbox_delegation_grants_projection_change'::text),
+    ('calendar_grants_projection_change'),
+    ('sender_rights_projection_change'),
+    ('delegate_preferences_projection_change'),
+    ('mailboxes_default_delegation_projection_change'),
+    ('calendars_default_delegation_projection_change'),
+    ('accounts_delegate_directory_projection_change')
+)
+SELECT CASE WHEN
+  (
+    SELECT COUNT(*) = 3
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'delegation_projection_state'
+      AND column_name IN ('revision', 'applied_revision', 'updated_at')
+      AND is_nullable = 'NO'
+      AND data_type = CASE column_name
+        WHEN 'revision' THEN 'bigint'
+        WHEN 'applied_revision' THEN 'bigint'
+        WHEN 'updated_at' THEN 'timestamp with time zone'
+      END
+  )
+  AND (
+    SELECT COUNT(DISTINCT procedure_row.proname) = 4
+    FROM pg_proc procedure_row
+    JOIN pg_namespace namespace_row ON namespace_row.oid = procedure_row.pronamespace
+    WHERE namespace_row.nspname = 'public'
+      AND procedure_row.proname IN (
+        'advance_delegation_projection_state',
+        'track_delegation_projection_change',
+        'track_default_delegation_collection_change',
+        'track_delegate_directory_projection_change'
+      )
+  )
+  AND NOT EXISTS (
+    SELECT trigger_name FROM required_triggers
+    EXCEPT
+    SELECT trigger_row.tgname
+    FROM pg_trigger trigger_row
+    JOIN pg_class table_row ON table_row.oid = trigger_row.tgrelid
+    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+    WHERE namespace_row.nspname = 'public'
+      AND NOT trigger_row.tgisinternal
+  )
+THEN 1 ELSE 0 END;
 SQL
 }
 
@@ -952,6 +1007,7 @@ canonical_schema_shape_is_current() {
 
   [[ "$(schema_metadata_shape_ok "${database_url}" "${expected_schema_version}")" == "1" ]] || return 1
   [[ "$(canonical_required_relations_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(delegation_projection_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(mapi_auxiliary_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(mapi_low_dynamic_property_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(recoverable_items_shape_ok "${database_url}")" == "1" ]] || return 1

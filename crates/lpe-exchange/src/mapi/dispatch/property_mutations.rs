@@ -252,7 +252,13 @@ where
                 }
             }
             Some(MapiObject::DelegateFreeBusyMessage { .. }) => {
-                stage_delegate_freebusy_property_values(session, handle_slots, request, values)
+                stage_delegate_freebusy_property_values(
+                    session,
+                    handle_slots,
+                    request,
+                    snapshot,
+                    values,
+                )
             }
             Some(
                 object @ (MapiObject::Task { .. }
@@ -414,6 +420,7 @@ fn stage_delegate_freebusy_property_values(
     session: &mut MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
     values: Vec<(u32, MapiValue)>,
 ) -> Result<()> {
     let Some(MapiObject::DelegateFreeBusyMessage {
@@ -424,7 +431,7 @@ fn stage_delegate_freebusy_property_values(
     else {
         return Err(anyhow!("MAPI delegate free/busy message was not found"));
     };
-    if !crate::mapi_store::is_outlook_local_freebusy_message_id(*message_id)
+    if !snapshot.is_outlook_local_freebusy_message_id(*message_id)
         || values.iter().any(|(tag, _)| {
             canonical_property_storage_tag(*tag) != PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE
         })

@@ -127,7 +127,7 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
             Some(MapiValue::Binary(additional_ren_entry_ids_ex(mailbox_guid)))
         }
         PID_TAG_FREE_BUSY_ENTRY_IDS => {
-            Some(MapiValue::MultiBinary(free_busy_entry_ids(mailbox_guid)))
+            free_busy_entry_ids(mailbox_guid).map(MapiValue::MultiBinary)
         }
         _ => None,
     }
@@ -227,20 +227,23 @@ fn additional_ren_entry_ids_ex(mailbox_guid: Uuid) -> Vec<u8> {
     value
 }
 
-fn free_busy_entry_ids(mailbox_guid: Uuid) -> Vec<Vec<u8>> {
-    vec![
+fn free_busy_entry_ids(mailbox_guid: Uuid) -> Option<Vec<Vec<u8>>> {
+    let local_freebusy_message_id = crate::mapi::identity::mapped_mapi_object_id(
+        &crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID,
+    )?;
+    Some(vec![
         Vec::new(),
         // [MS-OXOSFLD] section 2.2.6 requires the Delegate Information
         // object EntryID in the second vector slot.
         crate::mapi::identity::message_entry_id_from_object_ids(
             mailbox_guid,
             FREEBUSY_DATA_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID,
+            local_freebusy_message_id,
         )
-        .expect("the reserved LocalFreebusy message uses a valid MAPI identity"),
+        .expect("the durable LocalFreebusy message uses a valid MAPI identity"),
         Vec::new(),
         special_folder_entry_id(mailbox_guid, FREEBUSY_DATA_FOLDER_ID),
-    ]
+    ])
 }
 
 fn special_folder_entry_id(mailbox_guid: Uuid, folder_id: u64) -> Vec<u8> {

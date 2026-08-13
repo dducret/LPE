@@ -321,12 +321,13 @@ pub(crate) async fn upsert_mailbox_delegation_grant(
     let account = require_account(&storage, &headers).await?;
     Ok(Json(
         storage
-            .upsert_mailbox_delegation_grant(
+            .upsert_mailbox_delegation_grant_with_preferences(
                 MailboxDelegationGrantInput {
                     owner_account_id: account.account_id,
                     grantee_email: request.grantee_email.clone(),
                     may_write: request.may_write,
                 },
+                request.delegate_preferences,
                 AuditEntryInput {
                     actor: account.email.clone(),
                     action: "mailbox-delegation-upsert".to_string(),

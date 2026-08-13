@@ -39,6 +39,10 @@ const AUTH_STORAGE: &str = include_str!("auth.rs");
 const EXCHANGE_STORE: &str = include_str!("../../lpe-exchange/src/store.rs");
 const EXCHANGE_STORE_MAPI_METADATA: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_metadata.rs");
+const EXCHANGE_STORE_DELEGATE_FREEBUSY_IDENTITY: &str =
+    include_str!("../../lpe-exchange/src/store/storage_impl/delegate_freebusy_identity.rs");
+const EXCHANGE_STORE_EWS_DELEGATION: &str =
+    include_str!("../../lpe-exchange/src/store/storage_impl/ews_delegation.rs");
 const EXCHANGE_STORE_MAPI_PERMISSIONS: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_permissions.rs");
 const EXCHANGE_STORE_MAPI_SPECIAL_FOLDER_ALIASES: &str =
@@ -286,6 +290,73 @@ fn ews_compatibility_gap_models_are_canonical_sql_state() {
             && !SCHEMA.contains("CREATE TABLE ews_delegate")
             && !SCHEMA.contains("CREATE TABLE ews_message_tracking"),
         "EWS compatibility gaps must use canonical LPE/LPE-CT state, not protocol-local Exchange tables"
+    );
+}
+
+#[test]
+fn local_freebusy_uses_a_canonical_delegation_revision_not_parallel_content() {
+    let projection_state = table_definition("delegation_projection_state");
+    for needle in [
+        "revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0)",
+        "applied_revision BIGINT NOT NULL DEFAULT 0",
+        "CHECK (applied_revision >= 0 AND applied_revision <= revision)",
+        "updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()",
+        "FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+    ] {
+        assert!(
+            projection_state.contains(needle),
+            "delegation projection state is missing {needle}"
+        );
+    }
+    assert_schema_contains_all(&[
+        "CREATE OR REPLACE FUNCTION advance_delegation_projection_state",
+        "CREATE OR REPLACE FUNCTION track_default_delegation_collection_change",
+        "CREATE OR REPLACE FUNCTION track_delegate_directory_projection_change",
+        "delegation_projection_state.revision + 1",
+        "delegation_projection_state.updated_at + INTERVAL '1 microsecond'",
+        "CREATE TRIGGER mailbox_delegation_grants_projection_change",
+        "CREATE TRIGGER calendar_grants_projection_change",
+        "CREATE TRIGGER sender_rights_projection_change",
+        "CREATE TRIGGER delegate_preferences_projection_change",
+        "CREATE TRIGGER mailboxes_default_delegation_projection_change",
+        "CREATE TRIGGER calendars_default_delegation_projection_change",
+        "CREATE TRIGGER accounts_delegate_directory_projection_change",
+        "to_jsonb(OLD) - ARRAY['id', 'created_at', 'updated_at']",
+        "AFTER UPDATE OF primary_email, display_name ON accounts",
+    ]);
+    assert_source_contains_all(
+        "EWS default delegate projection",
+        EXCHANGE_STORE_EWS_DELEGATION,
+        &[
+            "WITH inbox_grants AS",
+            "mailbox.role = 'inbox'",
+            "default_calendar_grants AS",
+            "calendar.role = 'calendar'",
+            "sender.identity_id IS NULL",
+        ],
+    );
+    assert_source_contains_all(
+        "LocalFreebusy atomic durable projection",
+        EXCHANGE_STORE_DELEGATE_FREEBUSY_IDENTITY,
+        &[
+            "INSERT INTO delegation_projection_state (tenant_id, account_id)",
+            "SELECT revision, applied_revision",
+            "FOR UPDATE",
+            "SET applied_revision = revision",
+            "FETCH_EWS_DELEGATES_SQL",
+            "allocate_next_mapi_global_counter",
+            "predecessor_change_list",
+        ],
+    );
+    assert!(
+        EXCHANGE_STORE_MAPI_METADATA
+            .contains("LocalFreebusy identity must be loaded with its canonical delegate projection"),
+        "generic PostgreSQL identity allocation must reject a LocalFreebusy request detached from its canonical delegate tuple"
+    );
+    assert!(
+        !EXCHANGE_STORE_DELEGATE_FREEBUSY_IDENTITY.contains("calendar_events")
+            && !SCHEMA.contains("CREATE TABLE local_freebusy"),
+        "LocalFreebusy versioning must not depend on event content or create a parallel content table"
     );
 }
 
@@ -1429,6 +1500,7 @@ fn updater_rejects_an_incomplete_current_schema_before_stopping_lpe() {
             "schema_version' AND data_type = 'text'",
             "schema_version = :'expected_schema_version'",
             "canonical_required_relations_shape_ok()",
+            "delegation_projection_shape_ok()",
             "mapi_auxiliary_shape_ok()",
             "mapi_low_dynamic_property_shape_ok()",
             "recoverable_items_shape_ok()",

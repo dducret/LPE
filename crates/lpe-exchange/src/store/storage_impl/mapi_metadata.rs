@@ -8,6 +8,15 @@ macro_rules! store_impl_mapi_metadata {
         requests: &'a [MapiIdentityRequest],
     ) -> StoreFuture<'a, Vec<MapiIdentityRecord>> {
         Box::pin(async move {
+            if requests.iter().any(|request| {
+                request.object_kind == MapiIdentityObjectKind::DelegateFreeBusyMessage
+                    && request.canonical_id
+                        == crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID
+            }) {
+                anyhow::bail!(
+                    "LocalFreebusy identity must be loaded with its canonical delegate projection"
+                );
+            }
             let tenant_id = sqlx::query_scalar::<_, Uuid>(
                 r#"
                 SELECT tenant_id

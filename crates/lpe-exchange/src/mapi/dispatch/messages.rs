@@ -37,9 +37,13 @@ pub(super) fn fallback_open_message_folder_id(
     }
 }
 
-pub(super) fn open_message_folder_id(request: &RopRequest, message_id: u64) -> u64 {
+pub(super) fn open_message_folder_id(
+    request: &RopRequest,
+    message_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> u64 {
     request.folder_id().unwrap_or_else(|| {
-        if crate::mapi_store::is_outlook_local_freebusy_message_id(message_id) {
+        if snapshot.is_outlook_local_freebusy_message_id(message_id) {
             FREEBUSY_DATA_FOLDER_ID
         } else {
             INBOX_FOLDER_ID

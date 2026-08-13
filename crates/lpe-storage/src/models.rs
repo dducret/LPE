@@ -210,6 +210,9 @@ pub(crate) struct MailboxDelegationGrantRow {
     pub(crate) grantee_email: String,
     pub(crate) grantee_display_name: String,
     pub(crate) may_write: bool,
+    pub(crate) meeting_request_delivery: String,
+    pub(crate) receives_meeting_request_copy: bool,
+    pub(crate) may_view_private_items: bool,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
 }

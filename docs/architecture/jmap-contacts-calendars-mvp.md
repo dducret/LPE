@@ -92,7 +92,7 @@
   - private `Note` maps to canonical `notes`
   - private `JournalEntry` maps to canonical `journal_entries`
   - private `Reminder` is computed from reminder-bearing canonical tasks and calendar events
-  - private `Share` projects and mutates canonical mailbox, sender, contact, calendar, and task sharing grants
+  - private `Share` projects and mutates canonical mailbox, sender, contact, calendar, and task sharing grants; mailbox shares also round-trip the canonical `delegatePreferences` tuple with patch semantics for omitted fields
   - private `DurableChange` exposes canonical change cursor metadata and categories for clients that need durable sync diagnostics
 - Payloads:
   - `CalendarEvent` participant metadata is stored in `calendar_events.attendees_json` as an object containing organizer and attendee fields; older array-only attendee payloads are migrated into the object form.
@@ -100,7 +100,7 @@
   - `CalendarEvent/get`, `CalendarEvent/set`, `CalendarEvent/query`, and `CalendarEvent/changes` are limited to canonical calendar fields already owned by LPE: `id`, `uid`, `@type`, `title`, `start`, `duration`, `timeZone`, `allDay`, `status`, `sequence`, `recurrenceRule`, opaque `recurrence`, opaque `recurrenceOverrides`, `locations` by name, `organizer`, `participants`, `description`, `descriptionContentType`, `bodyHtml`, `calendarIds`, and `links`. Event scalar fields map to `calendar_events`; `links` stores upload-backed event attachments in `calendar_event_attachments` and projects them back with `calendar-attachment:` blob ids. This is not a full JSCalendar implementation; unsupported fields are rejected rather than stored as protocol-local extensions.
   - `ContactCard/get`, `ContactCard/set`, `ContactCard/query`, and `ContactCard/changes` project canonical contact rows, not recipient suggestions. They preserve old narrow `name`/primary `email`/primary `phone` behavior while mapping richer canonical fields through `name`, `emails`, `phones`, `addresses`, `onlineServices`, `organizations`, `titles`, `notes`, `addressBookIds`, and source metadata accepted by the bounded implementation.
   - Contact updates preserve existing rich contact fields when an adapter omits fields it cannot represent. Explicit empty arrays, empty strings, or JSON nulls clear only the fields the calling API intentionally addresses.
-  - `Share` returns a stable object-specific projection with `id`, `@type: "Share"`, `type`, `grantId`, owner and grantee account metadata, `rights`, and `created`/`updated` timestamps. Calendar shares include `calendarId` and `calendarName` when the grant targets a concrete calendar collection. Sender shares include `senderRight`; task-list shares include `taskListId` and `taskListName`.
+  - `Share` returns a stable object-specific projection with `id`, `@type: "Share"`, `type`, `grantId`, owner and grantee account metadata, `rights`, and `created`/`updated` timestamps. Mailbox shares include `delegatePreferences` (`meetingRequestDelivery`, `receivesMeetingRequestCopy`, and `mayViewPrivateItems`) from canonical `delegate_preferences`; calendar and sender share rows do not duplicate this owner/delegate policy. Calendar shares include `calendarId` and `calendarName` when the grant targets a concrete calendar collection. Sender shares include `senderRight`; task-list shares include `taskListId` and `taskListName`.
   - `DurableChange` returns the singleton `canonical` object with `@type: "DurableChange"`, `scope: "account"`, `cursor`, `isAppendOnly: true`, `mayRead: true`, `mayWrite: false`, and category objects listing affected JMAP object families.
 - Push:
   - private `Note` and `JournalEntry` are WebSocket push data types
@@ -112,6 +112,7 @@
   - no JMAP-only collection store
   - no protocol-local sharing model
   - `Share` and `DurableChange` are canonical private JMAP projections, not MAPI session or subsystem objects
+  - MAPI identity/version rows, including the durable identity of the projected Outlook `LocalFreebusy` message, are protocol-private and are never exposed as JMAP objects or share fields
   - `DurableChange` is an append-only sync cursor projection; write methods remain read-only error surfaces and must not mutate canonical history
   - cursor-backed `changes` responses replay durable object log rows; contact, calendar-event, and task surfaces expand collection and grant dependency rows to affected child object ids instead of falling back to full state diffs
   - `Share/changes` and `Reminder/changes` use string-id durable replay because their JMAP ids are typed projections such as `mailbox:<grantId>`, `sender:<grantId>`, `task:<taskId>`, `calendar:<eventId>`, and `mail:<messageId>`

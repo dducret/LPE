@@ -299,6 +299,9 @@ pub(in crate::mapi) fn rop_find_row_response(
                 let rows = snapshot
                     .delegate_freebusy_messages()
                     .iter()
+                    .filter(|message| {
+                        delegate_freebusy_message_is_associated(message) == *associated
+                    })
                     .collect::<Vec<_>>();
                 if let Some((index, message)) =
                     find_row(rows.as_slice(), *position, request, |message| {
@@ -309,10 +312,11 @@ pub(in crate::mapi) fn rop_find_row_response(
                 {
                     *position = index;
                     response.push(1);
-                    write_standard_property_row(
-                        &mut response,
-                        &serialize_delegate_freebusy_row(message, mailbox_guid, &columns),
-                    );
+                    response.extend_from_slice(&serialize_delegate_freebusy_property_row(
+                        message,
+                        mailbox_guid,
+                        &columns,
+                    ));
                 } else {
                     return rop_find_row_no_match_response(request);
                 }

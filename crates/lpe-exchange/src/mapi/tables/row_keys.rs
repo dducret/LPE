@@ -128,6 +128,9 @@ pub(in crate::mapi) fn table_row_keys(
                 let mut rows = snapshot
                     .delegate_freebusy_messages()
                     .iter()
+                    .filter(|message| {
+                        delegate_freebusy_message_is_associated(message) == *associated
+                    })
                     .collect::<Vec<_>>();
                 rows.retain(|message| {
                     restriction_matches(restriction.as_ref(), |property_tag| {

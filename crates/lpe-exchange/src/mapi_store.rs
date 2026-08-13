@@ -17,11 +17,11 @@ use crate::mapi::permissions::{
     MapiFolderPermission,
 };
 use crate::store::ExchangeStore;
-use crate::store::{MapiAssociatedConfigRecord, MapiCustomPropertyValue, MapiNamedPropertyMapping};
 use crate::store::{
-    MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
+    EwsDelegate, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
     MapiNavigationShortcutClientProperties, MapiNavigationShortcutRecord,
 };
+use crate::store::{MapiAssociatedConfigRecord, MapiCustomPropertyValue, MapiNamedPropertyMapping};
 
 mod folder_commit_time;
 mod folder_versions;
@@ -235,14 +235,23 @@ pub(crate) use associated_config::{
     is_outlook_common_views_default_navigation_shortcut_id, is_outlook_configuration_message_class,
     is_outlook_configuration_message_class_name, is_outlook_default_conversation_action_id,
     is_outlook_inbox_default_associated_config_id,
-    is_outlook_inbox_virtual_only_associated_config_id, is_outlook_local_freebusy_message_id,
+    is_outlook_inbox_virtual_only_associated_config_id, is_outlook_local_freebusy_message,
     is_outlook_umolk_user_options_message_class,
     modeled_virtual_associated_config_message_for_canonical_id,
     outlook_default_folder_named_view_id, outlook_default_folder_named_view_name,
     outlook_inbox_exact_virtual_associated_config_for_message_class,
     OUTLOOK_COMMON_VIEWS_COMPACT_NAMED_VIEW_ID, OUTLOOK_INBOX_RULE_ORGANIZER_CONFIG_CLASS,
-    OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID, OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS,
+    OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID, OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS,
 };
+#[cfg(test)]
+pub(crate) fn outlook_local_freebusy_identity_request() -> MapiIdentityRequest {
+    MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::DelegateFreeBusyMessage,
+        canonical_id: OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID,
+        reserved_global_counter: None,
+        source_key: None,
+    }
+}
 #[cfg(test)]
 pub(crate) use associated_config::{
     OUTLOOK_COMMON_VIEWS_SENT_TO_NAMED_VIEW_ID, OUTLOOK_DEFAULT_FOLDER_NAMED_VIEW_ID,
@@ -275,6 +284,8 @@ pub(crate) struct MapiDelegateFreeBusyMessage {
     pub(crate) id: u64,
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
+    pub(crate) durable_identity: Option<MapiIdentityRecord>,
+    pub(crate) delegates: Vec<EwsDelegate>,
     pub(crate) message: DelegateFreeBusyMessageObject,
 }
 
@@ -558,6 +569,10 @@ impl<T: ExchangeStore> MapiStore for T {
             let conversation_actions = self.fetch_conversation_actions(account_id).await?;
             let delegate_freebusy_messages =
                 self.fetch_delegate_freebusy_messages(account_id).await?;
+            let local_freebusy_projection =
+                self.fetch_local_freebusy_projection(account_id).await?;
+            let local_freebusy_identity = local_freebusy_projection.identity;
+            let local_freebusy_delegates = local_freebusy_projection.delegates;
             let public_trees = self.fetch_public_folder_trees(account_id).await?;
             let mut public_folders = Vec::new();
             let mut pending_public_folder_ids = public_trees
@@ -627,9 +642,10 @@ impl<T: ExchangeStore> MapiStore for T {
                 &public_folders,
                 &public_folder_items,
             );
-            let identity_records = self
+            let mut identity_records = self
                 .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
                 .await?;
+            identity_records.push(local_freebusy_identity);
             let store_identity = self.fetch_mapi_store_identity().await?;
             let identity_codec =
                 crate::mapi::identity::MapiIdentityCodec::from_special_folder_identity_records(
@@ -716,6 +732,10 @@ impl<T: ExchangeStore> MapiStore for T {
             })
             .map(|snapshot| snapshot.with_conversation_actions(conversation_actions))
             .map(|snapshot| snapshot.with_delegate_freebusy_messages(delegate_freebusy_messages))
+            .and_then(|snapshot| {
+                snapshot.with_delegate_freebusy_message_identities(&identity_records)
+            })
+            .and_then(|snapshot| snapshot.with_local_freebusy_delegates(local_freebusy_delegates))
             .map(|snapshot| snapshot.with_recoverable_items(recoverable_items))
             .map(|snapshot| snapshot.with_reminders(reminders))
             .map(|snapshot| {
@@ -862,6 +882,7 @@ fn mapi_identity_requests(
     requests.extend(
         delegate_freebusy_messages
             .iter()
+            .filter(|message| message.id != OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID)
             .map(|message| MapiIdentityRequest {
                 object_kind: MapiIdentityObjectKind::DelegateFreeBusyMessage,
                 canonical_id: message.id,

@@ -74,9 +74,9 @@ use crate::{
         MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiEventCreateOutcome,
         MapiFolderHierarchyCommitOutcome, MapiFolderProfilePropertyValue, MapiFolderVersion,
         MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
-        MapiMailboxContentCommitTime, MapiNamedPropertyMapping, MapiNotificationPoll,
-        MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
-        UpsertEwsUserConfigurationInput,
+        MapiLocalFreebusyProjection, MapiMailboxContentCommitTime, MapiNamedPropertyMapping,
+        MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint,
+        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -6126,6 +6126,26 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(delegates) })
+    }
+
+    fn fetch_local_freebusy_projection<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, MapiLocalFreebusyProjection> {
+        Box::pin(async move {
+            let requests = [crate::mapi_store::outlook_local_freebusy_identity_request()];
+            let mut identities = self
+                .fetch_or_allocate_mapi_identities(account_id, &requests)
+                .await?;
+            let identity = identities
+                .pop()
+                .ok_or_else(|| anyhow::anyhow!("LocalFreebusy identity was not allocated"))?;
+            let delegates = self.fetch_ews_delegates(account_id).await?;
+            Ok(MapiLocalFreebusyProjection {
+                identity,
+                delegates,
+            })
+        })
     }
 
     fn upsert_ews_delegate<'a>(

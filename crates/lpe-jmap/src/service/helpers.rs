@@ -97,6 +97,9 @@ pub(super) fn parse_share_input(owner_account_id: Uuid, value: &Value) -> Result
         .or_else(|| value.get("shareType"))
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("share type is required"))?;
+    if share_type != "mailbox" && value.get("delegatePreferences").is_some() {
+        bail!("delegatePreferences is supported only for mailbox shares");
+    }
     let rights = value.get("rights").and_then(Value::as_object);
     Ok(JmapShareInput {
         owner_account_id,
@@ -140,6 +143,12 @@ pub(super) fn parse_share_input(owner_account_id: Uuid, value: &Value) -> Result
             .or_else(|| value.get("mayShare"))
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        delegate_preferences: value
+            .get("delegatePreferences")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()?
+            .unwrap_or_default(),
     })
 }
 

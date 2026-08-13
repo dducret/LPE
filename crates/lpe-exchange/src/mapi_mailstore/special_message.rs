@@ -49,6 +49,8 @@ pub(crate) enum SpecialMessagePropertyValue {
     U32(u32),
     U64(u64),
     String(String),
+    MultiI32(Vec<i32>),
+    MultiBinary(Vec<Vec<u8>>),
     MultiString(Vec<String>),
     Time(String),
 }
@@ -503,6 +505,19 @@ pub(super) fn write_special_message_property(
             bytes.extend_from_slice(&0u16.to_le_bytes());
             write_u32(buffer, bytes.len().min(u32::MAX as usize) as u32);
             buffer.extend_from_slice(&bytes);
+        }
+        SpecialMessagePropertyValue::MultiI32(values) => {
+            write_u32(buffer, values.len().min(u32::MAX as usize) as u32);
+            for value in values.iter().take(u32::MAX as usize) {
+                write_i32(buffer, *value);
+            }
+        }
+        SpecialMessagePropertyValue::MultiBinary(values) => {
+            write_u32(buffer, values.len().min(u32::MAX as usize) as u32);
+            for value in values.iter().take(u32::MAX as usize) {
+                write_u32(buffer, value.len().min(u32::MAX as usize) as u32);
+                buffer.extend_from_slice(value);
+            }
         }
         SpecialMessagePropertyValue::MultiString(values) => {
             write_u32(buffer, values.len().min(u32::MAX as usize) as u32);

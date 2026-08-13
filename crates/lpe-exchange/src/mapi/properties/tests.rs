@@ -2187,42 +2187,6 @@ fn additional_ren_entry_ids_advertises_documented_indexed_special_folders() {
 }
 
 #[test]
-fn free_busy_entry_ids_advertises_freebusy_data_at_documented_index() {
-    let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
-    let Some(MapiValue::MultiBinary(values)) =
-        special_folder_identification_property_value(mailbox_guid, PID_TAG_FREE_BUSY_ENTRY_IDS)
-    else {
-        panic!("expected FreeBusyEntryIds multi-binary value");
-    };
-
-    assert_eq!(values.len(), 4);
-    assert!(values[0].is_empty());
-    assert_eq!(
-        values[1],
-        crate::mapi::identity::message_entry_id_from_object_ids(
-            mailbox_guid,
-            FREEBUSY_DATA_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID,
-        )
-        .unwrap()
-    );
-    assert_eq!(
-        crate::mapi::rop::default_view_message_entry_id_target(&values[1]),
-        Some((
-            FREEBUSY_DATA_FOLDER_ID,
-            crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID,
-        ))
-    );
-    assert_eq!(values[1].len(), 70);
-    assert!(values[2].is_empty());
-    assert_eq!(
-        crate::mapi::identity::object_id_from_folder_identifier_bytes(&values[3]),
-        Some(FREEBUSY_DATA_FOLDER_ID)
-    );
-    assert_eq!(values[3].len(), 46);
-}
-
-#[test]
 fn typed_scalar_property_values_round_trip() {
     assert_eq!(round_trip(0x3001_0001, &MapiValue::Null), MapiValue::Null);
     assert_eq!(

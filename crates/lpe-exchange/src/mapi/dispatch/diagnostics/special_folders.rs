@@ -770,6 +770,12 @@ fn special_property_shape(value: &mapi_mailstore::SpecialMessagePropertyValue) -
         mapi_mailstore::SpecialMessagePropertyValue::String(value) => {
             format!("string:chars={}", value.chars().count())
         }
+        mapi_mailstore::SpecialMessagePropertyValue::MultiI32(values) => {
+            format!("multi_i32:count={}", values.len())
+        }
+        mapi_mailstore::SpecialMessagePropertyValue::MultiBinary(values) => {
+            format!("multi_binary:count={}", values.len())
+        }
         mapi_mailstore::SpecialMessagePropertyValue::MultiString(values) => {
             format!("multistring:count={}", values.len())
         }

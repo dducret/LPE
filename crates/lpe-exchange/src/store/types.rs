@@ -615,6 +615,12 @@ pub(crate) struct EwsDelegate {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct MapiLocalFreebusyProjection {
+    pub(crate) identity: MapiIdentityRecord,
+    pub(crate) delegates: Vec<EwsDelegate>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct UpsertEwsDelegateInput {
     pub(crate) owner_account_id: Uuid,
     pub(crate) grantee_email: String,

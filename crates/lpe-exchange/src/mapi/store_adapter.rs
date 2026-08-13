@@ -386,6 +386,12 @@ where
         .fetch_delegate_freebusy_messages(account_id)
         .await
         .context("fetch MAPI delegate freebusy messages")?;
+    let local_freebusy_projection = store
+        .fetch_local_freebusy_projection(account_id)
+        .await
+        .context("fetch canonical LocalFreebusy projection")?;
+    let local_freebusy_identity = local_freebusy_projection.identity;
+    let local_freebusy_delegates = local_freebusy_projection.delegates;
     log_mapi_store_load_step(account_id, plan, "fetch recoverable items", 0);
     let mut recoverable_items = Vec::new();
     for folder in ["deletions", "versions", "purges"] {
@@ -717,6 +723,7 @@ where
         .chain(
             delegate_freebusy_messages
                 .iter()
+                .filter(|message| message.id != mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID)
                 .map(|message| MapiIdentityRequest {
                     object_kind: MapiIdentityObjectKind::DelegateFreeBusyMessage,
                     canonical_id: message.id,
@@ -746,10 +753,11 @@ where
         raw_identity_request_count,
         &identity_requests,
     );
-    let allocated_non_message_identities = store
+    let mut allocated_non_message_identities = store
         .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
         .await
         .context("allocate MAPI non-message identities")?;
+    allocated_non_message_identities.push(local_freebusy_identity);
     log_mapi_store_load_step(
         account_id,
         plan,
@@ -895,6 +903,8 @@ where
         .with_associated_configs(associated_configs)
         .with_associated_config_identity_ids(associated_config_identity_ids)
         .with_delegate_freebusy_messages(delegate_freebusy_messages)
+        .with_delegate_freebusy_message_identities(&snapshot_identities)?
+        .with_local_freebusy_delegates(local_freebusy_delegates)?
         .with_recoverable_items(recoverable_items)
         .with_reminders(reminders)
         .with_content_windows(content_windows)
@@ -1257,9 +1267,6 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
     if mapi_store::is_outlook_default_conversation_action_id(object_id) {
         return "virtual_conversation_action";
     }
-    if mapi_store::is_outlook_local_freebusy_message_id(object_id) {
-        return "virtual_local_freebusy_message";
-    }
     if crate::mapi::identity::global_counter_from_store_id(object_id).is_some() {
         "unallocated_store_object"
     } else {
@@ -1272,7 +1279,6 @@ fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
         || mapi_store::is_outlook_inbox_default_associated_config_id(object_id)
         || mapi_store::is_outlook_common_views_default_navigation_shortcut_id(object_id)
         || mapi_store::is_outlook_default_conversation_action_id(object_id)
-        || mapi_store::is_outlook_local_freebusy_message_id(object_id)
 }
 
 fn format_mapi_identity_kinds(identities: &[MapiIdentityLookupRecord]) -> String {

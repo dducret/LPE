@@ -7,6 +7,9 @@ use crate::{
     SenderDelegationGrantRow, Storage,
 };
 
+use super::delegate_preferences::{
+    upsert_delegate_preferences_patch_in_tx, validate_delegate_preferences_patch,
+};
 use super::types::{
     map_mailbox_delegation_grant, map_sender_delegation_grant, sender_identity_id,
     validate_mailbox_delegation_rights, MailboxAccountAccess, MailboxDelegationGrant,
@@ -35,6 +38,17 @@ impl Storage {
         input: MailboxDelegationGrantInput,
         audit: AuditEntryInput,
     ) -> Result<MailboxDelegationGrant> {
+        self.upsert_mailbox_delegation_grant_inner(input, Default::default(), audit)
+            .await
+    }
+
+    pub(super) async fn upsert_mailbox_delegation_grant_inner(
+        &self,
+        input: MailboxDelegationGrantInput,
+        delegate_preferences: super::DelegatePreferencesPatch,
+        audit: AuditEntryInput,
+    ) -> Result<MailboxDelegationGrant> {
+        validate_delegate_preferences_patch(&delegate_preferences)?;
         let tenant_id = self
             .tenant_id_for_account_id(input.owner_account_id)
             .await?;
@@ -82,6 +96,15 @@ impl Storage {
         .bind(grantee.id)
         .bind(input.may_write)
         .fetch_one(&mut *tx)
+        .await?;
+
+        upsert_delegate_preferences_patch_in_tx(
+            &mut tx,
+            &tenant_id,
+            owner.id,
+            grantee.id,
+            &delegate_preferences,
+        )
         .await?;
 
         let modseq = self
@@ -197,7 +220,7 @@ impl Storage {
                 &mut tx,
                 &tenant_id,
                 Some(owner.id),
-                Some(input.mailbox_id),
+                None,
                 "mailbox_delegation_grant",
                 grant_id,
                 "updated",
@@ -239,7 +262,7 @@ impl Storage {
                     &mut tx,
                     &tenant_id,
                     Some(owner.id),
-                    Some(input.mailbox_id),
+                    None,
                     "mailbox_delegation_grant",
                     grant_id,
                     "destroyed",
@@ -270,11 +293,16 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let deleted_rows = sqlx::query(
             r#"
-            DELETE FROM mailbox_delegation_grants
-            WHERE tenant_id = $1
-              AND owner_account_id = $2
-              AND grantee_account_id = $3
-            RETURNING id, mailbox_id
+            DELETE FROM mailbox_delegation_grants grant_row
+            USING mailboxes mailbox
+            WHERE grant_row.tenant_id = $1
+              AND grant_row.owner_account_id = $2
+              AND grant_row.grantee_account_id = $3
+              AND mailbox.tenant_id = grant_row.tenant_id
+              AND mailbox.account_id = grant_row.owner_account_id
+              AND mailbox.id = grant_row.mailbox_id
+              AND mailbox.role = 'inbox'
+            RETURNING grant_row.id, grant_row.mailbox_id
             "#,
         )
         .bind(&tenant_id)
@@ -287,6 +315,20 @@ impl Storage {
             bail!("mailbox delegation grant not found");
         }
 
+        sqlx::query(
+            r#"
+            DELETE FROM delegate_preferences
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND grantee_account_id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .bind(grantee_account_id)
+        .execute(&mut *tx)
+        .await?;
+
         for row in deleted_rows {
             let grant_id: Uuid = row.try_get("id")?;
             let mailbox_id: Uuid = row.try_get("mailbox_id")?;
@@ -297,7 +339,7 @@ impl Storage {
                 &mut tx,
                 &tenant_id,
                 Some(owner_account_id),
-                Some(mailbox_id),
+                None,
                 "mailbox_delegation_grant",
                 grant_id,
                 "destroyed",
@@ -352,11 +394,26 @@ impl Storage {
                 grantee.primary_email AS grantee_email,
                 grantee.display_name AS grantee_display_name,
                 g.may_write,
+                COALESCE(pref.meeting_request_delivery, 'delegate_and_owner')
+                    AS meeting_request_delivery,
+                COALESCE(pref.receives_meeting_request_copy, TRUE)
+                    AS receives_meeting_request_copy,
+                COALESCE(pref.may_view_private_items, FALSE)
+                    AS may_view_private_items,
                 to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
                 to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM mailbox_delegation_grants g
+            JOIN mailboxes mailbox
+              ON mailbox.tenant_id = g.tenant_id
+             AND mailbox.account_id = g.owner_account_id
+             AND mailbox.id = g.mailbox_id
+             AND mailbox.role = 'inbox'
             JOIN accounts owner ON owner.id = g.owner_account_id
             JOIN accounts grantee ON grantee.id = g.grantee_account_id
+            LEFT JOIN delegate_preferences pref
+              ON pref.tenant_id = g.tenant_id
+             AND pref.owner_account_id = g.owner_account_id
+             AND pref.grantee_account_id = g.grantee_account_id
             WHERE g.tenant_id = $1
               AND g.owner_account_id = $2
               AND g.grantee_account_id = $3
@@ -566,11 +623,26 @@ impl Storage {
                 grantee.primary_email AS grantee_email,
                 grantee.display_name AS grantee_display_name,
                 g.may_write,
+                COALESCE(pref.meeting_request_delivery, 'delegate_and_owner')
+                    AS meeting_request_delivery,
+                COALESCE(pref.receives_meeting_request_copy, TRUE)
+                    AS receives_meeting_request_copy,
+                COALESCE(pref.may_view_private_items, FALSE)
+                    AS may_view_private_items,
                 to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
                 to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM mailbox_delegation_grants g
+            JOIN mailboxes mailbox
+              ON mailbox.tenant_id = g.tenant_id
+             AND mailbox.account_id = g.owner_account_id
+             AND mailbox.id = g.mailbox_id
+             AND mailbox.role = 'inbox'
             JOIN accounts owner ON owner.id = g.owner_account_id
             JOIN accounts grantee ON grantee.id = g.grantee_account_id
+            LEFT JOIN delegate_preferences pref
+              ON pref.tenant_id = g.tenant_id
+             AND pref.owner_account_id = g.owner_account_id
+             AND pref.grantee_account_id = g.grantee_account_id
             WHERE g.tenant_id = $1
               AND g.owner_account_id = $2
             ORDER BY lower(grantee.primary_email) ASC

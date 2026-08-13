@@ -274,6 +274,12 @@ export type MailboxDelegationGrant = {
   granteeAccountId: string;
   granteeEmail: string;
   granteeDisplayName: string;
+  mayWrite: boolean;
+  delegatePreferences: {
+    meetingRequestDelivery: "delegate_only" | "delegate_and_owner" | "owner_only";
+    receivesMeetingRequestCopy: boolean;
+    mayViewPrivateItems: boolean;
+  };
   createdAt: string;
   updatedAt: string;
 };

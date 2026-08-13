@@ -2422,6 +2422,24 @@ impl JmapStore for FakeStore {
         let id = format!("{}:{grant_id}", input.share_type);
         let account = Self::account();
         let grantee_account_id = Uuid::new_v4();
+        let delegate_preferences = if input.share_type == "mailbox" {
+            Some(json!({
+                "meetingRequestDelivery": input
+                    .delegate_preferences
+                    .meeting_request_delivery
+                    .unwrap_or_else(|| "delegate_and_owner".to_string()),
+                "receivesMeetingRequestCopy": input
+                    .delegate_preferences
+                    .receives_meeting_request_copy
+                    .unwrap_or(true),
+                "mayViewPrivateItems": input
+                    .delegate_preferences
+                    .may_view_private_items
+                    .unwrap_or(false)
+            }))
+        } else {
+            None
+        };
         let share = json!({
             "id": id,
             "@type": "Share",
@@ -2437,6 +2455,7 @@ impl JmapStore for FakeStore {
             "calendarName": input.calendar_id.map(|_| "Team Calendar"),
             "taskListId": input.task_list_id.map(|id| id.to_string()),
             "senderRight": input.sender_right,
+            "delegatePreferences": delegate_preferences,
             "rights": {
                 "mayRead": input.may_read,
                 "mayWrite": input.may_write,
@@ -14457,7 +14476,11 @@ async fn share_writes_create_copy_import_and_destroy_canonical_grants() {
                                 "mailboxShare": {
                                     "type": "mailbox",
                                     "granteeEmail": "bob@example.test",
-                                    "mayWrite": true
+                                    "mayWrite": true,
+                                    "delegatePreferences": {
+                                        "meetingRequestDelivery": "delegate_only",
+                                        "mayViewPrivateItems": true
+                                    }
                                 }
                             }
                         }),
@@ -14527,6 +14550,14 @@ async fn share_writes_create_copy_import_and_destroy_canonical_grants() {
         response.method_responses[0].1["created"]["mailboxShare"]["rights"]["mayWrite"],
         true
     );
+    assert_eq!(
+        response.method_responses[0].1["created"]["mailboxShare"]["delegatePreferences"],
+        json!({
+            "meetingRequestDelivery": "delegate_only",
+            "receivesMeetingRequestCopy": true,
+            "mayViewPrivateItems": true
+        })
+    );
     assert!(
         response.method_responses[1].1["created"]["contactsShare"]["id"]
             .as_str()
@@ -14574,6 +14605,10 @@ async fn share_writes_create_copy_import_and_destroy_canonical_grants() {
     assert!(share["ownerAccountId"].as_str().is_some());
     assert!(share["granteeAccountId"].as_str().is_some());
     assert!(share["rights"].get("mayRead").is_some());
+    assert_eq!(
+        share["delegatePreferences"]["meetingRequestDelivery"],
+        "delegate_only"
+    );
 
     let destroy = service
         .handle_api_request(

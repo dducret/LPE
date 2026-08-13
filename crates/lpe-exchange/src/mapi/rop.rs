@@ -721,6 +721,27 @@ fn fallback_default_specific_property(
             })
             .unwrap_or(false);
     }
+    if let Some(MapiObject::DelegateFreeBusyMessage {
+        folder_id,
+        message_id,
+        ..
+    }) = object
+    {
+        let Some(message) = snapshot
+            .delegate_freebusy_message_for_id(*message_id)
+            .filter(|message| message.folder_id == *folder_id)
+            .filter(|message| crate::mapi_store::is_outlook_local_freebusy_message(message))
+        else {
+            return false;
+        };
+        let value_tag = get_properties_specific_value_tag(object, tag);
+        if canonical_property_storage_tag(value_tag) == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE
+        {
+            return false;
+        }
+        return delegate_freebusy_property_value(message, principal.account_id, value_tag)
+            .is_none();
+    }
     if !matches!(
         object,
         Some(MapiObject::Logon | MapiObject::PublicFolderLogon)

@@ -2,9 +2,9 @@ use axum::{http::StatusCode, Json};
 use lpe_storage::{
     AccountAppPassword, AccountAuthFactor, AdminAuthFactor, AuthenticatedAccount,
     AuthenticatedAdmin, CollaborationCollection, CollaborationGrant, ContactNameFields,
-    ContactSourceFields, DelegateAccessObject, DelegateFreeBusyMessageObject, FreeBusyBlock,
-    MailFlowEntry, MailboxDelegationOverview, SieveScriptDocument, SieveScriptSummary,
-    TaskListGrant,
+    ContactSourceFields, DelegateAccessObject, DelegateFreeBusyMessageObject,
+    DelegatePreferencesPatch, FreeBusyBlock, MailFlowEntry, MailboxDelegationOverview,
+    SieveScriptDocument, SieveScriptSummary, TaskListGrant,
 };
 use serde::{
     de::{self, Visitor},
@@ -688,6 +688,8 @@ pub struct UpsertMailboxDelegationGrantRequest {
     pub grantee_email: String,
     #[serde(default = "default_true")]
     pub may_write: bool,
+    #[serde(default)]
+    pub delegate_preferences: DelegatePreferencesPatch,
 }
 
 #[derive(Debug, Deserialize)]

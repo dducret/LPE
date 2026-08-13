@@ -4,10 +4,10 @@ use lpe_storage::{
     AuditEntryInput, AuthenticatedAccount, CalendarEventAttachment, CanonicalChangeCategory,
     CanonicalChangeListener, CanonicalChangeReplay, CanonicalPushChangeSet, ClientNote,
     ClientReminder, ClientTask, ClientTaskList, CollaborationCollection, CollaborationGrantInput,
-    CreateTaskListInput, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery, JmapEmailSubmission,
-    JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
-    JmapThreadQuery, JmapUploadBlob, JournalEntry, MailboxAccountAccess,
+    CreateTaskListInput, DelegatePreferencesPatch, JmapEmail, JmapEmailFollowupUpdate,
+    JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState,
+    JmapStringObjectChange, JmapThreadQuery, JmapUploadBlob, JournalEntry, MailboxAccountAccess,
     MailboxDelegationGrantInput, MailboxRule, OutlookProfileState, RecipientSuggestion,
     ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
     SenderIdentity, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
@@ -35,6 +35,7 @@ pub struct JmapShareInput {
     pub may_write: bool,
     pub may_delete: bool,
     pub may_share: bool,
+    pub delegate_preferences: DelegatePreferencesPatch,
 }
 
 #[allow(async_fn_in_trait)]
@@ -1398,12 +1399,13 @@ impl JmapStore for Storage {
         let share_type = input.share_type.as_str();
         let value = match share_type {
             "mailbox" => serde_json::to_value(
-                self.upsert_mailbox_delegation_grant(
+                self.upsert_mailbox_delegation_grant_with_preferences(
                     MailboxDelegationGrantInput {
                         owner_account_id: input.owner_account_id,
                         grantee_email: input.grantee_email,
                         may_write: input.may_write,
                     },
+                    input.delegate_preferences,
                     audit,
                 )
                 .await?,

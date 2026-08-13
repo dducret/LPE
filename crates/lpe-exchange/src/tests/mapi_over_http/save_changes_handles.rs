@@ -603,6 +603,12 @@ async fn mapi_over_http_failed_save_keeps_the_open_message_response_handle() {
         session: Some(FakeStore::account()),
         ..Default::default()
     };
+    let local_freebusy_id = store
+        .fetch_local_freebusy_projection(FakeStore::account().account_id)
+        .await
+        .unwrap()
+        .identity
+        .object_id;
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -614,7 +620,6 @@ async fn mapi_over_http_failed_save_keeps_the_open_message_response_handle() {
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let local_freebusy_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
     let mut rops = mapi_private_logon_rops("alice");
     append_rop_open_folder(
         &mut rops,

@@ -102,12 +102,24 @@ pub(in crate::mapi) fn serialize_conversation_action_row(
     row
 }
 
-pub(in crate::mapi) fn serialize_delegate_freebusy_row(
+pub(in crate::mapi) fn serialize_delegate_freebusy_property_row(
     message: &MapiDelegateFreeBusyMessage,
     mailbox_guid: Uuid,
     columns: &[u32],
 ) -> Vec<u8> {
-    serialize_freebusy_row_staged(message, mailbox_guid, columns, None)
+    serialize_optional_property_row(
+        columns,
+        columns
+            .iter()
+            .map(|column| delegate_freebusy_property_value(message, mailbox_guid, *column))
+            .collect(),
+    )
+}
+
+pub(in crate::mapi) fn delegate_freebusy_message_is_associated(
+    message: &MapiDelegateFreeBusyMessage,
+) -> bool {
+    !crate::mapi_store::is_outlook_local_freebusy_message(message)
 }
 
 pub(in crate::mapi) fn serialize_freebusy_row_staged(
@@ -118,7 +130,7 @@ pub(in crate::mapi) fn serialize_freebusy_row_staged(
 ) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
-        let value = if crate::mapi_store::is_outlook_local_freebusy_message_id(message.id)
+        let value = if crate::mapi_store::is_outlook_local_freebusy_message(message)
             && canonical_property_storage_tag(*column)
                 == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE
         {
@@ -982,7 +994,8 @@ pub(in crate::mapi) fn delegate_freebusy_property_value(
     mailbox_guid: Uuid,
     property_tag: u32,
 ) -> Option<MapiValue> {
-    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    let identity = message.durable_identity.as_ref();
+    let local_freebusy = crate::mapi_store::is_outlook_local_freebusy_message(message);
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_MID => Some(MapiValue::U64(message.id)),
         PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
@@ -991,6 +1004,9 @@ pub(in crate::mapi) fn delegate_freebusy_property_value(
             message.id,
         )
         .map(MapiValue::Binary),
+        PID_TAG_INSTANCE_KEY if local_freebusy => {
+            identity.map(|identity| MapiValue::Binary(identity.source_key.clone()))
+        }
         PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(message.id),
         )),
@@ -1005,8 +1021,16 @@ pub(in crate::mapi) fn delegate_freebusy_property_value(
                 "IPM.Microsoft.ScheduleData.FreeBusy".to_string()
             },
         )),
-        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
-        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(
+            if delegate_freebusy_message_is_associated(message) {
+                0x0000_0040
+            } else {
+                0
+            },
+        )),
+        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(delegate_freebusy_message_is_associated(
+            message,
+        ))),
         PID_TAG_MESSAGE_SIZE => Some(mapi_message_size_value(delegate_freebusy_message_size(
             message,
         ))),
@@ -1014,40 +1038,129 @@ pub(in crate::mapi) fn delegate_freebusy_property_value(
             delegate_freebusy_message_size(message),
         )),
         PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+        PID_TAG_SOURCE_KEY if local_freebusy => {
+            identity.map(|identity| MapiValue::Binary(identity.source_key.clone()))
+        }
         PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
             message.id,
         ))),
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(message.folder_id),
         )),
+        PID_TAG_CHANGE_KEY if local_freebusy => {
+            identity.map(|identity| MapiValue::Binary(identity.change_key.clone()))
+        }
         PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
-            mapi_mailstore::change_key_for_change_number(change_number),
+            mapi_mailstore::change_key_for_change_number(
+                mapi_mailstore::change_number_for_store_id(message.id),
+            ),
         )),
-        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
-            mapi_mailstore::predecessor_change_list(change_number),
-        )),
-        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        PID_TAG_PREDECESSOR_CHANGE_LIST if local_freebusy => {
+            identity.map(|identity| MapiValue::Binary(identity.predecessor_change_list.clone()))
+        }
+        PID_TAG_PREDECESSOR_CHANGE_LIST => {
+            Some(MapiValue::Binary(mapi_mailstore::predecessor_change_list(
+                mapi_mailstore::change_number_for_store_id(message.id),
+            )))
+        }
+        PID_TAG_CHANGE_NUMBER if local_freebusy => {
+            identity.map(|identity| MapiValue::U64(identity.change_number))
+        }
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(mapi_mailstore::change_number_for_store_id(
+            message.id,
+        ))),
+        PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME
+        | PID_TAG_MESSAGE_DELIVERY_TIME
+            if local_freebusy =>
+        {
+            identity.map(|identity| MapiValue::I64(identity.last_modification_time as i64))
+        }
         PID_TAG_LAST_MODIFICATION_TIME
         | PID_TAG_LOCAL_COMMIT_TIME
         | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
             mapi_mailstore::filetime_from_rfc3339_utc(&message.message.updated_at) as i64,
         )),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
-        PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE => Some(MapiValue::U32(0)),
-        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => Some(MapiValue::Binary(Vec::new())),
-        // [MS-OXODLGT] section 2.2.2.2.7 requires this flag on the Delegate
-        // Information object. Other free/busy rows retain the no-delegate
-        // projection.
-        0x6843_000B if crate::mapi_store::is_outlook_local_freebusy_message_id(message.id) => {
+        PID_TAG_VIEW_DESCRIPTOR_VIEW_MODE if !local_freebusy => Some(MapiValue::U32(0)),
+        PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE if local_freebusy => {
+            Some(MapiValue::Binary(EMPTY_APPOINTMENT_TOMBSTONE.to_vec()))
+        }
+        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B if local_freebusy => {
+            crate::mapi::identity::outlook_message_list_settings_entry_id(mailbox_guid, message.id)
+                .map(MapiValue::Binary)
+        }
+        0x6842_000B if local_freebusy && !message.delegates.is_empty() => {
+            let delegates_receive = message
+                .delegates
+                .iter()
+                .any(|delegate| delegate.preferences.receives_meeting_request_copy);
+            let owner_receives = message
+                .delegates
+                .iter()
+                .any(|delegate| delegate.preferences.meeting_request_delivery != "delegate_only");
+            Some(MapiValue::Bool(owner_receives || !delegates_receive))
+        }
+        0x6843_000B if local_freebusy && !message.delegates.is_empty() => {
+            // [MS-OXODLGT] section 2.2.2.2.7 requires this flag on the
+            // Delegate Information object.
             Some(MapiValue::Bool(true))
         }
-        0x6842_000B | 0x6843_000B | 0x684B_000B | 0x686D_000B | 0x686E_000B | 0x686F_000B => {
+        0x684B_000B if local_freebusy && !message.delegates.is_empty() => {
+            // The canonical EWS model does not distinguish
+            // DelegatesAndSendInformationToMe from DelegatesAndMe, so it
+            // cannot safely project TRUE for this global preference.
             Some(MapiValue::Bool(false))
         }
-        0x6844_101F | 0x684A_101F => Some(MapiValue::MultiString(Vec::new())),
-        0x6845_1102 | 0x6870_1102 => Some(MapiValue::MultiBinary(Vec::new())),
-        0x686B_1003 | 0x6871_1003 => Some(MapiValue::MultiI32(Vec::new())),
-        0x6872_001F => Some(MapiValue::String(String::new())),
+        0x6844_101F | 0x684A_101F if local_freebusy && !message.delegates.is_empty() => {
+            Some(MapiValue::MultiString(
+                message
+                    .delegates
+                    .iter()
+                    .map(|delegate| delegate.grantee_display_name.clone())
+                    .collect(),
+            ))
+        }
+        0x6845_1102 if local_freebusy && !message.delegates.is_empty() => {
+            Some(MapiValue::MultiBinary(
+                message
+                    .delegates
+                    .iter()
+                    .map(|delegate| {
+                        crate::mapi::nspi::nspi_entry_permanent_entry_id(
+                            &ExchangeAddressBookEntry {
+                                id: delegate.grantee_account_id,
+                                display_name: delegate.grantee_display_name.clone(),
+                                email: delegate.grantee_email.clone(),
+                                entry_kind: ExchangeAddressBookEntryKind::Account,
+                                directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                                member_emails: Vec::new(),
+                                details: Default::default(),
+                            },
+                        )
+                    })
+                    .collect(),
+            ))
+        }
+        0x686B_1003 if local_freebusy && !message.delegates.is_empty() => {
+            Some(MapiValue::MultiI32(
+                message
+                    .delegates
+                    .iter()
+                    .map(|delegate| i32::from(delegate.preferences.may_view_private_items))
+                    .collect(),
+            ))
+        }
+        OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B => Some(MapiValue::Binary(Vec::new())),
+        0x6842_000B | 0x6843_000B | 0x684B_000B | 0x686D_000B | 0x686E_000B | 0x686F_000B
+            if !local_freebusy =>
+        {
+            Some(MapiValue::Bool(false))
+        }
+        0x6844_101F | 0x684A_101F if !local_freebusy => Some(MapiValue::MultiString(Vec::new())),
+        0x6845_1102 | 0x6870_1102 if !local_freebusy => Some(MapiValue::MultiBinary(Vec::new())),
+        0x686B_1003 | 0x6871_1003 if !local_freebusy => Some(MapiValue::MultiI32(Vec::new())),
+        0x6872_001F if !local_freebusy => Some(MapiValue::String(String::new())),
         _ => None,
     }
 }

@@ -5,11 +5,12 @@ use lpe_domain::InboundDeliveryRequest;
 use lpe_storage::{
     mapi_store_identity::{mapi_store_id, mapi_xid},
     AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult, CollaborationGrantInput,
-    CollaborationResourceKind, CreatePublicFolderTreeInput, JmapImportedEmailInput,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, ManagedRetentionFolderCreateInput, NewAccount,
-    NewDomain, NewMailbox, NewPstTransferJob, PublicFolderPerUserStatePatch,
-    PublicFolderPermissionInput, PublicFolderReplicaInput, ReminderQuery,
-    SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
+    CollaborationResourceKind, CreatePublicFolderTreeInput, DelegatePreferencesPatch,
+    JmapImportedEmailInput, JmapMailboxCreateInput, JmapMailboxUpdateInput,
+    MailboxDelegationGrantInput, MailboxFolderDelegationGrantInput,
+    ManagedRetentionFolderCreateInput, NewAccount, NewDomain, NewMailbox, NewPstTransferJob,
+    PublicFolderPerUserStatePatch, PublicFolderPermissionInput, PublicFolderReplicaInput,
+    ReminderQuery, SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput, UpsertClientEventInput, UpsertClientNoteInput,
     UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
@@ -2884,6 +2885,160 @@ async fn exercise_custom_calendar_grant_path(
     .await
     .context("seed custom calendar grantee account")?;
 
+    let custom_mailbox_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO mailboxes (
+            id, tenant_id, account_id, role, display_name, sort_order, uid_validity
+        )
+        VALUES ($1, $2, $3, 'custom', 'Runtime Delegation Custom', 30, 7301)
+        "#,
+    )
+    .bind(custom_mailbox_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .execute(pool)
+    .await
+    .context("seed custom mailbox for mailbox Share scope")?;
+    storage
+        .set_mailbox_folder_delegation_grant(
+            MailboxFolderDelegationGrantInput {
+                owner_account_id: fixture.account_id,
+                mailbox_id: custom_mailbox_id,
+                grantee_account_id,
+                may_read: true,
+                may_write: false,
+                may_delete: false,
+                may_share: false,
+            },
+            audit(
+                &fixture.account_email,
+                "mailbox-folder-share-upsert",
+                "runtime custom mailbox ACL",
+            ),
+        )
+        .await
+        .context("grant custom mailbox ACL before mailbox Share")?;
+    let mailbox_share = storage
+        .upsert_mailbox_delegation_grant_with_preferences(
+            MailboxDelegationGrantInput {
+                owner_account_id: fixture.account_id,
+                grantee_email: grantee_email.clone(),
+                may_write: true,
+            },
+            DelegatePreferencesPatch {
+                meeting_request_delivery: Some("owner_only".to_string()),
+                receives_meeting_request_copy: Some(false),
+                may_view_private_items: Some(true),
+            },
+            audit(
+                &fixture.account_email,
+                "mailbox-share-upsert",
+                "runtime default Inbox Share",
+            ),
+        )
+        .await
+        .context("create default Inbox mailbox Share")?;
+    let inbox_grant_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT grant_row.id
+        FROM mailbox_delegation_grants grant_row
+        JOIN mailboxes mailbox
+          ON mailbox.tenant_id = grant_row.tenant_id
+         AND mailbox.account_id = grant_row.owner_account_id
+         AND mailbox.id = grant_row.mailbox_id
+         AND mailbox.role = 'inbox'
+        WHERE grant_row.tenant_id = $1
+          AND grant_row.owner_account_id = $2
+          AND grant_row.grantee_account_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(grantee_account_id)
+    .fetch_one(pool)
+    .await
+    .context("load default Inbox grant after mailbox Share upsert")?;
+    anyhow::ensure!(
+        mailbox_share.id == inbox_grant_id
+            && mailbox_share.delegate_preferences.meeting_request_delivery == "owner_only"
+            && !mailbox_share
+                .delegate_preferences
+                .receives_meeting_request_copy
+            && mailbox_share.delegate_preferences.may_view_private_items,
+        "mailbox Share upsert must return the default Inbox relation and canonical preferences"
+    );
+    let mailbox_shares = storage
+        .fetch_outgoing_mailbox_delegation_grants(fixture.account_id)
+        .await
+        .context("list mailbox Shares with a parallel custom-folder ACL")?;
+    let grantee_mailbox_shares = mailbox_shares
+        .iter()
+        .filter(|grant| grant.grantee_account_id == grantee_account_id)
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        grantee_mailbox_shares.len() == 1 && grantee_mailbox_shares[0].id == inbox_grant_id,
+        "mailbox Share listing must exclude custom-folder ACL rows"
+    );
+    storage
+        .delete_mailbox_delegation_grant(
+            fixture.account_id,
+            grantee_account_id,
+            audit(
+                &fixture.account_email,
+                "mailbox-share-delete",
+                "runtime default Inbox Share removal",
+            ),
+        )
+        .await
+        .context("delete default Inbox mailbox Share")?;
+    let remaining_mailbox_grants = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mailbox_delegation_grants
+        WHERE tenant_id = $1
+          AND owner_account_id = $2
+          AND grantee_account_id = $3
+          AND mailbox_id = $4
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(grantee_account_id)
+    .bind(custom_mailbox_id)
+    .fetch_one(pool)
+    .await
+    .context("count custom-folder ACL rows after mailbox Share deletion")?;
+    let remaining_preferences = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM delegate_preferences
+        WHERE tenant_id = $1
+          AND owner_account_id = $2
+          AND grantee_account_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(grantee_account_id)
+    .fetch_one(pool)
+    .await
+    .context("count delegate preferences after mailbox Share deletion")?;
+    anyhow::ensure!(
+        remaining_mailbox_grants == 1 && remaining_preferences == 0,
+        "mailbox Share deletion must preserve custom-folder ACLs and delete its preference tuple"
+    );
+
+    let mut default_event_input =
+        runtime_calendar_event_input(fixture.account_id, None, "Scoped tentative availability");
+    default_event_input.date = "2099-08-13".to_string();
+    default_event_input.time = "12:00".to_string();
+    default_event_input.status = "tentative".to_string();
+    storage
+        .create_accessible_event(fixture.account_id, None, default_event_input)
+        .await
+        .context("create tentative event in the default Calendar")?;
+
     let custom_calendar = storage
         .create_accessible_calendar_collection(fixture.account_id, "Runtime Shared Calendar")
         .await
@@ -2911,6 +3066,54 @@ async fn exercise_custom_calendar_grant_path(
         )
         .await
         .context("share custom calendar through collaboration grant input")?;
+
+    let custom_only_free_busy = storage
+        .fetch_free_busy_blocks(
+            grantee_account_id,
+            fixture.account_id,
+            "2099-08-13T13:00:00Z",
+            "2099-08-13T11:00:00Z",
+        )
+        .await
+        .context("fetch default-Calendar free/busy with only custom-calendar access")?;
+    anyhow::ensure!(
+        custom_only_free_busy.len() == 1 && custom_only_free_busy[0].status == "busy",
+        "custom-calendar-only access must not reveal default-Calendar availability detail"
+    );
+    storage
+        .upsert_collaboration_grant(
+            CollaborationGrantInput {
+                kind: CollaborationResourceKind::Calendar,
+                owner_account_id: fixture.account_id,
+                grantee_email: grantee_email.clone(),
+                calendar_id: None,
+                may_read: true,
+                may_write: false,
+                may_delete: false,
+                may_share: false,
+            },
+            audit(
+                &fixture.account_email,
+                "calendar-share-upsert",
+                "runtime default Calendar read grant",
+            ),
+        )
+        .await
+        .context("share the default Calendar for detailed free/busy")?;
+    let default_calendar_free_busy = storage
+        .fetch_free_busy_blocks(
+            grantee_account_id,
+            fixture.account_id,
+            "2099-08-13T13:00:00Z",
+            "2099-08-13T11:00:00Z",
+        )
+        .await
+        .context("fetch free/busy with default-Calendar access")?;
+    anyhow::ensure!(
+        default_calendar_free_busy.len() == 1
+            && default_calendar_free_busy[0].status == "tentative",
+        "default-Calendar read access must reveal modeled availability detail"
+    );
 
     let outgoing = storage
         .fetch_outgoing_collaboration_grants(

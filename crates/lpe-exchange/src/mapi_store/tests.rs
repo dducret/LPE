@@ -3513,12 +3513,28 @@ fn snapshot_projects_reminders_as_underlying_calendar_and_task_links() {
 #[test]
 fn snapshot_projects_computed_delegate_freebusy_messages() {
     let message_id = Uuid::parse_str("56565656-5656-4656-8656-565656565656").unwrap();
-    crate::mapi::identity::remember_mapi_identity(
-        message_id,
-        crate::mapi::identity::mapi_store_id(610),
-    );
-    let snapshot = MapiMailStoreSnapshot::empty().with_delegate_freebusy_messages(vec![
-        DelegateFreeBusyMessageObject {
+    let identity = |canonical_id, counter| {
+        let object_id = crate::mapi::identity::mapi_store_id(counter);
+        let change_number = crate::mapi_mailstore::change_number_for_store_id(object_id);
+        MapiIdentityRecord {
+            object_kind: MapiIdentityObjectKind::DelegateFreeBusyMessage,
+            canonical_id,
+            object_id,
+            change_number,
+            source_key: crate::mapi_mailstore::source_key_for_store_id(object_id),
+            change_key: crate::mapi_mailstore::change_key_for_change_number(change_number),
+            predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(change_number),
+            last_modification_time: crate::mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-08-13T12:42:00Z",
+            ),
+        }
+    };
+    let identities = vec![
+        identity(message_id, 610),
+        identity(OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID, 611),
+    ];
+    let snapshot = MapiMailStoreSnapshot::empty()
+        .with_delegate_freebusy_messages(vec![DelegateFreeBusyMessageObject {
             id: message_id,
             account_id: Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap(),
             owner_account_id: Uuid::parse_str("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb").unwrap(),
@@ -3531,16 +3547,24 @@ fn snapshot_projects_computed_delegate_freebusy_messages() {
             busy_status: Some("busy".to_string()),
             payload_json: "{}".to_string(),
             updated_at: "2026-05-26T08:00:00Z".to_string(),
-        },
-    ]);
+        }])
+        .with_delegate_freebusy_message_identities(&identities)
+        .unwrap();
 
     assert_eq!(snapshot.delegate_freebusy_messages().len(), 2);
     let projected_id = snapshot.delegate_freebusy_messages()[0].id;
     assert!(snapshot
         .delegate_freebusy_message_for_id(projected_id)
         .is_some());
-    assert!(snapshot.delegate_freebusy_messages().iter().any(|message| {
-        message.id == OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID
-            && message.message.subject == "LocalFreebusy"
-    }));
+    let local_freebusy = snapshot
+        .delegate_freebusy_messages()
+        .iter()
+        .find(|message| is_outlook_local_freebusy_message(message))
+        .unwrap();
+    assert_eq!(local_freebusy.id, identities[1].object_id);
+    assert_eq!(
+        local_freebusy.durable_identity.as_ref(),
+        Some(&identities[1])
+    );
+    assert_eq!(local_freebusy.message.subject, "LocalFreebusy");
 }

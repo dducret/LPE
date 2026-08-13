@@ -71,6 +71,7 @@ impl Storage {
         for table in [
             "accounts",
             "calendar_events",
+            "delegation_projection_state",
             "mapi_calendar_event_identity_moves",
             "mapi_store_identity",
             "mapi_mailbox_replicas",
@@ -107,6 +108,66 @@ impl Storage {
                     "required table {schema_name}.{table} is missing; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
                 );
             }
+        }
+
+        let delegation_projection_shape_is_current = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT
+                (
+                    SELECT COUNT(*) = 3
+                    FROM information_schema.columns
+                    WHERE table_schema = $1
+                      AND table_name = 'delegation_projection_state'
+                      AND column_name IN ('revision', 'applied_revision', 'updated_at')
+                      AND is_nullable = 'NO'
+                      AND data_type = CASE column_name
+                          WHEN 'revision' THEN 'bigint'
+                          WHEN 'applied_revision' THEN 'bigint'
+                          WHEN 'updated_at' THEN 'timestamp with time zone'
+                      END
+                )
+                AND (
+                    SELECT COUNT(DISTINCT procedure_row.proname) = 4
+                    FROM pg_proc procedure_row
+                    JOIN pg_namespace namespace_row
+                      ON namespace_row.oid = procedure_row.pronamespace
+                    WHERE namespace_row.nspname = $1
+                      AND procedure_row.proname IN (
+                          'advance_delegation_projection_state',
+                          'track_delegation_projection_change',
+                          'track_default_delegation_collection_change',
+                          'track_delegate_directory_projection_change'
+                      )
+                )
+                AND (
+                    SELECT COUNT(DISTINCT trigger_row.tgname) = 7
+                    FROM pg_trigger trigger_row
+                    JOIN pg_class table_row ON table_row.oid = trigger_row.tgrelid
+                    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                    WHERE namespace_row.nspname = $1
+                      AND NOT trigger_row.tgisinternal
+                      AND trigger_row.tgname IN (
+                          'mailbox_delegation_grants_projection_change',
+                          'calendar_grants_projection_change',
+                          'sender_rights_projection_change',
+                          'delegate_preferences_projection_change',
+                          'mailboxes_default_delegation_projection_change',
+                          'calendars_default_delegation_projection_change',
+                          'accounts_delegate_directory_projection_change'
+                      )
+                )
+            "#,
+        )
+        .bind(schema_name)
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| {
+            format!("unable to inspect delegation projection shape in {schema_name}")
+        })?;
+        if !delegation_projection_shape_is_current {
+            bail!(
+                "required delegation projection revision shape is missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
         }
 
         let mut invalid_columns = Vec::new();

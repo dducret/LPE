@@ -161,6 +161,40 @@ pub struct SenderIdentity {
     pub sender_display: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegatePreferences {
+    pub meeting_request_delivery: String,
+    pub receives_meeting_request_copy: bool,
+    pub may_view_private_items: bool,
+}
+
+impl Default for DelegatePreferences {
+    fn default() -> Self {
+        Self {
+            meeting_request_delivery: "delegate_and_owner".to_string(),
+            receives_meeting_request_copy: true,
+            may_view_private_items: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegatePreferencesPatch {
+    pub meeting_request_delivery: Option<String>,
+    pub receives_meeting_request_copy: Option<bool>,
+    pub may_view_private_items: Option<bool>,
+}
+
+impl DelegatePreferencesPatch {
+    pub(super) fn is_empty(&self) -> bool {
+        self.meeting_request_delivery.is_none()
+            && self.receives_meeting_request_copy.is_none()
+            && self.may_view_private_items.is_none()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MailboxDelegationGrantInput {
     pub owner_account_id: Uuid,
@@ -197,6 +231,7 @@ pub struct MailboxDelegationGrant {
     pub grantee_email: String,
     pub grantee_display_name: String,
     pub may_write: bool,
+    pub delegate_preferences: DelegatePreferences,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -253,6 +288,11 @@ pub(super) fn map_mailbox_delegation_grant(
         grantee_email: row.grantee_email,
         grantee_display_name: row.grantee_display_name,
         may_write: row.may_write,
+        delegate_preferences: DelegatePreferences {
+            meeting_request_delivery: row.meeting_request_delivery,
+            receives_meeting_request_copy: row.receives_meeting_request_copy,
+            may_view_private_items: row.may_view_private_items,
+        },
         created_at: row.created_at,
         updated_at: row.updated_at,
     }

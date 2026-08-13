@@ -161,7 +161,7 @@ pub(super) fn property_stream_data(
         (
             MapiObject::DelegateFreeBusyMessage { message_id, .. },
             1 | 2
-        ) if crate::mapi_store::is_outlook_local_freebusy_message_id(*message_id)
+        ) if snapshot.is_outlook_local_freebusy_message_id(*message_id)
             && canonical_property_storage_tag(property_tag)
                 == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE
     );
@@ -233,7 +233,7 @@ pub(super) fn property_stream_data(
             message_id,
             pending_appointment_tombstone,
             ..
-        } if crate::mapi_store::is_outlook_local_freebusy_message_id(*message_id)
+        } if snapshot.is_outlook_local_freebusy_message_id(*message_id)
             && canonical_property_storage_tag(property_tag)
                 == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE =>
         {

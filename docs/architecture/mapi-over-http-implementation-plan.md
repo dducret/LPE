@@ -468,6 +468,29 @@ before it is advertised.
   trailing GetProps request rather than SetProps. A fix for Calendar normal
   content must not rotate associated/FAI ChangeKeys.
 
+  Probe K (`202608131242`) confirms on a fresh database that the Calendar
+  server-ChangeKey correction is active, but the three Calendar synchronization
+  reports remain. The first post-Save Outlook activity repeatedly opens and
+  reads `LocalFreebusy`. That run exposed a separate durable-object defect:
+  LPE advertised one constant high MID with an epoch modification time and a
+  ChangeKey derived from the synthetic MID. The genuine Exchange 2016
+  `raw/548` control instead returns absent Delegate Information cells as
+  `ecNotFound`, followed by a durable LMT, an independently versioned
+  server ChangeKey, a 46-byte provider EntryID, and the message class.
+  `LocalFreebusy` is therefore now a normal-content MAPI projection with one
+  account-scoped `mapi_object_identities` row. Its MID and SourceKey remain
+  stable; changes to canonical default-Inbox/default-Calendar delegation,
+  account-wide sender rights, `delegate_preferences`, or a projected delegate's
+  name/email rotate its CN, ChangeKey, PCL, and LMT. The canonical tuple read
+  and identity rotation share one revision-fenced transaction so a concurrent
+  write cannot consume a revision with stale property content. Ordinary
+  Calendar item changes do not rotate it.
+  The projection has no parallel content table and its private identity is not
+  exposed through REST or JMAP. REST mailbox delegation and JMAP mailbox
+  `Share` instead read and patch the same canonical `delegate_preferences`
+  tuple that EWS already uses. A fresh Outlook run is still required to prove
+  whether this is the remaining Calendar interoperability boundary.
+
   For the current non-delegated Event model, the canonical organizer supplies
   the complete `PidTagSender*` and `PidTagSentRepresenting*` identity families;
   LPE does not invent a distinct delegate sender without canonical delegate
@@ -993,12 +1016,22 @@ before it is advertised.
   read-only `LocalFreebusy` projection—the required
   `IPM.Microsoft.ScheduleData.FreeBusy` / `LocalFreebusy` object under
   `[MS-OXODLGT]` sections 2.2.2.1.1 and 2.2.2.1.2—as that stable target. The
-  same 70-byte account-scoped EntryID is returned by GetProps and tables and is
-  emitted by direct CopyTo and content sync; the virtual object remains present
-  alongside canonical delegate/free-busy rows. Its required
-  `PidTagScheduleInfoDontMailDelegates` projection is true under
-  `[MS-OXODLGT]` section 2.2.2.2.7. This is a no-schema correction; a new
-  Outlook profile run remains required to determine its effect on `N2`.
+  same 70-byte account-scoped EntryID is returned by GetProps and tables.
+  Direct CopyTo and normal-content sync keep provider-local EntryID and
+  InstanceKey out of the message content; sync identifies the same object by
+  its durable SourceKey and optional MID instead. The private `0x0E0B0102`
+  46-byte value is likewise limited to the observed GetProps/table/stream
+  surface because no Exchange LocalFreebusy FastTransfer control supports
+  transmitting it. Probe K supersedes the
+  earlier constant virtual identity: the object now uses one durable
+  account-scoped MAPI identity/version row, while its delegate-property content
+  remains a projection of canonical grants, rights, and preferences. With no
+  configured delegates, the Exchange `raw/548` property vector returns the
+  first fourteen Delegate Information cells as `ecNotFound`; configured rows
+  project correlated names, EntryIDs, flags, and delivery preferences. The
+  valid empty appointment-tombstone stream remains available. This requires no
+  LocalFreebusy content table, but it does require the fresh-schema delegation
+  projection revision and durable MAPI identity metadata described above.
 - Exchange's additional `PidTagExtendedFolderFlags` (`0x36DA0102`) subproperty
   in that same request is a reserved `0x06` record under `[MS-OXOCFG]` section
   2.2.7.1, with no specified meaning. LPE's default valid `0x01` record is
@@ -1439,15 +1472,17 @@ non-canonical LPE state.
   shared calendars remain visible but reject write/delete attempts without
   mutating `calendar_events` or `calendar_event_attachments`.
   LPE does not create arbitrary placeholder delegate/free-busy messages.
-  The documented exception is one stable, read-only virtual Delegate
-  Information message in Freebusy Data: `LocalFreebusy` with class
+  The documented exception is one stable Delegate Information projection in
+  Freebusy Data: `LocalFreebusy` with class
   `IPM.Microsoft.ScheduleData.FreeBusy`. Its account-scoped Message EntryID is
   the second `PidTagFreeBusyEntryIds` element on Root and Inbox, and the same
   object is openable through tables, GetProps, content sync, and direct
-  FastTransfer. It is a protocol projection of canonical calendar/delegation
-  state, not a persisted delegate-data table or permission to create other
-  placeholder messages. This follows `[MS-OXOSFLD]` section 2.2.6 and
-  `[MS-OXODLGT]` sections 2.2.2.1.1, 2.2.2.1.2, and 2.2.2.2.7.
+  FastTransfer. The object is normal content, not FAI. Its MID/SourceKey and
+  version tuple are durable MAPI metadata, while its property content is a
+  projection of the canonical default delegation relationship and never a
+  second delegate-data source of truth. This follows `[MS-OXOSFLD]` section
+  2.2.6, `[MS-OXOPFFB]` section 4.2, and `[MS-OXODLGT]` sections 2.2.2.1.1,
+  2.2.2.1.2, 2.2.2.2, and 3.1.4.3.4.
 - `PidTagSwappedToDoData` uses the documented version-1 validation. Malformed
   blobs fail validation instead of being accepted into canonical task state.
 - Journal and Notes data are canonical account-owned items. MAPI coverage must
@@ -2921,12 +2956,17 @@ Delegate/free-busy readiness additionally requires the canonical
 `/api/mail/delegation/free-busy` layer to return delegate access objects and
 merged non-overlapping availability blocks for the target mailbox calendar.
 When no canonical delegate or free/busy state exists, the data-derived
-message-object list is empty. Freebusy Data nevertheless retains its one
-documented, read-only virtual Delegate Information object, `LocalFreebusy`, so
-the Root/Inbox `PidTagFreeBusyEntryIds` contract never advertises a dangling
-EntryID. MAPI delegate/free-busy message objects are otherwise computed from
-canonical grants, sender rights, accounts, and calendar events; LPE does not
-persist a MAPI-local delegate/free-busy message table.
+delegate message list is empty. Freebusy Data nevertheless retains its one
+documented Delegate Information projection, `LocalFreebusy`, so the Root/Inbox
+`PidTagFreeBusyEntryIds` contract never advertises a dangling EntryID. Its
+protocol identity/version is durable and account scoped; its contents are
+computed from canonical default-Inbox/default-Calendar grants, account-wide
+sender rights, accounts, and delegate preferences. A monotonic canonical
+delegation revision invalidates that projection even when the final relation is
+deleted or a projected delegate's directory fields change. The current/applied
+revision pair atomically fences the canonical tuple read and MAPI version
+rotation. LPE does not persist a MAPI-local delegate/free-busy content table, and
+ordinary calendar-event changes do not rotate the Delegate Information object.
 This follows the Microsoft MAPI over HTTP session model, the delegate calendar
 constraints in MS-OXODLGT, the delegate-management contract in MS-OXWSDLGM, and
 the Outlook free/busy block behavior described by Microsoft's Free/Busy API

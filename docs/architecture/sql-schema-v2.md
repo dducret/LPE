@@ -653,10 +653,18 @@ queries exclude rows without `reminder_set`, rows with dismissed reminders,
 completed tasks, and cancelled task/calendar state; diagnostic queries can
 include inactive rows with explicit statuses.
 
-Delegate/free-busy MAPI message objects also do not have a protocol-local table.
-They are computed from canonical `calendar_grants`, `sender_rights`, account
-directory rows, and `calendar_events` using the same same-tenant free/busy
-visibility rules as `/api/mail/delegation/free-busy`.
+Delegate/free-busy MAPI message contents also do not have a protocol-local
+table. They are computed from canonical `calendar_grants`, `sender_rights`,
+`delegate_preferences`, account directory rows, and `calendar_events` using the
+same same-tenant free/busy visibility rules as
+`/api/mail/delegation/free-busy`. The one Outlook `LocalFreebusy` projection has
+an account-scoped row in the existing `mapi_object_identities` table so its
+MID/SourceKey/CN/ChangeKey/PCL/LMT tuple survives reconnects. The small
+`delegation_projection_state` table stores only the monotonic current and
+applied revisions used to atomically pair the default-Inbox/default-Calendar
+delegate tuple with its MAPI version, including final deletes and projected
+delegate name/email changes; it is not LocalFreebusy content or API-visible state. Ordinary
+`calendar_events` changes do not advance it.
 
 Durable contacts and recipient suggestions are separate concepts. Durable
 contacts live only in `contact_books` and `contacts`, including Outlook-visible
@@ -692,7 +700,12 @@ profile/user-configuration compatibility. `mapi_associated_config_messages`
 stores bounded Outlook-created MAPI FAI configuration rows only for MAPI replay.
 `delegate_preferences` stores only delegate delivery/private-item preferences;
 mailbox, calendar, task, contact, and sender rights remain in the canonical
-grant tables. Retention tags use `retention_policy_tags` and
+grant tables. `delegation_projection_state` stores only the monotonic current
+and applied revision plus change time used to invalidate Outlook's computed `LocalFreebusy` MAPI
+identity. Its triggers follow semantic changes to the default Inbox, default
+Calendar, account-wide sender rights, and delegate preferences, including hard
+deletes and projected delegate directory changes; they exclude secondary collection grants, identity-specific sender
+rights, and calendar events. Retention tags use `retention_policy_tags` and
 `account_retention_policy_assignments`, not Exchange-only policy blobs. Contact
 groups and IM-group projections use `contact_groups` and
 `contact_group_members` over canonical contacts, accounts, and external member
@@ -872,6 +885,7 @@ collaboration, rights, or user-visible state.
 - `mailbox_delegation_grants`
 - `sender_rights`
 - `delegate_preferences`
+- `delegation_projection_state`
 - `mail_app_catalog`
 - `mail_app_tenant_policies`
 - `mail_app_installations`

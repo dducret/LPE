@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 
 mod calendar;
 mod calendar_identity;
+mod delegate_freebusy;
 use calendar::*;
 
 fn navigation_shortcut_message(
@@ -180,23 +181,6 @@ impl MapiMailStoreSnapshot {
                 action,
             })
             .collect();
-        self
-    }
-
-    pub(crate) fn with_delegate_freebusy_messages(
-        mut self,
-        messages: Vec<DelegateFreeBusyMessageObject>,
-    ) -> Self {
-        self.delegate_freebusy_messages = messages
-            .into_iter()
-            .map(|message| MapiDelegateFreeBusyMessage {
-                id: mapi_item_id(&message.id),
-                folder_id: crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
-                canonical_id: message.id,
-                message,
-            })
-            .collect();
-        ensure_virtual_local_freebusy_message(&mut self.delegate_freebusy_messages);
         self
     }
 
@@ -1492,19 +1476,6 @@ impl MapiMailStoreSnapshot {
         item_id: u64,
     ) -> Option<MapiConversationActionMessage> {
         self.conversation_action_message_for_id(item_id).cloned()
-    }
-
-    pub(crate) fn delegate_freebusy_messages(&self) -> &[MapiDelegateFreeBusyMessage] {
-        &self.delegate_freebusy_messages
-    }
-
-    pub(crate) fn delegate_freebusy_message_for_id(
-        &self,
-        item_id: u64,
-    ) -> Option<&MapiDelegateFreeBusyMessage> {
-        self.delegate_freebusy_messages
-            .iter()
-            .find(|message| message.id == item_id)
     }
 
     pub(crate) fn recoverable_items_for_folder(

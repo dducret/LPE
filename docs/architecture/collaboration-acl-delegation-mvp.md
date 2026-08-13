@@ -27,6 +27,16 @@
   - accepts bounded Outlook `RopModifyPermissions` folder ACL rows only when they map to same-tenant canonical mailbox delegation grants
   - supports `send-as` and `send-on-behalf` checks during canonical submission
   - does not create protocol-specific submitted-message logic
+  - stores the mailbox-level owner/delegate meeting-delivery policy in
+    `delegate_preferences`: meeting requests go to the delegate, delegate and
+    owner, or owner; the delegate can receive meeting-request copies and may be
+    allowed to view private items
+  - `/api/mail/delegation` and the private JMAP `Share/get` projection return
+    that preference tuple only on mailbox shares; mailbox-delegation `PUT` and
+    JMAP `Share/set` update supplied fields and preserve omitted fields
+  - mailbox `Share` reads and deletion target only the owner's default Inbox;
+    deleting that relation deletes its preference tuple while custom-folder ACLs,
+    calendar grants, and sender rights remain independently managed relations
 - Delegate / free-busy object layer:
   - `/api/mail/delegation/free-busy` returns canonical delegate access objects
     and computed free/busy blocks for Outlook, EWS, and MAPI consumers
@@ -36,11 +46,26 @@
   - free/busy is computed from canonical `calendar_events`, not stored as an
     Exchange-specific public-folder free/busy store
   - same-tenant users can retrieve availability blocks; users with canonical
-    calendar read grants can distinguish tentative from busy, while users
-    without calendar read grants receive availability-only `busy` blocks
+    read access to the owner's default Calendar can distinguish tentative from
+    busy, while users without that access receive availability-only `busy`
+    blocks; access to another custom calendar owned by the same account does not
+    reveal default-Calendar status detail
   - cancelled events are omitted from free/busy output
   - delegate meeting-object handling is considered enabled only when the
     grantee has calendar write access and canonical `send-on-behalf`
+  - Outlook `LocalFreebusy` is a MAPI Delegate Information projection over this
+    canonical state. Its durable MAPI identity/version metadata is not an API or
+    JMAP object and `mapi_object_identities` is never published through either
+    surface.
+  - `delegation_projection_state` is only a monotonic invalidation marker for
+    that computed MAPI row, not a delegate/free-busy content store. Its current
+    and applied revisions serialize the canonical delegate read with MAPI
+    identity rotation. It advances
+    for semantic changes to default-Inbox grants, default-Calendar grants,
+    account-wide sender rights, and delegate preferences, including the last
+    hard delete, and changes to a projected delegate's name or primary email.
+    Secondary collection grants, identity-specific sender rights,
+    and ordinary calendar-event changes do not advance it.
 - JMAP:
   - exposes shared objects through canonical account and collection visibility
   - uses canonical state/change channels
@@ -76,4 +101,5 @@
 | Calendars | `calendar_events` |
 | Tasks | `tasks`, `task_lists`, `task_list_grants` |
 | Mailboxes | canonical mailbox tables and mailbox delegation grants |
-| Delegate/free-busy objects | `calendar_grants`, `sender_rights`, `calendar_events` |
+| Delegate preferences | `delegate_preferences` attached to a mailbox owner/delegate relation |
+| Delegate/free-busy objects | `calendar_grants`, `sender_rights`, `delegate_preferences`, `calendar_events`; `delegation_projection_state` is version metadata only |

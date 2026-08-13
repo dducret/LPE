@@ -889,6 +889,7 @@ impl ImapStore for FakeStore {
                     grantee_email: normalized_email.clone(),
                     grantee_display_name: normalized_email.clone(),
                     may_write: input.may_write,
+                    delegate_preferences: lpe_storage::DelegatePreferences::default(),
                     created_at: "2026-04-22T10:00:00Z".to_string(),
                     updated_at: "2026-04-22T10:00:00Z".to_string(),
                 };

@@ -154,8 +154,8 @@ pub(super) const OUTLOOK_INBOX_AGGREGATION_ID: u64 =
 pub(crate) const OUTLOOK_QUICK_STEP_CUSTOM_ACTION_CLASS: &str = "IPM.Microsoft.CustomAction";
 pub(super) const OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID: u64 =
     crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF2);
-pub(crate) const OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID: u64 =
-    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
+pub(crate) const OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID: Uuid =
+    Uuid::from_u128(0x6d617069_6672_4266_8000_000000000001);
 
 pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> bool {
     matches!(
@@ -241,8 +241,8 @@ pub(crate) fn is_outlook_default_conversation_action_id(item_id: u64) -> bool {
     item_id == OUTLOOK_DEFAULT_CONVERSATION_ACTION_ID
 }
 
-pub(crate) fn is_outlook_local_freebusy_message_id(item_id: u64) -> bool {
-    item_id == OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID
+pub(crate) fn is_outlook_local_freebusy_message(message: &MapiDelegateFreeBusyMessage) -> bool {
+    message.canonical_id == OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID
 }
 
 pub(super) fn outlook_inbox_associated_config_defaults(
@@ -530,14 +530,22 @@ pub(crate) fn is_outlook_umolk_user_options_message_class(message_class: &str) -
     message_class.eq_ignore_ascii_case(OUTLOOK_INBOX_UMOLK_USER_OPTIONS_CONFIG_CLASS)
 }
 
-pub(super) fn virtual_local_freebusy_message() -> MapiDelegateFreeBusyMessage {
-    let canonical_id = Uuid::from_u128(0x6d617069_6672_4266_8000_000000000001);
+pub(super) fn virtual_local_freebusy_message(
+    identity: &crate::store::MapiIdentityRecord,
+) -> MapiDelegateFreeBusyMessage {
+    debug_assert_eq!(
+        identity.object_kind,
+        crate::store::MapiIdentityObjectKind::DelegateFreeBusyMessage
+    );
+    debug_assert_eq!(identity.canonical_id, OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID);
     MapiDelegateFreeBusyMessage {
-        id: OUTLOOK_LOCAL_FREEBUSY_MESSAGE_ID,
+        id: identity.object_id,
         folder_id: crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
-        canonical_id,
+        canonical_id: OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID,
+        durable_identity: Some(identity.clone()),
+        delegates: Vec::new(),
         message: DelegateFreeBusyMessageObject {
-            id: canonical_id,
+            id: OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID,
             account_id: Uuid::nil(),
             owner_account_id: Uuid::nil(),
             owner_email: String::new(),
@@ -555,11 +563,9 @@ pub(super) fn virtual_local_freebusy_message() -> MapiDelegateFreeBusyMessage {
 
 pub(super) fn ensure_virtual_local_freebusy_message(
     messages: &mut Vec<MapiDelegateFreeBusyMessage>,
+    identity: &crate::store::MapiIdentityRecord,
 ) {
-    if !messages
-        .iter()
-        .any(|message| is_outlook_local_freebusy_message_id(message.id))
-    {
-        messages.push(virtual_local_freebusy_message());
+    if !messages.iter().any(is_outlook_local_freebusy_message) {
+        messages.push(virtual_local_freebusy_message(identity));
     }
 }

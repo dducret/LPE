@@ -13,7 +13,7 @@ pub(super) fn append_open_message_response(
     output_handles: &mut Vec<u32>,
 ) {
     let message_id = request.message_id().unwrap_or(0);
-    let folder_id = open_message_folder_id(request, message_id);
+    let folder_id = open_message_folder_id(request, message_id, snapshot);
     if let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) {
         let handle = session.allocate_output_handle(
             request.output_handle_index,

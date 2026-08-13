@@ -3377,6 +3377,262 @@ CREATE TABLE delegate_preferences (
 CREATE INDEX delegate_preferences_grantee_idx
     ON delegate_preferences (tenant_id, grantee_account_id, owner_account_id);
 
+-- Monotonic invalidation for the computed Outlook LocalFreebusy projection.
+-- Delegate content remains canonical in the grant/right/preference tables above.
+CREATE TABLE delegation_projection_state (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    revision BIGINT NOT NULL DEFAULT 1 CHECK (revision > 0),
+    applied_revision BIGINT NOT NULL DEFAULT 0
+        CHECK (applied_revision >= 0 AND applied_revision <= revision),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (tenant_id, account_id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE OR REPLACE FUNCTION advance_delegation_projection_state(
+    projection_tenant_id UUID,
+    projection_account_id UUID
+)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO delegation_projection_state (tenant_id, account_id, revision, updated_at)
+    SELECT projection_tenant_id, projection_account_id, 1, clock_timestamp()
+    WHERE EXISTS (
+        SELECT 1
+        FROM accounts
+        WHERE tenant_id = projection_tenant_id
+          AND id = projection_account_id
+    )
+    ON CONFLICT (tenant_id, account_id)
+    DO UPDATE SET
+        revision = delegation_projection_state.revision + 1,
+        updated_at = GREATEST(
+            clock_timestamp(),
+            delegation_projection_state.updated_at + INTERVAL '1 microsecond'
+        );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION track_delegation_projection_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    old_is_projected BOOLEAN := FALSE;
+    new_is_projected BOOLEAN := FALSE;
+BEGIN
+    IF TG_OP = 'UPDATE'
+        AND to_jsonb(OLD) - ARRAY['id', 'created_at', 'updated_at']
+            = to_jsonb(NEW) - ARRAY['id', 'created_at', 'updated_at']
+    THEN
+        RETURN NEW;
+    END IF;
+
+    IF TG_TABLE_NAME = 'delegate_preferences' THEN
+        old_is_projected := TG_OP <> 'INSERT';
+        new_is_projected := TG_OP <> 'DELETE';
+    ELSIF TG_TABLE_NAME = 'sender_rights' THEN
+        IF TG_OP <> 'INSERT' THEN
+            old_is_projected := OLD.identity_id IS NULL;
+        END IF;
+        IF TG_OP <> 'DELETE' THEN
+            new_is_projected := NEW.identity_id IS NULL;
+        END IF;
+    ELSIF TG_TABLE_NAME = 'mailbox_delegation_grants' THEN
+        IF TG_OP <> 'INSERT' THEN
+            SELECT EXISTS (
+                SELECT 1
+                FROM mailboxes
+                WHERE tenant_id = OLD.tenant_id
+                  AND account_id = OLD.owner_account_id
+                  AND id = OLD.mailbox_id
+                  AND role = 'inbox'
+            ) INTO old_is_projected;
+        END IF;
+        IF TG_OP <> 'DELETE' THEN
+            SELECT EXISTS (
+                SELECT 1
+                FROM mailboxes
+                WHERE tenant_id = NEW.tenant_id
+                  AND account_id = NEW.owner_account_id
+                  AND id = NEW.mailbox_id
+                  AND role = 'inbox'
+            ) INTO new_is_projected;
+        END IF;
+    ELSIF TG_TABLE_NAME = 'calendar_grants' THEN
+        IF TG_OP <> 'INSERT' THEN
+            SELECT EXISTS (
+                SELECT 1
+                FROM calendars
+                WHERE tenant_id = OLD.tenant_id
+                  AND owner_account_id = OLD.owner_account_id
+                  AND id = OLD.calendar_id
+                  AND role = 'calendar'
+            ) INTO old_is_projected;
+        END IF;
+        IF TG_OP <> 'DELETE' THEN
+            SELECT EXISTS (
+                SELECT 1
+                FROM calendars
+                WHERE tenant_id = NEW.tenant_id
+                  AND owner_account_id = NEW.owner_account_id
+                  AND id = NEW.calendar_id
+                  AND role = 'calendar'
+            ) INTO new_is_projected;
+        END IF;
+    END IF;
+
+    IF old_is_projected THEN
+        PERFORM advance_delegation_projection_state(OLD.tenant_id, OLD.owner_account_id);
+    END IF;
+    IF new_is_projected THEN
+        IF TG_OP <> 'UPDATE'
+            OR NOT old_is_projected
+            OR OLD.tenant_id IS DISTINCT FROM NEW.tenant_id
+            OR OLD.owner_account_id IS DISTINCT FROM NEW.owner_account_id
+        THEN
+            PERFORM advance_delegation_projection_state(NEW.tenant_id, NEW.owner_account_id);
+        END IF;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION track_default_delegation_collection_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' AND OLD.role IS NOT DISTINCT FROM NEW.role THEN
+        RETURN NEW;
+    END IF;
+
+    IF TG_TABLE_NAME = 'mailboxes' THEN
+        IF OLD.role = 'inbox' THEN
+            PERFORM advance_delegation_projection_state(OLD.tenant_id, OLD.account_id);
+        END IF;
+        IF TG_OP = 'UPDATE'
+            AND NEW.role = 'inbox'
+            AND OLD.role IS DISTINCT FROM NEW.role
+        THEN
+            PERFORM advance_delegation_projection_state(NEW.tenant_id, NEW.account_id);
+        END IF;
+    ELSIF TG_TABLE_NAME = 'calendars' THEN
+        IF OLD.role = 'calendar' THEN
+            PERFORM advance_delegation_projection_state(OLD.tenant_id, OLD.owner_account_id);
+        END IF;
+        IF TG_OP = 'UPDATE'
+            AND NEW.role = 'calendar'
+            AND OLD.role IS DISTINCT FROM NEW.role
+        THEN
+            PERFORM advance_delegation_projection_state(NEW.tenant_id, NEW.owner_account_id);
+        END IF;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION track_delegate_directory_projection_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    projection_owner UUID;
+BEGIN
+    IF OLD.primary_email IS NOT DISTINCT FROM NEW.primary_email
+        AND OLD.display_name IS NOT DISTINCT FROM NEW.display_name
+    THEN
+        RETURN NEW;
+    END IF;
+
+    FOR projection_owner IN
+        SELECT owner_account_id
+        FROM (
+            SELECT grant_row.owner_account_id
+            FROM mailbox_delegation_grants grant_row
+            JOIN mailboxes mailbox
+              ON mailbox.tenant_id = grant_row.tenant_id
+             AND mailbox.account_id = grant_row.owner_account_id
+             AND mailbox.id = grant_row.mailbox_id
+             AND mailbox.role = 'inbox'
+            WHERE grant_row.tenant_id = NEW.tenant_id
+              AND grant_row.grantee_account_id = NEW.id
+
+            UNION
+
+            SELECT grant_row.owner_account_id
+            FROM calendar_grants grant_row
+            JOIN calendars calendar
+              ON calendar.tenant_id = grant_row.tenant_id
+             AND calendar.owner_account_id = grant_row.owner_account_id
+             AND calendar.id = grant_row.calendar_id
+             AND calendar.role = 'calendar'
+            WHERE grant_row.tenant_id = NEW.tenant_id
+              AND grant_row.grantee_account_id = NEW.id
+
+            UNION
+
+            SELECT owner_account_id
+            FROM sender_rights
+            WHERE tenant_id = NEW.tenant_id
+              AND grantee_account_id = NEW.id
+              AND identity_id IS NULL
+
+            UNION
+
+            SELECT owner_account_id
+            FROM delegate_preferences
+            WHERE tenant_id = NEW.tenant_id
+              AND grantee_account_id = NEW.id
+        ) projected_owners
+        ORDER BY owner_account_id
+    LOOP
+        PERFORM advance_delegation_projection_state(NEW.tenant_id, projection_owner);
+    END LOOP;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER mailbox_delegation_grants_projection_change
+AFTER INSERT OR UPDATE OR DELETE ON mailbox_delegation_grants
+FOR EACH ROW EXECUTE FUNCTION track_delegation_projection_change();
+
+CREATE TRIGGER calendar_grants_projection_change
+AFTER INSERT OR UPDATE OR DELETE ON calendar_grants
+FOR EACH ROW EXECUTE FUNCTION track_delegation_projection_change();
+
+CREATE TRIGGER sender_rights_projection_change
+AFTER INSERT OR UPDATE OR DELETE ON sender_rights
+FOR EACH ROW EXECUTE FUNCTION track_delegation_projection_change();
+
+CREATE TRIGGER delegate_preferences_projection_change
+AFTER INSERT OR UPDATE OR DELETE ON delegate_preferences
+FOR EACH ROW EXECUTE FUNCTION track_delegation_projection_change();
+
+CREATE TRIGGER mailboxes_default_delegation_projection_change
+BEFORE DELETE OR UPDATE OF role ON mailboxes
+FOR EACH ROW EXECUTE FUNCTION track_default_delegation_collection_change();
+
+CREATE TRIGGER calendars_default_delegation_projection_change
+BEFORE DELETE OR UPDATE OF role ON calendars
+FOR EACH ROW EXECUTE FUNCTION track_default_delegation_collection_change();
+
+CREATE TRIGGER accounts_delegate_directory_projection_change
+AFTER UPDATE OF primary_email, display_name ON accounts
+FOR EACH ROW EXECUTE FUNCTION track_delegate_directory_projection_change();
+
 CREATE TABLE mail_app_catalog (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,

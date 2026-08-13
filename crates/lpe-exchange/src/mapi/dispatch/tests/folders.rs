@@ -2072,7 +2072,6 @@ fn default_folder_identification_contract_decodes_root_defaults() {
         "PidTagCommonViewsEntryId:bytes=46:decoded_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
     )));
     assert!(contract.contains("PidTagAdditionalRenEntryIds:count=5"));
-    assert!(contract.contains("PidTagFreeBusyEntryIds:count=4"));
 }
 
 #[test]

@@ -176,15 +176,21 @@ fn rop_query_rows_response_inner(
                 columns.clone()
             };
             if *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                rows_are_serialized_property_rows = true;
                 snapshot
                     .delegate_freebusy_messages()
                     .iter()
+                    .filter(|message| {
+                        delegate_freebusy_message_is_associated(message) == *associated
+                    })
                     .filter(|message| {
                         restriction_matches(restriction.as_ref(), |property_tag| {
                             delegate_freebusy_property_value(message, mailbox_guid, property_tag)
                         })
                     })
-                    .map(|message| serialize_delegate_freebusy_row(message, mailbox_guid, &columns))
+                    .map(|message| {
+                        serialize_delegate_freebusy_property_row(message, mailbox_guid, &columns)
+                    })
                     .collect::<Vec<_>>()
             } else if *associated {
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {

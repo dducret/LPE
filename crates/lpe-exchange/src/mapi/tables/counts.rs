@@ -90,7 +90,9 @@ pub(in crate::mapi) fn folder_message_count(
     if folder_id == FREEBUSY_DATA_FOLDER_ID {
         return snapshot
             .delegate_freebusy_messages()
-            .len()
+            .iter()
+            .filter(|message| !delegate_freebusy_message_is_associated(message))
+            .count()
             .min(u32::MAX as usize) as u32;
     }
     if is_contact_contents_folder(folder_id) {
@@ -150,7 +152,9 @@ pub(in crate::mapi) fn associated_folder_message_count(
     } else if folder_id == FREEBUSY_DATA_FOLDER_ID {
         snapshot
             .delegate_freebusy_messages()
-            .len()
+            .iter()
+            .filter(|message| delegate_freebusy_message_is_associated(message))
+            .count()
             .min(u32::MAX as usize) as u32
     } else if has_associated_table_rows(folder_id, snapshot) {
         associated_table_rows(folder_id, snapshot, None, Uuid::nil())
@@ -207,6 +211,7 @@ pub(in crate::mapi) fn restricted_associated_folder_message_count(
         snapshot
             .delegate_freebusy_messages()
             .iter()
+            .filter(|message| delegate_freebusy_message_is_associated(message))
             .filter(|message| {
                 restriction_matches(restriction, |property_tag| {
                     delegate_freebusy_property_value(message, mailbox_guid, property_tag)
@@ -264,12 +269,18 @@ pub(in crate::mapi) fn table_position_and_count(
             {
                 0
             } else if *folder_id == FREEBUSY_DATA_FOLDER_ID {
-                restricted_associated_folder_message_count(
-                    *folder_id,
-                    snapshot,
-                    restriction.as_ref(),
-                    mailbox_guid,
-                )
+                snapshot
+                    .delegate_freebusy_messages()
+                    .iter()
+                    .filter(|message| {
+                        delegate_freebusy_message_is_associated(message) == *associated
+                    })
+                    .filter(|message| {
+                        restriction_matches(restriction.as_ref(), |property_tag| {
+                            delegate_freebusy_property_value(message, mailbox_guid, property_tag)
+                        })
+                    })
+                    .count()
             } else if *associated {
                 restricted_associated_folder_message_count(
                     *folder_id,

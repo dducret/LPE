@@ -9,6 +9,7 @@ use crate::{
     JmapEmailRecipientRow, Storage,
 };
 
+mod delegate_preferences;
 mod delegation;
 mod mime;
 mod types;
@@ -22,9 +23,10 @@ pub(crate) use types::{
     push_recipients, sender_authorization_kind_from_str, sender_identity_id, AccountIdentity,
 };
 pub use types::{
-    AttachmentUploadInput, CancelSubmissionResult, MailboxAccountAccess, MailboxDelegationGrant,
-    MailboxDelegationGrantInput, MailboxDelegationOverview, MailboxFolderDelegationGrantInput,
-    SavedDraftMessage, SenderAuthorizationKind, SenderDelegationGrant, SenderDelegationGrantInput,
+    AttachmentUploadInput, CancelSubmissionResult, DelegatePreferences, DelegatePreferencesPatch,
+    MailboxAccountAccess, MailboxDelegationGrant, MailboxDelegationGrantInput,
+    MailboxDelegationOverview, MailboxFolderDelegationGrantInput, SavedDraftMessage,
+    SenderAuthorizationKind, SenderDelegationGrant, SenderDelegationGrantInput,
     SenderDelegationRight, SenderIdentity, SubmissionAccountIdentity, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput,
 };

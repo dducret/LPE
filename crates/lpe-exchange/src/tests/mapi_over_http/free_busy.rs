@@ -10,6 +10,15 @@ fn empty_appointment_tombstone() -> Vec<u8> {
     tombstone
 }
 
+fn local_freebusy_id(store: &FakeStore) -> u64 {
+    *store
+        .mapi_identities
+        .lock()
+        .unwrap()
+        .get(&crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID)
+        .expect("private logon allocates the durable LocalFreebusy identity")
+}
+
 #[tokio::test]
 async fn mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_sequence() {
     // Outlook 16.0.20131 emitted this sequence in the 202607201648 replay:
@@ -26,10 +35,10 @@ async fn mapi_over_http_local_freebusy_accepts_outlook_tombstone_maintenance_seq
         session: Some(FakeStore::account()),
         ..Default::default()
     };
-    let service = ExchangeService::new(store);
+    let service = ExchangeService::new(store.clone());
     let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
-    let local_freebusy_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
+    let local_freebusy_id = local_freebusy_id(&store);
     let mut rops = Vec::new();
     append_rop_open_message(
         &mut rops,
@@ -125,10 +134,10 @@ async fn mapi_over_http_local_freebusy_rejects_nonempty_tombstone_without_canoni
         session: Some(FakeStore::account()),
         ..Default::default()
     };
-    let service = ExchangeService::new(store);
+    let service = ExchangeService::new(store.clone());
     let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
-    let local_freebusy_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
+    let local_freebusy_id = local_freebusy_id(&store);
     let mut rops = Vec::new();
     append_rop_open_message(
         &mut rops,
@@ -176,10 +185,10 @@ async fn mapi_over_http_local_freebusy_rejects_created_but_incomplete_tombstone(
         session: Some(FakeStore::account()),
         ..Default::default()
     };
-    let service = ExchangeService::new(store);
+    let service = ExchangeService::new(store.clone());
     let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
-    let local_freebusy_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
+    let local_freebusy_id = local_freebusy_id(&store);
     let mut rops = Vec::new();
     append_rop_open_message(
         &mut rops,
@@ -223,10 +232,10 @@ async fn mapi_over_http_local_freebusy_direct_tombstone_set_is_staged_until_save
         session: Some(FakeStore::account()),
         ..Default::default()
     };
-    let service = ExchangeService::new(store);
+    let service = ExchangeService::new(store.clone());
     let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
-    let local_freebusy_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
+    let local_freebusy_id = local_freebusy_id(&store);
     let staged_tombstone = vec![0xA5, 0x5A, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
     let mut property_values = Vec::new();
     append_mapi_binary_property(
@@ -302,10 +311,10 @@ async fn mapi_over_http_local_freebusy_rejects_unmodeled_mixed_set_without_parti
         session: Some(FakeStore::account()),
         ..Default::default()
     };
-    let service = ExchangeService::new(store);
+    let service = ExchangeService::new(store.clone());
     let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
-    let local_freebusy_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFE4);
+    let local_freebusy_id = local_freebusy_id(&store);
     let mut property_values = Vec::new();
     append_mapi_binary_property(
         &mut property_values,

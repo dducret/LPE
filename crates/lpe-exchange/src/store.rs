@@ -101,6 +101,11 @@ pub trait ExchangeStore: AccountAuthStore {
         requests: &'a [MapiIdentityRequest],
     ) -> StoreFuture<'a, Vec<MapiIdentityRecord>>;
 
+    fn fetch_local_freebusy_projection<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, MapiLocalFreebusyProjection>;
+
     fn fetch_mapi_identities_by_object_ids<'a>(
         &'a self,
         account_id: Uuid,

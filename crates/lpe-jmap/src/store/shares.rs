@@ -29,6 +29,7 @@ pub(super) fn project_share(share_type: &str, value: Value) -> Result<Value> {
     copy_share_field_as(object, &mut projected, "updatedAt", "updated");
     match share_type {
         "mailbox" => {
+            copy_share_field(object, &mut projected, "delegatePreferences");
             projected.insert(
                 "rights".to_string(),
                 json!({
