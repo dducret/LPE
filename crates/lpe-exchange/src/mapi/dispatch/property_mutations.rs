@@ -368,10 +368,7 @@ where
                             );
                         }
                         persist_profile_folder_property_values(
-                            store,
-                            principal,
-                            folder_id,
-                            &values,
+                            store, principal, folder_id, &values,
                         )
                         .await?;
                         apply_mapi_property_values(

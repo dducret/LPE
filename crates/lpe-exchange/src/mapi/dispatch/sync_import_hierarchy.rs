@@ -108,6 +108,49 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 ));
                 return;
             };
+            let existing_profile_values = if canonical_folder_id == INBOX_FOLDER_ID
+                && property_values.iter().any(|(tag, _)| {
+                    canonical_property_storage_tag(*tag) == PID_TAG_ADDITIONAL_REN_ENTRY_IDS
+                }) {
+                let profile_tags = [PID_TAG_ADDITIONAL_REN_ENTRY_IDS];
+                match store
+                    .fetch_mapi_folder_hierarchy_profile_snapshot(
+                        principal.account_id,
+                        durable_folder_id,
+                        INBOX_FOLDER_ID,
+                        &profile_tags,
+                    )
+                    .await
+                {
+                    Ok(Some(profile)) => profile.profile_values,
+                    Ok(None) | Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x73,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        return;
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+            let (profile_values, aliases) = match imported_folder_profile_property_values(
+                principal,
+                canonical_folder_id,
+                &property_values,
+                &existing_profile_values,
+            ) {
+                Ok(values) => values,
+                Err(_) => {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x73,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    return;
+                }
+            };
             match store
                 .commit_mapi_folder_hierarchy_change(
                     principal.account_id,
@@ -115,6 +158,8 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                     imported_version.last_modification_time,
                     imported_version.change_key,
                     imported_version.predecessor_change_list,
+                    &profile_values,
+                    &aliases,
                 )
                 .await
             {
@@ -122,10 +167,19 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                     let version = folder_version_for_snapshot(snapshot, version);
                     let change_number = version.change_number;
                     snapshot.upsert_folder_version(version);
-                    session.record_notification(MapiNotificationEvent::hierarchy(
+                    for alias in &aliases {
+                        session.record_special_folder_alias(
+                            alias.alias_folder_id,
+                            alias.canonical_folder_id,
+                        );
+                    }
+                    let mut event = MapiNotificationEvent::hierarchy(
                         parent_folder_id,
                         Some(canonical_folder_id),
-                    ));
+                    )
+                    .with_object_kind("mailbox");
+                    event.modseq = Some(change_number);
+                    session.record_notification(event);
                     record_sync_upload_hierarchy_change_with_change_number(
                         session,
                         folder_id,
@@ -147,11 +201,24 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 }
                 Ok(MapiFolderHierarchyCommitOutcome::Conflict(version)) => {
                     let version = folder_version_for_snapshot(snapshot, version);
+                    let imported_won = version.change_key == imported_version.change_key;
+                    let change_number = version.change_number;
                     snapshot.upsert_folder_version(version);
-                    session.record_notification(MapiNotificationEvent::hierarchy(
+                    if imported_won {
+                        for alias in &aliases {
+                            session.record_special_folder_alias(
+                                alias.alias_folder_id,
+                                alias.canonical_folder_id,
+                            );
+                        }
+                    }
+                    let mut event = MapiNotificationEvent::hierarchy(
                         parent_folder_id,
                         Some(canonical_folder_id),
-                    ));
+                    )
+                    .with_object_kind("mailbox");
+                    event.modseq = Some(change_number);
+                    session.record_notification(event);
                     // [MS-OXCFXICS] section 3.2.5.9.4.3: a hierarchy conflict
                     // returns Success without adding its CN to MetaTagCnsetSeen.
                     responses.extend_from_slice(

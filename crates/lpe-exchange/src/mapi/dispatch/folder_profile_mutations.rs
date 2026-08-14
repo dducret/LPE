@@ -67,9 +67,7 @@ pub(super) fn imported_folder_profile_property_values(
             (PID_TAG_EXTENDED_FOLDER_FLAGS, _) => {
                 return Err(anyhow!("invalid PidTagExtendedFolderFlags value"));
             }
-            (PID_TAG_ADDITIONAL_REN_ENTRY_IDS, _)
-                if folder_id == INBOX_FOLDER_ID =>
-            {
+            (PID_TAG_ADDITIONAL_REN_ENTRY_IDS, _) if folder_id == INBOX_FOLDER_ID => {
                 let value = merge_additional_ren_entry_ids(
                     principal,
                     existing_additional_ren_entry_ids.as_ref(),
