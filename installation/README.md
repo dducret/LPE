@@ -357,7 +357,7 @@ Files:
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
 - `init-schema.sh` refuses to reset while `lpe.service` (or `SERVICE_NAME`) is active, rejects relations in non-system schemas other than `public`, resets or creates `public`, pins `search_path` to that canonical schema, and applies the canonical `0.5.2-sql` schema in one transaction; it requires an empty public schema unless `LPE_RESET_SCHEMA=true` requests an intentional destructive reset
-- `check-lpe.sh` verifies the installation, PostgreSQL, the exact schema version, required durable MAPI identity version columns, complete account-scoped special-folder alias shape, the canonical mailbox change-kind vocabulary including `copied`, the service, and the HTTP endpoints
+- `check-lpe.sh` verifies the installation, PostgreSQL, the exact schema version, required durable MAPI identity version columns, complete account-scoped special-folder alias shape, enabled and correctly bound LocalFreebusy projection triggers, the LocalFreebusy custom-property primary-key/account-cascade and replay constraint shape, the canonical mailbox change-kind vocabulary including `copied`, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
 - `test-ha-core-active-passive.sh` validates local core HA role gating and readiness transitions

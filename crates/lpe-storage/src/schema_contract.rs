@@ -7,6 +7,7 @@ const BLOB_STORE_STORAGE: &str = include_str!("blob_store.rs");
 const CHANGE_STORAGE: &str = include_str!("change.rs");
 const COLLABORATION_STORAGE: &str = include_str!("collaboration.rs");
 const COLLABORATION_DELETED_EVENTS_STORAGE: &str = include_str!("collaboration/deleted_events.rs");
+const COLLABORATION_FREE_BUSY_STORAGE: &str = include_str!("collaboration/free_busy.rs");
 const COLLABORATION_GRANTS_STORAGE: &str = include_str!("collaboration/grants.rs");
 const COLLABORATION_TYPES_STORAGE: &str = include_str!("collaboration/types.rs");
 const CONVERSATION_ACTIONS_STORAGE: &str = include_str!("conversation_actions.rs");
@@ -32,13 +33,19 @@ const SUBMISSION_STORAGE: &str = include_str!("submission.rs");
 const SUBMISSION_DELEGATION_STORAGE: &str = include_str!("submission/delegation.rs");
 const SUBMISSION_TYPES_STORAGE: &str = include_str!("submission/types.rs");
 const TASKS_STORAGE: &str = include_str!("tasks.rs");
-const WORKSPACE_STORAGE: &str = include_str!("workspace.rs");
+const WORKSPACE_STORAGE: &str = concat!(
+    include_str!("workspace.rs"),
+    "\n",
+    include_str!("workspace/client_workspace.rs")
+);
 const ADMIN_STORAGE: &str = include_str!("admin.rs");
 const ADMIN_PROVISIONING_STORAGE: &str = include_str!("admin/provisioning.rs");
 const AUTH_STORAGE: &str = include_str!("auth.rs");
 const EXCHANGE_STORE: &str = include_str!("../../lpe-exchange/src/store.rs");
 const EXCHANGE_STORE_MAPI_METADATA: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/mapi_metadata.rs");
+const EXCHANGE_STORE_MAPI_SYNC_CHECKPOINTS: &str =
+    include_str!("../../lpe-exchange/src/store/storage_impl/mapi_sync_checkpoints.rs");
 const EXCHANGE_STORE_DELEGATE_FREEBUSY_IDENTITY: &str =
     include_str!("../../lpe-exchange/src/store/storage_impl/delegate_freebusy_identity.rs");
 const EXCHANGE_STORE_EWS_DELEGATION: &str =
@@ -744,12 +751,26 @@ fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
         "object_kind = 'submission'",
         "summary_json ? 'status'",
         "'navigation_shortcut'",
+        "'delegate_freebusy_message'",
+        "object_kind = 'delegate_freebusy_message'\n            AND account_id IS NOT NULL\n            AND mailbox_id IS NULL\n            AND collection_id IS NULL",
+        "summary_json @> '{\"mapiOnly\": true}'::jsonb",
+        "summary_json ? 'folderId'",
+        "summary_json ? 'mapiMessageId'",
+        "jsonb_typeof(summary_json -> 'folderId') = 'string'",
+        "jsonb_typeof(summary_json -> 'mapiMessageId') = 'string'",
+        "(summary_json ->> 'folderId') ~ '^[1-9][0-9]*$'",
+        "(summary_json ->> 'mapiMessageId') ~ '^[1-9][0-9]*$'",
     ] {
         assert!(
             change_log.contains(required),
             "mail_change_log must enforce replay row shape: {required}"
         );
     }
+    assert_eq!(
+        change_log.matches("'delegate_freebusy_message'").count(),
+        2,
+        "mail_change_log must allow delegate_freebusy_message in both its object-kind and account-scoped object-shape constraints"
+    );
 
     let tombstones = table_definition("tombstones");
     assert!(
@@ -1093,26 +1114,36 @@ fn mapi_associated_config_messages_are_bounded_mapi_only_state() {
 }
 
 #[test]
-fn mapi_delegate_freebusy_messages_are_computed_from_canonical_state() {
+fn mapi_delegate_freebusy_canonical_properties_are_computed_from_canonical_state() {
     assert!(
         !SCHEMA.contains("CREATE TABLE mapi_delegate_freebusy_messages"),
-        "delegate/free-busy projections must not introduce MAPI-local storage"
+        "delegate/free-busy projections must not introduce a dedicated MAPI content table"
     );
     assert_source_contains_all(
         "collaboration storage",
         COLLABORATION_STORAGE,
+        &["fetch_delegate_access_objects"],
+    );
+    assert_source_contains_all(
+        "collaboration free/busy storage",
+        COLLABORATION_FREE_BUSY_STORAGE,
         &[
             "project_delegate_freebusy_messages",
             "fetch_delegate_freebusy_messages",
             "compute_delegate_freebusy_messages",
-            "fetch_delegate_access_objects",
             "fetch_free_busy_blocks",
-            "delegate_freebusy_message_objects",
         ],
     );
+    assert_source_contains_all(
+        "collaboration free/busy types",
+        COLLABORATION_TYPES_STORAGE,
+        &["delegate_freebusy_message_objects"],
+    );
     assert!(
-        !COLLABORATION_STORAGE.contains("mapi_delegate_freebusy_messages"),
-        "delegate/free-busy storage must stay computed from calendar grants, sender rights, accounts, and calendar events"
+        !COLLABORATION_STORAGE.contains("mapi_delegate_freebusy_messages")
+            && !COLLABORATION_FREE_BUSY_STORAGE.contains("mapi_delegate_freebusy_messages")
+            && !COLLABORATION_TYPES_STORAGE.contains("mapi_delegate_freebusy_messages"),
+        "canonical delegate/free-busy properties must stay computed from calendar grants, sender rights, accounts, and calendar events"
     );
 }
 
@@ -1134,12 +1165,13 @@ fn mapi_named_properties_and_custom_values_are_durable() {
 
     let values = table_definition("mapi_custom_property_values");
     for required in [
-        "object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment', 'public_folder_item'))",
+        "object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment', 'public_folder_item', 'delegate_freebusy_message'))",
         "canonical_id UUID NOT NULL",
         "property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295)",
         "property_type INTEGER NOT NULL CHECK (property_type >= 0 AND property_type <= 65535)",
         "property_value BYTEA NOT NULL",
         "PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id, property_tag, property_type)",
+        "FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
     ] {
         assert!(
             values.contains(required),
@@ -1217,6 +1249,7 @@ fn mapi_profile_settings_are_canonical_account_settings() {
         &[
             EXCHANGE_STORE,
             EXCHANGE_STORE_MAPI_METADATA,
+            EXCHANGE_STORE_MAPI_SYNC_CHECKPOINTS,
             EXCHANGE_STORE_MAPI_SPECIAL_FOLDER_ALIASES,
         ],
         &[
@@ -1818,8 +1851,27 @@ fn fresh_schema_checks_validate_constraint_shape_without_migration_names() {
         &[
             "conrelid = 'public.mail_change_log'::regclass AND contype = 'c'",
             "pg_get_constraintdef(oid) LIKE '%associated_config%'",
+            "pg_get_constraintdef(oid) LIKE '%delegate_freebusy_message%'",
+            "pg_get_constraintdef(oid) NOT LIKE '%account_id IS NOT NULL%'",
+            "pg_get_constraintdef(oid) LIKE '%account_id IS NOT NULL%'",
+            "pg_get_constraintdef(oid) LIKE '%mailbox_id IS NULL%'",
+            "pg_get_constraintdef(oid) LIKE '%collection_id IS NULL%'",
+            "pg_get_constraintdef(oid) LIKE '%mapiOnly%true%'",
+            "replace(pg_get_constraintdef(oid), 'folderId', '')",
+            "replace(pg_get_constraintdef(oid), 'mapiMessageId', '')",
+            "replace(pg_get_constraintdef(oid), 'jsonb_typeof', '')",
+            "replace(pg_get_constraintdef(oid), '^[1-9][0-9]*$', '')",
+            "mapi_change_log_object_kind_constraint_ok",
+            "mapi_change_log_object_shape_constraint_ok",
             "pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%'",
             "mail_change_log_copy_kind_shape_ok",
+        ],
+    );
+    assert_source_contains_all(
+        "install-common.sh canonical mail copy change-kind constraint helper",
+        INSTALL_COMMON_SCRIPT,
+        &[
+            "mail_change_log_copy_kind_shape_ok()",
             "pg_get_constraintdef(oid) LIKE '%''copied''%'",
         ],
     );
@@ -1875,6 +1927,33 @@ fn runtime_schema_check_rejects_missing_required_mapi_shape() {
     assert!(
         !core_runtime.contains("current_schema()"),
         "storage startup must validate the canonical public schema regardless of search_path"
+    );
+}
+
+#[test]
+fn runtime_schema_check_validates_local_freebusy_trigger_and_property_semantics() {
+    assert_source_contains_all(
+        "storage startup LocalFreebusy schema assertion",
+        CORE_STORAGE,
+        &[
+            "delegation_projection_shape_is_current",
+            "expected_triggers(",
+            "ARRAY['display_name', 'primary_email']::text[]",
+            "position('INSERT INTO delegation_projection_state' IN procedure_row.prosrc) > 0",
+            "position('revision = delegation_projection_state.revision + 1' IN procedure_row.prosrc) > 0",
+            "constraint_row.confdeltype = 'c'",
+            "table_row.relname = expected.table_name",
+            "procedure_row.proname = expected.function_name",
+            "trigger_row.tgenabled = 'O'",
+            "trigger_row.tgtype = expected.trigger_type",
+            "trigger_row.tgnargs = 0",
+            "mapi_custom_property_values_shape_is_current",
+            "'object_kind'",
+            "'canonical_id'",
+            "'property_tag'",
+            "'property_type'",
+            "required MAPI custom-property primary key and account cascade are missing or incompatible",
+        ],
     );
 }
 
@@ -2819,6 +2898,7 @@ fn blob_and_message_lifecycle_metadata_support_cleanup_guards() {
 #[test]
 fn recoverable_items_are_canonical_lifecycle_state() {
     let _recoverable_items = table_definition("recoverable_items");
+    let imap_expunge_body = function_body(MAIL_ITEMS_STORAGE, "pub async fn expunge_imap_deleted");
     for required in [
         "source_mailbox_message_id UUID NOT NULL",
         "source_mailbox_id UUID NOT NULL",
@@ -2854,6 +2934,34 @@ fn recoverable_items_are_canonical_lifecycle_state() {
             && MAIL_ITEMS_STORAGE.contains("\"recoverableFolder\": \"deletions\""),
         "hard delete must write canonical recoverable item state and replay rows"
     );
+    for required in [
+        "COALESCE(mb.recoverable_items_retention_days, a.recoverable_items_retention_days)",
+        "(m.legal_hold OR a.litigation_hold_enabled)",
+        "FOR UPDATE OF mm",
+        "INSERT INTO recoverable_items",
+        "'deletions', 'expunge'",
+        "$10, 'imap'",
+        "insert_mail_change_log_in_tx",
+        "\"recoverable_item\"",
+        "\"created\"",
+    ] {
+        assert!(
+            imap_expunge_body.contains(required),
+            "IMAP expunge must create canonical recoverable state with effective policy and durable replay before hiding the membership: {required}"
+        );
+    }
+    assert_contains_before(
+        imap_expunge_body,
+        "INSERT INTO recoverable_items",
+        "UPDATE mailbox_messages",
+        "IMAP expunge must create recoverable state before hiding the membership",
+    );
+    assert_contains_before(
+        imap_expunge_body,
+        "\"recoverable_item\"",
+        "UPDATE mailbox_messages",
+        "IMAP expunge must journal recoverable state before hiding the membership",
+    );
     for forbidden in [
         "CREATE TABLE mapi_recoverable",
         "CREATE TABLE mapi_dumpster",
@@ -2879,6 +2987,18 @@ fn existing_draft_updates_write_mailbox_message_change_log_entries() {
 }
 
 #[test]
+fn draft_destruction_removes_its_search_projection() {
+    let draft_destroy_body =
+        function_body(SUBMISSION_STORAGE, "async fn delete_draft_message_in_tx");
+    assert!(
+        draft_destroy_body.contains("DELETE FROM mail_search_documents")
+            && draft_destroy_body
+                .contains("WHERE tenant_id = $1 AND account_id = $2 AND mailbox_message_id = $3",),
+        "draft destruction must remove the exact mailbox membership search projection"
+    );
+}
+
+#[test]
 fn mailbox_count_mutations_recalculate_from_visible_memberships() {
     let draft_destroy_body =
         function_body(SUBMISSION_STORAGE, "async fn delete_draft_message_in_tx");
@@ -2897,8 +3017,10 @@ fn mailbox_count_mutations_recalculate_from_visible_memberships() {
     );
     assert!(
         imap_expunge_body.contains("visibility = 'expunged'")
+            && imap_expunge_body.contains("DELETE FROM mail_search_documents")
+            && imap_expunge_body.contains("mailbox_message_id = ANY($3)")
             && imap_expunge_body.contains("recalculate_mailbox_counts_in_tx"),
-        "IMAP expunge must recalculate counters after expunging visible rows"
+        "IMAP expunge must remove only the expunged memberships' search documents and recalculate counters after hiding the visible rows"
     );
 }
 
@@ -2979,6 +3101,37 @@ fn mailbox_moves_create_target_membership_and_tombstone_source_uid() {
             && move_body.contains("mapi_object_id,\n                deleted_modseq")
             && move_body.contains("rekey_active_mapi_message_identity_for_server_move_in_tx"),
         "normal MAPI moves must retain the retired source MID on the source tombstone"
+    );
+}
+
+#[test]
+fn mailbox_copy_search_projection_uses_the_exact_source_membership() {
+    let copy_body = function_body(
+        MESSAGE_OPS_STORAGE,
+        "pub async fn copy_jmap_email_between_accounts",
+    );
+    assert!(
+        copy_body.contains("let source_membership_id: Uuid = source.try_get(\"id\")?")
+            && copy_body.contains(
+                "WHERE tenant_id = $1\n              AND account_id = $2\n              AND mailbox_message_id = $3\n              AND message_id = $4"
+            )
+            && !copy_body.contains(
+                "WHERE tenant_id = $1 AND message_id = $2\n            ORDER BY updated_at DESC"
+            ),
+        "mailbox copy must clone search state from the exact selected source account and membership"
+    );
+}
+
+#[test]
+fn mailbox_move_search_projection_uses_the_exact_source_membership() {
+    let move_body = function_body(MESSAGE_OPS_STORAGE, "async fn move_jmap_email_membership");
+    assert!(
+        move_body.contains(
+            "WHERE tenant_id = $1 AND account_id = $2 AND mailbox_message_id = $3",
+        ) && !move_body.contains(
+            "WHERE tenant_id = $1 AND message_id = $2\n            ORDER BY updated_at DESC",
+        ),
+        "mailbox move must clone search state from the exact selected source account and membership"
     );
 }
 

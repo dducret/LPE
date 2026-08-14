@@ -28,6 +28,31 @@ pub(in crate::mapi) fn serialize_navigation_shortcut_row(
     row
 }
 
+pub(in crate::mapi) fn serialize_navigation_shortcut_row_with_pending(
+    message: &MapiNavigationShortcutMessage,
+    principal: &AccountPrincipal,
+    pending_properties: &HashMap<u32, MapiValue>,
+    deleted_properties: &HashSet<u32>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        let storage_tag = canonical_property_storage_tag(*column);
+        let value = if deleted_properties.contains(&storage_tag) {
+            None
+        } else {
+            pending_properties.get(&storage_tag).cloned().or_else(|| {
+                navigation_shortcut_property_value_for_principal(message, principal, *column)
+            })
+        };
+        match value {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
 pub(super) fn serialize_common_views_property_row_with_mailbox_guid(
     message: &MapiCommonViewsMessage,
     mailbox_guid: Uuid,
@@ -141,20 +166,44 @@ pub(in crate::mapi) fn serialize_freebusy_row_staged(
     columns: &[u32],
     pending_appointment_tombstone: Option<&[u8]>,
 ) -> Vec<u8> {
+    serialize_freebusy_row_staged_with_custom(
+        message,
+        mailbox_guid,
+        columns,
+        pending_appointment_tombstone,
+        &HashMap::new(),
+    )
+}
+
+pub(in crate::mapi) fn serialize_freebusy_row_staged_with_custom(
+    message: &MapiDelegateFreeBusyMessage,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+    pending_appointment_tombstone: Option<&[u8]>,
+    custom_values: &HashMap<u32, Vec<u8>>,
+) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
-        let value = if crate::mapi_store::is_outlook_local_freebusy_message(message)
+        if crate::mapi_store::is_outlook_local_freebusy_message(message)
             && canonical_property_storage_tag(*column)
                 == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE
         {
-            Some(MapiValue::Binary(
-                pending_appointment_tombstone
-                    .unwrap_or(&EMPTY_APPOINTMENT_TOMBSTONE)
-                    .to_vec(),
-            ))
-        } else {
-            delegate_freebusy_property_value(message, mailbox_guid, *column)
-        };
+            write_mapi_value(
+                &mut row,
+                *column,
+                &MapiValue::Binary(
+                    pending_appointment_tombstone
+                        .unwrap_or(&EMPTY_APPOINTMENT_TOMBSTONE)
+                        .to_vec(),
+                ),
+            );
+            continue;
+        }
+        if let Some(value) = custom_values.get(column) {
+            row.extend_from_slice(value);
+            continue;
+        }
+        let value = { delegate_freebusy_property_value(message, mailbox_guid, *column) };
         match value {
             Some(value) => write_mapi_value(&mut row, *column, &value),
             None => write_property_default(&mut row, *column),
@@ -764,24 +813,6 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 {
                     Some(MapiValue::Binary(minimal_custom_action_roaming_xml_stream()))
                 }
-                property_tag
-                    if MapiPropertyTag::new(property_tag).property_id()
-                        == MapiPropertyTag::new(PID_NAME_CONTENT_CLASS_W_TAG).property_id()
-                        && crate::mapi_store::is_outlook_configuration_message_class(
-                            &message.message_class,
-                        ) =>
-                {
-                    Some(MapiValue::String("urn:content-classes:message".to_string()))
-                }
-                property_tag
-                    if MapiPropertyTag::new(property_tag).property_id()
-                        == MapiPropertyTag::new(PID_NAME_CONTENT_TYPE_W_TAG).property_id()
-                        && crate::mapi_store::is_outlook_configuration_message_class(
-                            &message.message_class,
-                        ) =>
-                {
-                    Some(MapiValue::String("text/xml".to_string()))
-                }
                 PID_LID_OUTLOOK_SHARING_PROVIDER_GUID_TAG
                     if is_outlook_virtual_sharing_state_config(message) =>
                 {
@@ -833,11 +864,6 @@ pub(in crate::mapi) fn associated_config_named_property_tags(
         .filter(|tag| MapiPropertyTag::new(*tag).property_id() >= 0x8000)
         .filter(|tag| associated_config_property_value(message, *tag).is_some())
         .collect::<Vec<_>>();
-    for tag in [PID_NAME_CONTENT_CLASS_W_TAG, PID_NAME_CONTENT_TYPE_W_TAG] {
-        if associated_config_property_value(message, tag).is_some() {
-            tags.push(tag);
-        }
-    }
     tags.sort_unstable();
     tags.dedup();
     tags
@@ -881,8 +907,6 @@ fn is_umolk_computed_property(property_tag: u32) -> bool {
             | PID_TAG_MESSAGE_DELIVERY_TIME
             | PID_TAG_ROAMING_DATATYPES
             | PID_TAG_ROAMING_DICTIONARY
-            | PID_NAME_CONTENT_CLASS_W_TAG
-            | PID_NAME_CONTENT_TYPE_W_TAG
     )
 }
 

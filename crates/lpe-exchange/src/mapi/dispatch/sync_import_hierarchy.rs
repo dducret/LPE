@@ -122,6 +122,10 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                     let version = folder_version_for_snapshot(snapshot, version);
                     let change_number = version.change_number;
                     snapshot.upsert_folder_version(version);
+                    session.record_notification(MapiNotificationEvent::hierarchy(
+                        parent_folder_id,
+                        Some(canonical_folder_id),
+                    ));
                     record_sync_upload_hierarchy_change_with_change_number(
                         session,
                         folder_id,
@@ -144,6 +148,10 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 Ok(MapiFolderHierarchyCommitOutcome::Conflict(version)) => {
                     let version = folder_version_for_snapshot(snapshot, version);
                     snapshot.upsert_folder_version(version);
+                    session.record_notification(MapiNotificationEvent::hierarchy(
+                        parent_folder_id,
+                        Some(canonical_folder_id),
+                    ));
                     // [MS-OXCFXICS] section 3.2.5.9.4.3: a hierarchy conflict
                     // returns Success without adding its CN to MetaTagCnsetSeen.
                     responses.extend_from_slice(
@@ -339,6 +347,10 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 imported_identity.object_id,
                 imported_identity.change_number,
             );
+            session.record_notification(MapiNotificationEvent::hierarchy(
+                parent_folder_id,
+                Some(imported_identity.object_id),
+            ));
             responses.extend_from_slice(&rop_synchronization_import_hierarchy_change_response(
                 request,
             ));

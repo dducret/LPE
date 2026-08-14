@@ -48,8 +48,9 @@ use crate::mapi::properties::{
     MapiNamedPropertyKind,
 };
 
-const MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS: [i64; 8] = [
+const MAPI_ASSOCIATED_CONFIG_VIRTUAL_PARENT_FOLDER_IDS: [i64; 9] = [
     crate::mapi::identity::INBOX_FOLDER_ID as i64,
+    crate::mapi::identity::COMMON_VIEWS_FOLDER_ID as i64,
     crate::mapi::identity::CALENDAR_FOLDER_ID as i64,
     crate::mapi::identity::CONTACTS_FOLDER_ID as i64,
     crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID as i64,
@@ -105,6 +106,13 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         account_id: Uuid,
     ) -> StoreFuture<'a, MapiLocalFreebusyProjection>;
+
+    fn commit_local_freebusy_custom_property_changes<'a>(
+        &'a self,
+        account_id: Uuid,
+        values: &'a [MapiCustomPropertyValue],
+        deleted_property_tags: &'a [u32],
+    ) -> StoreFuture<'a, MapiLocalFreebusyCommit>;
 
     fn fetch_mapi_identities_by_object_ids<'a>(
         &'a self,

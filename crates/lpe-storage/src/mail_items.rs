@@ -311,15 +311,28 @@ pub async fn expunge_imap_deleted(
 
     let expunge_rows = sqlx::query(
         r#"
-            SELECT id, message_id, thread_id, imap_uid, is_seen
-            FROM mailbox_messages
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND mailbox_id = $3
-              AND message_id = ANY($4)
-              AND visibility = 'visible'
-              AND is_deleted = TRUE
-            ORDER BY imap_uid ASC
+            SELECT mm.id, mm.message_id, mm.thread_id, mm.imap_uid, mm.is_seen,
+                   COALESCE(mb.recoverable_items_retention_days, a.recoverable_items_retention_days) AS recoverable_retention_days,
+                   (m.legal_hold OR a.litigation_hold_enabled) AS recoverable_legal_hold
+            FROM mailbox_messages mm
+            JOIN messages m
+              ON m.tenant_id = mm.tenant_id
+             AND m.id = mm.message_id
+            JOIN mailboxes mb
+              ON mb.tenant_id = mm.tenant_id
+             AND mb.account_id = mm.account_id
+             AND mb.id = mm.mailbox_id
+            JOIN accounts a
+              ON a.tenant_id = mm.tenant_id
+             AND a.id = mm.account_id
+            WHERE mm.tenant_id = $1
+              AND mm.account_id = $2
+              AND mm.mailbox_id = $3
+              AND mm.message_id = ANY($4)
+              AND mm.visibility = 'visible'
+              AND mm.is_deleted = TRUE
+            ORDER BY mm.imap_uid ASC
+            FOR UPDATE OF mm
             "#,
     )
     .bind(&tenant_id)
@@ -380,7 +393,65 @@ pub async fn expunge_imap_deleted(
             .bind(cursor)
             .execute(&mut *tx)
             .await?;
+
+            let recoverable_item_id = Uuid::new_v4();
+            let recoverable_retention_days: i32 = row.try_get("recoverable_retention_days")?;
+            let recoverable_legal_hold: bool = row.try_get("recoverable_legal_hold")?;
+            sqlx::query(
+                r#"
+                    INSERT INTO recoverable_items (
+                        id, tenant_id, account_id, message_id, source_mailbox_message_id,
+                        source_mailbox_id, source_imap_uid, source_thread_id,
+                        recoverable_folder, delete_kind, retained_until, legal_hold,
+                        created_by_protocol
+                    )
+                    VALUES (
+                        $1, $2, $3, $4, $5,
+                        $6, $7, $8,
+                        'deletions', 'expunge',
+                        CASE WHEN $9::integer = 0 THEN NOW() ELSE NOW() + ($9::integer * INTERVAL '1 day') END,
+                        $10, 'imap'
+                    )
+                    ON CONFLICT (tenant_id, account_id, source_mailbox_message_id) DO NOTHING
+                    "#,
+            )
+            .bind(recoverable_item_id)
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(message_id)
+            .bind(membership_id)
+            .bind(mailbox_id)
+            .bind(imap_uid)
+            .bind(row.try_get::<Uuid, _>("thread_id")?)
+            .bind(recoverable_retention_days)
+            .bind(recoverable_legal_hold)
+            .execute(&mut *tx)
+            .await?;
+
+            Storage::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(account_id),
+                None,
+                "recoverable_item",
+                recoverable_item_id,
+                "created",
+                modseq,
+                &principals,
+                serde_json::json!({
+                    "messageId": message_id,
+                    "sourceMailboxMessageId": membership_id,
+                    "recoverableFolder": "deletions",
+                    "sourceMailboxId": mailbox_id,
+                    "sourceImapUid": imap_uid
+                }),
+            )
+            .await?;
         }
+        let membership_ids = expunge_rows
+            .iter()
+            .map(|row| row.try_get::<Uuid, _>("id"))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         let unread_removed = expunge_rows
             .iter()
             .filter(|row| !row.try_get::<bool, _>("is_seen").unwrap_or(true))
@@ -401,13 +472,21 @@ pub async fn expunge_imap_deleted(
         .bind(&tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
-        .bind(
-            &expunge_rows
-                .iter()
-                .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
-                .collect::<Vec<_>>(),
-        )
+        .bind(&membership_ids)
         .bind(modseq)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            r#"
+                DELETE FROM mail_search_documents
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND mailbox_message_id = ANY($3)
+                "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&membership_ids)
         .execute(&mut *tx)
         .await?;
         sqlx::query(

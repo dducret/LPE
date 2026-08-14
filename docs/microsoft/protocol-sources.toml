@@ -956,7 +956,7 @@ used_for = [
   "Required general PidTagAccess and PidTagAccessLevel properties on folder-associated Message objects opened read-only by Outlook",
   "Computed PidTagHasAttachments and effective PidTagMessageStatus projection for configuration FAI FastTransfer",
   "Exchange 2010 through 2019 product behavior that does not support PidTagRecordKey",
-  "RopOpenMessage HasNamedProperties advertisement and named-property availability through RopGetPropertiesAll",
+  "RopOpenMessage HasNamedProperties advertisement for actually stored named properties and their availability through RopGetPropertiesAll",
   "RopModifyRecipients RecipientType values and RecipientRow property columns",
   "Canonical Calendar PidTagNativeBody and PidTagRtfInSync body-format projection",
 ]
@@ -1061,7 +1061,7 @@ used_for = [
   "Bounded preservation of Outlook 16.0.20228's trace-observed type-5 Calendar group-header variant without treating it as a specification-defined WLink type",
   "Rejection of incomplete navigation shortcut FAI messages instead of synthetic WLink defaults",
   "Distinct client-created navigation shortcut identity lifecycle without property-based deduplication",
-  "Existing navigation shortcut property staging and atomic SaveChangesMessage version update",
+  "Existing navigation shortcut property staging, including byte-exact same-handle PidTagWlinkEntryId reads, and atomic SaveChangesMessage version update",
   "Contacts Common Views navigation shortcut projection with CLSID_ContactFolder",
   "Mail Common Views navigation shortcut projection with the exact CLSID_MailFolder and a client- and trace-independent semantic rule preserving absent group properties",
   "Exact persistence of client-written CalendarColor, AddressBookEID, AddressBookStoreEID, ClientID, and ROGroupType values without synthetic fallbacks",
@@ -1180,7 +1180,7 @@ used_for = [
   "Partial item upload example using OpenCollector, UploadStateStream, existing-message property changes, and GetTransferState",
   "PredecessorChangeList conflict detection examples for FailOnConflict content uploads",
   "MS-OXCFXICS 3.1.5.3 successful-import baseline: a distinct internal server CN with the supplied ChangeKey and PCL{ChangeKey} assigned to the imported version",
-  "Exchange normal-Message product control in logs/202608041041.saz raw 216 to 221 to 223: Save returns a server ChangeKey matching the new server CN and the normal Calendar path merges the imported ChangeKey ancestry into PCL",
+  "LPE normal-Message interoperability capture in logs/202608041041.saz raw 216 to 221 to 223: Save returns a server ChangeKey matching the new server CN and the normal Calendar path merges the imported ChangeKey ancestry into PCL; this is not Exchange product evidence",
   "Exchange associated-message product controls in logs/test1_202608031300.saz raw 306 to 307, 467 to 468, 513 to 514, and 689 to 690: Save preserves each imported FAI ChangeKey",
   "Imported message and hierarchy deletion flags and PtypMultipleBinary GID list semantics",
   "Preservation of persisted FAI SourceKey, ChangeKey, and PredecessorChangeList across ICS upload and download when NoForeignIdentifiers is absent",
@@ -1189,6 +1189,7 @@ used_for = [
   "Separation of ImportMessageChange identity headers from subsequent Message property staging, preserving imported LastModificationTime independently of the FAI CreationTime",
   "Atomic Common Views WLink import, client-reserved MID validation, conflict disposition, deletion tombstones, and ObjectDeleted replay behavior",
   "Deferred Common Views associated-message classification at Save after imported identity headers and staged properties are complete",
+  "Durable Freebusy Data content-sync replay of committed LocalFreebusy custom-property versions through their server ChangeNumber, ChangeKey, and named-property bag",
   "NoForeignIdentifiers projection of local SourceKey and ParentSourceKey values instead of persisted foreign identifiers",
   "Immediate same-Execute post-save retrieval of the committed PidTagChangeKey on a Message object kept open by the client",
   "Durable Calendar Event ChangeNumber, ChangeKey, PredecessorChangeList, and stable SourceKey projection across direct reads and ICS",
@@ -1550,10 +1551,12 @@ local_cache = "docs/microsoft/cache/MS-OXCPERM.pdf"
 sha256 = "f129904f77752739be0a8a5ca36a23095412e29dc53383493b97792510fd3dfe"
 used_for = [
   "Folder permissions table projection and bounded permission mutation over canonical grants",
+  "ReplaceRows request-buffer semantics for Outlook's empty Freebusy Data permission update; nonempty ACL copying remains an LPE canonical-model fail-closed boundary rather than a claimed Exchange rule",
 ]
 sections = [
   "2.2.1 RopGetPermissionsTable ROP",
   "2.2.2 RopModifyPermissions ROP",
+  "2.2.2.1 RopModifyPermissions ROP Request Buffer",
   "2.2.2.1.1 PermissionData Structure",
   "2.2.5 PidTagMemberId Property",
   "2.2.6 PidTagMemberName Property",
@@ -1583,11 +1586,13 @@ used_for = [
   "Calendar-to-Deleted-Items ObjectMoved old/new FolderId and MessageId notification semantics",
   "Durable Common Views WLink create, modify, and delete notifications for associated contents tables",
   "Durable non-WLink Common Views FAI notifications with canonical folder and MID identity",
+  "Message-scoped registration matching and LocalFreebusy ObjectModified delivery",
 ]
 sections = [
   "2.2.1 Notifications",
   "2.2.1.1 Server Event Types",
   "2.2.1.2.1 RopRegisterNotification ROP",
+  "2.2.1.2.1.1 RopRegisterNotification ROP Request Buffer",
   "2.2.1.3 Pending Notifications",
   "2.2.1.4.1 RopNotify ROP",
   "2.2.1.4.1.2 NotificationData Structure",
@@ -2376,7 +2381,8 @@ local_cache = "docs/microsoft/cache/MS-OXODLGT.pdf"
 sha256 = "0511b5479a9823944db7246046aa61af208d7cdac8cd298abba04706a5eddde5"
 used_for = [
   "Bounded delegate access projection through canonical mailbox delegation, calendar grants, sender rights, and free/busy objects",
-  "LocalFreebusy Delegate Information projection, durable MAPI identity/version metadata, absent-property cells, and canonical delegate preference arrays required by Root/Inbox PidTagFreeBusyEntryIds",
+  "LocalFreebusy Delegate Information projection, durable MAPI identity/version metadata, and configured canonical delegate preference arrays required by Root/Inbox PidTagFreeBusyEntryIds",
+  "Calendar and Delegate Data folder role constraints for configured delegation relationships",
   "RopSaveChangesMessage example labeling combined SaveFlags 0x0A as KeepOpenReadWrite DelayedCall",
 ]
 sections = [
@@ -2389,6 +2395,7 @@ sections = [
   "2.2.2.2.1 PidTagScheduleInfoDelegatorWantsCopy Property",
   "2.2.2.2.2 PidTagScheduleInfoDelegatorWantsInfo Property",
   "2.2.2.2.3 PidTagScheduleInfoDelegateNames Property",
+  "2.2.2.2.4 PidTagScheduleInfoDelegateNamesW Property",
   "2.2.2.2.5 PidTagScheduleInfoDelegateEntryIds Property",
   "2.2.2.2.6 PidTagDelegateFlags Property",
   "2.2.2.2.7 PidTagScheduleInfoDontMailDelegates Property",
@@ -2396,12 +2403,16 @@ sections = [
   "3.1.4.1 Creating a Delegate Data Folder",
   "3.1.4.2 Creating a Delegate Information Object",
   "3.1.4.3 Creating a Delegation Relationship",
-  "3.1.4.3.4 Setting the Delegate Information Object Properties",
+  "3.1.4.3.2 Setting Delegate Folder Permissions",
+  "3.1.4.3.2.1 Additional Constraints for Calendar Folder",
+  "3.1.4.3.3 Setting Individual Delegate Preferences",
+  "3.1.4.3.4 Setting Global Delegate Preferences",
   "3.1.4.3.4.1 Setting the PidTagScheduleInfoDelegatorWantsCopy Property",
   "3.1.4.3.4.2 Setting the PidTagScheduleInfoDelegatorWantsInfo Property",
   "4.1 Create Delegation Relationship with Multiple Delegates",
   "4.1.3.1 Open the Delegator Information Object",
   "4.1.3.2 Update the Delegator Information Object Properties",
+  "4.1.5 Set Permissions for Delegator Special Folders",
 ]
 
 [[protocol]]

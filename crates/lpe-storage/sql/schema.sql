@@ -1643,6 +1643,7 @@ CREATE TABLE mail_change_log (
         'conversation_action',
         'navigation_shortcut',
         'associated_config',
+        'delegate_freebusy_message',
         'recoverable_item',
         'public_folder_tree',
         'public_folder',
@@ -1716,6 +1717,19 @@ CREATE TABLE mail_change_log (
             AND collection_id IS NULL
             AND summary_json ? 'messageId'
             AND summary_json ? 'status'
+        )
+        OR (
+            object_kind = 'delegate_freebusy_message'
+            AND account_id IS NOT NULL
+            AND mailbox_id IS NULL
+            AND collection_id IS NULL
+            AND summary_json @> '{"mapiOnly": true}'::jsonb
+            AND summary_json ? 'folderId'
+            AND summary_json ? 'mapiMessageId'
+            AND jsonb_typeof(summary_json -> 'folderId') = 'string'
+            AND jsonb_typeof(summary_json -> 'mapiMessageId') = 'string'
+            AND (summary_json ->> 'folderId') ~ '^[1-9][0-9]*$'
+            AND (summary_json ->> 'mapiMessageId') ~ '^[1-9][0-9]*$'
         )
         OR (
             object_kind IN (
@@ -2336,7 +2350,7 @@ CREATE UNIQUE INDEX mapi_named_properties_name_idx
 CREATE TABLE mapi_custom_property_values (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment', 'public_folder_item')),
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment', 'public_folder_item', 'delegate_freebusy_message')),
     canonical_id UUID NOT NULL,
     property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295),
     property_type INTEGER NOT NULL CHECK (property_type >= 0 AND property_type <= 65535),

@@ -131,7 +131,8 @@ impl Storage {
         .ok_or_else(|| anyhow::anyhow!("target mailbox not found"))?;
         let source = sqlx::query(
             r#"
-            SELECT message_id, thread_id, is_seen, is_flagged, received_at::text AS received_at
+            SELECT id, message_id, thread_id, is_seen, is_flagged,
+                   received_at::text AS received_at
             FROM mailbox_messages
             WHERE tenant_id = $1
               AND account_id = $2
@@ -147,6 +148,7 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow::anyhow!("message not found"))?;
+        let source_membership_id: Uuid = source.try_get("id")?;
         let target_contains_message = sqlx::query_scalar::<_, bool>(
             r#"
             SELECT EXISTS (
@@ -192,15 +194,18 @@ impl Storage {
                 subject_text, participants_visible, body_text, attachment_text, search_vector
             )
             SELECT
-                tenant_id, $4, $3, message_id,
+                tenant_id, $6, $5, message_id,
                 subject_text, participants_visible, body_text, attachment_text, search_vector
             FROM mail_search_documents
-            WHERE tenant_id = $1 AND message_id = $2
-            ORDER BY updated_at DESC
-            LIMIT 1
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND mailbox_message_id = $3
+              AND message_id = $4
             "#,
         )
         .bind(&tenant_id)
+        .bind(source_account_id)
+        .bind(source_membership_id)
         .bind(message_id)
         .bind(membership_id)
         .bind(target_account_id)
@@ -590,16 +595,15 @@ impl Storage {
                 subject_text, participants_visible, body_text, attachment_text, search_vector
             )
             SELECT
-                tenant_id, account_id, $3, message_id,
+                tenant_id, account_id, $4, message_id,
                 subject_text, participants_visible, body_text, attachment_text, search_vector
             FROM mail_search_documents
-            WHERE tenant_id = $1 AND message_id = $2
-            ORDER BY updated_at DESC
-            LIMIT 1
+            WHERE tenant_id = $1 AND account_id = $2 AND mailbox_message_id = $3
             "#,
         )
         .bind(&tenant_id)
-        .bind(message_id)
+        .bind(account_id)
+        .bind(source_membership_id)
         .bind(target_membership_id)
         .execute(&mut *tx)
         .await?;

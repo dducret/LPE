@@ -274,6 +274,7 @@ pub(crate) enum MapiCustomPropertyObjectKind {
     JournalEntry,
     Attachment,
     PublicFolderItem,
+    DelegateFreeBusyMessage,
 }
 
 impl MapiCustomPropertyObjectKind {
@@ -287,6 +288,7 @@ impl MapiCustomPropertyObjectKind {
             Self::JournalEntry => "journal_entry",
             Self::Attachment => "attachment",
             Self::PublicFolderItem => "public_folder_item",
+            Self::DelegateFreeBusyMessage => "delegate_freebusy_message",
         }
     }
 }
@@ -601,7 +603,7 @@ impl Default for EwsDelegatePreferences {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EwsDelegate {
     pub(crate) owner_account_id: Uuid,
     pub(crate) grantee_account_id: Uuid,
@@ -618,6 +620,14 @@ pub(crate) struct EwsDelegate {
 pub(crate) struct MapiLocalFreebusyProjection {
     pub(crate) identity: MapiIdentityRecord,
     pub(crate) delegates: Vec<EwsDelegate>,
+    pub(crate) custom_properties: Vec<MapiCustomPropertyValue>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MapiLocalFreebusyCommit {
+    pub(crate) identity: MapiIdentityRecord,
+    pub(crate) delegates: Vec<EwsDelegate>,
+    pub(crate) custom_properties: Vec<MapiCustomPropertyValue>,
 }
 
 #[derive(Debug, Clone)]
@@ -653,6 +663,7 @@ pub(crate) struct MapiSyncChangeSet {
     pub(crate) changed_conversation_action_ids: Vec<Uuid>,
     pub(crate) changed_navigation_shortcut_ids: Vec<Uuid>,
     pub(crate) changed_associated_config_ids: Vec<MapiAssociatedConfigChange>,
+    pub(crate) changed_delegate_freebusy_ids: Vec<Uuid>,
     pub(crate) deleted_message_ids: Vec<Uuid>,
     pub(crate) deleted_message_object_ids: Vec<u64>,
     pub(crate) deleted_contact_ids: Vec<Uuid>,
@@ -684,6 +695,7 @@ impl Default for MapiSyncChangeSet {
             changed_conversation_action_ids: Vec::new(),
             changed_navigation_shortcut_ids: Vec::new(),
             changed_associated_config_ids: Vec::new(),
+            changed_delegate_freebusy_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             deleted_message_object_ids: Vec::new(),
             deleted_contact_ids: Vec::new(),

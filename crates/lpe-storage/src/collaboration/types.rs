@@ -37,7 +37,7 @@ impl CollaborationResourceKind {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CollaborationRights {
     pub may_read: bool,

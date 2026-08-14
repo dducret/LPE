@@ -10981,6 +10981,8 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert!(config.properties_json.get("0x7c070102").is_none());
     assert!(config.properties_json.get("0x7c080102").is_none());
     assert!(config.properties_json.get("0x0e0b0102").is_none());
+    assert!(config.properties_json.get("0x801f001f").is_none());
+    assert!(config.properties_json.get("0x836b001f").is_none());
 
     associated_configs
         .lock()
@@ -11092,6 +11094,15 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert!(
         contains_bytes(&reopen_response_rops, &[0x03, 0x02, 0, 0, 0, 0]),
         "OpenMessage for imported MID 0x23e failed: {reopen_response_rops:02x?}"
+    );
+    let open_response = reopen_response_rops
+        .windows(6)
+        .position(|window| window == [0x03, 0x02, 0, 0, 0, 0])
+        .expect("successful MessageListSettings OpenMessage response");
+    assert_eq!(
+        reopen_response_rops[open_response + 6],
+        0,
+        "OpenMessage must not advertise named properties absent from the persisted FAI"
     );
     let mut reopen_row =
         mapi_get_properties_specific_standard_row_offset(&reopen_response_rops, 2).unwrap() + 1;
@@ -11449,24 +11460,22 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
         config_binary.is_empty(),
         "direct FastTransfer must not synthesize the GetProps-only MessageListSettings 0x0E0B projection: {transfer:02x?}"
     );
-    // Exchange advertises named properties when opening this MList FAI. LPE's
-    // configuration projection supplies its canonical content-class/type
-    // values, so direct CopyTo must carry the same defined properties.
-    for (tag, value) in [
-        (0x801F_001F, "urn:content-classes:message"),
-        (0x836B_001F, "text/xml"),
-    ] {
-        let matches = properties
+    assert!(
+        !properties
             .iter()
-            .filter(|property| property.tag == tag)
-            .collect::<Vec<_>>();
-        assert_eq!(matches.len(), 1, "missing 0x{tag:08x}: {transfer:02x?}");
-        let mut expected = value
-            .encode_utf16()
-            .flat_map(u16::to_le_bytes)
-            .collect::<Vec<_>>();
-        expected.extend_from_slice(&[0, 0]);
-        assert_eq!(matches[0].value, expected, "unexpected 0x{tag:08x}");
+            .any(|property| property.tag == PID_TAG_PARENT_SOURCE_KEY),
+        "direct Message CopyTo must not synthesize the folder-only ParentSourceKey: {transfer:02x?}"
+    );
+    // Probe L imported this exact FAI without named content metadata. Probe M
+    // showed that adding guessed PidNameContentClass/PidNameContentType values
+    // changed the direct CopyTo bag before Outlook's view/form failure. The
+    // Exchange OpenMessage HasNamedProperties flag does not identify either
+    // named property, so preserve the client-written bag instead.
+    for tag in [0x801F_001F, 0x836B_001F] {
+        assert!(
+            !properties.iter().any(|property| property.tag == tag),
+            "direct CopyTo must not invent absent named property 0x{tag:08x}: {transfer:02x?}"
+        );
     }
 
     // Exchange 15.1.2507.34 trace 202607281134 returns 0x664F000B as
@@ -11658,14 +11667,14 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
     assert_eq!(downloaded.access, Some(0x0000_0007));
     assert_eq!(downloaded.access_level, Some(0x0000_0000));
     assert!(downloaded.body_tags.contains(&0x7C06_0003));
-    assert!(downloaded.body_tags.contains(&0x801F_001F));
-    assert!(downloaded.body_tags.contains(&0x836B_001F));
     for absent_tag in [
         0x0FFE_0003, // PidTagObjectType.
         0x0FF9_0102, // PidTagRecordKey.
         0x7C07_0102,
         0x7C08_0102,
         0x0E0B_0102,
+        0x801F_001F,
+        0x836B_001F,
     ] {
         assert!(!downloaded.body_tags.contains(&absent_tag));
     }
@@ -11771,6 +11780,79 @@ async fn mapi_over_http_message_list_settings_import_preserves_outlook_identity_
             .get(&config.id)
             .cloned(),
         Some(imported_pcl)
+    );
+
+    // A later client-defined named property must change HasNamedProperties
+    // because it is durably mapped and stored on this FAI, not because of the
+    // MessageListSettings class. This complements the exact Probe L reopen
+    // above, where the same class correctly advertised zero.
+    let named_property = MapiNamedProperty {
+        guid: [0x91; 16],
+        kind: MapiNamedPropertyKind::Name("OutlookConfigToken".to_string()),
+    };
+    let named_mapping = store
+        .fetch_or_allocate_mapi_named_property_ids(
+            account.account_id,
+            std::slice::from_ref(&named_property),
+            true,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .flatten()
+        .expect("durable named-property mapping");
+    let mut named_properties_json = config.properties_json.clone();
+    named_properties_json.as_object_mut().unwrap().insert(
+        format!("0x{:04x}001f", named_mapping.property_id),
+        serde_json::json!({"type": "string", "value": "enabled"}),
+    );
+    store
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: Some(config.id),
+            account_id: account.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: config.message_class.clone(),
+            subject: config.subject.clone(),
+            properties_json: named_properties_json,
+        })
+        .await
+        .unwrap();
+    let (named_headers, named_logon_handle) = mapi_connect_with_private_logon(&service).await;
+    let mut named_open_rops = Vec::new();
+    append_rop_open_folder(
+        &mut named_open_rops,
+        0,
+        1,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    );
+    append_rop_open_message(
+        &mut named_open_rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        imported_message_id,
+    );
+    let named_open_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &named_headers,
+            &execute_body(&rop_buffer(
+                &named_open_rops,
+                &[named_logon_handle, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let named_open_response_rops = response_rops_from_execute_response(named_open_response).await;
+    let named_open = named_open_response_rops
+        .windows(6)
+        .position(|window| window == [0x03, 0x02, 0, 0, 0, 0])
+        .expect("successful named MessageListSettings OpenMessage response");
+    assert_eq!(
+        named_open_response_rops[named_open + 6],
+        1,
+        "OpenMessage must advertise a genuinely persisted named property"
     );
 }
 
@@ -12580,11 +12662,6 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
         )]))),
         ..Default::default()
     };
-    let identity_codec = loaded_mapi_identity_codec(&store).await;
-    let durable_inbox_id = identity_codec
-        .actual_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
-        .unwrap();
-    let parent_source_key = crate::mapi::identity::source_key_for_object_id(durable_inbox_id);
     let service = ExchangeService::new(store);
     let (headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
 
@@ -12623,16 +12700,9 @@ async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds
     let chunks = mapi_fast_transfer_chunks(&response_rops);
     assert_eq!(chunks.len(), 1, "{response_rops:02x?}");
     let transfer = &chunks[0].1;
-    let mut expected_parent_source_key = PID_TAG_PARENT_SOURCE_KEY.to_le_bytes().to_vec();
-    expected_parent_source_key.extend_from_slice(&(parent_source_key.len() as u32).to_le_bytes());
-    expected_parent_source_key.extend_from_slice(&parent_source_key);
-    assert_eq!(
-        transfer
-            .windows(expected_parent_source_key.len())
-            .filter(|window| *window == expected_parent_source_key)
-            .count(),
-        1,
-        "associated-config CopyTo ParentSourceKey mismatch: {transfer:02x?}"
+    assert!(
+        !contains_bytes(transfer, &PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()),
+        "direct Message CopyTo synthesized a folder-only ParentSourceKey: {transfer:02x?}"
     );
     assert!(contains_bytes(transfer, &PID_TAG_SOURCE_KEY.to_le_bytes()));
     assert!(!contains_bytes(transfer, &0x4010_0003u32.to_le_bytes()));
@@ -18323,8 +18393,6 @@ async fn mapi_over_http_inbox_message_list_settings_import_preserves_outlook_sys
         .await?;
     let message_id = crate::mapi::identity::mapi_store_id(reserved_start + 0x25);
     let source_key = crate::mapi::identity::source_key_for_object_id(message_id);
-    let parent_source_key =
-        crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::INBOX_FOLDER_ID);
     let imported_change_key = vec![
         0x7B, 0xA0, 0x82, 0x5A, 0xAC, 0x2C, 0x83, 0x41, 0xB7, 0xF3, 0x5A, 0x2B, 0x64, 0x05, 0xDD,
         0x07, 0x00, 0x00, 0x04, 0x14,
@@ -18539,17 +18607,9 @@ async fn mapi_over_http_inbox_message_list_settings_import_preserves_outlook_sys
         "CopyTo did not preserve canonical LastModifierName in {:02x?}",
         chunks[0].1
     );
-    let mut expected_parent_source_key = PID_TAG_PARENT_SOURCE_KEY.to_le_bytes().to_vec();
-    expected_parent_source_key.extend_from_slice(&(parent_source_key.len() as u32).to_le_bytes());
-    expected_parent_source_key.extend_from_slice(&parent_source_key);
-    assert_eq!(
-        chunks[0]
-            .1
-            .windows(expected_parent_source_key.len())
-            .filter(|window| *window == expected_parent_source_key)
-            .count(),
-        1,
-        "CopyTo must project the same containing-folder SourceKey as ICS"
+    assert!(
+        !contains_bytes(&chunks[0].1, &PID_TAG_PARENT_SOURCE_KEY.to_le_bytes()),
+        "direct Message CopyTo synthesized a folder-only ParentSourceKey"
     );
 
     fixture.cleanup().await?;

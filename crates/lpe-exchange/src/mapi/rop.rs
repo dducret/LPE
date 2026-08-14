@@ -4,6 +4,7 @@ use super::sync::*;
 use super::tables::*;
 use super::wire::{MapiError, MapiPropertyType, MapiRestrictionType, RopId};
 use super::*;
+use crate::mapi::dispatch::custom_properties::effective_delegate_freebusy_message;
 
 mod attachments;
 mod buffer;
@@ -324,13 +325,13 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                     0x8004_010F,
                 );
             };
-            let message = navigation_shortcut_with_pending_properties(
+            serialize_navigation_shortcut_row_with_pending(
                 &message,
-                principal.account_id,
+                principal,
                 pending_properties,
                 deleted_properties,
-            );
-            serialize_navigation_shortcut_row(&message, Some(principal), &columns)
+                &columns,
+            )
         }
         Some(MapiObject::CommonViewNamedView { folder_id, view_id }) => {
             let Some(message) = snapshot.named_view_message_for_folder_and_id(*folder_id, *view_id)
@@ -421,25 +422,22 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             serialize_conversation_action_row(&message, &columns)
         }
         Some(MapiObject::DelegateFreeBusyMessage {
-            folder_id,
-            message_id,
             pending_appointment_tombstone: pending,
+            ..
         }) => {
-            let Some(message) = snapshot
-                .delegate_freebusy_message_for_id(*message_id)
-                .filter(|message| message.folder_id == *folder_id)
-            else {
+            let Some(message) = effective_delegate_freebusy_message(object, snapshot) else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
                     0x8004_010F,
                 );
             };
-            serialize_freebusy_row_staged(
-                message,
+            serialize_freebusy_row_staged_with_custom(
+                &message,
                 principal.account_id,
                 &columns,
                 pending.as_deref(),
+                custom_values,
             )
         }
         Some(MapiObject::RecoverableItem { folder_id, item_id }) => {
@@ -721,16 +719,9 @@ fn fallback_default_specific_property(
             })
             .unwrap_or(false);
     }
-    if let Some(MapiObject::DelegateFreeBusyMessage {
-        folder_id,
-        message_id,
-        ..
-    }) = object
-    {
-        let Some(message) = snapshot
-            .delegate_freebusy_message_for_id(*message_id)
-            .filter(|message| message.folder_id == *folder_id)
-            .filter(|message| crate::mapi_store::is_outlook_local_freebusy_message(message))
+    if matches!(object, Some(MapiObject::DelegateFreeBusyMessage { .. })) {
+        let Some(message) = effective_delegate_freebusy_message(object, snapshot)
+            .filter(crate::mapi_store::is_outlook_local_freebusy_message)
         else {
             return false;
         };
@@ -739,7 +730,7 @@ fn fallback_default_specific_property(
         {
             return false;
         }
-        return delegate_freebusy_property_value(message, principal.account_id, value_tag)
+        return delegate_freebusy_property_value(&message, principal.account_id, value_tag)
             .is_none();
     }
     if !matches!(
@@ -1165,13 +1156,13 @@ pub(in crate::mapi) fn serialize_object_property(
             .navigation_shortcut_table_message_for_id(*shortcut_id)
             .filter(|message| message.folder_id == *folder_id)
             .map(|message| {
-                let message = navigation_shortcut_with_pending_properties(
+                serialize_navigation_shortcut_row_with_pending(
                     &message,
-                    principal.account_id,
+                    principal,
                     pending_properties,
                     deleted_properties,
-                );
-                serialize_navigation_shortcut_row(&message, Some(principal), &[tag])
+                    &[tag],
+                )
             })
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
@@ -1258,12 +1249,10 @@ pub(in crate::mapi) fn serialize_object_property(
                 value
             }),
         Some(MapiObject::DelegateFreeBusyMessage {
-            folder_id,
-            message_id,
             pending_appointment_tombstone: pending,
-        }) => snapshot
-            .delegate_freebusy_message_for_id(*message_id)
-            .filter(|message| message.folder_id == *folder_id)
+            ..
+        }) => effective_delegate_freebusy_message(object, snapshot)
+            .as_ref()
             .map(|message| {
                 serialize_freebusy_row_staged(
                     message,

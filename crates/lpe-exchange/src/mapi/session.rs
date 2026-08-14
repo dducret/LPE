@@ -9,6 +9,7 @@ use super::transport::*;
 use super::*;
 use crate::mapi::wire::RopId;
 use crate::mapi_store::MapiAssociatedConfigMessage;
+use crate::store::{EwsDelegate, MapiCustomPropertyValue, MapiIdentityRecord};
 use lpe_storage::{
     AttachmentUploadInput, JmapEmail, MapiContactImportedIdentity, MapiEventAttachmentChanges,
     MapiEventImportedIdentity, SearchFolderDefinition,

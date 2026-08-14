@@ -821,9 +821,11 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
             return;
         }
         Some(MapiObject::DelegateFreeBusyMessage {
+            folder_id,
             message_id,
+            saved_state,
             pending_appointment_tombstone,
-            ..
+            transaction,
         }) => {
             if pending_appointment_tombstone
                 .as_deref()
@@ -840,12 +842,97 @@ pub(super) async fn append_save_changes_message_route_response<S: ExchangeStore>
                 ));
                 return;
             }
+            let Some(message) = snapshot
+                .delegate_freebusy_message_for_id(message_id)
+                .filter(|message| message.folder_id == folder_id)
+                .filter(|message| crate::mapi_store::is_outlook_local_freebusy_message(message))
+            else {
+                responses.extend_from_slice(&rop_error_response(
+                    0x0C,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                ));
+                return;
+            };
+            let mut committed_state =
+                saved_state.unwrap_or_else(|| MapiSavedDelegateFreeBusyState {
+                    identity: message
+                        .durable_identity
+                        .clone()
+                        .expect("canonical LocalFreebusy has a durable MAPI identity"),
+                    delegates: message.delegates.clone(),
+                    custom_properties: message.custom_properties.clone(),
+                });
+            let has_custom_property_changes = !transaction.pending_properties.is_empty()
+                || !transaction.deleted_properties.is_empty();
+            let mut notification_identity = None;
+            if has_custom_property_changes {
+                let mut values = transaction
+                    .pending_properties
+                    .iter()
+                    .map(|(property_tag, value)| {
+                        let mut property_value = Vec::new();
+                        write_mapi_value(&mut property_value, *property_tag, value);
+                        MapiCustomPropertyValue {
+                            property_tag: *property_tag,
+                            property_type: MapiPropertyTag::new(*property_tag).property_type_code(),
+                            property_value,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                values.sort_by_key(|value| value.property_tag);
+                let mut deleted_property_tags = transaction
+                    .deleted_properties
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>();
+                deleted_property_tags.sort_unstable();
+                let commit = match store
+                    .commit_local_freebusy_custom_property_changes(
+                        principal.account_id,
+                        &values,
+                        &deleted_property_tags,
+                    )
+                    .await
+                {
+                    Ok(commit) => commit,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x0C,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                        return;
+                    }
+                };
+                notification_identity =
+                    Some((commit.identity.canonical_id, commit.identity.change_number));
+                committed_state.identity = commit.identity;
+                committed_state.delegates = commit.delegates;
+                committed_state.custom_properties = commit.custom_properties;
+            }
             if let Some(MapiObject::DelegateFreeBusyMessage {
+                saved_state,
                 pending_appointment_tombstone,
+                transaction,
                 ..
             }) = session.handles.get_mut(&handle)
             {
+                *saved_state = Some(committed_state);
                 *pending_appointment_tombstone = None;
+                transaction.pending_properties.clear();
+                transaction.deleted_properties.clear();
+            }
+            if let Some((canonical_id, modseq)) = notification_identity {
+                // [MS-OXCNOTIF] sections 2.2.1.1 and 2.2.1.2.1.1: a
+                // committed Message property change is an ObjectModified
+                // event within the registered FID/MID scope.
+                let mut event = MapiNotificationEvent::content(folder_id, Some(message_id))
+                    .with_canonical_ids(None, Some(canonical_id))
+                    .with_object_kind("delegate_freebusy_message");
+                event.event_mask = MapiNotificationEventMask::ObjectModified.as_u16();
+                event.modseq = Some(modseq);
+                session.record_notification(event);
             }
             append_save_changes_message_response(
                 responses,

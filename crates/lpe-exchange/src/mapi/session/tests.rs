@@ -314,11 +314,14 @@ fn session_suppresses_only_own_action_notifications_for_0x80_hierarchy_table() {
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
     let mut session = remove_session(&session_id).unwrap();
+    let folder_id = crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID;
+    let parent_folder_id = crate::mapi::identity::ROOT_FOLDER_ID;
+    let message_id = 0x0000_0000_065d_0001;
     let hierarchy_handle = 77;
     session.handles.insert(
         hierarchy_handle,
         MapiObject::HierarchyTable {
-            folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            folder_id: parent_folder_id,
             depth: false,
             depth_folder_ids: Default::default(),
             columns: Vec::new(),
@@ -345,25 +348,50 @@ fn session_suppresses_only_own_action_notifications_for_0x80_hierarchy_table() {
         MapiObject::NotificationSubscription {
             registration: crate::mapi::notifications::MapiNotificationRegistration {
                 logon_id: 0,
-                notification_types: MapiNotificationEventMask::ObjectCreated.as_u16(),
-                folder_id: Some(crate::mapi::identity::CALENDAR_FOLDER_ID),
+                notification_types: MapiNotificationEventMask::ObjectModified.as_u16(),
+                folder_id: Some(folder_id),
+                message_id: Some(message_id),
             },
         },
     );
 
-    // RopSaveChangesMessage first records the sparse local event. The durable
-    // poll then supplies its canonical echo in the same Execute.
+    // RopSaveChangesMessage records the authoritative version locally. A
+    // concurrent external version can precede its durable echo in the poll.
+    let canonical_message_id = uuid::Uuid::from_u128(0x58f2_7180_44af_490f_9329_d0bcf2000e26);
     session.begin_execute_notification_origin_tracking();
-    session.record_notification(MapiNotificationEvent::content(
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-        Some(0x0000_0000_065d_0001),
-    ));
+    let mut direct_own_action = MapiNotificationEvent::content(folder_id, Some(message_id))
+        .with_canonical_ids(None, Some(canonical_message_id))
+        .with_object_kind("delegate_freebusy_message");
+    direct_own_action.event_mask = MapiNotificationEventMask::ObjectModified.as_u16();
+    direct_own_action.modseq = Some(65_667);
+    session.record_notification(direct_own_action);
     let mut own_action_events = session.take_execute_notification_origins();
+    let concurrent_external = MapiNotificationEvent::canonical(
+        MapiNotificationKind::Content,
+        MapiNotificationEventMask::ObjectModified.as_u16(),
+        folder_id,
+        Some(message_id),
+        None,
+        65_666,
+        65_666,
+        Some(2),
+        Some(0),
+        "updated".to_string(),
+        None,
+        None,
+        Some("LocalFreebusy".to_string()),
+        Some("IPM.Microsoft.ScheduleData.FreeBusy".to_string()),
+    )
+    .with_canonical_ids(None, Some(canonical_message_id))
+    .with_parent_folder_id(Some(parent_folder_id))
+    .with_object_kind("delegate_freebusy_message");
+    session.record_polled_notification(concurrent_external, &mut own_action_events);
+
     let own_action_echo = MapiNotificationEvent::canonical(
         MapiNotificationKind::Content,
-        MapiNotificationEventMask::ObjectCreated.as_u16(),
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-        Some(0x0000_0000_065d_0001),
+        MapiNotificationEventMask::ObjectModified.as_u16(),
+        folder_id,
+        Some(message_id),
         None,
         65_667,
         65_667,
@@ -372,45 +400,31 @@ fn session_suppresses_only_own_action_notifications_for_0x80_hierarchy_table() {
         "created".to_string(),
         None,
         None,
-        Some("Probe H".to_string()),
-        Some("IPM.Appointment".to_string()),
+        Some("LocalFreebusy".to_string()),
+        Some("IPM.Microsoft.ScheduleData.FreeBusy".to_string()),
     )
-    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID));
+    .with_canonical_ids(None, Some(canonical_message_id))
+    .with_parent_folder_id(Some(parent_folder_id))
+    .with_object_kind("delegate_freebusy_message");
     session.record_polled_notification(own_action_echo, &mut own_action_events);
-
-    // A concurrent external edit of the same item is a distinct durable
-    // version and must not inherit the local event's suppression marker.
-    let concurrent_external = MapiNotificationEvent::canonical(
-        MapiNotificationKind::Content,
-        MapiNotificationEventMask::ObjectModified.as_u16(),
-        crate::mapi::identity::CALENDAR_FOLDER_ID,
-        Some(0x0000_0000_065d_0001),
-        None,
-        65_668,
-        65_668,
-        Some(2),
-        Some(0),
-        "updated".to_string(),
-        None,
-        None,
-        Some("Probe H - concurrent edit".to_string()),
-        Some("IPM.Appointment".to_string()),
-    )
-    .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID));
-    session.record_polled_notification(concurrent_external, &mut own_action_events);
 
     let (own_deliveries, _) =
         session.take_pending_notification_delivery_batch_for_execute(&own_action_events);
-    assert!(own_deliveries.iter().any(|(handle, _, event)| {
-        *handle == subscription_handle
-            && event.event_mask == MapiNotificationEventMask::ObjectCreated.as_u16()
-    }));
-    assert!(own_deliveries.iter().any(|(handle, _, event)| {
-        *handle == hierarchy_handle
-            && event.kind == MapiNotificationKind::Hierarchy
-            && event.event_mask == MapiNotificationEventMask::TableModified.as_u16() | 0x8000
-            && event.modseq == Some(65_668)
-    }));
+    let subscription_modseqs = own_deliveries
+        .iter()
+        .filter_map(|(handle, _, event)| (*handle == subscription_handle).then_some(event.modseq))
+        .collect::<Vec<_>>();
+    assert_eq!(subscription_modseqs, vec![Some(65_666), Some(65_667)]);
+    let hierarchy_modseqs = own_deliveries
+        .iter()
+        .filter_map(|(handle, _, event)| {
+            (*handle == hierarchy_handle
+                && event.kind == MapiNotificationKind::Hierarchy
+                && event.event_mask == MapiNotificationEventMask::TableModified.as_u16() | 0x8000)
+                .then_some(event.modseq)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(hierarchy_modseqs, vec![Some(65_666)]);
 }
 
 #[test]
@@ -458,6 +472,7 @@ fn session_new_mail_hierarchy_row_survives_preceding_basic_table_change() {
                 logon_id: 0,
                 notification_types: MapiNotificationEventMask::NewMail.as_u16(),
                 folder_id: None,
+                message_id: None,
             },
         },
     );
@@ -620,6 +635,7 @@ fn session_derives_counted_folder_modified_notification_for_collaboration_conten
                 logon_id: 0,
                 notification_types: MapiNotificationEventMask::ObjectModified.as_u16(),
                 folder_id: None,
+                message_id: None,
             },
         },
     );
@@ -681,6 +697,7 @@ fn session_delivers_only_complete_message_moves_and_copies_to_subscriptions() {
                     logon_id: 0,
                     notification_types: event_mask.as_u16(),
                     folder_id: None,
+                    message_id: None,
                 },
             },
         );
@@ -735,6 +752,7 @@ fn hierarchy_move_notifies_the_source_subscription_and_refreshes_both_parent_tab
                 logon_id: 0,
                 notification_types: MapiNotificationEventMask::ObjectMoved.as_u16(),
                 folder_id: Some(source_parent_folder_id),
+                message_id: None,
             },
         },
     );
@@ -800,8 +818,19 @@ fn hierarchy_move_notifies_the_source_subscription_and_refreshes_both_parent_tab
 }
 
 #[test]
-fn notification_subscription_preserves_rop_logon_id_through_rop_notify() {
-    let raw_request = [0x29, 0x01, 0x00, 0x02, 0x10, 0x00, 0x01];
+fn notification_subscription_preserves_message_and_folder_scope_through_rop_notify() {
+    let folder_id = crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID;
+    let message_id = 0x0000_0000_0056_0001;
+    let sibling_message_id = 0x0000_0000_0057_0001;
+    let mut raw_request = vec![0x29, 0x01, 0x00, 0x02, 0x10, 0x00, 0x00];
+    raw_request.extend_from_slice(
+        &crate::mapi::identity::wire_id_bytes_from_object_id(folder_id)
+            .expect("Freebusy Data FID has a wire form"),
+    );
+    raw_request.extend_from_slice(
+        &crate::mapi::identity::wire_id_bytes_from_object_id(message_id)
+            .expect("LocalFreebusy MID has a wire form"),
+    );
     let (request, logon_id) = crate::mapi::rop::read_rop_request_with_logon_id(
         &mut crate::mapi::rop::Cursor::new(&raw_request),
     )
@@ -809,6 +838,23 @@ fn notification_subscription_preserves_rop_logon_id_through_rop_notify() {
     let registration =
         crate::mapi::notifications::notification_registration_from_request(&request, logon_id);
     assert_eq!(registration.logon_id, 1);
+    assert_eq!(registration.folder_id, Some(folder_id));
+    assert_eq!(registration.message_id, Some(message_id));
+    let mut folder_scoped_raw_request = raw_request.clone();
+    let message_id_offset = folder_scoped_raw_request.len() - 8;
+    folder_scoped_raw_request[message_id_offset..].fill(0);
+    let (folder_scoped_request, folder_scoped_logon_id) =
+        crate::mapi::rop::read_rop_request_with_logon_id(&mut crate::mapi::rop::Cursor::new(
+            &folder_scoped_raw_request,
+        ))
+        .expect("folder-scoped RegisterNotification request parses");
+    let folder_scoped_registration =
+        crate::mapi::notifications::notification_registration_from_request(
+            &folder_scoped_request,
+            folder_scoped_logon_id,
+        );
+    assert_eq!(folder_scoped_registration.folder_id, Some(folder_id));
+    assert_eq!(folder_scoped_registration.message_id, None);
 
     let principal = principal();
     let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
@@ -818,28 +864,52 @@ fn notification_subscription_preserves_rop_logon_id_through_rop_notify() {
         notification_handle,
         MapiObject::NotificationSubscription { registration },
     );
-    session.record_notification(MapiNotificationEvent::canonical(
-        MapiNotificationKind::Hierarchy,
-        MapiNotificationEventMask::ObjectModified.as_u16(),
-        crate::mapi::identity::INBOX_FOLDER_ID,
-        Some(crate::mapi::identity::INBOX_FOLDER_ID),
-        None,
-        1,
-        1,
-        Some(3),
-        Some(3),
-        "updated".to_string(),
-        None,
-        None,
-        None,
-        None,
-    ));
+    let folder_scoped_notification_handle = 80;
+    session.handles.insert(
+        folder_scoped_notification_handle,
+        MapiObject::NotificationSubscription {
+            registration: folder_scoped_registration,
+        },
+    );
+    for candidate_message_id in [sibling_message_id, message_id] {
+        session.record_notification(MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            MapiNotificationEventMask::ObjectModified.as_u16(),
+            folder_id,
+            Some(candidate_message_id),
+            None,
+            1,
+            1,
+            None,
+            None,
+            "updated".to_string(),
+            None,
+            None,
+            Some("LocalFreebusy".to_string()),
+            Some("IPM.Microsoft.ScheduleData.FreeBusy".to_string()),
+        ));
+    }
 
     let (deliveries, _) = session.take_pending_notification_delivery_batch();
-    assert_eq!(deliveries.len(), 1);
-    let (handle, delivery_logon_id, event) = &deliveries[0];
+    assert_eq!(deliveries.len(), 3);
+    let folder_scoped_message_ids = deliveries
+        .iter()
+        .filter_map(|(handle, _, event)| {
+            (*handle == folder_scoped_notification_handle).then_some(event.message_id)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        folder_scoped_message_ids,
+        vec![Some(sibling_message_id), Some(message_id)]
+    );
+    let (handle, delivery_logon_id, event) = deliveries
+        .iter()
+        .find(|(handle, _, _)| *handle == notification_handle)
+        .expect("message-scoped subscription receives its exact target");
     assert_eq!(*handle, notification_handle);
     assert_eq!(*delivery_logon_id, 1);
+    assert_eq!(event.folder_id, folder_id);
+    assert_eq!(event.message_id, Some(message_id));
     let identity_codec = crate::mapi::identity::MapiIdentityCodec::legacy_for_tests();
     let response = crate::mapi::notifications::rop_notify_response(
         &identity_codec,

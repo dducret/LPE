@@ -112,49 +112,256 @@ impl Storage {
 
         let delegation_projection_shape_is_current = sqlx::query_scalar::<_, bool>(
             r#"
+            WITH projection_table AS (
+                SELECT table_row.oid
+                FROM pg_class table_row
+                JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                WHERE namespace_row.nspname = $1
+                  AND table_row.relname = 'delegation_projection_state'
+                  AND table_row.relkind = 'r'
+            ),
+            accounts_table AS (
+                SELECT table_row.oid
+                FROM pg_class table_row
+                JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                WHERE namespace_row.nspname = $1
+                  AND table_row.relname = 'accounts'
+                  AND table_row.relkind = 'r'
+            ),
+            expected_triggers(
+                trigger_name,
+                table_name,
+                function_name,
+                trigger_type,
+                update_columns
+            ) AS (
+                VALUES
+                    (
+                        'mailbox_delegation_grants_projection_change'::text,
+                        'mailbox_delegation_grants'::text,
+                        'track_delegation_projection_change'::text,
+                        29::smallint,
+                        ARRAY[]::text[]
+                    ),
+                    (
+                        'calendar_grants_projection_change',
+                        'calendar_grants',
+                        'track_delegation_projection_change',
+                        29,
+                        ARRAY[]::text[]
+                    ),
+                    (
+                        'sender_rights_projection_change',
+                        'sender_rights',
+                        'track_delegation_projection_change',
+                        29,
+                        ARRAY[]::text[]
+                    ),
+                    (
+                        'delegate_preferences_projection_change',
+                        'delegate_preferences',
+                        'track_delegation_projection_change',
+                        29,
+                        ARRAY[]::text[]
+                    ),
+                    (
+                        'mailboxes_default_delegation_projection_change',
+                        'mailboxes',
+                        'track_default_delegation_collection_change',
+                        27,
+                        ARRAY['role']::text[]
+                    ),
+                    (
+                        'calendars_default_delegation_projection_change',
+                        'calendars',
+                        'track_default_delegation_collection_change',
+                        27,
+                        ARRAY['role']::text[]
+                    ),
+                    (
+                        'accounts_delegate_directory_projection_change',
+                        'accounts',
+                        'track_delegate_directory_projection_change',
+                        17,
+                        ARRAY['display_name', 'primary_email']::text[]
+                    )
+            ),
+            canonical_functions AS (
+                SELECT COUNT(*) = 4 AS shape_ok
+                FROM pg_proc procedure_row
+                JOIN pg_namespace namespace_row
+                  ON namespace_row.oid = procedure_row.pronamespace
+                JOIN pg_language language_row ON language_row.oid = procedure_row.prolang
+                WHERE namespace_row.nspname = $1
+                  AND language_row.lanname = 'plpgsql'
+                  AND procedure_row.prokind = 'f'
+                  AND (
+                    (
+                        procedure_row.proname = 'advance_delegation_projection_state'
+                        AND procedure_row.prorettype = 'void'::regtype
+                        AND oidvectortypes(procedure_row.proargtypes) = 'uuid, uuid'
+                        AND position('INSERT INTO delegation_projection_state' IN procedure_row.prosrc) > 0
+                        AND position('WHERE EXISTS' IN procedure_row.prosrc) > 0
+                        AND position('revision = delegation_projection_state.revision + 1' IN procedure_row.prosrc) > 0
+                        AND position('updated_at = GREATEST' IN procedure_row.prosrc) > 0
+                    )
+                    OR (
+                        procedure_row.proname = 'track_delegation_projection_change'
+                        AND procedure_row.prorettype = 'trigger'::regtype
+                        AND procedure_row.pronargs = 0
+                        AND position('to_jsonb(OLD) - ARRAY[''id'', ''created_at'', ''updated_at'']' IN procedure_row.prosrc) > 0
+                        AND position('mailbox_delegation_grants' IN procedure_row.prosrc) > 0
+                        AND position('calendar_grants' IN procedure_row.prosrc) > 0
+                        AND position('sender_rights' IN procedure_row.prosrc) > 0
+                        AND position('delegate_preferences' IN procedure_row.prosrc) > 0
+                        AND position('advance_delegation_projection_state(OLD.tenant_id, OLD.owner_account_id)' IN procedure_row.prosrc) > 0
+                        AND position('advance_delegation_projection_state(NEW.tenant_id, NEW.owner_account_id)' IN procedure_row.prosrc) > 0
+                    )
+                    OR (
+                        procedure_row.proname = 'track_default_delegation_collection_change'
+                        AND procedure_row.prorettype = 'trigger'::regtype
+                        AND procedure_row.pronargs = 0
+                        AND position('TG_TABLE_NAME = ''mailboxes''' IN procedure_row.prosrc) > 0
+                        AND position('OLD.role = ''inbox''' IN procedure_row.prosrc) > 0
+                        AND position('TG_TABLE_NAME = ''calendars''' IN procedure_row.prosrc) > 0
+                        AND position('OLD.role = ''calendar''' IN procedure_row.prosrc) > 0
+                        AND position('advance_delegation_projection_state' IN procedure_row.prosrc) > 0
+                    )
+                    OR (
+                        procedure_row.proname = 'track_delegate_directory_projection_change'
+                        AND procedure_row.prorettype = 'trigger'::regtype
+                        AND procedure_row.pronargs = 0
+                        AND position('OLD.primary_email IS NOT DISTINCT FROM NEW.primary_email' IN procedure_row.prosrc) > 0
+                        AND position('OLD.display_name IS NOT DISTINCT FROM NEW.display_name' IN procedure_row.prosrc) > 0
+                        AND position('mailbox_delegation_grants' IN procedure_row.prosrc) > 0
+                        AND position('calendar_grants' IN procedure_row.prosrc) > 0
+                        AND position('sender_rights' IN procedure_row.prosrc) > 0
+                        AND position('delegate_preferences' IN procedure_row.prosrc) > 0
+                        AND position('ORDER BY owner_account_id' IN procedure_row.prosrc) > 0
+                        AND position('advance_delegation_projection_state' IN procedure_row.prosrc) > 0
+                    )
+                  )
+            )
             SELECT
                 (
-                    SELECT COUNT(*) = 3
+                    SELECT COUNT(*) = 5
                     FROM information_schema.columns
                     WHERE table_schema = $1
                       AND table_name = 'delegation_projection_state'
-                      AND column_name IN ('revision', 'applied_revision', 'updated_at')
-                      AND is_nullable = 'NO'
-                      AND data_type = CASE column_name
-                          WHEN 'revision' THEN 'bigint'
-                          WHEN 'applied_revision' THEN 'bigint'
-                          WHEN 'updated_at' THEN 'timestamp with time zone'
-                      END
-                )
-                AND (
-                    SELECT COUNT(DISTINCT procedure_row.proname) = 4
-                    FROM pg_proc procedure_row
-                    JOIN pg_namespace namespace_row
-                      ON namespace_row.oid = procedure_row.pronamespace
-                    WHERE namespace_row.nspname = $1
-                      AND procedure_row.proname IN (
-                          'advance_delegation_projection_state',
-                          'track_delegation_projection_change',
-                          'track_default_delegation_collection_change',
-                          'track_delegate_directory_projection_change'
+                      AND (
+                            (column_name = 'tenant_id' AND data_type = 'uuid' AND is_nullable = 'NO')
+                            OR (column_name = 'account_id' AND data_type = 'uuid' AND is_nullable = 'NO')
+                            OR (column_name = 'revision' AND data_type = 'bigint' AND is_nullable = 'NO')
+                            OR (column_name = 'applied_revision' AND data_type = 'bigint' AND is_nullable = 'NO')
+                            OR (column_name = 'updated_at' AND data_type = 'timestamp with time zone' AND is_nullable = 'NO')
                       )
                 )
                 AND (
-                    SELECT COUNT(DISTINCT trigger_row.tgname) = 7
-                    FROM pg_trigger trigger_row
+                    SELECT COUNT(*) = 5
+                    FROM information_schema.columns
+                    WHERE table_schema = $1
+                      AND table_name = 'delegation_projection_state'
+                )
+                AND (
+                    SELECT COUNT(*) = 3
+                    FROM pg_attribute attribute_row
+                    JOIN pg_attrdef default_row
+                      ON default_row.adrelid = attribute_row.attrelid
+                     AND default_row.adnum = attribute_row.attnum
+                    WHERE attribute_row.attrelid = (SELECT oid FROM projection_table)
+                      AND NOT attribute_row.attisdropped
+                      AND (
+                            (attribute_row.attname = 'revision'
+                              AND pg_get_expr(default_row.adbin, default_row.adrelid) = '1')
+                            OR (attribute_row.attname = 'applied_revision'
+                              AND pg_get_expr(default_row.adbin, default_row.adrelid) = '0')
+                            OR (attribute_row.attname = 'updated_at'
+                              AND pg_get_expr(default_row.adbin, default_row.adrelid) = 'clock_timestamp()')
+                      )
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_constraint constraint_row
+                    WHERE constraint_row.conrelid = (SELECT oid FROM projection_table)
+                      AND constraint_row.contype = 'p'
+                      AND constraint_row.convalidated
+                      AND pg_get_constraintdef(constraint_row.oid) = 'PRIMARY KEY (tenant_id, account_id)'
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_constraint constraint_row
+                    WHERE constraint_row.conrelid = (SELECT oid FROM projection_table)
+                      AND constraint_row.contype = 'f'
+                      AND constraint_row.confrelid = (SELECT oid FROM accounts_table)
+                      AND constraint_row.confdeltype = 'c'
+                      AND constraint_row.convalidated
+                      AND (
+                        SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+                        FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+                        JOIN pg_attribute attribute_row
+                          ON attribute_row.attrelid = constraint_row.conrelid
+                         AND attribute_row.attnum = key_column.attnum
+                      ) = ARRAY['tenant_id', 'account_id']::text[]
+                      AND (
+                        SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+                        FROM unnest(constraint_row.confkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+                        JOIN pg_attribute attribute_row
+                          ON attribute_row.attrelid = constraint_row.confrelid
+                         AND attribute_row.attnum = key_column.attnum
+                      ) = ARRAY['tenant_id', 'id']::text[]
+                )
+                AND (
+                    SELECT COUNT(*) = 2
+                    FROM pg_constraint constraint_row
+                    WHERE constraint_row.conrelid = (SELECT oid FROM projection_table)
+                      AND constraint_row.contype = 'c'
+                      AND constraint_row.convalidated
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_constraint constraint_row
+                    WHERE constraint_row.conrelid = (SELECT oid FROM projection_table)
+                      AND constraint_row.contype = 'c'
+                      AND constraint_row.convalidated
+                      AND pg_get_constraintdef(constraint_row.oid) LIKE '%revision > 0%'
+                      AND pg_get_constraintdef(constraint_row.oid) NOT LIKE '%applied_revision%'
+                )
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_constraint constraint_row
+                    WHERE constraint_row.conrelid = (SELECT oid FROM projection_table)
+                      AND constraint_row.contype = 'c'
+                      AND constraint_row.convalidated
+                      AND pg_get_constraintdef(constraint_row.oid) LIKE '%applied_revision >= 0%'
+                      AND pg_get_constraintdef(constraint_row.oid) LIKE '%applied_revision <= revision%'
+                )
+                AND (SELECT shape_ok FROM canonical_functions)
+                AND (
+                    SELECT COUNT(*) = 7
+                    FROM expected_triggers expected
+                    JOIN pg_trigger trigger_row ON trigger_row.tgname = expected.trigger_name
                     JOIN pg_class table_row ON table_row.oid = trigger_row.tgrelid
-                    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
-                    WHERE namespace_row.nspname = $1
+                    JOIN pg_namespace table_namespace
+                      ON table_namespace.oid = table_row.relnamespace
+                    JOIN pg_proc procedure_row ON procedure_row.oid = trigger_row.tgfoid
+                    JOIN pg_namespace procedure_namespace
+                      ON procedure_namespace.oid = procedure_row.pronamespace
+                    WHERE table_namespace.nspname = $1
+                      AND procedure_namespace.nspname = $1
+                      AND table_row.relname = expected.table_name
+                      AND procedure_row.proname = expected.function_name
                       AND NOT trigger_row.tgisinternal
-                      AND trigger_row.tgname IN (
-                          'mailbox_delegation_grants_projection_change',
-                          'calendar_grants_projection_change',
-                          'sender_rights_projection_change',
-                          'delegate_preferences_projection_change',
-                          'mailboxes_default_delegation_projection_change',
-                          'calendars_default_delegation_projection_change',
-                          'accounts_delegate_directory_projection_change'
-                      )
+                      AND trigger_row.tgenabled = 'O'
+                      AND trigger_row.tgtype = expected.trigger_type
+                      AND trigger_row.tgnargs = 0
+                      AND ARRAY(
+                        SELECT attribute_row.attname::text
+                        FROM unnest(trigger_row.tgattr) AS update_column(attnum)
+                        JOIN pg_attribute attribute_row
+                          ON attribute_row.attrelid = trigger_row.tgrelid
+                         AND attribute_row.attnum = update_column.attnum
+                        ORDER BY attribute_row.attname
+                      ) = expected.update_columns
                 )
             "#,
         )
@@ -167,6 +374,82 @@ impl Storage {
         if !delegation_projection_shape_is_current {
             bail!(
                 "required delegation projection revision shape is missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+            );
+        }
+
+        let mapi_custom_property_values_shape_is_current = sqlx::query_scalar::<_, bool>(
+            r#"
+            WITH values_table AS (
+                SELECT table_row.oid
+                FROM pg_class table_row
+                JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                WHERE namespace_row.nspname = $1
+                  AND table_row.relname = 'mapi_custom_property_values'
+                  AND table_row.relkind = 'r'
+            ),
+            accounts_table AS (
+                SELECT table_row.oid
+                FROM pg_class table_row
+                JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                WHERE namespace_row.nspname = $1
+                  AND table_row.relname = 'accounts'
+                  AND table_row.relkind = 'r'
+            )
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_constraint constraint_row
+                WHERE constraint_row.conrelid = (SELECT oid FROM values_table)
+                  AND constraint_row.contype = 'p'
+                  AND constraint_row.convalidated
+                  AND (
+                    SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+                    FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+                    JOIN pg_attribute attribute_row
+                      ON attribute_row.attrelid = constraint_row.conrelid
+                     AND attribute_row.attnum = key_column.attnum
+                  ) = ARRAY[
+                    'tenant_id',
+                    'account_id',
+                    'object_kind',
+                    'canonical_id',
+                    'property_tag',
+                    'property_type'
+                  ]::text[]
+            )
+            AND EXISTS (
+                SELECT 1
+                FROM pg_constraint constraint_row
+                WHERE constraint_row.conrelid = (SELECT oid FROM values_table)
+                  AND constraint_row.contype = 'f'
+                  AND constraint_row.confrelid = (SELECT oid FROM accounts_table)
+                  AND constraint_row.confdeltype = 'c'
+                  AND constraint_row.convalidated
+                  AND (
+                    SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+                    FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+                    JOIN pg_attribute attribute_row
+                      ON attribute_row.attrelid = constraint_row.conrelid
+                     AND attribute_row.attnum = key_column.attnum
+                  ) = ARRAY['tenant_id', 'account_id']::text[]
+                  AND (
+                    SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+                    FROM unnest(constraint_row.confkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+                    JOIN pg_attribute attribute_row
+                      ON attribute_row.attrelid = constraint_row.confrelid
+                     AND attribute_row.attnum = key_column.attnum
+                  ) = ARRAY['tenant_id', 'id']::text[]
+            )
+            "#,
+        )
+        .bind(schema_name)
+        .fetch_one(&self.pool)
+        .await
+        .with_context(|| {
+            format!("unable to inspect MAPI custom-property value shape in {schema_name}")
+        })?;
+        if !mapi_custom_property_values_shape_is_current {
+            bail!(
+                "required MAPI custom-property primary key and account cascade are missing or incompatible in {schema_name}; LPE 0.5.2 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 

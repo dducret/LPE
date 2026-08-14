@@ -35,7 +35,10 @@ pub(super) async fn append_get_properties_all_response<S>(
     )
     .await;
     let object = attachment_overlay_object(session, handle_slots, request, snapshot);
-    responses.extend_from_slice(&rop_get_properties_all_response(
+    let custom_values =
+        effective_local_freebusy_custom_property_values(object.as_ref(), snapshot, None)
+            .unwrap_or_default();
+    responses.extend_from_slice(&rop_get_properties_all_response_with_custom(
         request,
         session,
         object.as_ref(),
@@ -43,6 +46,7 @@ pub(super) async fn append_get_properties_all_response<S>(
         mailboxes,
         emails,
         snapshot,
+        &custom_values,
     ));
 }
 
@@ -53,10 +57,15 @@ pub(super) fn append_get_properties_list_response(
     snapshot: &MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) {
-    responses.extend_from_slice(&rop_get_properties_list_response(
+    let object = input_object(session, handle_slots, request);
+    let custom_values =
+        effective_local_freebusy_custom_property_values(object, snapshot, None).unwrap_or_default();
+    let custom_property_tags = custom_values.keys().copied().collect::<Vec<_>>();
+    responses.extend_from_slice(&rop_get_properties_list_response_with_custom_tags(
         request,
         session,
-        input_object(session, handle_slots, request),
+        object,
         snapshot,
+        &custom_property_tags,
     ));
 }

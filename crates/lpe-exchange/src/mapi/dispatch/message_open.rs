@@ -289,14 +289,18 @@ pub(super) fn append_open_message_response(
                 MapiObject::DelegateFreeBusyMessage {
                     folder_id,
                     message_id,
+                    saved_state: None,
                     pending_appointment_tombstone: None,
+                    transaction: MapiDelegateFreeBusyTransaction::default(),
                 },
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
-            responses.extend_from_slice(&rop_open_message_response(
+            responses.extend_from_slice(&rop_open_message_response_with_named_properties(
                 request,
                 &message.message.subject,
                 0,
+                !message.custom_properties.is_empty(),
+                false,
             ));
             output_handles.push(handle);
         } else {

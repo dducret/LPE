@@ -316,19 +316,15 @@ fn write_fast_transfer_special_message_content(
     if property_filter.includes(PID_TAG_SOURCE_KEY) {
         write_binary_property(buffer, PID_TAG_SOURCE_KEY, &source_key);
     }
-    // LPE exposes the containing-folder SourceKey on Message objects through
-    // GetProps, tables, and ICS. [MS-OXCFXICS] sections 2.2.4.3.16,
-    // 3.2.5.8.1.1, 3.2.5.10, and 3.2.5.12 require direct CopyTo to apply its
-    // exclusion list to that same property bag.
-    if object.associated
-        && crate::mapi_store::is_outlook_configuration_message_class(&object.message_class)
-        && property_filter.includes(PID_TAG_PARENT_SOURCE_KEY)
-    {
-        write_binary_property(
-            buffer,
-            PID_TAG_PARENT_SOURCE_KEY,
-            &special_message_parent_source_key(object),
-        );
+    // [MS-OXPROPS] section 2.863 defines ParentSourceKey on a Folder. Preserve
+    // an explicitly persisted Message value, but do not synthesize the
+    // containing Folder's value in a direct Message messageContent.
+    if property_filter.includes(PID_TAG_PARENT_SOURCE_KEY) {
+        if let Some(parent_source_key) =
+            special_message_binary_property(object, PID_TAG_PARENT_SOURCE_KEY)
+        {
+            write_binary_property(buffer, PID_TAG_PARENT_SOURCE_KEY, parent_source_key);
+        }
     }
     // Preserve the existing direct CopyTo compatibility projection when the
     // caller's filter includes PidTagEntryId. Content-sync ICS excludes this

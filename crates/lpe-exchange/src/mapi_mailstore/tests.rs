@@ -1695,8 +1695,6 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         crate::mapi::identity::INBOX_FOLDER_ID,
     )
     .unwrap();
-    let parent_source_key =
-        crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::INBOX_FOLDER_ID);
     let special = SpecialMessageSyncFact {
         folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
         item_id,
@@ -1740,7 +1738,7 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
         ],
     );
     assert!(buffer.starts_with(&PID_TAG_SOURCE_KEY.to_le_bytes()));
-    assert_variable_property_present(&buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
+    assert_absent_property(&buffer, PID_TAG_PARENT_SOURCE_KEY);
     assert!(!buffer
         .windows(4)
         .any(|window| window == FastTransferMarker::StartFAIMsg.as_u32().to_le_bytes()));
@@ -1820,6 +1818,27 @@ fn microsoft_oxcfxics_fast_transfer_copy_fai_uses_message_content_root() {
     assert!(!no_children_buffer
         .windows(4)
         .any(|window| window == 0x4016_0003u32.to_le_bytes()));
+
+    let persisted_parent_source_key =
+        crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::INBOX_FOLDER_ID);
+    let mut special_with_persisted_parent = special.clone();
+    special_with_persisted_parent.named_properties.push((
+        PID_TAG_PARENT_SOURCE_KEY,
+        SpecialMessagePropertyValue::Binary(persisted_parent_source_key.clone()),
+    ));
+    let persisted_parent_buffer = fast_transfer_message_content_buffer_with_special_object(
+        Some(&entry_id),
+        Some(&parent_entry_id),
+        &special_with_persisted_parent,
+        0x09,
+        FastTransferDirectPropertyFilter::All,
+        FastTransferMessageChildren::all(),
+    );
+    assert_variable_property_present(
+        &persisted_parent_buffer,
+        PID_TAG_PARENT_SOURCE_KEY,
+        &persisted_parent_source_key,
+    );
 
     let mut normal = special;
     normal.associated = false;

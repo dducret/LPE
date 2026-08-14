@@ -17,6 +17,16 @@ const FETCH_LOCAL_FREEBUSY_IDENTITY_SQL: &str = r#"
     FOR UPDATE
 "#;
 
+const FETCH_LOCAL_FREEBUSY_CUSTOM_PROPERTIES_SQL: &str = r#"
+    SELECT property_tag, property_type, property_value
+    FROM mapi_custom_property_values
+    WHERE tenant_id = $1
+      AND account_id = $2
+      AND object_kind = 'delegate_freebusy_message'
+      AND canonical_id = $3
+    ORDER BY property_tag, property_type
+"#;
+
 fn local_freebusy_identity_from_row(row: sqlx::postgres::PgRow) -> MapiIdentityRecord {
     MapiIdentityRecord {
         object_kind: MapiIdentityObjectKind::DelegateFreeBusyMessage,
@@ -30,6 +40,78 @@ fn local_freebusy_identity_from_row(row: sqlx::postgres::PgRow) -> MapiIdentityR
             &row.get::<String, _>("updated_at"),
         ),
     }
+}
+
+fn local_freebusy_notification_event_from_change_row(
+    row: &sqlx::postgres::PgRow,
+    change_kind: &str,
+    cursor: i64,
+    modseq: u64,
+) -> Option<MapiNotificationEvent> {
+    let canonical_id = row.try_get::<Uuid, _>("object_id").ok()?;
+    let message_id = row
+        .try_get::<Option<i64>, _>("delegate_freebusy_mapi_object_id")
+        .ok()
+        .flatten()? as u64;
+    let folder_id = row
+        .try_get::<serde_json::Value, _>("summary_json")
+        .ok()?
+        .get("folderId")?
+        .as_str()?
+        .parse::<u64>()
+        .ok()?;
+    Some(
+        MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            mapi_notification_event_mask_for_change(change_kind, false),
+            folder_id,
+            Some(message_id),
+            None,
+            cursor,
+            modseq,
+            None,
+            None,
+            change_kind.to_string(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .with_canonical_ids(None, Some(canonical_id))
+        .with_object_kind("delegate_freebusy_message"),
+    )
+}
+
+async fn journal_local_freebusy_change(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+    identity: &MapiIdentityRecord,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO mail_change_log (
+            tenant_id, account_id, object_kind, object_id, change_kind, modseq,
+            affected_principal_ids, summary_json
+        )
+        VALUES (
+            $1, $2, 'delegate_freebusy_message', $3, 'updated', $4,
+            ARRAY[$2]::uuid[], $5
+        )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(identity.canonical_id)
+    .bind(identity.change_number as i64)
+    .bind(serde_json::json!({
+        "mapiOnly": true,
+        "folderId": crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID.to_string(),
+        "mapiMessageId": identity.object_id.to_string(),
+    }))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 macro_rules! store_impl_delegate_freebusy_identity {
@@ -133,7 +215,10 @@ macro_rules! store_impl_delegate_freebusy_identity {
                             .bind(canonical_id)
                             .fetch_one(&mut *tx)
                             .await?;
-                        local_freebusy_identity_from_row(row)
+                        let identity = local_freebusy_identity_from_row(row);
+                        journal_local_freebusy_change(&mut tx, tenant_id, account_id, &identity)
+                            .await?;
+                        identity
                     } else {
                         local_freebusy_identity_from_row(row)
                     }
@@ -212,6 +297,15 @@ macro_rules! store_impl_delegate_freebusy_identity {
                     .fetch_all(&mut *tx)
                     .await?;
                 let delegates = ews_delegates_from_rows(account_id, delegate_rows)?;
+                let custom_properties = sqlx::query(FETCH_LOCAL_FREEBUSY_CUSTOM_PROPERTIES_SQL)
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .bind(canonical_id)
+                    .fetch_all(&mut *tx)
+                    .await?
+                    .into_iter()
+                    .map(mapi_custom_property_value_from_row)
+                    .collect::<Result<Vec<_>>>()?;
                 let applied_revision = sqlx::query_scalar::<_, i64>(
                     r#"
                     UPDATE delegation_projection_state
@@ -235,6 +329,211 @@ macro_rules! store_impl_delegate_freebusy_identity {
                 Ok(MapiLocalFreebusyProjection {
                     identity,
                     delegates,
+                    custom_properties,
+                })
+            })
+        }
+
+        fn commit_local_freebusy_custom_property_changes<'a>(
+            &'a self,
+            account_id: Uuid,
+            values: &'a [MapiCustomPropertyValue],
+            deleted_property_tags: &'a [u32],
+        ) -> StoreFuture<'a, MapiLocalFreebusyCommit> {
+            Box::pin(async move {
+                if values.is_empty() && deleted_property_tags.is_empty() {
+                    anyhow::bail!("LocalFreebusy custom property commit is empty");
+                }
+                if deleted_property_tags
+                    .iter()
+                    .any(|property_tag| (property_tag >> 16) < 0x8000)
+                {
+                    anyhow::bail!("invalid LocalFreebusy custom property deletion");
+                }
+                let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+                let canonical_id = crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID;
+                let mut tx = self.pool().begin().await?;
+
+                // Match the canonical projection's acquisition order: store
+                // singleton, mailbox replica, projection marker, then object.
+                let store_identity =
+                    mapi_store_identity_for_account_in_tx(&mut tx, tenant_id, account_id).await?;
+                sqlx::query(
+                    r#"
+                    INSERT INTO delegation_projection_state (tenant_id, account_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (tenant_id, account_id) DO NOTHING
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .execute(&mut *tx)
+                .await?;
+                let (revision, _applied_revision) = sqlx::query_as::<_, (i64, i64)>(
+                    r#"
+                    SELECT revision, applied_revision
+                    FROM delegation_projection_state
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                    FOR UPDATE
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .fetch_one(&mut *tx)
+                .await?;
+
+                let current = sqlx::query(FETCH_LOCAL_FREEBUSY_IDENTITY_SQL)
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .bind(canonical_id)
+                    .fetch_optional(&mut *tx)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("durable LocalFreebusy identity is missing"))?;
+                let current_change_key = current.get::<Vec<u8>, _>("change_key");
+                let mut predecessors = parse_mapi_predecessor_change_list(
+                    &current.get::<Vec<u8>, _>("predecessor_change_list"),
+                )?;
+                if !mapi_predecessors_contain_change_key(&predecessors, &current_change_key)? {
+                    anyhow::bail!("LocalFreebusy PCL does not contain its current ChangeKey");
+                }
+
+                let deleted_tags = deleted_property_tags
+                    .iter()
+                    .copied()
+                    .map(i64::from)
+                    .collect::<Vec<_>>();
+                if !deleted_tags.is_empty() {
+                    sqlx::query(
+                        r#"
+                        DELETE FROM mapi_custom_property_values
+                        WHERE tenant_id = $1
+                          AND account_id = $2
+                          AND object_kind = 'delegate_freebusy_message'
+                          AND canonical_id = $3
+                          AND property_tag = ANY($4)
+                        "#,
+                    )
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .bind(canonical_id)
+                    .bind(&deleted_tags)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                for value in values {
+                    if value.property_type != value.property_tag as u16
+                        || (value.property_tag >> 16) < 0x8000
+                    {
+                        anyhow::bail!("invalid LocalFreebusy custom property tag");
+                    }
+                    sqlx::query(
+                        r#"
+                        INSERT INTO mapi_custom_property_values (
+                            tenant_id, account_id, object_kind, canonical_id,
+                            property_tag, property_type, property_value
+                        )
+                        VALUES ($1, $2, 'delegate_freebusy_message', $3, $4, $5, $6)
+                        ON CONFLICT (
+                            tenant_id, account_id, object_kind, canonical_id,
+                            property_tag, property_type
+                        )
+                        DO UPDATE SET
+                            property_value = EXCLUDED.property_value,
+                            updated_at = NOW()
+                        "#,
+                    )
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .bind(canonical_id)
+                    .bind(i64::from(value.property_tag))
+                    .bind(i32::from(value.property_type))
+                    .bind(&value.property_value)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+
+                let change_number =
+                    allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id).await?;
+                let change_key = lpe_storage::mapi_store_identity::mapi_xid(
+                    store_identity.replica_guid,
+                    change_number,
+                );
+                merge_mapi_predecessor_change_key(&mut predecessors, &change_key)?;
+                let predecessor_change_list =
+                    serialize_mapi_predecessor_change_list(&predecessors)?;
+                sqlx::query(
+                    r#"
+                    UPDATE mapi_object_identities
+                    SET mapi_change_number = $4,
+                        change_key = $5,
+                        predecessor_change_list = $6,
+                        updated_at = GREATEST(
+                            clock_timestamp(),
+                            updated_at + INTERVAL '1 microsecond'
+                        )
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND object_kind = 'delegate_freebusy_message'
+                      AND canonical_id = $3
+                      AND deleted_at IS NULL
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(canonical_id)
+                .bind(change_number as i64)
+                .bind(change_key)
+                .bind(predecessor_change_list)
+                .execute(&mut *tx)
+                .await?;
+                let refreshed = sqlx::query(FETCH_LOCAL_FREEBUSY_IDENTITY_SQL)
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .bind(canonical_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                let identity = local_freebusy_identity_from_row(refreshed);
+                let custom_properties = sqlx::query(FETCH_LOCAL_FREEBUSY_CUSTOM_PROPERTIES_SQL)
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .bind(canonical_id)
+                    .fetch_all(&mut *tx)
+                    .await?
+                    .into_iter()
+                    .map(mapi_custom_property_value_from_row)
+                    .collect::<Result<Vec<_>>>()?;
+                let delegate_rows = sqlx::query(FETCH_EWS_DELEGATES_SQL)
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .fetch_all(&mut *tx)
+                    .await?;
+                let delegates = ews_delegates_from_rows(account_id, delegate_rows)?;
+                let applied_revision = sqlx::query_scalar::<_, i64>(
+                    r#"
+                    UPDATE delegation_projection_state
+                    SET applied_revision = revision
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND revision = $3
+                    RETURNING applied_revision
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(revision)
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("LocalFreebusy projection revision changed"))?;
+                if applied_revision != revision {
+                    anyhow::bail!("LocalFreebusy projection revision was not applied");
+                }
+                journal_local_freebusy_change(&mut tx, tenant_id, account_id, &identity).await?;
+                tx.commit().await?;
+                Ok(MapiLocalFreebusyCommit {
+                    identity,
+                    delegates,
+                    custom_properties,
                 })
             })
         }

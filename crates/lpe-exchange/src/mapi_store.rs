@@ -286,6 +286,7 @@ pub(crate) struct MapiDelegateFreeBusyMessage {
     pub(crate) canonical_id: Uuid,
     pub(crate) durable_identity: Option<MapiIdentityRecord>,
     pub(crate) delegates: Vec<EwsDelegate>,
+    pub(crate) custom_properties: Vec<MapiCustomPropertyValue>,
     pub(crate) message: DelegateFreeBusyMessageObject,
 }
 
@@ -573,6 +574,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 self.fetch_local_freebusy_projection(account_id).await?;
             let local_freebusy_identity = local_freebusy_projection.identity;
             let local_freebusy_delegates = local_freebusy_projection.delegates;
+            let local_freebusy_custom_properties = local_freebusy_projection.custom_properties;
             let public_trees = self.fetch_public_folder_trees(account_id).await?;
             let mut public_folders = Vec::new();
             let mut pending_public_folder_ids = public_trees
@@ -736,6 +738,9 @@ impl<T: ExchangeStore> MapiStore for T {
                 snapshot.with_delegate_freebusy_message_identities(&identity_records)
             })
             .and_then(|snapshot| snapshot.with_local_freebusy_delegates(local_freebusy_delegates))
+            .and_then(|snapshot| {
+                snapshot.with_local_freebusy_custom_properties(local_freebusy_custom_properties)
+            })
             .map(|snapshot| snapshot.with_recoverable_items(recoverable_items))
             .map(|snapshot| snapshot.with_reminders(reminders))
             .map(|snapshot| {

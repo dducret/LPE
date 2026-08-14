@@ -4327,6 +4327,7 @@ async fn mapi_over_http_depth_root_hierarchy_includes_persisted_sync_issue_child
 #[tokio::test]
 async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_rows() {
     let folder_id = crate::mapi::identity::INBOX_FOLDER_ID;
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let local_message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
     let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999996");
     let contact_message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999998");
@@ -4334,7 +4335,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     let account = FakeStore::account();
     let contacts = Arc::new(Mutex::new(Vec::new()));
     let events = Arc::new(Mutex::new(Vec::new()));
-    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
     inbox.total_emails = 3;
     inbox.unread_emails = 2;
     let store = FakeStore {
@@ -4352,7 +4353,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
         mapi_notification_polls: Arc::new(Mutex::new(vec![
             MapiNotificationPoll {
                 event_pending: true,
-                cursor: Some(11),
+                cursor: Some(12),
                 events: vec![
                     crate::mapi::notifications::MapiNotificationEvent::canonical(
                         crate::mapi::notifications::MapiNotificationKind::Content,
@@ -4360,8 +4361,8 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
                         folder_id,
                         Some(message_id),
                         None,
-                        9,
-                        44,
+                        10,
+                        45,
                         Some(3),
                         Some(2),
                         "created".to_string(),
@@ -4377,8 +4378,8 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
                         crate::mapi::identity::CONTACTS_FOLDER_ID,
                         Some(contact_message_id),
                         None,
-                        10,
-                        45,
+                        11,
+                        46,
                         Some(1),
                         Some(1),
                         "created".to_string(),
@@ -4395,8 +4396,8 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
                         crate::mapi::identity::CALENDAR_FOLDER_ID,
                         Some(calendar_message_id),
                         None,
-                        11,
-                        46,
+                        12,
+                        47,
                         Some(1),
                         Some(1),
                         "created".to_string(),
@@ -4411,7 +4412,7 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
             },
             MapiNotificationPoll {
                 event_pending: true,
-                cursor: Some(8),
+                cursor: Some(9),
                 events: vec![
                     crate::mapi::notifications::MapiNotificationEvent::canonical(
                         crate::mapi::notifications::MapiNotificationKind::Content,
@@ -4430,6 +4431,23 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
                         Some("IPM.Note".to_string()),
                     )
                     .with_parent_folder_id(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)),
+                    crate::mapi::notifications::MapiNotificationEvent::canonical(
+                        crate::mapi::notifications::MapiNotificationKind::Hierarchy,
+                        0x0010,
+                        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                        Some(folder_id),
+                        None,
+                        9,
+                        44,
+                        Some(3),
+                        Some(2),
+                        "updated".to_string(),
+                        Some("Inbox".to_string()),
+                        None,
+                        None,
+                        None,
+                    )
+                    .with_canonical_ids(Some(inbox_id), Some(inbox_id)),
                 ],
             },
         ])),
@@ -4439,7 +4457,56 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
         crate::mapi::load_mapi_identity_codec_for_test(&store, FakeStore::account().account_id)
             .await
             .unwrap();
+    let imported_change_key = [
+        0x51, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
+        0xa6, 0x00, 0x00, 0x04, 0x15,
+    ];
+    let mut imported_predecessor_change_list = vec![imported_change_key.len() as u8];
+    imported_predecessor_change_list.extend_from_slice(&imported_change_key);
+    imported_predecessor_change_list = test_merge_mapi_predecessor_change_lists(
+        &store.mapi_identity_predecessor_change_lists.lock().unwrap()[&inbox_id],
+        &imported_predecessor_change_list,
+    )
+    .unwrap();
+    let mut hierarchy_values = Vec::new();
+    append_mapi_binary_property(
+        &mut hierarchy_values,
+        PID_TAG_PARENT_SOURCE_KEY,
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+            .unwrap(),
+    );
+    append_mapi_binary_property(
+        &mut hierarchy_values,
+        PID_TAG_SOURCE_KEY,
+        &identity_codec.source_key_for_object_id(folder_id).unwrap(),
+    );
+    append_mapi_i64_property(
+        &mut hierarchy_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        mapi_mailstore::filetime_from_change_number(17_200_000) as i64,
+    );
+    append_mapi_binary_property(
+        &mut hierarchy_values,
+        PID_TAG_CHANGE_KEY,
+        &imported_change_key,
+    );
+    append_mapi_binary_property(
+        &mut hierarchy_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &imported_predecessor_change_list,
+    );
+    append_mapi_utf16_property(&mut hierarchy_values, PID_TAG_DISPLAY_NAME_W, "Inbox");
+    let mut hierarchy_property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut hierarchy_property_values,
+        PID_TAG_DISPLAY_NAME_W,
+        "Inbox",
+    );
     let scoped_inbox_folder_id = identity_codec.actual_object_id(folder_id).unwrap();
+    let scoped_ipm_subtree_folder_id = identity_codec
+        .actual_object_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+        .unwrap();
     let scoped_contacts_folder_id = identity_codec
         .actual_object_id(crate::mapi::identity::CONTACTS_FOLDER_ID)
         .unwrap();
@@ -4501,6 +4568,15 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     append_rop_create_message(&mut rops, 4, 5, scoped_inbox_folder_id);
     append_rop_set_properties(&mut rops, 5, 2, &property_values);
     append_rop_save_changes_message(&mut rops, 5, 5);
+    append_rop_open_folder(&mut rops, 0, 6, scoped_ipm_subtree_folder_id);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x06, 0x07, 0x00, // RopSynchronizationOpenCollector, hierarchy
+        0x73, 0x00, 0x07, // RopSynchronizationImportHierarchyChange
+    ]);
+    rops.extend_from_slice(&6u16.to_le_bytes());
+    rops.extend_from_slice(&hierarchy_values);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&hierarchy_property_values);
 
     let response = service
         .handle_mapi(
@@ -4515,6 +4591,8 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
                     u32::MAX,
                     u32::MAX,
                     u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
                 ],
             )),
         )
@@ -4524,9 +4602,10 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     assert_eq!(imported_emails.lock().unwrap().len(), 1);
+    assert!(contains_bytes(&response_rops, &[0x73, 0x07, 0, 0, 0, 0]));
     assert!(
         !contains_bytes(&response_rops, &[0x2A, 0x03, 0, 0, 0, 0]),
-        "same-context save notified its 0x84 hierarchy table: {response_rops:02x?}"
+        "same-context save or hierarchy import notified its 0x84 hierarchy table: {response_rops:02x?}"
     );
 
     // The root hierarchy table was opened before these external collaboration

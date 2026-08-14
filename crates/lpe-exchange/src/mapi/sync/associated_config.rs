@@ -78,15 +78,9 @@ fn associated_config_default_sync_tags(
 ) -> &'static [u32] {
     if crate::mapi_store::is_outlook_configuration_message_class(&message.message_class) {
         // [MS-OXOCFG] sections 2.2.2.1 and 2.2.5.1 define
-        // PidTagRoamingDatatypes only as a declaration of roaming streams.
-        // It does not suppress independently defined named properties on a
-        // configuration message.
-        &[
-            PID_TAG_ROAMING_DATATYPES,
-            PID_TAG_ROAMING_DICTIONARY,
-            PID_NAME_CONTENT_CLASS_W_TAG,
-            PID_NAME_CONTENT_TYPE_W_TAG,
-        ]
+        // PidTagRoamingDatatypes as the declaration of roaming streams. Named
+        // properties remain client-owned and are exported only when persisted.
+        &[PID_TAG_ROAMING_DATATYPES, PID_TAG_ROAMING_DICTIONARY]
     } else {
         &[]
     }

@@ -192,14 +192,15 @@ async fn mapi_calendar_snapshot_identity_is_principal_scoped_in_postgresql() -> 
 }
 
 #[tokio::test]
-async fn mapi_identity_repair_preserves_rotated_calendar_change_key() -> anyhow::Result<()> {
+async fn mapi_identity_reopen_preserves_rotated_and_imported_calendar_change_keys(
+) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
         return Ok(());
     };
     let storage = fixture.storage.clone();
     let account_id = fixture.account_id;
     let collection = storage
-        .create_accessible_calendar_collection(account_id, "ChangeKey repair regression")
+        .create_accessible_calendar_collection(account_id, "ChangeKey persistence regression")
         .await?;
     let event_id = Uuid::parse_str("83838383-8383-4383-9383-838383838383")?;
     storage
@@ -222,12 +223,23 @@ async fn mapi_identity_repair_preserves_rotated_calendar_change_key() -> anyhow:
         )
         .await?
         .remove(0);
-    let global_counter =
-        crate::mapi::identity::global_counter_from_store_id(identity.object_id).unwrap();
-    let rotated_change_number = global_counter + 1;
-    let rotated_change_key =
-        crate::mapi::identity::change_key_for_change_number(rotated_change_number);
-    let rotated_predecessor_list = mapi_mailstore::predecessor_change_list(rotated_change_number);
+    let (store_identity, rotated_change_number) = {
+        let mut tx = storage.pool().begin().await?;
+        let allocated =
+            lpe_storage::mapi_store_identity::allocate_mapi_store_global_counter_in_tx(&mut tx)
+                .await?;
+        tx.commit().await?;
+        allocated
+    };
+    let rotated_change_key = lpe_storage::mapi_store_identity::mapi_xid(
+        store_identity.replica_guid,
+        rotated_change_number,
+    );
+    let rotated_predecessor_list = [
+        vec![rotated_change_key.len() as u8],
+        rotated_change_key.clone(),
+    ]
+    .concat();
     sqlx::query(
         r#"
         UPDATE mapi_object_identities
@@ -247,10 +259,9 @@ async fn mapi_identity_repair_preserves_rotated_calendar_change_key() -> anyhow:
     .execute(storage.pool())
     .await?;
 
-    // Reopening the identity runs the repair helper that regressed Test 08:34
-    // from CN 71 to its immutable object counter 70. [MS-OXCFXICS] sections
-    // 2.2.1.2.7, 2.2.1.2.8, and 3.1.5.3 require the rotated CK/CN/PCL
-    // version to remain coherent across reopen and synchronization.
+    // [MS-OXCFXICS] sections 2.2.1.2.7, 2.2.1.2.8, and 3.1.5.3 require the
+    // server-allocated CK/CN/PCL version to remain coherent across reopen and
+    // synchronization.
     storage
         .fetch_or_allocate_mapi_identities(
             account_id,
@@ -283,7 +294,7 @@ async fn mapi_identity_repair_preserves_rotated_calendar_change_key() -> anyhow:
 
     // [MS-OXCFXICS] sections 2.2.1.2.7 and 3.1.5.3 allow an ICS import to
     // preserve a foreign ChangeKey even though the server assigns a distinct
-    // internal CN. Identity repair must not replace that valid foreign XID.
+    // internal CN. Reopening the identity must not replace that valid foreign XID.
     let mut imported_change_key = Uuid::parse_str("94949494-9494-4494-9494-949494949494")?
         .as_bytes()
         .to_vec();
@@ -322,55 +333,6 @@ async fn mapi_identity_repair_preserves_rotated_calendar_change_key() -> anyhow:
         )
         .await?;
 
-    let (stored_change_key, stored_predecessor_list) = sqlx::query_as::<_, (Vec<u8>, Vec<u8>)>(
-        r#"
-            SELECT change_key, predecessor_change_list
-            FROM mapi_object_identities
-            WHERE account_id = $1
-              AND object_kind = 'calendar_event'
-              AND canonical_id = $2
-            "#,
-    )
-    .bind(account_id)
-    .bind(event_id)
-    .fetch_one(storage.pool())
-    .await?;
-    assert_eq!(stored_change_key, imported_change_key);
-    assert_eq!(stored_predecessor_list, imported_predecessor_list);
-
-    // Reproduce the already-persisted Test 08:34 signature: the former helper
-    // replaced CK71 with the object's creation CK70, while CN and PCL stayed
-    // at 71. A reopen must repair only that proven stale local ChangeKey.
-    let object_change_key = crate::mapi::identity::change_key_for_change_number(global_counter);
-    sqlx::query(
-        r#"
-        UPDATE mapi_object_identities
-        SET change_key = $3,
-            predecessor_change_list = $4
-        WHERE account_id = $1
-          AND object_kind = 'calendar_event'
-          AND canonical_id = $2
-        "#,
-    )
-    .bind(account_id)
-    .bind(event_id)
-    .bind(&object_change_key)
-    .bind(&rotated_predecessor_list)
-    .execute(storage.pool())
-    .await?;
-
-    storage
-        .fetch_or_allocate_mapi_identities(
-            account_id,
-            &[MapiIdentityRequest {
-                object_kind: MapiIdentityObjectKind::CalendarEvent,
-                canonical_id: event_id,
-                reserved_global_counter: None,
-                source_key: None,
-            }],
-        )
-        .await?;
-
     let (stored_source_key, stored_change_key, stored_predecessor_list, stored_instance_key) =
         sqlx::query_as::<_, (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>)>(
             r#"
@@ -387,8 +349,8 @@ async fn mapi_identity_repair_preserves_rotated_calendar_change_key() -> anyhow:
         .await?;
     assert_eq!(stored_source_key, identity.source_key);
     assert_eq!(stored_instance_key, identity.source_key);
-    assert_eq!(stored_change_key, rotated_change_key);
-    assert_eq!(stored_predecessor_list, rotated_predecessor_list);
+    assert_eq!(stored_change_key, imported_change_key);
+    assert_eq!(stored_predecessor_list, imported_predecessor_list);
 
     fixture.cleanup().await?;
     Ok(())

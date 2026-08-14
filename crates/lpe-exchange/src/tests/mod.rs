@@ -74,13 +74,14 @@ use crate::{
         MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiEventCreateOutcome,
         MapiFolderHierarchyCommitOutcome, MapiFolderProfilePropertyValue, MapiFolderVersion,
         MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
-        MapiLocalFreebusyProjection, MapiMailboxContentCommitTime, MapiNamedPropertyMapping,
-        MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint,
-        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
+        MapiLocalFreebusyCommit, MapiLocalFreebusyProjection, MapiMailboxContentCommitTime,
+        MapiNamedPropertyMapping, MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet,
+        MapiSyncCheckpoint, UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
 static MAPI_TEST_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+const MAPI_OBJECT_MODIFIED_EVENT_MASK: u16 = 0x0010;
 // Ephemeral search_path schemas cannot safely share prepared relation OIDs through a pooled proxy.
 static POSTGRES_MAPI_FIXTURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const STORAGE_SCHEMA_SQL: &str = include_str!("../../../lpe-storage/sql/schema.sql");
@@ -3839,8 +3840,15 @@ async fn postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_linea
         .await
         .unwrap()
         .remove(0);
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&fixture.storage, fixture.account_id)
+            .await
+            .unwrap();
 
-    assert_eq!(initial.object_id, crate::mapi::identity::TRASH_FOLDER_ID);
+    assert_eq!(
+        identity_codec.actual_object_id(crate::mapi::identity::TRASH_FOLDER_ID),
+        Some(initial.object_id)
+    );
     assert_ne!(
         initial.change_number,
         crate::mapi::identity::TRASH_FOLDER_COUNTER
@@ -4058,6 +4066,15 @@ async fn postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_linea
         .await
         .unwrap()
         .remove(0);
+    let common_views_folder_id = identity_codec
+        .actual_object_id(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
+        .expect("Common Views has a durable account-scoped FID");
+    assert_eq!(common_views.object_id, common_views_folder_id);
+    let common_views_parent_folder_id = crate::mapi_mailstore::virtual_special_folder_metadata(
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    )
+    .map(|(_, _, _, parent_folder_id, _)| parent_folder_id)
+    .expect("Common Views has canonical hierarchy metadata");
     let virtual_baseline = conflict_changes.current_change_sequence;
     let virtual_client_change_key = vec![
         0x91, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
@@ -4103,8 +4120,8 @@ async fn postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_linea
         (
             crate::mapi::notifications::MapiNotificationKind::Hierarchy,
             0x0010,
-            crate::mapi::identity::ROOT_FOLDER_ID,
-            Some(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID),
+            common_views_parent_folder_id,
+            Some(common_views_folder_id),
             None,
             None,
             Some("mailbox"),
@@ -6141,9 +6158,134 @@ impl ExchangeStore for FakeStore {
                 .pop()
                 .ok_or_else(|| anyhow::anyhow!("LocalFreebusy identity was not allocated"))?;
             let delegates = self.fetch_ews_delegates(account_id).await?;
+            let custom_properties = self
+                .fetch_all_mapi_custom_property_values(
+                    account_id,
+                    MapiCustomPropertyObjectKind::DelegateFreeBusyMessage,
+                    crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID,
+                )
+                .await?;
             Ok(MapiLocalFreebusyProjection {
                 identity,
                 delegates,
+                custom_properties,
+            })
+        })
+    }
+
+    fn commit_local_freebusy_custom_property_changes<'a>(
+        &'a self,
+        account_id: Uuid,
+        values: &'a [MapiCustomPropertyValue],
+        deleted_property_tags: &'a [u32],
+    ) -> StoreFuture<'a, MapiLocalFreebusyCommit> {
+        Box::pin(async move {
+            if values.is_empty() && deleted_property_tags.is_empty() {
+                anyhow::bail!("LocalFreebusy custom property commit is empty");
+            }
+            if deleted_property_tags
+                .iter()
+                .any(|property_tag| (property_tag >> 16) < 0x8000)
+                || values.iter().any(|value| {
+                    value.property_type != value.property_tag as u16
+                        || (value.property_tag >> 16) < 0x8000
+                })
+            {
+                anyhow::bail!("invalid LocalFreebusy custom property change");
+            }
+            let projection = self.fetch_local_freebusy_projection(account_id).await?;
+            let canonical_id = crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID;
+            {
+                let mut stored = self.mapi_custom_property_values.lock().unwrap();
+                stored.retain(
+                    |(
+                        stored_account_id,
+                        stored_object_kind,
+                        stored_canonical_id,
+                        property_tag,
+                        _property_type,
+                    ),
+                     _| {
+                        !(*stored_account_id == account_id
+                            && *stored_object_kind
+                                == MapiCustomPropertyObjectKind::DelegateFreeBusyMessage
+                            && *stored_canonical_id == canonical_id
+                            && deleted_property_tags.contains(property_tag))
+                    },
+                );
+                for value in values {
+                    stored.insert(
+                        (
+                            account_id,
+                            MapiCustomPropertyObjectKind::DelegateFreeBusyMessage,
+                            canonical_id,
+                            value.property_tag,
+                            value.property_type,
+                        ),
+                        value.property_value.clone(),
+                    );
+                }
+            }
+
+            let change_number = {
+                let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+                if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+                    *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
+                }
+                let change_number = *next_counter;
+                *next_counter = change_number.saturating_add(1);
+                change_number
+            };
+            let change_key = crate::mapi::identity::change_key_for_change_number(change_number);
+            let predecessor_change_list = test_merge_mapi_predecessor_change_lists(
+                &projection.identity.predecessor_change_list,
+                &crate::mapi_mailstore::predecessor_change_list(change_number),
+            )
+            .ok_or_else(|| anyhow::anyhow!("invalid LocalFreebusy predecessor change list"))?;
+            let last_modification_time =
+                crate::mapi_mailstore::filetime_from_change_number(change_number).max(
+                    projection
+                        .identity
+                        .last_modification_time
+                        .saturating_add(10),
+                );
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_number);
+            self.mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_key.clone());
+            self.mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .insert(canonical_id, predecessor_change_list.clone());
+            self.mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .insert(canonical_id, last_modification_time);
+            let identity = MapiIdentityRecord {
+                object_kind: MapiIdentityObjectKind::DelegateFreeBusyMessage,
+                canonical_id,
+                object_id: projection.identity.object_id,
+                change_number,
+                source_key: projection.identity.source_key,
+                change_key,
+                predecessor_change_list,
+                last_modification_time,
+            };
+            let custom_properties = self
+                .fetch_all_mapi_custom_property_values(
+                    account_id,
+                    MapiCustomPropertyObjectKind::DelegateFreeBusyMessage,
+                    canonical_id,
+                )
+                .await?;
+            Ok(MapiLocalFreebusyCommit {
+                identity,
+                delegates: projection.delegates,
+                custom_properties,
             })
         })
     }

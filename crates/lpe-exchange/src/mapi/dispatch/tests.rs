@@ -1359,10 +1359,12 @@ fn inbox_descriptor_behavior_contract_requires_persisted_view_after_early_releas
 }
 
 #[test]
-fn calendar_content_sync_changed_ids_are_projected() {
+fn special_content_sync_changed_ids_are_projected() {
     let changed_event_id = Uuid::from_u128(0xbd6a6c500b7f4fad83d93b9ea082d726);
+    let changed_freebusy_id = crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID;
     let changes = MapiSyncChangeSet {
         changed_calendar_event_ids: vec![changed_event_id],
+        changed_delegate_freebusy_ids: vec![changed_freebusy_id],
         ..Default::default()
     };
 
@@ -1373,6 +1375,14 @@ fn calendar_content_sync_changed_ids_are_projected() {
     );
 
     assert_eq!(changed_ids, vec![changed_event_id]);
+    assert_eq!(
+        changed_special_ids_for_folder(
+            FREEBUSY_DATA_FOLDER_ID,
+            &MapiMailStoreSnapshot::empty(),
+            &changes,
+        ),
+        vec![changed_freebusy_id]
+    );
 }
 
 #[test]

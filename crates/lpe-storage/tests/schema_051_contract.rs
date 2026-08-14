@@ -31,9 +31,19 @@ fn update_script_rejects_noncanonical_schema_before_service_stop_or_mutation() {
             "EXPECTED_RELEASE_VERSION",
             "if [[ \"${INSTALLED_SCHEMA_VERSION}\" != \"${EXPECTED_SCHEMA_VERSION}\" ]]",
             "has no in-place schema upgrade path",
-            "canonical_schema_shape_is_current()",
-            "mapi_store_identity_shape_ok",
+            "source \"${SCRIPT_DIR}/lib/install-common.sh\"",
+            "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${EXPECTED_SCHEMA_VERSION}\"",
             "Database schema ${EXPECTED_SCHEMA_VERSION} is current",
+        ],
+    );
+    assert_contains_all(
+        "install-common.sh canonical schema guard",
+        INSTALL_COMMON,
+        &[
+            "canonical_schema_shape_is_current()",
+            "local expected_schema_version=\"$2\"",
+            "schema_metadata_shape_ok \"${database_url}\" \"${expected_schema_version}\"",
+            "mapi_store_identity_shape_ok \"${database_url}\"",
         ],
     );
     for forbidden in [
@@ -44,6 +54,7 @@ fn update_script_rejects_noncanonical_schema_before_service_stop_or_mutation() {
         "MIGRATE_SCHEMA_FROM_050",
         "schema_target_shape_validated",
         "0.5.0-sql-v1-to-0.5.1-sql",
+        "0.5.0-sql-v1-outlook-cache-fidelity.sql",
         "psql \"${DATABASE_URL}\" -X -v ON_ERROR_STOP=1 -f",
     ] {
         assert!(
@@ -53,15 +64,33 @@ fn update_script_rejects_noncanonical_schema_before_service_stop_or_mutation() {
     }
     assert_before(
         UPDATE_LPE,
+        "source \"${SCRIPT_DIR}/lib/install-common.sh\"",
+        "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${EXPECTED_SCHEMA_VERSION}\"",
+        "the updater must source the canonical schema guard before invoking it",
+    );
+    assert_before(
+        UPDATE_LPE,
         "if [[ \"${INSTALLED_SCHEMA_VERSION}\" != \"${EXPECTED_SCHEMA_VERSION}\" ]]",
-        "canonical_schema_shape_is_current \"${DATABASE_URL}\"",
+        "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${EXPECTED_SCHEMA_VERSION}\"",
         "the updater must reject unsupported labels before it checks the current schema shape",
     );
     assert_before(
         UPDATE_LPE,
-        "canonical_schema_shape_is_current \"${DATABASE_URL}\"",
+        "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${EXPECTED_SCHEMA_VERSION}\"",
         "systemctl stop \"${SERVICE_NAME}\"",
         "the updater must reject incomplete current schemas before it stops LPE",
+    );
+    assert_before(
+        UPDATE_LPE,
+        "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${EXPECTED_SCHEMA_VERSION}\"",
+        "write_env_value \"${ENV_FILE}\"",
+        "the updater must reject incomplete current schemas before it mutates deployment state",
+    );
+    assert_before(
+        UPDATE_LPE,
+        "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${EXPECTED_SCHEMA_VERSION}\"",
+        "\"${CARGO_BIN}\" build --release -p lpe-cli",
+        "the updater must reject incomplete current schemas before it builds LPE",
     );
     assert_before(
         UPDATE_LPE,
@@ -74,6 +103,66 @@ fn update_script_rejects_noncanonical_schema_before_service_stop_or_mutation() {
         "if [[ \"${INSTALLED_SCHEMA_VERSION}\" != \"${EXPECTED_SCHEMA_VERSION}\" ]]",
         "\"${CARGO_BIN}\" build --release -p lpe-cli",
         "the updater must reject unsupported labels before it builds LPE",
+    );
+}
+
+#[test]
+fn canonical_schema_guard_requires_recovery_and_search_membership_semantics() {
+    assert_contains_all(
+        "shared recoverable-item shape guard",
+        INSTALL_COMMON,
+        &[
+            "recoverable_items_shape_ok()",
+            "table_name = 'recoverable_items'",
+            "column_name = 'created_by_protocol' AND data_type = 'text' AND is_nullable = 'NO'",
+            "UNIQUE (tenant_id, account_id, source_mailbox_message_id)",
+            "pg_get_constraintdef(oid) LIKE '%''imap''%'",
+            "mail_search_membership_shape_ok()",
+            "constraint_row.conrelid = 'public.mail_search_documents'::regclass",
+            "constraint_row.confrelid = 'public.mailbox_messages'::regclass",
+            "constraint_row.confdeltype = 'c'",
+            "ARRAY['tenant_id', 'account_id', 'mailbox_message_id', 'message_id']::text[]",
+            "ARRAY['tenant_id', 'account_id', 'id', 'message_id']::text[]",
+            "recoverable_items_shape_ok \"${database_url}\"",
+            "mail_search_membership_shape_ok \"${database_url}\"",
+        ],
+    );
+    assert!(
+        UPDATE_LPE.contains(
+            "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${EXPECTED_SCHEMA_VERSION}\"",
+        ) && INIT_LPE.contains(
+            "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${expected_schema_version}\"",
+        ) && CHECK_LPE.contains(
+            "canonical_schema_shape_is_current \"${DATABASE_URL}\" \"${expected_schema_version}\"",
+        ),
+        "update, initialization, and installation checks must all use the shared canonical shape guard"
+    );
+}
+
+#[test]
+fn canonical_schema_guard_validates_local_freebusy_trigger_and_property_semantics() {
+    assert_contains_all(
+        "shared LocalFreebusy projection guard",
+        INSTALL_COMMON,
+        &[
+            "delegation_projection_shape_ok()",
+            "expected_triggers(",
+            "ARRAY['display_name', 'primary_email']::text[]",
+            "position('INSERT INTO delegation_projection_state' IN procedure_row.prosrc) > 0",
+            "position('revision = delegation_projection_state.revision + 1' IN procedure_row.prosrc) > 0",
+            "PRIMARY KEY (tenant_id, account_id)",
+            "constraint_row.confrelid = 'public.accounts'::regclass",
+            "constraint_row.confdeltype = 'c'",
+            "table_row.relname = expected.table_name",
+            "procedure_row.proname = expected.function_name",
+            "trigger_row.tgenabled = 'O'",
+            "trigger_row.tgtype = expected.trigger_type",
+            "trigger_row.tgnargs = 0",
+            "mapi_auxiliary_shape_ok()",
+            "PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id, property_tag, property_type)",
+            "ARRAY['tenant_id', 'account_id']::text[]",
+            "ARRAY['tenant_id', 'id']::text[]",
+        ],
     );
 }
 

@@ -16,6 +16,7 @@ pub(in crate::mapi) struct MapiNotificationRegistration {
     pub(in crate::mapi) logon_id: u8,
     pub(in crate::mapi) notification_types: u16,
     pub(in crate::mapi) folder_id: Option<u64>,
+    pub(in crate::mapi) message_id: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -990,6 +991,11 @@ pub(in crate::mapi) fn registration_matches_event(
             return false;
         }
     }
+    if let Some(message_id) = registration.message_id {
+        if event.kind != MapiNotificationKind::Content || event.message_id != Some(message_id) {
+            return false;
+        }
+    }
 
     match event.kind {
         MapiNotificationKind::Content => {
@@ -1017,9 +1023,15 @@ pub(in crate::mapi) fn notification_registration_from_request(
     } else {
         request.notification_folder_id()
     };
+    let message_id = if folder_id.is_some() {
+        request.notification_message_id()
+    } else {
+        None
+    };
     MapiNotificationRegistration {
         logon_id,
         notification_types,
         folder_id,
+        message_id,
     }
 }

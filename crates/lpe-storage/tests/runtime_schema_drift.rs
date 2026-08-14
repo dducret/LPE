@@ -2666,6 +2666,85 @@ async fn exercise_cross_account_jmap_copy_bcc_projection(
     .await
     .context("seed cross-account JMAP copy target mailbox")?;
 
+    let decoy_mailbox_id = Uuid::new_v4();
+    let decoy_membership_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO mailboxes (
+            id, tenant_id, account_id, role, display_name, sort_order, uid_validity
+        )
+        VALUES ($1, $2, $3, 'custom', 'Existing copy membership', 1, 2)
+        "#,
+    )
+    .bind(decoy_mailbox_id)
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .execute(pool)
+    .await
+    .context("seed decoy mailbox before cross-account JMAP copy")?;
+    sqlx::query(
+        r#"
+        INSERT INTO mailbox_messages (
+            id, tenant_id, account_id, mailbox_id, message_id, imap_uid, received_at
+        )
+        VALUES ($1, $2, $3, $4, $5, 1, NOW())
+        "#,
+    )
+    .bind(decoy_membership_id)
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .bind(decoy_mailbox_id)
+    .bind(submitted.message_id)
+    .execute(pool)
+    .await
+    .context("seed decoy membership before cross-account JMAP copy")?;
+    sqlx::query(
+        r#"
+        INSERT INTO mail_search_documents (
+            tenant_id, account_id, mailbox_message_id, message_id,
+            subject_text, participants_visible, body_text, attachment_text,
+            search_vector, updated_at
+        )
+        VALUES (
+            $1, $2, $3, $4,
+            'decoy subject', 'decoy participant', 'decoy body', 'decoy attachment',
+            to_tsvector('simple', 'decoy search projection'), NOW() + INTERVAL '1 minute'
+        )
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .bind(decoy_membership_id)
+    .bind(submitted.message_id)
+    .execute(pool)
+    .await
+    .context("seed newer decoy search projection before cross-account JMAP copy")?;
+
+    let source_search = sqlx::query(
+        r#"
+        SELECT s.mailbox_message_id, s.subject_text, s.participants_visible,
+               s.body_text, s.attachment_text, s.search_vector::text AS search_vector
+        FROM mail_search_documents s
+        JOIN mailbox_messages mm
+          ON mm.tenant_id = s.tenant_id
+         AND mm.account_id = s.account_id
+         AND mm.id = s.mailbox_message_id
+         AND mm.message_id = s.message_id
+        WHERE s.tenant_id = $1
+          AND s.account_id = $2
+          AND s.message_id = $3
+          AND mm.visibility = 'visible'
+        ORDER BY mm.updated_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load exact source search projection before cross-account JMAP copy")?;
+
     storage
         .copy_jmap_email_between_accounts(
             fixture.account_id,
@@ -2689,6 +2768,74 @@ async fn exercise_cross_account_jmap_copy_bcc_projection(
         target_emails.len() == 1 && target_emails[0].bcc.is_empty(),
         "cross-account JMAP copy must not expose source protected Bcc"
     );
+
+    let target_search = sqlx::query(
+        r#"
+        SELECT s.mailbox_message_id, s.subject_text, s.participants_visible,
+               s.body_text, s.attachment_text, s.search_vector::text AS search_vector,
+               mm.account_id, mm.mailbox_id, mm.message_id, mm.visibility
+        FROM mail_search_documents s
+        JOIN mailbox_messages mm
+          ON mm.tenant_id = s.tenant_id
+         AND mm.account_id = s.account_id
+         AND mm.id = s.mailbox_message_id
+         AND mm.message_id = s.message_id
+        WHERE s.tenant_id = $1
+          AND s.account_id = $2
+          AND s.message_id = $3
+          AND mm.mailbox_id = $4
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(target_account_id)
+    .bind(submitted.message_id)
+    .bind(target_mailbox_id)
+    .fetch_one(pool)
+    .await
+    .context("load target search projection after cross-account JMAP copy")?;
+    let source_search_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_search_documents
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mailbox_message_id = $3
+          AND message_id = $4
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_search.try_get::<Uuid, _>("mailbox_message_id")?)
+    .bind(submitted.message_id)
+    .fetch_one(pool)
+    .await
+    .context("verify source search projection after cross-account JMAP copy")?;
+    anyhow::ensure!(
+        target_search.try_get::<Uuid, _>("account_id")? == target_account_id
+            && target_search.try_get::<Uuid, _>("mailbox_id")? == target_mailbox_id
+            && target_search.try_get::<Uuid, _>("message_id")? == submitted.message_id
+            && target_search.try_get::<String, _>("visibility")? == "visible"
+            && target_search.try_get::<Uuid, _>("mailbox_message_id")?
+                != source_search.try_get::<Uuid, _>("mailbox_message_id")?,
+        "cross-account copy search projection must bind the new target membership"
+    );
+    anyhow::ensure!(
+        source_search_count == 1,
+        "cross-account copy must preserve the selected source search projection"
+    );
+    for field in [
+        "subject_text",
+        "participants_visible",
+        "body_text",
+        "attachment_text",
+        "search_vector",
+    ] {
+        anyhow::ensure!(
+            target_search.try_get::<String, _>(field)?
+                == source_search.try_get::<String, _>(field)?,
+            "cross-account copy must clone {field} from the selected source membership"
+        );
+    }
 
     Ok(())
 }
@@ -3580,6 +3727,29 @@ async fn exercise_mailbox_move_path(
         "target move membership must allocate from target mailbox uid_next"
     );
 
+    let search_memberships = sqlx::query(
+        r#"
+        SELECT
+            COUNT(*) FILTER (WHERE mailbox_message_id = $4) AS source_count,
+            COUNT(*) FILTER (WHERE mailbox_message_id = $5) AS target_count
+        FROM mail_search_documents
+        WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.message_id)
+    .bind(source_membership_id)
+    .bind(target_membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load search membership projection after move")?;
+    anyhow::ensure!(
+        search_memberships.try_get::<i64, _>("source_count")? == 0
+            && search_memberships.try_get::<i64, _>("target_count")? == 1,
+        "move must rekey the search document from the source to target membership"
+    );
+
     let active_identity = sqlx::query(
         r#"
         SELECT mapi_object_id, source_key
@@ -3763,9 +3933,9 @@ async fn exercise_mailbox_move_path(
         r#"
         INSERT INTO mailboxes (
             id, tenant_id, account_id, role, display_name, sort_order,
-            uid_validity, uid_next
+            uid_validity, uid_next, recoverable_items_retention_days
         )
-        VALUES ($1, $2, $3, 'custom', 'Runtime Copy Target', 30, 9002, 77)
+        VALUES ($1, $2, $3, 'custom', 'Runtime Copy Target', 30, 9002, 77, 3)
         "#,
     )
     .bind(copied_mailbox_id)
@@ -3834,6 +4004,220 @@ async fn exercise_mailbox_move_path(
             "mailbox-scoped JMAP Email/query must return the message in mailbox {mailbox_id}"
         );
     }
+
+    let copied_membership = sqlx::query(
+        r#"
+        SELECT id, imap_uid
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mailbox_id = $3
+          AND message_id = $4
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(copied_mailbox_id)
+    .bind(submitted.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load copied membership before IMAP expunge")?;
+    let copied_membership_id = copied_membership.try_get::<Uuid, _>("id")?;
+    let copied_imap_uid = copied_membership.try_get::<i64, _>("imap_uid")?;
+    sqlx::query("UPDATE messages SET legal_hold = TRUE WHERE tenant_id = $1 AND id = $2")
+        .bind(fixture.tenant_id)
+        .bind(submitted.message_id)
+        .execute(pool)
+        .await
+        .context("enable message legal hold before IMAP expunge")?;
+    storage
+        .update_imap_flags(
+            fixture.account_id,
+            copied_mailbox_id,
+            &[submitted.message_id],
+            None,
+            None,
+            Some(true),
+            None,
+        )
+        .await
+        .context("mark copied membership deleted before IMAP expunge")?;
+    storage
+        .expunge_imap_deleted(
+            fixture.account_id,
+            copied_mailbox_id,
+            &[submitted.message_id],
+            audit(
+                "alice@example.test",
+                "imap-expunge",
+                "runtime drift IMAP expunge",
+            ),
+        )
+        .await
+        .context("expunge copied IMAP membership")?;
+
+    let expunged_projection = sqlx::query(
+        r#"
+        SELECT
+            membership.visibility,
+            membership.imap_uid,
+            EXISTS (
+                SELECT 1
+                FROM mail_search_documents search
+                WHERE search.tenant_id = membership.tenant_id
+                  AND search.account_id = membership.account_id
+                  AND search.mailbox_message_id = membership.id
+            ) AS expunged_search_exists,
+            EXISTS (
+                SELECT 1
+                FROM mail_search_documents search
+                WHERE search.tenant_id = membership.tenant_id
+                  AND search.account_id = membership.account_id
+                  AND search.mailbox_message_id = $4
+            ) AS remaining_search_exists,
+            EXISTS (
+                SELECT 1
+                FROM tombstones tombstone
+                WHERE tombstone.tenant_id = membership.tenant_id
+                  AND tombstone.account_id = membership.account_id
+                  AND tombstone.mailbox_message_id = membership.id
+                  AND tombstone.reason = 'expunge'
+            ) AS expunge_tombstone_exists
+        FROM mailbox_messages membership
+        WHERE membership.tenant_id = $1
+          AND membership.account_id = $2
+          AND membership.id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(copied_membership_id)
+    .bind(target_membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load membership and search projection after IMAP expunge")?;
+    anyhow::ensure!(
+        expunged_projection.try_get::<String, _>("visibility")? == "expunged"
+            && expunged_projection.try_get::<i64, _>("imap_uid")? == copied_imap_uid
+            && !expunged_projection.try_get::<bool, _>("expunged_search_exists")?
+            && expunged_projection.try_get::<bool, _>("remaining_search_exists")?
+            && expunged_projection.try_get::<bool, _>("expunge_tombstone_exists")?,
+        "IMAP expunge must retain source history, delete only its search projection, and preserve other visible membership projections"
+    );
+
+    let after_expunge = storage
+        .fetch_jmap_emails(fixture.account_id, &[submitted.message_id])
+        .await
+        .context("fetch JMAP Email after one membership is expunged")?
+        .into_iter()
+        .next()
+        .context("remaining visible membership missing after IMAP expunge")?;
+    anyhow::ensure!(
+        after_expunge.mailbox_ids == vec![target_mailbox_id],
+        "IMAP expunge must leave the message visible through its other mailbox membership"
+    );
+
+    let recoverable = sqlx::query(
+        r#"
+        SELECT
+            recoverable.id,
+            recoverable.source_mailbox_id,
+            recoverable.source_imap_uid,
+            recoverable.recoverable_folder,
+            recoverable.delete_kind,
+            recoverable.status,
+            recoverable.legal_hold,
+            recoverable.created_by_protocol,
+            recoverable.retained_until > NOW() + INTERVAL '2 days'
+                AND recoverable.retained_until <= NOW() + INTERVAL '4 days'
+                AS retention_matches,
+            EXISTS (
+                SELECT 1
+                FROM mail_change_log log
+                WHERE log.tenant_id = recoverable.tenant_id
+                  AND log.account_id = recoverable.account_id
+                  AND log.object_kind = 'recoverable_item'
+                  AND log.object_id = recoverable.id
+                  AND log.change_kind = 'created'
+                  AND log.summary_json ->> 'sourceMailboxMessageId' = $4
+            ) AS created_change_exists
+        FROM recoverable_items recoverable
+        WHERE recoverable.tenant_id = $1
+          AND recoverable.account_id = $2
+          AND recoverable.source_mailbox_message_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(copied_membership_id)
+    .bind(copied_membership_id.to_string())
+    .fetch_one(pool)
+    .await
+    .context("load recoverable item after IMAP expunge")?;
+    let recoverable_item_id = recoverable.try_get::<Uuid, _>("id")?;
+    anyhow::ensure!(
+        recoverable.try_get::<Uuid, _>("source_mailbox_id")? == copied_mailbox_id
+            && recoverable.try_get::<i64, _>("source_imap_uid")? == copied_imap_uid
+            && recoverable.try_get::<String, _>("recoverable_folder")? == "deletions"
+            && recoverable.try_get::<String, _>("delete_kind")? == "expunge"
+            && recoverable.try_get::<String, _>("status")? == "active"
+            && recoverable.try_get::<bool, _>("legal_hold")?
+            && recoverable.try_get::<String, _>("created_by_protocol")? == "imap"
+            && recoverable.try_get::<bool, _>("retention_matches")?
+            && recoverable.try_get::<bool, _>("created_change_exists")?,
+        "IMAP expunge must create canonical recoverable state with effective retention, legal hold, IMAP provenance, and durable replay"
+    );
+
+    let restored = storage
+        .restore_recoverable_item(
+            fixture.account_id,
+            recoverable_item_id,
+            Some(copied_mailbox_id),
+            audit(
+                "alice@example.test",
+                "imap-restore-recoverable",
+                "runtime drift restore IMAP expunge",
+            ),
+        )
+        .await
+        .context("restore recoverable IMAP-expunged membership")?;
+    anyhow::ensure!(
+        restored.id == submitted.message_id
+            && restored.mailbox_ids.contains(&target_mailbox_id)
+            && restored.mailbox_ids.contains(&copied_mailbox_id),
+        "restoring an IMAP-expunged membership must preserve the other membership and recreate the source mailbox membership"
+    );
+    let restored_projection = sqlx::query(
+        r#"
+        SELECT
+            recoverable.status,
+            recoverable.restored_mailbox_message_id IS NOT NULL AS restored_membership_exists,
+            EXISTS (
+                SELECT 1
+                FROM mail_search_documents search
+                WHERE search.tenant_id = recoverable.tenant_id
+                  AND search.account_id = recoverable.account_id
+                  AND search.mailbox_message_id = recoverable.restored_mailbox_message_id
+            ) AS restored_search_exists
+        FROM recoverable_items recoverable
+        WHERE recoverable.tenant_id = $1
+          AND recoverable.account_id = $2
+          AND recoverable.id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(recoverable_item_id)
+    .fetch_one(pool)
+    .await
+    .context("load restored IMAP recoverable projection")?;
+    anyhow::ensure!(
+        restored_projection.try_get::<String, _>("status")? == "restored"
+            && restored_projection.try_get::<bool, _>("restored_membership_exists")?
+            && restored_projection.try_get::<bool, _>("restored_search_exists")?,
+        "IMAP recoverable restore must publish the restored membership and its search projection"
+    );
 
     Ok(())
 }
@@ -3958,6 +4342,23 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
     anyhow::ensure!(
         old_draft_projection.is_empty(),
         "MAPI draft submit must remove the source draft from canonical projections"
+    );
+    let old_draft_search_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_search_documents
+        WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(draft.message_id)
+    .fetch_one(pool)
+    .await
+    .context("count source draft search projections after MAPI submit")?;
+    anyhow::ensure!(
+        old_draft_search_count == 0,
+        "MAPI draft submit must delete the source draft search projection"
     );
 
     let sent_draft_jmap = storage

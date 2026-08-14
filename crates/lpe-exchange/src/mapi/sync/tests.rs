@@ -635,20 +635,32 @@ fn associated_config_fai_content_sync_emits_valid_property_definitions() {
             1,
             "CopyTo must preserve exactly one PidTagSearchKey on {message_class}"
         );
-        for (tag, guid, name) in [(0x9001_001Fu32, PS_PUBLIC_STRINGS_GUID, "OutlookConfigToken")] {
-            let mut expected_property_info = tag.to_le_bytes().to_vec();
-            expected_property_info.extend_from_slice(&guid);
-            expected_property_info.push(0x01);
-            expected_property_info.extend(name.encode_utf16().flat_map(u16::to_le_bytes));
-            expected_property_info.extend_from_slice(&0u16.to_le_bytes());
+        for (tag, guid, name, value) in [(
+            0x9001_001Fu32,
+            PS_PUBLIC_STRINGS_GUID,
+            "OutlookConfigToken",
+            "enabled",
+        )] {
+            let mut expected_property = tag.to_le_bytes().to_vec();
+            expected_property.extend_from_slice(&guid);
+            expected_property.push(0x01);
+            expected_property.extend(name.encode_utf16().flat_map(u16::to_le_bytes));
+            expected_property.extend_from_slice(&0u16.to_le_bytes());
+            let mut encoded_value = value
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>();
+            encoded_value.extend_from_slice(&0u16.to_le_bytes());
+            expected_property.extend_from_slice(&(encoded_value.len() as u32).to_le_bytes());
+            expected_property.extend_from_slice(&encoded_value);
             for (transfer_kind, transfer) in
                 [("ICS", item_payload), ("CopyTo", copy_buffer.as_slice())]
             {
                 assert!(
                     transfer
-                        .windows(expected_property_info.len())
-                        .any(|window| window == expected_property_info),
-                    "missing FastTransfer named property information for 0x{tag:08x} on {message_class} in {transfer_kind}"
+                        .windows(expected_property.len())
+                        .any(|window| window == expected_property),
+                    "missing FastTransfer named property definition or value for 0x{tag:08x} on {message_class} in {transfer_kind}"
                 );
             }
         }
@@ -2120,8 +2132,15 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
     let canonical_id = Uuid::from_u128(0x6d617069_6d6c_7350_8000_000000000201);
     let item_id = crate::mapi::identity::mapi_store_id(0x7a03);
     crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
-    let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
-        crate::store::MapiAssociatedConfigRecord {
+    let snapshot = MapiMailStoreSnapshot::empty()
+        .with_named_property_mappings(vec![crate::store::MapiNamedPropertyMapping {
+            property_id: 0x9001,
+            property: MapiNamedProperty {
+                guid: PS_PUBLIC_STRINGS_GUID,
+                kind: MapiNamedPropertyKind::Name("OutlookConfigToken".to_string()),
+            },
+        }])
+        .with_associated_configs(vec![crate::store::MapiAssociatedConfigRecord {
             id: canonical_id,
             account_id,
             folder_id: INBOX_FOLDER_ID,
@@ -2131,9 +2150,9 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
                 "0x0e170003": {"type": "i32", "value": 3},
                 "0x1000001f": {"type": "string", "value": "Outlook view state"},
                 "0x7c060003": {"type": "i32", "value": 4},
+                "0x9001001f": {"type": "string", "value": "Persisted named value"},
             }),
-        },
-    ]);
+        }]);
     let object = MapiObject::AssociatedConfig {
         folder_id: INBOX_FOLDER_ID,
         config_id: item_id,
@@ -2168,7 +2187,6 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
         (PID_TAG_HAS_ATTACHMENTS, "PidTagHasAttachments"),
         (PID_TAG_MESSAGE_STATUS, "PidTagMessageStatus"),
         (PID_TAG_PARENT_ENTRY_ID, "PidTagParentEntryId"),
-        (PID_TAG_PARENT_SOURCE_KEY, "PidTagParentSourceKey"),
         (PID_TAG_SEARCH_KEY, "PidTagSearchKey"),
         (PID_TAG_SOURCE_KEY, "PidTagSourceKey"),
         (PID_TAG_LAST_MODIFICATION_TIME, "PidTagLastModificationTime"),
@@ -2184,8 +2202,7 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
         (PID_TAG_BODY_W, "PidTagBody"),
         (PID_TAG_MESSAGE_SIZE, "PidTagMessageSize"),
         (0x7C06_0003, "PidTagRoamingDatatypes"),
-        (PID_NAME_CONTENT_CLASS_W_TAG, "PidNameContentClass"),
-        (PID_NAME_CONTENT_TYPE_W_TAG, "PidNameContentType"),
+        (0x9001_001F, "persisted named property"),
     ] {
         assert_eq!(
             property_count(
@@ -2245,6 +2262,22 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
     }
 
     let direct_copy = transfer(RopId::FastTransferSourceCopyTo.as_u8(), &[]);
+    assert_eq!(
+        property_count(&direct_copy, PID_TAG_PARENT_SOURCE_KEY),
+        0,
+        "direct Message CopyTo must not synthesize the folder-only ParentSourceKey"
+    );
+    assert_eq!(
+        property_count(
+            &transfer(
+                RopId::FastTransferSourceCopyProperties.as_u8(),
+                &[PID_TAG_PARENT_SOURCE_KEY],
+            ),
+            PID_TAG_PARENT_SOURCE_KEY,
+        ),
+        0,
+        "CopyProperties must not synthesize an absent ParentSourceKey"
+    );
     let mut expected_status = PID_TAG_MESSAGE_STATUS.to_le_bytes().to_vec();
     expected_status.extend_from_slice(&0i32.to_le_bytes());
     assert!(
@@ -2259,6 +2292,21 @@ fn special_message_general_properties_follow_fast_transfer_property_filters() {
             .any(|property| property == OUTLOOK_ASSOCIATED_CONFIG_BINARY_0E0B.to_le_bytes()),
         "direct FastTransfer must not synthesize the GetProps-only MessageListSettings 0x0E0B projection"
     );
+    for tag in [PID_NAME_CONTENT_CLASS_W_TAG, PID_NAME_CONTENT_TYPE_W_TAG] {
+        assert_eq!(
+            property_count(&direct_copy, tag),
+            0,
+            "direct CopyTo must not invent absent named property 0x{tag:08x}"
+        );
+        assert_eq!(
+            property_count(
+                &transfer(RopId::FastTransferSourceCopyProperties.as_u8(), &[tag]),
+                tag,
+            ),
+            0,
+            "CopyProperties must not invent requested named property 0x{tag:08x}"
+        );
+    }
 }
 
 #[test]
@@ -2559,7 +2607,9 @@ fn fast_transfer_manifest_rejects_delegate_freebusy_from_wrong_folder() {
     let object = MapiObject::DelegateFreeBusyMessage {
         folder_id: INBOX_FOLDER_ID,
         message_id: snapshot.delegate_freebusy_messages()[0].id,
+        saved_state: None,
         pending_appointment_tombstone: None,
+        transaction: MapiDelegateFreeBusyTransaction::default(),
     };
 
     let manifest = fast_transfer_manifest_for_object(

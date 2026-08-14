@@ -1591,6 +1591,17 @@ impl Storage {
         .await?;
         sqlx::query(
             r#"
+            DELETE FROM mail_search_documents
+            WHERE tenant_id = $1 AND account_id = $2 AND mailbox_message_id = $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_message_id)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            r#"
             UPDATE mailboxes
             SET total_messages = GREATEST(0, total_messages - 1),
                 unread_messages = GREATEST(0, unread_messages - CASE WHEN $4 THEN 0 ELSE 1 END),

@@ -375,6 +375,19 @@ pub(in crate::mapi) struct MapiContactTransaction {
     pub(in crate::mapi) deleted_properties: HashSet<u32>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::mapi) struct MapiDelegateFreeBusyTransaction {
+    pub(in crate::mapi) pending_properties: HashMap<u32, MapiValue>,
+    pub(in crate::mapi) deleted_properties: HashSet<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct MapiSavedDelegateFreeBusyState {
+    pub(in crate::mapi) identity: MapiIdentityRecord,
+    pub(in crate::mapi) delegates: Vec<EwsDelegate>,
+    pub(in crate::mapi) custom_properties: Vec<MapiCustomPropertyValue>,
+}
+
 impl MapiContactTransaction {
     pub(in crate::mapi) fn new(open_mode_flags: u8, base_modseq: i64) -> Self {
         Self {
@@ -462,7 +475,9 @@ pub(in crate::mapi) enum MapiObject {
     DelegateFreeBusyMessage {
         folder_id: u64,
         message_id: u64,
+        saved_state: Option<MapiSavedDelegateFreeBusyState>,
         pending_appointment_tombstone: Option<Vec<u8>>,
+        transaction: MapiDelegateFreeBusyTransaction,
     },
     RecoverableItem {
         folder_id: u64,

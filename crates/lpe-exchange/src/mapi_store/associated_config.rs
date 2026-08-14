@@ -544,6 +544,7 @@ pub(super) fn virtual_local_freebusy_message(
         canonical_id: OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID,
         durable_identity: Some(identity.clone()),
         delegates: Vec::new(),
+        custom_properties: Vec::new(),
         message: DelegateFreeBusyMessageObject {
             id: OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID,
             account_id: Uuid::nil(),

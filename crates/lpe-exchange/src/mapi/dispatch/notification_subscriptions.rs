@@ -61,6 +61,7 @@ pub(super) async fn append_register_notification_response<S>(
     let input_context = format_handle_lineage_context(input_object);
     let notification_types = registration.notification_types;
     let notification_folder_id = registration.folder_id;
+    let notification_message_id = registration.message_id;
     if session.notification_cursor.is_none() {
         session.notification_cursor = store
             .fetch_mapi_notification_cursor(principal.account_id)
@@ -76,7 +77,7 @@ pub(super) async fn append_register_notification_response<S>(
     responses.extend_from_slice(&rop_register_notification_response(request));
     output_handles.push(handle);
     let registration_context = format!(
-        "phase=register_notification;request_id={request_id};request_rops={request_rop_names};input_index={};input_handle={};input_kind={};input_folder={};output_index={};output_handle={handle};notification_types=0x{notification_types:04x};whole_store={};notification_folder={};cursor_loaded={}",
+        "phase=register_notification;request_id={request_id};request_rops={request_rop_names};input_index={};input_handle={};input_kind={};input_folder={};output_index={};output_handle={handle};notification_types=0x{notification_types:04x};whole_store={};notification_folder={};notification_message={};cursor_loaded={}",
         request.input_handle_index().unwrap_or(0),
         format_optional_debug_handle(input_handle_value),
         input_object_kind,
@@ -85,6 +86,9 @@ pub(super) async fn append_register_notification_response<S>(
         notification_folder_id.is_none(),
         notification_folder_id
             .map(|folder_id| format!("0x{folder_id:016x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        notification_message_id
+            .map(|message_id| format!("0x{message_id:016x}"))
             .unwrap_or_else(|| "none".to_string()),
         session.notification_cursor.is_some()
     );
@@ -159,6 +163,9 @@ pub(super) async fn append_register_notification_response<S>(
         want_whole_store = notification_folder_id.is_none(),
         notification_folder_id = %notification_folder_id
             .map(|folder_id| format!("0x{folder_id:016x}"))
+            .unwrap_or_else(|| "none".to_string()),
+        notification_message_id = %notification_message_id
+            .map(|message_id| format!("0x{message_id:016x}"))
             .unwrap_or_else(|| "none".to_string()),
         notification_cursor_loaded = session.notification_cursor.is_some(),
         registration_context = %registration_context,

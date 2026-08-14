@@ -392,6 +392,7 @@ where
         .context("fetch canonical LocalFreebusy projection")?;
     let local_freebusy_identity = local_freebusy_projection.identity;
     let local_freebusy_delegates = local_freebusy_projection.delegates;
+    let local_freebusy_custom_properties = local_freebusy_projection.custom_properties;
     log_mapi_store_load_step(account_id, plan, "fetch recoverable items", 0);
     let mut recoverable_items = Vec::new();
     for folder in ["deletions", "versions", "purges"] {
@@ -905,6 +906,7 @@ where
         .with_delegate_freebusy_messages(delegate_freebusy_messages)
         .with_delegate_freebusy_message_identities(&snapshot_identities)?
         .with_local_freebusy_delegates(local_freebusy_delegates)?
+        .with_local_freebusy_custom_properties(local_freebusy_custom_properties)?
         .with_recoverable_items(recoverable_items)
         .with_reminders(reminders)
         .with_content_windows(content_windows)

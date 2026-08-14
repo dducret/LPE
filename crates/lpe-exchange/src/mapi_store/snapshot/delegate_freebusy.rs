@@ -13,6 +13,7 @@ impl MapiMailStoreSnapshot {
                 canonical_id: message.id,
                 durable_identity: None,
                 delegates: Vec::new(),
+                custom_properties: Vec::new(),
                 message,
             })
             .collect();
@@ -56,6 +57,19 @@ impl MapiMailStoreSnapshot {
             .find(|message| is_outlook_local_freebusy_message(message))
             .ok_or_else(|| anyhow!("canonical MAPI LocalFreebusy message is missing"))?;
         message.delegates = delegates;
+        Ok(self)
+    }
+
+    pub(crate) fn with_local_freebusy_custom_properties(
+        mut self,
+        custom_properties: Vec<MapiCustomPropertyValue>,
+    ) -> Result<Self> {
+        let message = self
+            .delegate_freebusy_messages
+            .iter_mut()
+            .find(|message| is_outlook_local_freebusy_message(message))
+            .ok_or_else(|| anyhow!("canonical MAPI LocalFreebusy message is missing"))?;
+        message.custom_properties = custom_properties;
         Ok(self)
     }
 

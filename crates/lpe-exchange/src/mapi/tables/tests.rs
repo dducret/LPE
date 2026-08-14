@@ -8096,11 +8096,11 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
     );
     assert_eq!(
         associated_config_property_value(&message, PID_NAME_CONTENT_CLASS_W_TAG),
-        Some(MapiValue::String("urn:content-classes:message".to_string()))
+        None
     );
     assert_eq!(
         associated_config_property_value(&message, PID_NAME_CONTENT_TYPE_W_TAG),
-        Some(MapiValue::String("text/xml".to_string()))
+        None
     );
     let explicit_marker = MapiAssociatedConfigMessage {
         properties_json: serde_json::json!({
@@ -8193,14 +8193,33 @@ fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
     );
     assert_eq!(
         associated_config_property_value(&explicit_no_streams, PID_NAME_CONTENT_CLASS_W_TAG),
-        Some(MapiValue::String("urn:content-classes:message".to_string()))
+        None
     );
     assert_eq!(
         associated_config_property_value(&explicit_no_streams, PID_NAME_CONTENT_TYPE_W_TAG),
-        Some(MapiValue::String("text/xml".to_string()))
+        None
     );
     assert_eq!(
         associated_config_named_property_tags(&explicit_no_streams),
+        Vec::<u32>::new()
+    );
+    let explicit_named_content = MapiAssociatedConfigMessage {
+        properties_json: serde_json::json!({
+            "0x801f001f": {"type": "string", "value": "persisted content class"},
+            "0x836b001f": {"type": "string", "value": "persisted content type"}
+        }),
+        ..message.clone()
+    };
+    assert_eq!(
+        associated_config_property_value(&explicit_named_content, PID_NAME_CONTENT_CLASS_W_TAG),
+        Some(MapiValue::String("persisted content class".to_string()))
+    );
+    assert_eq!(
+        associated_config_property_value(&explicit_named_content, PID_NAME_CONTENT_TYPE_W_TAG),
+        Some(MapiValue::String("persisted content type".to_string()))
+    );
+    assert_eq!(
+        associated_config_named_property_tags(&explicit_named_content),
         vec![PID_NAME_CONTENT_CLASS_W_TAG, PID_NAME_CONTENT_TYPE_W_TAG]
     );
     let work_hours = MapiAssociatedConfigMessage {

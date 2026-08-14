@@ -66,6 +66,15 @@ async fn postgres_local_freebusy_identity_rotates_only_for_default_delegate_stat
     assert!(error.to_string().contains("canonical delegate projection"));
 
     let initial = postgres_local_freebusy_identity(&storage, fixture.account_id).await?;
+    let freebusy_mailbox_id = crate::mapi_mailstore::virtual_special_mailbox(
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+    )
+    .expect("Freebusy Data virtual mailbox")
+    .id;
+    let before_seed_cursor = storage
+        .fetch_mapi_notification_cursor(fixture.account_id)
+        .await?
+        .unwrap_or(0);
     storage
         .upsert_mailbox_delegation_grant_with_preferences(
             lpe_storage::MailboxDelegationGrantInput {
@@ -88,6 +97,41 @@ async fn postgres_local_freebusy_identity_rotates_only_for_default_delegate_stat
     );
     assert_eq!(initial.object_id, seeded.object_id);
     assert_eq!(initial.source_key, seeded.source_key);
+    let seed_changes = storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            Some(freebusy_mailbox_id),
+            MapiCheckpointKind::Content,
+            before_seed_cursor as u64,
+        )
+        .await?;
+    assert_eq!(
+        seed_changes.changed_delegate_freebusy_ids,
+        vec![crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID],
+        "one delegate-driven rotation must produce one Freebusy Data ICS delta"
+    );
+    let seed_poll = storage
+        .poll_mapi_notifications(fixture.account_id, before_seed_cursor)
+        .await?;
+    let seed_notifications = seed_poll
+        .events
+        .iter()
+        .filter(|event| event.notification_test_shape().6 == Some("delegate_freebusy_message"))
+        .collect::<Vec<_>>();
+    assert_eq!(seed_notifications.len(), 1);
+    assert_eq!(
+        seed_notifications[0].notification_test_shape(),
+        (
+            MapiNotificationKind::Content,
+            MAPI_OBJECT_MODIFIED_EVENT_MASK,
+            crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+            Some(initial.object_id),
+            None,
+            None,
+            Some("delegate_freebusy_message"),
+        ),
+        "the durable delegate-driven rotation must be replayable by another MAPI session"
+    );
 
     storage
         .upsert_mailbox_delegation_grant_with_preferences(
@@ -195,6 +239,10 @@ async fn postgres_local_freebusy_identity_rotates_only_for_default_delegate_stat
     .await?;
     assert_eq!(revision, applied_revision);
 
+    let before_calendar_cursor = storage
+        .fetch_mapi_notification_cursor(fixture.account_id)
+        .await?
+        .unwrap_or(0);
     storage
         .upsert_client_event(UpsertClientEventInput {
             id: Some(Uuid::parse_str("78787878-7878-4878-9878-787878787878").unwrap()),
@@ -224,6 +272,29 @@ async fn postgres_local_freebusy_identity_rotates_only_for_default_delegate_stat
         directory_update, after_event,
         "ordinary Calendar Event state rotated LocalFreebusy"
     );
+    let calendar_control_changes = storage
+        .fetch_mapi_sync_changes(
+            fixture.account_id,
+            Some(freebusy_mailbox_id),
+            MapiCheckpointKind::Content,
+            before_calendar_cursor as u64,
+        )
+        .await?;
+    assert!(
+        calendar_control_changes
+            .changed_delegate_freebusy_ids
+            .is_empty(),
+        "ordinary Calendar churn leaked into Freebusy Data ICS"
+    );
+    let calendar_control_poll = storage
+        .poll_mapi_notifications(fixture.account_id, before_calendar_cursor)
+        .await?;
+    assert!(
+        calendar_control_poll.events.iter().all(|event| {
+            event.notification_test_shape().6 != Some("delegate_freebusy_message")
+        }),
+        "ordinary Calendar churn emitted a LocalFreebusy notification"
+    );
 
     storage
         .delete_mailbox_delegation_grant(
@@ -238,6 +309,296 @@ async fn postgres_local_freebusy_identity_rotates_only_for_default_delegate_stat
     assert!(last_delete.change_number > after_event.change_number);
     assert_ne!(last_delete.change_key, after_event.change_key);
     assert!(last_delete.last_modification_time > after_event.last_modification_time);
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn postgres_local_freebusy_custom_saves_return_one_authoritative_bag_and_replay_notification(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    let tenant_id = Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap();
+    let domain_id = Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap();
+    let delegate_account_id = Uuid::parse_str("10000000-0000-0000-0000-000000000008").unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES ($1, $2, $3, 'custom-save-delegate@example.test', 'Custom Save Delegate')
+        "#,
+    )
+    .bind(delegate_account_id)
+    .bind(tenant_id)
+    .bind(domain_id)
+    .execute(storage.pool())
+    .await?;
+    let initial = postgres_local_freebusy_identity(&storage, account_id).await?;
+    let baseline_cursor = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    let first_tag = 0x9100_000B;
+    let second_tag = 0x9101_000B;
+
+    storage
+        .upsert_mailbox_delegation_grant_with_preferences(
+            lpe_storage::MailboxDelegationGrantInput {
+                owner_account_id: account_id,
+                grantee_email: "custom-save-delegate@example.test".to_string(),
+                may_write: true,
+            },
+            lpe_storage::DelegatePreferencesPatch {
+                receives_meeting_request_copy: Some(true),
+                ..Default::default()
+            },
+            postgres_mapi_audit("pending-local-freebusy-delegate", delegate_account_id),
+        )
+        .await?;
+    let pending_projection_state = sqlx::query_as::<_, (i64, i64)>(
+        r#"
+        SELECT revision, applied_revision
+        FROM delegation_projection_state
+        WHERE tenant_id = $1 AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert!(pending_projection_state.0 > pending_projection_state.1);
+
+    let first = storage
+        .commit_local_freebusy_custom_property_changes(
+            account_id,
+            &[MapiCustomPropertyValue {
+                property_tag: first_tag,
+                property_type: 0x000B,
+                property_value: vec![1],
+            }],
+            &[],
+        )
+        .await?;
+    assert_eq!(first.delegates.len(), 1);
+    assert_eq!(first.delegates[0].grantee_account_id, delegate_account_id);
+    assert_eq!(
+        first.delegates[0].grantee_email,
+        "custom-save-delegate@example.test"
+    );
+    let applied_projection_state = sqlx::query_as::<_, (i64, i64)>(
+        r#"
+        SELECT revision, applied_revision
+        FROM delegation_projection_state
+        WHERE tenant_id = $1 AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(applied_projection_state.0, applied_projection_state.1);
+    assert_eq!(applied_projection_state.0, pending_projection_state.0);
+    let cursor_after_first = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    let (reloaded_after_first, reloaded_delegates) =
+        postgres_local_freebusy_projection(&storage, account_id).await?;
+    assert_eq!(reloaded_after_first, first.identity);
+    assert_eq!(reloaded_delegates.len(), 1);
+    assert_eq!(
+        reloaded_delegates[0].grantee_account_id,
+        delegate_account_id
+    );
+    assert_eq!(
+        storage
+            .fetch_mapi_notification_cursor(account_id)
+            .await?
+            .unwrap_or(0),
+        cursor_after_first,
+        "reloading the coalesced revision emitted a second journal row"
+    );
+    let coalesced_journal_rows = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'delegate_freebusy_message'
+          AND modseq = $3
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(first.identity.change_number as i64)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(coalesced_journal_rows, 1);
+    let second = storage
+        .commit_local_freebusy_custom_property_changes(
+            account_id,
+            &[MapiCustomPropertyValue {
+                property_tag: second_tag,
+                property_type: 0x000B,
+                property_value: vec![0],
+            }],
+            &[],
+        )
+        .await?;
+
+    assert!(first.identity.change_number > initial.change_number);
+    assert!(second.identity.change_number > first.identity.change_number);
+    assert_eq!(second.delegates.len(), 1);
+    assert_eq!(second.delegates[0].grantee_account_id, delegate_account_id);
+    assert_eq!(
+        second.custom_properties,
+        vec![
+            MapiCustomPropertyValue {
+                property_tag: first_tag,
+                property_type: 0x000B,
+                property_value: vec![1],
+            },
+            MapiCustomPropertyValue {
+                property_tag: second_tag,
+                property_type: 0x000B,
+                property_value: vec![0],
+            },
+        ],
+        "the second save must return the complete bag committed under its ChangeKey"
+    );
+
+    let freebusy_mailbox_id = crate::mapi_mailstore::virtual_special_mailbox(
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+    )
+    .expect("Freebusy Data virtual mailbox")
+    .id;
+    let changes = storage
+        .fetch_mapi_sync_changes(
+            account_id,
+            Some(freebusy_mailbox_id),
+            MapiCheckpointKind::Content,
+            baseline_cursor as u64,
+        )
+        .await?;
+    assert_eq!(
+        changes.changed_delegate_freebusy_ids,
+        vec![crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID],
+        "incremental Freebusy Data ICS must consume the journaled LocalFreebusy version"
+    );
+
+    let poll = storage
+        .poll_mapi_notifications(account_id, baseline_cursor)
+        .await?;
+    let local_freebusy_events = poll
+        .events
+        .iter()
+        .filter(|event| event.notification_test_shape().6 == Some("delegate_freebusy_message"))
+        .collect::<Vec<_>>();
+    assert_eq!(local_freebusy_events.len(), 2);
+    for event in local_freebusy_events {
+        assert_eq!(
+            event.notification_test_shape(),
+            (
+                MapiNotificationKind::Content,
+                MAPI_OBJECT_MODIFIED_EVENT_MASK,
+                crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+                Some(initial.object_id),
+                None,
+                None,
+                Some("delegate_freebusy_message"),
+            )
+        );
+    }
+
+    let paging_baseline = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    sqlx::query(
+        r#"
+        WITH generated AS (
+            SELECT
+                ordinal,
+                md5($2::text || ':mapi-sync-cursor:' || ordinal::text)::uuid AS id
+            FROM generate_series(1, 1001) AS ordinal
+        )
+        INSERT INTO mapi_associated_config_messages (
+            tenant_id, id, account_id, folder_id, message_class, subject, properties_json
+        )
+        SELECT
+            $1, id, $2, $3, 'IPM.Configuration.CursorFlood',
+            'Cursor flood ' || ordinal::text, '{}'::jsonb
+        FROM generated
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID as i64)
+    .execute(storage.pool())
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO mail_change_log (
+            tenant_id, account_id, object_kind, object_id, change_kind, modseq,
+            affected_principal_ids, summary_json
+        )
+        SELECT
+            $1, $2, 'associated_config', id, 'updated',
+            20000 + row_number() OVER (ORDER BY id)::bigint, ARRAY[$2]::uuid[],
+            jsonb_build_object('folderId', $3::text)
+        FROM mapi_associated_config_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_class = 'IPM.Configuration.CursorFlood'
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID as i64)
+    .execute(storage.pool())
+    .await?;
+    storage
+        .commit_local_freebusy_custom_property_changes(
+            account_id,
+            &[MapiCustomPropertyValue {
+                property_tag: 0x9102_000B,
+                property_type: 0x000B,
+                property_value: vec![1],
+            }],
+            &[],
+        )
+        .await?;
+    let tail_cursor = storage
+        .fetch_mapi_notification_cursor(account_id)
+        .await?
+        .unwrap_or(0);
+    let complete_page = storage
+        .fetch_mapi_sync_changes(
+            account_id,
+            Some(freebusy_mailbox_id),
+            MapiCheckpointKind::Content,
+            paging_baseline as u64,
+        )
+        .await?;
+    assert!(complete_page.changed_associated_config_ids.is_empty());
+    assert_eq!(
+        complete_page.changed_delegate_freebusy_ids,
+        vec![crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID],
+        "more than one storage page of Common Views rows must not hide the later LocalFreebusy change"
+    );
+    assert_eq!(complete_page.current_change_sequence, tail_cursor as u64);
+    let after_complete_page = storage
+        .fetch_mapi_sync_changes(
+            account_id,
+            Some(freebusy_mailbox_id),
+            MapiCheckpointKind::Content,
+            complete_page.current_change_sequence,
+        )
+        .await?;
+    assert!(after_complete_page.changed_delegate_freebusy_ids.is_empty());
 
     fixture.cleanup().await?;
     Ok(())

@@ -1263,6 +1263,10 @@ pub(super) fn changed_special_ids_for_folder(
         changed_ids.extend(changes.changed_deleted_calendar_event_ids.iter().copied());
         return changed_ids;
     }
+    if folder_id == FREEBUSY_DATA_FOLDER_ID {
+        changed_ids.extend(changes.changed_delegate_freebusy_ids.iter().copied());
+        return changed_ids;
+    }
     if snapshot
         .collaboration_folder_for_id(folder_id)
         .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Task)

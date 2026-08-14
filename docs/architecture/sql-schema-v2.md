@@ -151,12 +151,17 @@ canonical rule change rows; deletes write tombstones before removing the live
 script.
 
 UID allocation must update the mailbox row and insert membership rows in the
-same transaction. Expunge removes the live membership row only after writing a
-tombstone row.
+same transaction. Expunge writes its tombstone (and canonical recoverable row
+where applicable) before marking the membership `visibility = 'expunged'`; it
+does not physically delete the historical membership.
 
 Mailbox copy and move semantics are membership semantics, not message-row
 rewrites. Copy creates another visible `mailbox_messages` row for the same
 canonical `messages.id` and allocates a new UID from the target mailbox.
+Its `mail_search_documents` row is cloned from the exact selected source
+account and mailbox membership, never from an arbitrary row that shares only
+the tenant and message id. The target search document is bound to the new
+membership; copy preserves the source document.
 Move creates the target membership the same way, then marks the source
 membership `visibility = 'expunged'`, preserves the original source
 `imap_uid`, and writes a `tombstones` row with reason `move`. The target
@@ -164,6 +169,9 @@ membership receives a new UID from the target mailbox `uid_next`. Protocol
 replay uses the move change row plus tombstone to report JMAP `Email/changes`,
 mailbox count changes, IMAP QRESYNC-style expunge state, and MAPI checkpoint
 replay without rewriting historical UIDs.
+Move or expunge removes only the source membership's search document in the
+same transaction; the historical membership and tombstone remain, and search
+documents for other visible memberships are preserved.
 
 At the MAPI boundary, a server-side inter-folder move is also an identity
 transition: the destination receives a new MID and SourceKey, while the source
@@ -379,10 +387,16 @@ Protocol adapters store only cursor rows:
 - `mapi_named_properties` stores durable per-account named-property mappings
   for Outlook-cached property ids. `mapi_custom_property_values` stores opaque
   Outlook-specific property values by canonical object identity, property tag,
-  and property type. These tables preserve object fidelity; they must not
-  become protocol-local mailbox, `Sent`, outbox, search, rights, or AI/search
-  projection state. Each `(tenant_id, account_id, property_id)` is unique so
+  and property type, including provider-private named metadata for the fixed
+  `LocalFreebusy` Delegate Information object. It does not own the object's
+  grants, delegate preferences, or MAPI identity/version. These tables preserve
+  object fidelity; they must not become protocol-local mailbox, `Sent`, outbox,
+  search, rights, or AI/search projection state. Each `(tenant_id, account_id, property_id)` is unique so
   Outlook never receives one property id for two distinct named properties.
+  A committed `LocalFreebusy` custom-property mutation writes a `mapiOnly`
+  `delegate_freebusy_message` change-log row in the same transaction as its
+  property bag and identity rotation. MAPI notification replay and Freebusy Data
+  ICS consume that row, while JMAP cursors and user-visible APIs ignore it.
 - `mapi_profile_settings` stores only bounded account-scoped Outlook profile
   settings required for cached-mode reuse. The initial setting is
   `ipm_subtree_ost_id`, the client-written IPM subtree OST identity reloaded
@@ -653,8 +667,8 @@ queries exclude rows without `reminder_set`, rows with dismissed reminders,
 completed tasks, and cancelled task/calendar state; diagnostic queries can
 include inactive rows with explicit statuses.
 
-Delegate/free-busy MAPI message contents also do not have a protocol-local
-table. They are computed from canonical `calendar_grants`, `sender_rights`,
+Canonical delegate/free-busy properties do not have a dedicated protocol-local
+content table. They are computed from canonical `calendar_grants`, `sender_rights`,
 `delegate_preferences`, account directory rows, and `calendar_events` using the
 same same-tenant free/busy visibility rules as
 `/api/mail/delegation/free-busy`. The one Outlook `LocalFreebusy` projection has
@@ -664,7 +678,10 @@ MID/SourceKey/CN/ChangeKey/PCL/LMT tuple survives reconnects. The small
 applied revisions used to atomically pair the default-Inbox/default-Calendar
 delegate tuple with its MAPI version, including final deletes and projected
 delegate name/email changes; it is not LocalFreebusy content or API-visible state. Ordinary
-`calendar_events` changes do not advance it.
+`calendar_events` changes do not advance it. Provider-private named metadata on
+the fixed object uses the shared `mapi_custom_property_values` table and is
+published only by a successful Message Save; it does not own grants,
+preferences, or calendar content.
 
 Durable contacts and recipient suggestions are separate concepts. Durable
 contacts live only in `contact_books` and `contacts`, including Outlook-visible

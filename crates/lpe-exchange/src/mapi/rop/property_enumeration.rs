@@ -52,6 +52,7 @@ pub(in crate::mapi) fn object_supports_property_reads(object: &MapiObject) -> bo
     }
 }
 
+#[cfg(test)]
 pub(in crate::mapi) fn rop_get_properties_all_response(
     request: &RopRequest,
     session: &MapiSession,
@@ -60,6 +61,28 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    rop_get_properties_all_response_with_custom(
+        request,
+        session,
+        object,
+        principal,
+        mailboxes,
+        emails,
+        snapshot,
+        &HashMap::new(),
+    )
+}
+
+pub(in crate::mapi) fn rop_get_properties_all_response_with_custom(
+    request: &RopRequest,
+    session: &MapiSession,
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    custom_values: &HashMap<u32, Vec<u8>>,
 ) -> Vec<u8> {
     let Some(object) = object else {
         return rop_error_response(
@@ -91,10 +114,15 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
     }
 
     let effective_event = effective_event_properties(object, snapshot);
-    let tags = effective_event
+    let mut tags = effective_event
         .as_ref()
         .map(|effective| effective.tags.clone())
         .unwrap_or_else(|| get_properties_all_tags(object, snapshot));
+    if matches!(object, MapiObject::DelegateFreeBusyMessage { .. }) {
+        tags.extend(custom_values.keys().copied());
+        tags.sort_unstable();
+        tags.dedup();
+    }
     let mut response = vec![0x08, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
     let size_limit = request_property_size_limit(request);
@@ -107,18 +135,36 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
             effective_event.is_some(),
             storage_response_tag,
         );
-        let value = effective_event
-            .as_ref()
-            .and_then(|effective| {
-                effective
-                    .values_by_property_id
-                    .get(&MapiPropertyTag::new(storage_tag).property_id())
-            })
-            .filter(|(tag, _)| *tag == storage_tag)
-            .map(|(_, value)| {
-                let mut encoded = Vec::new();
-                write_mapi_value(&mut encoded, storage_response_tag, value);
-                encoded
+        let custom_value = custom_values.get(&storage_tag).map(|encoded| {
+            if storage_response_tag == storage_tag {
+                return encoded.clone();
+            }
+            let mut cursor = Cursor::new(encoded);
+            let Ok(value) = parse_mapi_property_value(&mut cursor, storage_tag) else {
+                return encoded.clone();
+            };
+            if cursor.remaining() != 0 {
+                return encoded.clone();
+            }
+            let mut converted = Vec::new();
+            write_mapi_value(&mut converted, storage_response_tag, &value);
+            converted
+        });
+        let value = custom_value
+            .or_else(|| {
+                effective_event
+                    .as_ref()
+                    .and_then(|effective| {
+                        effective
+                            .values_by_property_id
+                            .get(&MapiPropertyTag::new(storage_tag).property_id())
+                    })
+                    .filter(|(tag, _)| *tag == storage_tag)
+                    .map(|(_, value)| {
+                        let mut encoded = Vec::new();
+                        write_mapi_value(&mut encoded, storage_response_tag, value);
+                        encoded
+                    })
             })
             .unwrap_or_else(|| {
                 serialize_object_property(
@@ -141,11 +187,22 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
     response
 }
 
+#[cfg(test)]
 pub(in crate::mapi) fn rop_get_properties_list_response(
     request: &RopRequest,
     session: &MapiSession,
     object: Option<&MapiObject>,
     snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    rop_get_properties_list_response_with_custom_tags(request, session, object, snapshot, &[])
+}
+
+pub(in crate::mapi) fn rop_get_properties_list_response_with_custom_tags(
+    request: &RopRequest,
+    session: &MapiSession,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+    custom_property_tags: &[u32],
 ) -> Vec<u8> {
     let Some(object) = object else {
         return rop_error_response(
@@ -171,9 +228,14 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
             return rop_error_response(0x09, request.response_handle_index(), 0x8004_010F);
         }
     }
-    let tags = effective_event_properties(object, snapshot)
+    let mut tags = effective_event_properties(object, snapshot)
         .map(|effective| effective.tags)
         .unwrap_or_else(|| get_properties_list_tags(object));
+    if matches!(object, MapiObject::DelegateFreeBusyMessage { .. }) {
+        tags.extend_from_slice(custom_property_tags);
+        tags.sort_unstable();
+        tags.dedup();
+    }
     let mut response = vec![0x09, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.extend_from_slice(&(tags.len() as u16).to_le_bytes());

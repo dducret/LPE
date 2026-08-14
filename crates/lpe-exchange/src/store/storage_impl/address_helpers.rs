@@ -162,8 +162,18 @@ fn mapi_notification_event_from_change_row(
                 row.try_get::<Uuid, _>("object_id").ok(),
                 mailbox_folder_ids,
             )?;
-            let virtual_metadata =
-                crate::mapi_mailstore::virtual_special_folder_metadata(changed_folder_id);
+            let virtual_metadata = crate::mapi_mailstore::virtual_special_folder_metadata(
+                changed_folder_id,
+            )
+            .or_else(|| {
+                let canonical_id = row.try_get::<Uuid, _>("object_id").ok()?;
+                crate::mapi::identity::logical_special_folder_ids()
+                    .find(|folder_id| {
+                        crate::mapi_mailstore::virtual_special_mailbox_id(*folder_id)
+                            == canonical_id
+                    })
+                    .and_then(crate::mapi_mailstore::virtual_special_folder_metadata)
+            });
             let parent_id_present = row
                 .try_get::<bool, _>("hierarchy_parent_id_present")
                 .unwrap_or(false);
@@ -585,6 +595,9 @@ fn mapi_notification_event_from_change_row(
                 .with_canonical_ids(None, Some(config_id))
                 .with_object_kind("associated_config"),
             )
+        }
+        "delegate_freebusy_message" => {
+            local_freebusy_notification_event_from_change_row(&row, &change_kind, cursor, modseq)
         }
         "mailbox_message" | "attachment" => {
             let scope_role = row.try_get::<String, _>("scope_role").ok();

@@ -288,6 +288,10 @@ async fn reserve_imported_event_range(
     first_global_counter: u64,
     last_global_counter: u64,
 ) -> Result<()> {
+    let (first_global_counter, last_global_counter) = (
+        first_global_counter.min(last_global_counter),
+        first_global_counter.max(last_global_counter),
+    );
     let end_global_counter_exclusive = last_global_counter
         .checked_add(1)
         .ok_or_else(|| anyhow::anyhow!("test MAPI local range overflow"))?;
@@ -2726,7 +2730,16 @@ async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_re
     .to_string();
     update.attachment_changes.upserts = vec![attachment_upsert(0, "ordre-du-jour-été.pdf")];
     let saved = fixture.storage.commit_mapi_event_update(update).await?;
-    assert!(matches!(saved, MapiEventCommitOutcome::Saved(_)));
+    let MapiEventCommitOutcome::Saved(saved) = saved else {
+        panic!("expected saved MAPI Event outcome");
+    };
+    let owner_active_version = saved.version;
+    let delegate_active_versions = fixture
+        .storage
+        .fetch_mapi_event_versions(delegate_account_id, &[fixture.event_id])
+        .await?;
+    assert_eq!(delegate_active_versions.len(), 1);
+    let delegate_active_version = &delegate_active_versions[0];
 
     let moved = fixture
         .storage
@@ -2744,13 +2757,25 @@ async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_re
         .expect("the principal had an active MAPI identity");
     assert_eq!(identity.account_id, fixture.account_id);
     assert_eq!(identity.old_mapi_object_id, mapi_store_id(50));
-    assert_eq!(identity.new_mapi_object_id, mapi_store_id(101));
+    assert_eq!(
+        identity.new_mapi_object_id,
+        mapi_store_id(identity.new_change_number)
+    );
     assert_eq!(identity.old_source_key, change_key(50));
-    assert_eq!(identity.new_source_key, change_key(101));
-    assert_eq!(identity.old_change_number, 100);
-    assert_eq!(identity.new_change_number, 101);
-    assert_eq!(identity.old_change_key, change_key(100));
-    assert_eq!(identity.new_change_key, change_key(101));
+    assert_eq!(
+        identity.new_source_key,
+        change_key(identity.new_change_number)
+    );
+    assert_eq!(
+        identity.old_change_number,
+        owner_active_version.change_number
+    );
+    assert!(identity.new_change_number > identity.old_change_number);
+    assert_eq!(identity.old_change_key, owner_active_version.change_key);
+    assert_eq!(
+        identity.new_change_key,
+        change_key(identity.new_change_number)
+    );
 
     let owner_deleted_versions = fixture
         .storage
@@ -2758,11 +2783,17 @@ async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_re
         .await?;
     assert_eq!(owner_deleted_versions.len(), 1);
     assert_eq!(owner_deleted_versions[0].event_id, fixture.event_id);
-    assert_eq!(owner_deleted_versions[0].change_number, 101);
-    assert_eq!(owner_deleted_versions[0].change_key, change_key(101));
+    assert_eq!(
+        owner_deleted_versions[0].change_number,
+        identity.new_change_number
+    );
+    assert_eq!(
+        owner_deleted_versions[0].change_key,
+        identity.new_change_key
+    );
     assert_eq!(
         owner_deleted_versions[0].predecessor_change_list,
-        predecessor_change_list(&change_key(101))
+        predecessor_change_list(&identity.new_change_key)
     );
     let persisted_deleted_version = sqlx::query(
         r#"
@@ -2794,11 +2825,18 @@ async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_re
         .await?;
     assert_eq!(delegate_deleted_versions.len(), 1);
     assert_eq!(delegate_deleted_versions[0].event_id, fixture.event_id);
-    assert_eq!(delegate_deleted_versions[0].change_number, 201);
-    assert_eq!(delegate_deleted_versions[0].change_key, change_key(201));
+    assert!(delegate_deleted_versions[0].change_number > delegate_active_version.change_number);
+    assert_eq!(
+        delegate_deleted_versions[0].change_key,
+        change_key(delegate_deleted_versions[0].change_number)
+    );
     assert_eq!(
         delegate_deleted_versions[0].predecessor_change_list,
-        predecessor_change_list(&change_key(201))
+        predecessor_change_list(&delegate_deleted_versions[0].change_key)
+    );
+    assert_ne!(
+        delegate_deleted_versions[0].change_number,
+        identity.new_change_number
     );
     assert_eq!(
         delegate_deleted_versions[0].updated_at,
@@ -2929,7 +2967,7 @@ async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_re
     );
     assert_eq!(
         persisted_mapping.get::<i64, _>("new_mapi_object_id"),
-        mapi_store_id(101) as i64
+        identity.new_mapi_object_id as i64
     );
     assert_eq!(
         persisted_mapping.get::<Vec<u8>, _>("old_source_key"),
@@ -2937,7 +2975,7 @@ async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_re
     );
     assert_eq!(
         persisted_mapping.get::<Vec<u8>, _>("new_source_key"),
-        change_key(101)
+        identity.new_source_key
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
@@ -2969,10 +3007,16 @@ async fn calendar_event_move_to_deleted_items_preserves_canonical_content_and_re
     );
     assert_eq!(
         delegate_mapping.get::<i64, _>("new_mapi_object_id"),
-        mapi_store_id(201) as i64
+        mapi_store_id(delegate_deleted_versions[0].change_number) as i64
     );
-    assert_eq!(delegate_mapping.get::<i64, _>("old_change_number"), 200);
-    assert_eq!(delegate_mapping.get::<i64, _>("new_change_number"), 201);
+    assert_eq!(
+        delegate_mapping.get::<i64, _>("old_change_number"),
+        delegate_active_version.change_number as i64
+    );
+    assert_eq!(
+        delegate_mapping.get::<i64, _>("new_change_number"),
+        delegate_deleted_versions[0].change_number as i64
+    );
 
     assert!(fixture
         .storage

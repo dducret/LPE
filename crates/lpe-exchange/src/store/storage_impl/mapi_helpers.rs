@@ -102,6 +102,9 @@ async fn mapi_special_object_kind_for_checkpoint_mailbox(
     if matches_virtual_folder(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID) {
         return Ok(Some("navigation_shortcut"));
     }
+    if matches_virtual_folder(crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID) {
+        return Ok(Some("delegate_freebusy_message"));
+    }
     let mailbox_role = sqlx::query_scalar::<_, String>(
         r#"
         SELECT role
@@ -884,4 +887,3 @@ mod tests {
         assert!(allowed.contains(&(crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID as i64)));
     }
 }
-

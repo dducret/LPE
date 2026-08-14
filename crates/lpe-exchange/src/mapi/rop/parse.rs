@@ -142,16 +142,22 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn notification_folder_id(&self) -> Option<u64> {
-        if self.rop_id != 0x29 || self.notification_want_whole_store()? {
-            return None;
-        }
-        let offset = if self.notification_types()? & 0x0400 != 0 {
-            4
-        } else {
-            3
-        };
+        let offset = self.notification_object_offset()?;
         let bytes = self.payload.get(offset..offset + 8)?;
         crate::mapi::identity::object_id_from_wire_id(bytes)
+    }
+
+    pub(in crate::mapi) fn notification_message_id(&self) -> Option<u64> {
+        let offset = self.notification_object_offset()? + 8;
+        let bytes = self.payload.get(offset..offset + 8)?;
+        crate::mapi::identity::object_id_from_wire_id(bytes)
+    }
+
+    fn notification_object_offset(&self) -> Option<usize> {
+        if self.notification_want_whole_store()? {
+            return None;
+        }
+        Some(3 + usize::from(self.notification_types()? & 0x0400 != 0))
     }
 
     pub(in crate::mapi) fn message_id(&self) -> Option<u64> {

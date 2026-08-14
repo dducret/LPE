@@ -1,4 +1,5 @@
 use super::*;
+use crate::mapi_store::is_outlook_local_freebusy_message;
 
 pub(super) fn is_permissions_dispatch_rop(rop_id: RopId) -> bool {
     matches!(
@@ -69,6 +70,21 @@ pub(super) async fn append_modify_permissions_response<S>(
         return;
     };
     let folder_id = *folder_id;
+    // [MS-OXCPERM] section 2.2.2.1 permits ReplaceRows with an empty
+    // PermissionsData array. Probe M sends that exact no-op against the
+    // owner's fresh, empty Freebusy Data permission table.
+    if folder_id == FREEBUSY_DATA_FOLDER_ID
+        && request.payload.as_slice() == [0x01, 0x00, 0x00]
+        && snapshot.permissions_for_folder(folder_id).is_empty()
+        && snapshot
+            .delegate_freebusy_messages()
+            .iter()
+            .find(|message| is_outlook_local_freebusy_message(message))
+            .is_some_and(|message| message.delegates.is_empty())
+    {
+        responses.extend_from_slice(&rop_modify_permissions_response(request));
+        return;
+    }
     let mailbox_folder = folder_row_for_id(folder_id, mailboxes);
     let public_folder = snapshot.public_folder_for_id(folder_id);
     let calendar_collection_folder = snapshot

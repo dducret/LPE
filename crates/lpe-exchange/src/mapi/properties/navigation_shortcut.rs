@@ -59,44 +59,6 @@ pub(in crate::mapi) fn navigation_shortcut_mutation_properties(
     .collect()
 }
 
-pub(in crate::mapi) fn navigation_shortcut_with_pending_properties(
-    message: &MapiNavigationShortcutMessage,
-    account_id: Uuid,
-    pending_properties: &HashMap<u32, MapiValue>,
-    deleted_properties: &HashSet<u32>,
-) -> MapiNavigationShortcutMessage {
-    if pending_properties.is_empty() && deleted_properties.is_empty() {
-        return message.clone();
-    }
-    let properties = navigation_shortcut_properties_with_pending(
-        message,
-        account_id,
-        pending_properties,
-        deleted_properties,
-    );
-    let updated = navigation_shortcut_from_mapi_properties(
-        account_id,
-        Some(message.canonical_id),
-        &properties,
-    );
-    MapiNavigationShortcutMessage {
-        id: message.id,
-        folder_id: message.folder_id,
-        canonical_id: message.canonical_id,
-        durable_identity: message.durable_identity.clone(),
-        subject: updated.subject,
-        target_folder_id: updated.target_folder_id,
-        shortcut_type: updated.shortcut_type,
-        flags: updated.flags,
-        save_stamp: updated.save_stamp,
-        section: updated.section,
-        ordinal: updated.ordinal,
-        group_header_id: updated.group_header_id,
-        group_name: updated.group_name,
-        client_properties: updated.client_properties,
-    }
-}
-
 pub(in crate::mapi) fn navigation_shortcut_properties_with_pending(
     message: &MapiNavigationShortcutMessage,
     account_id: Uuid,

@@ -350,6 +350,8 @@ macro_rules! store_impl_public_address_im {
                         AS navigation_shortcut_mapi_object_id,
                     associated_config_identity.mapi_object_id
                         AS associated_config_mapi_object_id,
+                    NULLIF(log.summary_json->>'mapiMessageId', '')::bigint
+                        AS delegate_freebusy_mapi_object_id,
                     notification_message.is_seen AS message_is_seen,
                     notification_message.is_draft AS message_is_draft,
                     message.has_attachments AS message_has_attachments,
@@ -536,7 +538,8 @@ macro_rules! store_impl_public_address_im {
                   AND (log.retained_until IS NULL OR log.retained_until > NOW())
                   AND log.object_kind IN (
                       'mailbox', 'mailbox_message', 'attachment', 'contact', 'calendar_event',
-                      'deleted_calendar_event', 'calendar', 'navigation_shortcut', 'associated_config'
+                      'deleted_calendar_event', 'calendar', 'navigation_shortcut', 'associated_config',
+                      'delegate_freebusy_message'
                   )
                 ORDER BY log.cursor ASC
                 LIMIT 101

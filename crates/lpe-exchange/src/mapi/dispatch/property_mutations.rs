@@ -252,6 +252,10 @@ where
                 }
             }
             Some(MapiObject::DelegateFreeBusyMessage { .. }) => {
+                // Outlook's provider-private named properties (for example
+                // `fixupfbfolder`) are staged on this Message handle until a
+                // successful SaveChangesMessage. They never replace canonical
+                // grants or delegate preferences.
                 stage_delegate_freebusy_property_values(
                     session,
                     handle_slots,
@@ -426,30 +430,41 @@ fn stage_delegate_freebusy_property_values(
     let Some(MapiObject::DelegateFreeBusyMessage {
         message_id,
         pending_appointment_tombstone,
+        transaction,
         ..
     }) = input_object_mut(session, handle_slots, request)
     else {
         return Err(anyhow!("MAPI delegate free/busy message was not found"));
     };
-    if !snapshot.is_outlook_local_freebusy_message_id(*message_id)
-        || values.iter().any(|(tag, _)| {
-            canonical_property_storage_tag(*tag) != PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE
-        })
-    {
+    if !snapshot.is_outlook_local_freebusy_message_id(*message_id) {
         return Err(anyhow!(
             "unsupported delegate free/busy Message property mutation"
         ));
     }
+    for (tag, value) in &values {
+        if canonical_property_storage_tag(*tag) == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE {
+            if !matches!(value, MapiValue::Binary(_)) {
+                return Err(anyhow!("appointment tombstone must be binary"));
+            }
+        } else if !is_custom_property_tag(*tag) {
+            return Err(anyhow!(
+                "unsupported delegate free/busy Message property mutation"
+            ));
+        }
+    }
     for (tag, value) in values {
         if canonical_property_storage_tag(tag) == PID_TAG_SCHEDULE_INFO_APPOINTMENT_TOMBSTONE {
             let MapiValue::Binary(value) = value else {
-                return Err(anyhow!("appointment tombstone must be binary"));
+                unreachable!()
             };
             // [MS-OXCPRPT] sections 3.2.5.4 and 3.2.5.13: the new value is
             // immediately visible through this Message handle, while Save is
             // the publication boundary. The computed LocalFreebusy object
             // never stores a second copy outside canonical calendar state.
             *pending_appointment_tombstone = Some(value);
+        } else {
+            transaction.deleted_properties.remove(&tag);
+            transaction.pending_properties.insert(tag, value);
         }
     }
     Ok(())
@@ -506,6 +521,14 @@ pub(super) async fn append_delete_properties_response<S>(
         &property_tags,
     ) {
         result
+    } else if delegate_freebusy_mutation {
+        stage_delegate_freebusy_property_deletions(
+            session,
+            handle_slots,
+            request,
+            snapshot,
+            &property_tags,
+        )
     } else if matches!(object, Some(MapiObject::Event { .. })) {
         stage_event_property_deletions(session, handle_slots, request, snapshot, &property_tags)
             .map(|problems| event_property_problems = problems)
@@ -668,6 +691,38 @@ pub(super) async fn append_delete_properties_response<S>(
             0x8004_0102,
         )),
     }
+}
+
+fn stage_delegate_freebusy_property_deletions(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: &[u32],
+) -> Result<()> {
+    let Some(MapiObject::DelegateFreeBusyMessage {
+        message_id,
+        transaction,
+        ..
+    }) = input_object_mut(session, handle_slots, request)
+    else {
+        return Err(anyhow!("MAPI delegate free/busy message was not found"));
+    };
+    if !snapshot.is_outlook_local_freebusy_message_id(*message_id)
+        || property_tags
+            .iter()
+            .copied()
+            .any(|tag| !is_custom_property_tag(tag))
+    {
+        return Err(anyhow!(
+            "unsupported delegate free/busy Message property deletion"
+        ));
+    }
+    for tag in property_tags {
+        transaction.pending_properties.remove(tag);
+        transaction.deleted_properties.insert(*tag);
+    }
+    Ok(())
 }
 
 fn restore_requested_property_problem_tags(

@@ -1499,11 +1499,7 @@ fn associated_config_get_properties_all_returns_its_named_properties() {
     };
     assert_eq!(
         associated_config_named_property_tags(&message),
-        vec![
-            PID_NAME_CONTENT_CLASS_W_TAG,
-            PID_NAME_CONTENT_TYPE_W_TAG,
-            0x9001_001F,
-        ]
+        vec![0x9001_001F]
     );
     let object = MapiObject::AssociatedConfig {
         folder_id: message.folder_id,
@@ -1525,11 +1521,7 @@ fn associated_config_get_properties_all_returns_its_named_properties() {
         &[],
         &MapiMailStoreSnapshot::empty(),
     );
-    for (tag, value) in [
-        (PID_NAME_CONTENT_CLASS_W_TAG, "urn:content-classes:message"),
-        (PID_NAME_CONTENT_TYPE_W_TAG, "text/xml"),
-        (0x9001_001F, "persisted named value"),
-    ] {
+    for (tag, value) in [(0x9001_001Fu32, "persisted named value")] {
         assert!(contains_bytes(&unicode_response, &tag.to_le_bytes()));
         assert!(contains_utf16(&unicode_response, value));
     }
@@ -1549,17 +1541,7 @@ fn associated_config_get_properties_all_returns_its_named_properties() {
         &[],
         &MapiMailStoreSnapshot::empty(),
     );
-    for (tag, value) in [
-        (
-            (PID_NAME_CONTENT_CLASS_W_TAG & 0xffff_0000) | 0x001e,
-            "urn:content-classes:message",
-        ),
-        (
-            (PID_NAME_CONTENT_TYPE_W_TAG & 0xffff_0000) | 0x001e,
-            "text/xml",
-        ),
-        (0x9001_001E, "persisted named value"),
-    ] {
+    for (tag, value) in [(0x9001_001Eu32, "persisted named value")] {
         assert!(contains_bytes(&string8_response, &tag.to_le_bytes()));
         assert!(contains_ascii_z(&string8_response, value));
     }
@@ -3266,7 +3248,9 @@ fn delegate_freebusy_getprops_rejects_message_from_wrong_folder() {
     let object = MapiObject::DelegateFreeBusyMessage {
         folder_id: INBOX_FOLDER_ID,
         message_id: snapshot.delegate_freebusy_messages()[0].id,
+        saved_state: None,
         pending_appointment_tombstone: None,
+        transaction: MapiDelegateFreeBusyTransaction::default(),
     };
     let mut payload = Vec::new();
     payload.extend_from_slice(&4096u16.to_le_bytes());

@@ -205,6 +205,11 @@ pub(super) async fn fetch_custom_property_values_for_request<S>(
 where
     S: ExchangeStore,
 {
+    if let Some(values) =
+        effective_local_freebusy_custom_property_values(object, snapshot, Some(property_tags))
+    {
+        return Ok(values);
+    }
     let Some((object_kind, canonical_id)) =
         custom_property_object_identity(object, mailboxes, emails, snapshot)
     else {
@@ -276,11 +281,174 @@ where
     Ok(values)
 }
 
+pub(super) fn effective_local_freebusy_custom_property_values(
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: Option<&[u32]>,
+) -> Option<HashMap<u32, Vec<u8>>> {
+    let MapiObject::DelegateFreeBusyMessage {
+        folder_id,
+        message_id,
+        saved_state,
+        transaction,
+        ..
+    } = object?
+    else {
+        return None;
+    };
+    let message = snapshot
+        .delegate_freebusy_message_for_id(*message_id)
+        .filter(|message| message.folder_id == *folder_id)?;
+    if !crate::mapi_store::is_outlook_local_freebusy_message(message) {
+        return Some(HashMap::new());
+    }
+
+    let requested = |tag: u32| property_tags.is_none_or(|tags| tags.contains(&tag));
+    let custom_properties = saved_state
+        .as_ref()
+        .map(|state| state.custom_properties.as_slice())
+        .unwrap_or(&message.custom_properties);
+    let mut values = custom_properties
+        .iter()
+        .filter_map(|value| {
+            if !requested(value.property_tag) || value.property_type != value.property_tag as u16 {
+                return None;
+            }
+            let mut cursor = Cursor::new(&value.property_value);
+            parse_mapi_property_value(&mut cursor, value.property_tag)
+                .ok()
+                .filter(|_| cursor.remaining() == 0)
+                .map(|_| (value.property_tag, value.property_value.clone()))
+        })
+        .collect::<HashMap<_, _>>();
+    for tag in &transaction.deleted_properties {
+        values.remove(tag);
+    }
+    for (tag, value) in &transaction.pending_properties {
+        if requested(*tag) {
+            let mut encoded = Vec::new();
+            write_mapi_value(&mut encoded, *tag, value);
+            values.insert(*tag, encoded);
+        }
+    }
+    Some(values)
+}
+
+pub(in crate::mapi) fn effective_delegate_freebusy_message(
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<crate::mapi_store::MapiDelegateFreeBusyMessage> {
+    let MapiObject::DelegateFreeBusyMessage {
+        folder_id,
+        message_id,
+        saved_state,
+        ..
+    } = object?
+    else {
+        return None;
+    };
+    let mut message = snapshot
+        .delegate_freebusy_message_for_id(*message_id)
+        .filter(|message| message.folder_id == *folder_id)?
+        .clone();
+    if let Some(state) = saved_state {
+        message.durable_identity = Some(state.identity.clone());
+        message.delegates = state.delegates.clone();
+        message.custom_properties = state.custom_properties.clone();
+    }
+    Some(message)
+}
+
+async fn custom_property_values_for_copy_source<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    source: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: Option<&[u32]>,
+) -> Result<Option<HashMap<u32, MapiCustomPropertyValue>>>
+where
+    S: ExchangeStore,
+{
+    let Some((source_kind, source_id)) =
+        custom_property_object_identity(source, mailboxes, emails, snapshot)
+    else {
+        return Ok(None);
+    };
+    if let Some(values) =
+        effective_local_freebusy_custom_property_values(source, snapshot, property_tags)
+    {
+        return Ok(Some(
+            values
+                .into_iter()
+                .map(|(property_tag, property_value)| {
+                    (
+                        property_tag,
+                        MapiCustomPropertyValue {
+                            property_tag,
+                            property_type: MapiPropertyTag::new(property_tag).property_type_code(),
+                            property_value,
+                        },
+                    )
+                })
+                .collect(),
+        ));
+    }
+
+    let source_account_id = custom_property_storage_account_id(principal, source, snapshot);
+    let stored_values = match property_tags {
+        Some(property_tags) => {
+            store
+                .fetch_mapi_custom_property_values(
+                    source_account_id,
+                    source_kind,
+                    source_id,
+                    property_tags,
+                )
+                .await?
+        }
+        None => {
+            store
+                .fetch_all_mapi_custom_property_values(source_account_id, source_kind, source_id)
+                .await?
+        }
+    };
+    Ok(Some(
+        stored_values
+            .into_iter()
+            .chain(staged_custom_property_values(source, property_tags))
+            .map(|value| (value.property_tag, value))
+            .collect(),
+    ))
+}
+
+fn stage_local_freebusy_copied_custom_property_values(
+    destination: Option<&mut MapiObject>,
+    values: &[MapiCustomPropertyValue],
+) -> Result<bool> {
+    let Some(MapiObject::DelegateFreeBusyMessage { transaction, .. }) = destination else {
+        return Ok(false);
+    };
+    for value in values {
+        let mut cursor = Cursor::new(&value.property_value);
+        let property_value = parse_mapi_property_value(&mut cursor, value.property_tag)?;
+        if cursor.remaining() != 0 {
+            return Err(anyhow!("invalid copied LocalFreebusy property value"));
+        }
+        transaction.deleted_properties.remove(&value.property_tag);
+        transaction
+            .pending_properties
+            .insert(value.property_tag, property_value);
+    }
+    Ok(true)
+}
+
 pub(super) async fn copy_custom_property_values_for_request<S>(
     store: &S,
     principal: &AccountPrincipal,
     source: Option<&MapiObject>,
-    destination: Option<&MapiObject>,
+    mut destination: Option<&mut MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
@@ -292,29 +460,26 @@ where
     if property_tags.is_empty() || !property_tags.iter().copied().all(is_custom_property_tag) {
         return Ok(None);
     }
-    let Some((source_kind, source_id)) =
-        custom_property_object_identity(source, mailboxes, emails, snapshot)
-    else {
-        return Ok(None);
-    };
     let Some((destination_kind, destination_id)) =
-        custom_property_object_identity(destination, mailboxes, emails, snapshot)
+        custom_property_object_identity(destination.as_deref(), mailboxes, emails, snapshot)
     else {
         return Ok(None);
     };
-    let source_account_id = custom_property_storage_account_id(principal, source, snapshot);
     let destination_account_id =
-        custom_property_storage_account_id(principal, destination, snapshot);
-    let source_values = store
-        .fetch_mapi_custom_property_values(source_account_id, source_kind, source_id, property_tags)
-        .await?
-        .into_iter()
-        .map(|value| (value.property_tag, value))
-        .collect::<HashMap<_, _>>();
-    let mut source_values = source_values;
-    for value in staged_custom_property_values(source, Some(property_tags)) {
-        source_values.insert(value.property_tag, value);
-    }
+        custom_property_storage_account_id(principal, destination.as_deref(), snapshot);
+    let Some(source_values) = custom_property_values_for_copy_source(
+        store,
+        principal,
+        source,
+        mailboxes,
+        emails,
+        snapshot,
+        Some(property_tags),
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
     let mut copied_values = Vec::new();
     let mut problems = Vec::new();
     for (index, property_tag) in property_tags.iter().copied().enumerate() {
@@ -329,14 +494,19 @@ where
         }
     }
     if !copied_values.is_empty() {
-        store
-            .upsert_mapi_custom_property_values(
-                destination_account_id,
-                destination_kind,
-                destination_id,
-                &copied_values,
-            )
-            .await?;
+        if !stage_local_freebusy_copied_custom_property_values(
+            destination.as_deref_mut(),
+            &copied_values,
+        )? {
+            store
+                .upsert_mapi_custom_property_values(
+                    destination_account_id,
+                    destination_kind,
+                    destination_id,
+                    &copied_values,
+                )
+                .await?;
+        }
     }
     Ok(Some(problems))
 }
@@ -345,7 +515,7 @@ pub(super) async fn copy_all_custom_property_values_for_request<S>(
     store: &S,
     principal: &AccountPrincipal,
     source: Option<&MapiObject>,
-    destination: Option<&MapiObject>,
+    mut destination: Option<&mut MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
@@ -354,47 +524,44 @@ pub(super) async fn copy_all_custom_property_values_for_request<S>(
 where
     S: ExchangeStore,
 {
-    let Some((source_kind, source_id)) =
-        custom_property_object_identity(source, mailboxes, emails, snapshot)
-    else {
-        return Ok(false);
-    };
     let Some((destination_kind, destination_id)) =
-        custom_property_object_identity(destination, mailboxes, emails, snapshot)
+        custom_property_object_identity(destination.as_deref(), mailboxes, emails, snapshot)
     else {
         return Ok(false);
     };
-    let source_account_id = custom_property_storage_account_id(principal, source, snapshot);
     let destination_account_id =
-        custom_property_storage_account_id(principal, destination, snapshot);
+        custom_property_storage_account_id(principal, destination.as_deref(), snapshot);
     let excluded = excluded_property_tags
         .iter()
         .copied()
         .collect::<HashSet<_>>();
-    let mut values = store
-        .fetch_all_mapi_custom_property_values(source_account_id, source_kind, source_id)
-        .await?
-        .into_iter()
-        .chain(staged_custom_property_values(source, None).into_iter())
+    let Some(source_values) = custom_property_values_for_copy_source(
+        store, principal, source, mailboxes, emails, snapshot, None,
+    )
+    .await?
+    else {
+        return Ok(false);
+    };
+    let mut values = source_values
+        .into_values()
         .filter(|value| {
             is_custom_property_tag(value.property_tag) && !excluded.contains(&value.property_tag)
         })
-        .map(|value| (value.property_tag, value))
-        .collect::<HashMap<_, _>>()
-        .into_values()
         .collect::<Vec<_>>();
     values.sort_by_key(|value| value.property_tag);
     if values.is_empty() {
         return Ok(false);
     }
-    store
-        .upsert_mapi_custom_property_values(
-            destination_account_id,
-            destination_kind,
-            destination_id,
-            &values,
-        )
-        .await?;
+    if !stage_local_freebusy_copied_custom_property_values(destination.as_deref_mut(), &values)? {
+        store
+            .upsert_mapi_custom_property_values(
+                destination_account_id,
+                destination_kind,
+                destination_id,
+                &values,
+            )
+            .await?;
+    }
     Ok(true)
 }
 
@@ -516,6 +683,20 @@ pub(super) fn custom_property_object_identity(
         } => snapshot
             .public_folder_item_for_id(*folder_id, *item_id)
             .map(|item| (MapiCustomPropertyObjectKind::PublicFolderItem, item.item.id)),
+        MapiObject::DelegateFreeBusyMessage {
+            folder_id,
+            message_id,
+            ..
+        } => snapshot
+            .delegate_freebusy_message_for_id(*message_id)
+            .filter(|message| message.folder_id == *folder_id)
+            .filter(|message| crate::mapi_store::is_outlook_local_freebusy_message(message))
+            .map(|message| {
+                (
+                    MapiCustomPropertyObjectKind::DelegateFreeBusyMessage,
+                    message.canonical_id,
+                )
+            }),
         _ => None,
     }
 }

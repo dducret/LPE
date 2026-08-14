@@ -758,51 +758,237 @@ delegation_projection_shape_ok() {
   local database_url="$1"
 
   psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
-WITH required_triggers(trigger_name) AS (
+WITH expected_triggers(
+  trigger_name,
+  table_name,
+  function_name,
+  trigger_type,
+  update_columns
+) AS (
   VALUES
-    ('mailbox_delegation_grants_projection_change'::text),
-    ('calendar_grants_projection_change'),
-    ('sender_rights_projection_change'),
-    ('delegate_preferences_projection_change'),
-    ('mailboxes_default_delegation_projection_change'),
-    ('calendars_default_delegation_projection_change'),
-    ('accounts_delegate_directory_projection_change')
+    (
+      'mailbox_delegation_grants_projection_change'::text,
+      'mailbox_delegation_grants'::text,
+      'track_delegation_projection_change'::text,
+      29::smallint,
+      ARRAY[]::text[]
+    ),
+    (
+      'calendar_grants_projection_change',
+      'calendar_grants',
+      'track_delegation_projection_change',
+      29,
+      ARRAY[]::text[]
+    ),
+    (
+      'sender_rights_projection_change',
+      'sender_rights',
+      'track_delegation_projection_change',
+      29,
+      ARRAY[]::text[]
+    ),
+    (
+      'delegate_preferences_projection_change',
+      'delegate_preferences',
+      'track_delegation_projection_change',
+      29,
+      ARRAY[]::text[]
+    ),
+    (
+      'mailboxes_default_delegation_projection_change',
+      'mailboxes',
+      'track_default_delegation_collection_change',
+      27,
+      ARRAY['role']::text[]
+    ),
+    (
+      'calendars_default_delegation_projection_change',
+      'calendars',
+      'track_default_delegation_collection_change',
+      27,
+      ARRAY['role']::text[]
+    ),
+    (
+      'accounts_delegate_directory_projection_change',
+      'accounts',
+      'track_delegate_directory_projection_change',
+      17,
+      ARRAY['display_name', 'primary_email']::text[]
+    )
+),
+canonical_functions AS (
+  SELECT COUNT(*) = 4 AS shape_ok
+  FROM pg_proc procedure_row
+  JOIN pg_namespace namespace_row ON namespace_row.oid = procedure_row.pronamespace
+  JOIN pg_language language_row ON language_row.oid = procedure_row.prolang
+  WHERE namespace_row.nspname = 'public'
+    AND language_row.lanname = 'plpgsql'
+    AND procedure_row.prokind = 'f'
+    AND (
+      (
+        procedure_row.proname = 'advance_delegation_projection_state'
+        AND procedure_row.prorettype = 'void'::regtype
+        AND oidvectortypes(procedure_row.proargtypes) = 'uuid, uuid'
+        AND position('INSERT INTO delegation_projection_state' IN procedure_row.prosrc) > 0
+        AND position('WHERE EXISTS' IN procedure_row.prosrc) > 0
+        AND position('revision = delegation_projection_state.revision + 1' IN procedure_row.prosrc) > 0
+        AND position('updated_at = GREATEST' IN procedure_row.prosrc) > 0
+      )
+      OR (
+        procedure_row.proname = 'track_delegation_projection_change'
+        AND procedure_row.prorettype = 'trigger'::regtype
+        AND procedure_row.pronargs = 0
+        AND position('to_jsonb(OLD) - ARRAY[''id'', ''created_at'', ''updated_at'']' IN procedure_row.prosrc) > 0
+        AND position('mailbox_delegation_grants' IN procedure_row.prosrc) > 0
+        AND position('calendar_grants' IN procedure_row.prosrc) > 0
+        AND position('sender_rights' IN procedure_row.prosrc) > 0
+        AND position('delegate_preferences' IN procedure_row.prosrc) > 0
+        AND position('advance_delegation_projection_state(OLD.tenant_id, OLD.owner_account_id)' IN procedure_row.prosrc) > 0
+        AND position('advance_delegation_projection_state(NEW.tenant_id, NEW.owner_account_id)' IN procedure_row.prosrc) > 0
+      )
+      OR (
+        procedure_row.proname = 'track_default_delegation_collection_change'
+        AND procedure_row.prorettype = 'trigger'::regtype
+        AND procedure_row.pronargs = 0
+        AND position('TG_TABLE_NAME = ''mailboxes''' IN procedure_row.prosrc) > 0
+        AND position('OLD.role = ''inbox''' IN procedure_row.prosrc) > 0
+        AND position('TG_TABLE_NAME = ''calendars''' IN procedure_row.prosrc) > 0
+        AND position('OLD.role = ''calendar''' IN procedure_row.prosrc) > 0
+        AND position('advance_delegation_projection_state' IN procedure_row.prosrc) > 0
+      )
+      OR (
+        procedure_row.proname = 'track_delegate_directory_projection_change'
+        AND procedure_row.prorettype = 'trigger'::regtype
+        AND procedure_row.pronargs = 0
+        AND position('OLD.primary_email IS NOT DISTINCT FROM NEW.primary_email' IN procedure_row.prosrc) > 0
+        AND position('OLD.display_name IS NOT DISTINCT FROM NEW.display_name' IN procedure_row.prosrc) > 0
+        AND position('mailbox_delegation_grants' IN procedure_row.prosrc) > 0
+        AND position('calendar_grants' IN procedure_row.prosrc) > 0
+        AND position('sender_rights' IN procedure_row.prosrc) > 0
+        AND position('delegate_preferences' IN procedure_row.prosrc) > 0
+        AND position('ORDER BY owner_account_id' IN procedure_row.prosrc) > 0
+        AND position('advance_delegation_projection_state' IN procedure_row.prosrc) > 0
+      )
+    )
 )
 SELECT CASE WHEN
   (
-    SELECT COUNT(*) = 3
+    SELECT COUNT(*) = 5
     FROM information_schema.columns
     WHERE table_schema = 'public'
       AND table_name = 'delegation_projection_state'
-      AND column_name IN ('revision', 'applied_revision', 'updated_at')
-      AND is_nullable = 'NO'
-      AND data_type = CASE column_name
-        WHEN 'revision' THEN 'bigint'
-        WHEN 'applied_revision' THEN 'bigint'
-        WHEN 'updated_at' THEN 'timestamp with time zone'
-      END
-  )
-  AND (
-    SELECT COUNT(DISTINCT procedure_row.proname) = 4
-    FROM pg_proc procedure_row
-    JOIN pg_namespace namespace_row ON namespace_row.oid = procedure_row.pronamespace
-    WHERE namespace_row.nspname = 'public'
-      AND procedure_row.proname IN (
-        'advance_delegation_projection_state',
-        'track_delegation_projection_change',
-        'track_default_delegation_collection_change',
-        'track_delegate_directory_projection_change'
+      AND (
+            (column_name = 'tenant_id' AND data_type = 'uuid' AND is_nullable = 'NO')
+            OR (column_name = 'account_id' AND data_type = 'uuid' AND is_nullable = 'NO')
+            OR (column_name = 'revision' AND data_type = 'bigint' AND is_nullable = 'NO')
+            OR (column_name = 'applied_revision' AND data_type = 'bigint' AND is_nullable = 'NO')
+            OR (column_name = 'updated_at' AND data_type = 'timestamp with time zone' AND is_nullable = 'NO')
       )
   )
-  AND NOT EXISTS (
-    SELECT trigger_name FROM required_triggers
-    EXCEPT
-    SELECT trigger_row.tgname
-    FROM pg_trigger trigger_row
+  AND (
+    SELECT COUNT(*) = 5
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'delegation_projection_state'
+  )
+  AND (
+    SELECT COUNT(*) = 3
+    FROM pg_attribute attribute_row
+    JOIN pg_attrdef default_row
+      ON default_row.adrelid = attribute_row.attrelid
+     AND default_row.adnum = attribute_row.attnum
+    WHERE attribute_row.attrelid = 'public.delegation_projection_state'::regclass
+      AND NOT attribute_row.attisdropped
+      AND (
+            (attribute_row.attname = 'revision'
+              AND pg_get_expr(default_row.adbin, default_row.adrelid) = '1')
+            OR (attribute_row.attname = 'applied_revision'
+              AND pg_get_expr(default_row.adbin, default_row.adrelid) = '0')
+            OR (attribute_row.attname = 'updated_at'
+              AND pg_get_expr(default_row.adbin, default_row.adrelid) = 'clock_timestamp()')
+      )
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint constraint_row
+    WHERE constraint_row.conrelid = 'public.delegation_projection_state'::regclass
+      AND constraint_row.contype = 'p'
+      AND constraint_row.convalidated
+      AND pg_get_constraintdef(constraint_row.oid) = 'PRIMARY KEY (tenant_id, account_id)'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint constraint_row
+    WHERE constraint_row.conrelid = 'public.delegation_projection_state'::regclass
+      AND constraint_row.contype = 'f'
+      AND constraint_row.confrelid = 'public.accounts'::regclass
+      AND constraint_row.confdeltype = 'c'
+      AND constraint_row.convalidated
+      AND (
+        SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+        FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+        JOIN pg_attribute attribute_row
+          ON attribute_row.attrelid = constraint_row.conrelid
+         AND attribute_row.attnum = key_column.attnum
+      ) = ARRAY['tenant_id', 'account_id']::text[]
+      AND (
+        SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+        FROM unnest(constraint_row.confkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+        JOIN pg_attribute attribute_row
+          ON attribute_row.attrelid = constraint_row.confrelid
+         AND attribute_row.attnum = key_column.attnum
+      ) = ARRAY['tenant_id', 'id']::text[]
+  )
+  AND (
+    SELECT COUNT(*) = 2
+    FROM pg_constraint constraint_row
+    WHERE constraint_row.conrelid = 'public.delegation_projection_state'::regclass
+      AND constraint_row.contype = 'c'
+      AND constraint_row.convalidated
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint constraint_row
+    WHERE constraint_row.conrelid = 'public.delegation_projection_state'::regclass
+      AND constraint_row.contype = 'c'
+      AND constraint_row.convalidated
+      AND pg_get_constraintdef(constraint_row.oid) LIKE '%revision > 0%'
+      AND pg_get_constraintdef(constraint_row.oid) NOT LIKE '%applied_revision%'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint constraint_row
+    WHERE constraint_row.conrelid = 'public.delegation_projection_state'::regclass
+      AND constraint_row.contype = 'c'
+      AND constraint_row.convalidated
+      AND pg_get_constraintdef(constraint_row.oid) LIKE '%applied_revision >= 0%'
+      AND pg_get_constraintdef(constraint_row.oid) LIKE '%applied_revision <= revision%'
+  )
+  AND (SELECT shape_ok FROM canonical_functions)
+  AND (
+    SELECT COUNT(*) = 7
+    FROM expected_triggers expected
+    JOIN pg_trigger trigger_row ON trigger_row.tgname = expected.trigger_name
     JOIN pg_class table_row ON table_row.oid = trigger_row.tgrelid
-    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
-    WHERE namespace_row.nspname = 'public'
+    JOIN pg_namespace table_namespace ON table_namespace.oid = table_row.relnamespace
+    JOIN pg_proc procedure_row ON procedure_row.oid = trigger_row.tgfoid
+    JOIN pg_namespace procedure_namespace ON procedure_namespace.oid = procedure_row.pronamespace
+    WHERE table_namespace.nspname = 'public'
+      AND procedure_namespace.nspname = 'public'
+      AND table_row.relname = expected.table_name
+      AND procedure_row.proname = expected.function_name
       AND NOT trigger_row.tgisinternal
+      AND trigger_row.tgenabled = 'O'
+      AND trigger_row.tgtype = expected.trigger_type
+      AND trigger_row.tgnargs = 0
+      AND ARRAY(
+        SELECT attribute_row.attname::text
+        FROM unnest(trigger_row.tgattr) AS update_column(attnum)
+        JOIN pg_attribute attribute_row
+          ON attribute_row.attrelid = trigger_row.tgrelid
+         AND attribute_row.attnum = update_column.attnum
+        ORDER BY attribute_row.attname
+      ) = expected.update_columns
   )
 THEN 1 ELSE 0 END;
 SQL
@@ -818,7 +1004,40 @@ SELECT CASE WHEN
     FROM pg_constraint
     WHERE conrelid = 'public.mapi_custom_property_values'::regclass
       AND contype = 'c'
+      AND convalidated
       AND pg_get_constraintdef(oid) LIKE '%public_folder_item%'
+      AND pg_get_constraintdef(oid) LIKE '%delegate_freebusy_message%'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint constraint_row
+    WHERE constraint_row.conrelid = 'public.mapi_custom_property_values'::regclass
+      AND constraint_row.contype = 'p'
+      AND constraint_row.convalidated
+      AND pg_get_constraintdef(constraint_row.oid) = 'PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id, property_tag, property_type)'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint constraint_row
+    WHERE constraint_row.conrelid = 'public.mapi_custom_property_values'::regclass
+      AND constraint_row.contype = 'f'
+      AND constraint_row.confrelid = 'public.accounts'::regclass
+      AND constraint_row.confdeltype = 'c'
+      AND constraint_row.convalidated
+      AND (
+        SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+        FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+        JOIN pg_attribute attribute_row
+          ON attribute_row.attrelid = constraint_row.conrelid
+         AND attribute_row.attnum = key_column.attnum
+      ) = ARRAY['tenant_id', 'account_id']::text[]
+      AND (
+        SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+        FROM unnest(constraint_row.confkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+        JOIN pg_attribute attribute_row
+          ON attribute_row.attrelid = constraint_row.confrelid
+         AND attribute_row.attnum = key_column.attnum
+      ) = ARRAY['tenant_id', 'id']::text[]
   )
   AND (
     SELECT COUNT(*)
@@ -857,6 +1076,24 @@ SELECT CASE WHEN
     WHERE conrelid = 'public.mail_change_log'::regclass
       AND contype = 'c'
       AND pg_get_constraintdef(oid) LIKE '%associated_config%'
+      AND pg_get_constraintdef(oid) LIKE '%delegate_freebusy_message%'
+      AND pg_get_constraintdef(oid) NOT LIKE '%account_id IS NOT NULL%'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.mail_change_log'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%associated_config%'
+      AND pg_get_constraintdef(oid) LIKE '%delegate_freebusy_message%'
+      AND pg_get_constraintdef(oid) LIKE '%account_id IS NOT NULL%'
+      AND pg_get_constraintdef(oid) LIKE '%mailbox_id IS NULL%'
+      AND pg_get_constraintdef(oid) LIKE '%collection_id IS NULL%'
+      AND pg_get_constraintdef(oid) LIKE '%mapiOnly%true%'
+      AND (length(pg_get_constraintdef(oid)) - length(replace(pg_get_constraintdef(oid), 'folderId', ''))) >= 3 * length('folderId')
+      AND (length(pg_get_constraintdef(oid)) - length(replace(pg_get_constraintdef(oid), 'mapiMessageId', ''))) >= 3 * length('mapiMessageId')
+      AND (length(pg_get_constraintdef(oid)) - length(replace(pg_get_constraintdef(oid), 'jsonb_typeof', ''))) >= 2 * length('jsonb_typeof')
+      AND (length(pg_get_constraintdef(oid)) - length(replace(pg_get_constraintdef(oid), '^[1-9][0-9]*$', ''))) >= 2 * length('^[1-9][0-9]*$')
   )
 THEN 1 ELSE 0 END;
 SQL
@@ -931,6 +1168,28 @@ SELECT CASE WHEN
   ) = 1
   AND (
     SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'recoverable_items'
+      AND (
+            (column_name = 'id' AND data_type = 'uuid' AND is_nullable = 'NO')
+            OR (column_name = 'tenant_id' AND data_type = 'uuid' AND is_nullable = 'NO')
+            OR (column_name = 'account_id' AND data_type = 'uuid' AND is_nullable = 'NO')
+            OR (column_name = 'message_id' AND data_type = 'uuid' AND is_nullable = 'NO')
+            OR (column_name = 'source_mailbox_message_id' AND data_type = 'uuid' AND is_nullable = 'NO')
+            OR (column_name = 'source_mailbox_id' AND data_type = 'uuid' AND is_nullable = 'NO')
+            OR (column_name = 'source_imap_uid' AND data_type = 'bigint' AND is_nullable = 'NO')
+            OR (column_name = 'source_thread_id' AND data_type = 'uuid' AND is_nullable = 'YES')
+            OR (column_name = 'recoverable_folder' AND data_type = 'text' AND is_nullable = 'NO')
+            OR (column_name = 'delete_kind' AND data_type = 'text' AND is_nullable = 'NO')
+            OR (column_name = 'status' AND data_type = 'text' AND is_nullable = 'NO')
+            OR (column_name = 'retained_until' AND data_type = 'timestamp with time zone' AND is_nullable = 'YES')
+            OR (column_name = 'legal_hold' AND data_type = 'boolean' AND is_nullable = 'NO')
+            OR (column_name = 'created_by_protocol' AND data_type = 'text' AND is_nullable = 'NO')
+      )
+  ) = 14
+  AND (
+    SELECT COUNT(*)
     FROM pg_constraint
     WHERE conrelid = 'public.mailboxes'::regclass
       AND conname = 'mailboxes_retention_policy_tag_fk'
@@ -951,7 +1210,59 @@ SELECT CASE WHEN
       AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'
       AND pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'
   )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.recoverable_items'::regclass
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) = 'UNIQUE (tenant_id, account_id, source_mailbox_message_id)'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.recoverable_items'::regclass
+      AND contype = 'c'
+      AND convalidated
+      AND pg_get_constraintdef(oid) LIKE '%created_by_protocol%'
+      AND pg_get_constraintdef(oid) LIKE '%''jmap''%'
+      AND pg_get_constraintdef(oid) LIKE '%''imap''%'
+      AND pg_get_constraintdef(oid) LIKE '%''ews''%'
+      AND pg_get_constraintdef(oid) LIKE '%''mapi''%'
+      AND pg_get_constraintdef(oid) LIKE '%''api''%'
+      AND pg_get_constraintdef(oid) LIKE '%''retention_worker''%'
+      AND (length(pg_get_constraintdef(oid)) - length(replace(pg_get_constraintdef(oid), '::text', ''))) = 6 * length('::text')
+  )
 THEN 1 ELSE 0 END;
+SQL
+}
+
+mail_search_membership_shape_ok() {
+  local database_url="$1"
+
+  psql "${database_url}" -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT CASE WHEN EXISTS (
+  SELECT 1
+  FROM pg_constraint constraint_row
+  WHERE constraint_row.conrelid = 'public.mail_search_documents'::regclass
+    AND constraint_row.contype = 'f'
+    AND constraint_row.confrelid = 'public.mailbox_messages'::regclass
+    AND constraint_row.confdeltype = 'c'
+    AND constraint_row.convalidated
+    AND (
+      SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+      FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+      JOIN pg_attribute attribute_row
+        ON attribute_row.attrelid = constraint_row.conrelid
+       AND attribute_row.attnum = key_column.attnum
+    ) = ARRAY['tenant_id', 'account_id', 'mailbox_message_id', 'message_id']::text[]
+    AND (
+      SELECT array_agg(attribute_row.attname::text ORDER BY key_column.ordinality)
+      FROM unnest(constraint_row.confkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+      JOIN pg_attribute attribute_row
+        ON attribute_row.attrelid = constraint_row.confrelid
+       AND attribute_row.attnum = key_column.attnum
+    ) = ARRAY['tenant_id', 'account_id', 'id', 'message_id']::text[]
+) THEN 1 ELSE 0 END;
 SQL
 }
 
@@ -1011,6 +1322,7 @@ canonical_schema_shape_is_current() {
   [[ "$(mapi_auxiliary_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(mapi_low_dynamic_property_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(recoverable_items_shape_ok "${database_url}")" == "1" ]] || return 1
+  [[ "$(mail_search_membership_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(public_folder_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(mapi_local_replica_range_shape_ok "${database_url}")" == "1" ]] || return 1
   [[ "$(mapi_outlook_cache_fidelity_shape_ok "${database_url}")" == "1" ]] || return 1

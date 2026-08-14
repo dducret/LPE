@@ -90,6 +90,7 @@ fn execute_overflow_restores_deliverable_notification_batch() {
                 logon_id: 0,
                 notification_types: MapiNotificationEventMask::TableModified.as_u16(),
                 folder_id: Some(INBOX_FOLDER_ID),
+                message_id: None,
             },
         },
     );
@@ -121,6 +122,7 @@ fn execute_overflow_does_not_restore_unmatched_notification() {
                 logon_id: 0,
                 notification_types: MapiNotificationEventMask::TableModified.as_u16(),
                 folder_id: Some(INBOX_FOLDER_ID),
+                message_id: None,
             },
         },
     );
@@ -441,6 +443,7 @@ fn release_only_execute_with_notification_target_requires_identity_scope() {
                 logon_id: 0,
                 notification_types: crate::mapi::wire::MapiNotificationEventMask::NewMail.as_u16(),
                 folder_id: None,
+                message_id: None,
             },
         },
     );

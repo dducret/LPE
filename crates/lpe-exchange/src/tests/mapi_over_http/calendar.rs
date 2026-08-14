@@ -6166,9 +6166,9 @@ async fn mapi_over_http_freebusy_data_folder_content_sync_projects_canonical_fai
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 3)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 2)));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 3);
+    assert_eq!(stream.message_changes.len(), 2);
     assert!(stream
         .message_changes
         .iter()
@@ -6181,10 +6181,6 @@ async fn mapi_over_http_freebusy_data_folder_content_sync_projects_canonical_fai
         .message_changes
         .iter()
         .any(|message| message.subject == "Free/busy for owner@example.test"));
-    assert!(stream
-        .message_changes
-        .iter()
-        .any(|message| message.subject == "LocalFreebusy"));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.Delegate")
@@ -7261,6 +7257,7 @@ async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_ev
         0x1013_001Fu32, // PidTagBodyHtml
         0x0C1A_001Fu32, // PidTagSenderName
         0x0C1F_001Fu32, // PidTagSenderEmailAddress
+        0x5D01_001Fu32, // PidTagSenderSmtpAddress
         0x0E04_001Fu32, // PidTagDisplayTo
         0x8238_001Fu32, // PidLidAllAttendeesString
         0x823B_001Fu32, // PidLidToAttendeesString
@@ -7308,6 +7305,10 @@ async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_ev
         &utf16z("<p>Contents table body</p>")
     ));
     assert!(contains_bytes(&response_rops, &utf16z("Alice Calendar")));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test")
+    ));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("alice@example.test")

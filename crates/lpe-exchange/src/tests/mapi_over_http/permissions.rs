@@ -89,7 +89,32 @@ async fn mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_g
     let delegate_member_id = identities[0].object_id;
 
     let service = ExchangeService::new(storage.clone());
-    let (execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    // Probe M sends this exact [MS-OXCPERM] section 2.2.2.1 empty
+    // ReplaceRows request against the fresh Freebusy Data permission table.
+    let mut empty_freebusy_rops = Vec::new();
+    append_rop_open_folder(
+        &mut empty_freebusy_rops,
+        0,
+        1,
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+    );
+    empty_freebusy_rops.extend_from_slice(&[0x40, 0x00, 0x01, 0x01]);
+    empty_freebusy_rops.extend_from_slice(&0u16.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&empty_freebusy_rops, &[logon_handle, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x40, 0x01, 0, 0, 0, 0]));
+
+    renew_mapi_request_id(&mut execute_headers);
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
     rops.extend_from_slice(&[0x40, 0x00, 0x01, 0x00]); // RopModifyPermissions.
@@ -138,6 +163,38 @@ async fn mapi_over_http_calendar_modify_permissions_writes_postgresql_calendar_g
     assert!(delegate_calendars.iter().any(|calendar| {
         calendar.owner_account_id == fixture.account_id && calendar.rights.may_write
     }));
+
+    // The Freebusy Data ACL surface is intentionally fail-closed while its
+    // distinct role semantics are not representable. Once a canonical
+    // delegate exists, an empty ReplaceRows request is no longer the fresh
+    // empty-table no-op and must not falsely report that it removed the row.
+    renew_mapi_request_id(&mut execute_headers);
+    let mut nonempty_freebusy_rops = Vec::new();
+    append_rop_open_folder(
+        &mut nonempty_freebusy_rops,
+        0,
+        1,
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+    );
+    nonempty_freebusy_rops.extend_from_slice(&[0x40, 0x00, 0x01, 0x01]);
+    nonempty_freebusy_rops.extend_from_slice(&0u16.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &nonempty_freebusy_rops,
+                &[logon_handle, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x40, 0x01, 0x0F, 0x01, 0x04, 0x80]
+    ));
 
     fixture.cleanup().await?;
     Ok(())
@@ -291,6 +348,17 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
         .clone()
         .expect("LocalFreebusy has a durable MAPI identity");
     let identity_codec = snapshot.identity_codec().clone();
+    let projection_state_before = sqlx::query_as::<_, (i64, i64)>(
+        r#"
+        SELECT revision, applied_revision
+        FROM delegation_projection_state
+        WHERE tenant_id = $1 AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(delegate_account_id)
+    .fetch_one(storage.pool())
+    .await?;
 
     let service = ExchangeService::new(storage.clone());
     let mut connect_headers = mapi_headers("Connect");
@@ -721,7 +789,563 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
         read_rop_utf16z(&response_rops, &mut value_offset).unwrap(),
         "IPM.Microsoft.ScheduleData.FreeBusy"
     );
-    let first_getprops = response_rops[get_offset..value_offset].to_vec();
+    // Probe M follows the successful table/open path by creating and writing
+    // this provider-private named flag on LocalFreebusy. It is compatibility
+    // metadata on the Delegate Information object, not canonical grant state.
+    let ps_public_strings = [
+        0x29, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ];
+    let fixupfbfolder_name = utf16z("urn:schemas-microsoft-com:office:outlook#fixupfbfolder");
+    renew_mapi_request_id(&mut execute_headers);
+    let mut named_rops = Vec::new();
+    named_rops.extend_from_slice(&[
+        0x56, 0x00, 0x00, 0x02, // RopGetPropertyIdsFromNames, create missing on Logon.
+    ]);
+    named_rops.extend_from_slice(&1u16.to_le_bytes());
+    named_rops.push(0x01); // MNID_STRING.
+    named_rops.extend_from_slice(&ps_public_strings);
+    named_rops.push(fixupfbfolder_name.len() as u8);
+    named_rops.extend_from_slice(&fixupfbfolder_name);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&named_rops, &[logon_handle])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let named_marker = [0x56, 0x00, 0, 0, 0, 0, 1, 0];
+    let named_offset = response_rops
+        .windows(named_marker.len())
+        .position(|window| window == named_marker)
+        .expect("LocalFreebusy fixupfbfolder named-property mapping");
+    let fixupfbfolder_id = u16::from_le_bytes(
+        response_rops[named_offset + named_marker.len()..named_offset + named_marker.len() + 2]
+            .try_into()
+            .unwrap(),
+    );
+    assert!(fixupfbfolder_id >= crate::mapi::properties::DYNAMIC_NAMED_PROPERTY_ID_START);
+    let fixupfbfolder_tag = u32::from(fixupfbfolder_id) << 16 | 0x000B;
+
+    // [MS-OXCPRPT] section 3.2.5.4: a Message SetProperties value is
+    // handle-local until SaveChangesMessage. Prove the pending value through
+    // all three property reads while a separately opened handle still sees
+    // the durable absence.
+    renew_mapi_request_id(&mut execute_headers);
+    let mut staged_fixup_rops = Vec::new();
+    append_rop_open_message(
+        &mut staged_fixup_rops,
+        0,
+        1,
+        advertised_target.0,
+        advertised_target.1,
+    );
+    let mut true_fixup_value = Vec::new();
+    append_mapi_bool_property(&mut true_fixup_value, fixupfbfolder_tag, true);
+    append_rop_set_properties(&mut staged_fixup_rops, 1, 1, &true_fixup_value);
+    append_rop_get_properties_specific(&mut staged_fixup_rops, 1, &[fixupfbfolder_tag]);
+    staged_fixup_rops.extend_from_slice(&[0x08, 0x00, 0x01, 0x00, 0x10, 0x01, 0x00]);
+    staged_fixup_rops.extend_from_slice(&[0x09, 0x00, 0x01]);
+    append_rop_open_message(
+        &mut staged_fixup_rops,
+        0,
+        2,
+        advertised_target.0,
+        advertised_target.1,
+    );
+    append_rop_get_properties_specific(&mut staged_fixup_rops, 2, &[fixupfbfolder_tag]);
+    staged_fixup_rops.extend_from_slice(&[0x01, 0x00, 0x01, 0x01, 0x00, 0x02]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &staged_fixup_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0A, 0x01, 0, 0, 0, 0]));
+    let row_offset = mapi_get_properties_specific_standard_row_offset(&response_rops, 1)
+        .expect("pending LocalFreebusy fixupfbfolder GetProps");
+    assert_eq!(response_rops[row_offset + 1], 1);
+    let get_all_start = response_rops
+        .windows(6)
+        .position(|window| window == [0x08, 0x01, 0, 0, 0, 0])
+        .expect("pending LocalFreebusy GetPropertiesAll");
+    let get_list_start = response_rops[get_all_start + 6..]
+        .windows(6)
+        .position(|window| window == [0x09, 0x01, 0, 0, 0, 0])
+        .map(|offset| get_all_start + 6 + offset)
+        .expect("pending LocalFreebusy GetPropertiesList");
+    let second_open_start = response_rops[get_list_start + 6..]
+        .windows(6)
+        .position(|window| window == [0x03, 0x02, 0, 0, 0, 0])
+        .map(|offset| get_list_start + 6 + offset)
+        .expect("second LocalFreebusy OpenMessage");
+    let mut expected_fixup_property = fixupfbfolder_tag.to_le_bytes().to_vec();
+    expected_fixup_property.push(1);
+    assert!(contains_bytes(
+        &response_rops[get_all_start..get_list_start],
+        &expected_fixup_property
+    ));
+    assert!(contains_bytes(
+        &response_rops[get_list_start..second_open_start],
+        &fixupfbfolder_tag.to_le_bytes()
+    ));
+    let second_marker = [0x07, 0x02, 0, 0, 0, 0];
+    let second_row = response_rops
+        .windows(second_marker.len())
+        .position(|window| window == second_marker)
+        .map(|offset| offset + second_marker.len())
+        .expect("second LocalFreebusy fixupfbfolder GetProps");
+    assert_eq!(response_rops[second_row], 1);
+    assert_eq!(response_rops[second_row + 1], 0x0A);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[second_row + 2..second_row + 6]
+                .try_into()
+                .unwrap()
+        ),
+        0x8004_010F
+    );
+    let staged_row_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_custom_property_values
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'delegate_freebusy_message'
+          AND canonical_id = $3
+          AND property_tag = $4
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(delegate_account_id)
+    .bind(crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID)
+    .bind(i64::from(fixupfbfolder_tag))
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(
+        staged_row_count, 0,
+        "SetProperties must not persist before Save"
+    );
+
+    // A distinct live session subscribes before the save. Its later Execute
+    // must receive the same durable change without relying on handle-local
+    // state from the saving session.
+    let mut observer_connect_headers = mapi_headers("Connect");
+    observer_connect_headers.insert(
+        axum::http::header::AUTHORIZATION,
+        HeaderValue::from_static("Bearer delegate-token"),
+    );
+    let observer_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &observer_connect_headers, b"")
+        .await
+        .unwrap();
+    let observer_cookie = mapi_cookie_header(&observer_connect);
+    let mut observer_execute_headers = mapi_headers("Execute");
+    observer_execute_headers.insert(
+        axum::http::header::AUTHORIZATION,
+        HeaderValue::from_static("Bearer delegate-token"),
+    );
+    observer_execute_headers.insert("cookie", HeaderValue::from_str(&observer_cookie).unwrap());
+    let observer_logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &observer_execute_headers,
+            &execute_body(&rop_buffer(
+                &mapi_private_logon_rops("delegate"),
+                &[u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let observer_logon_body = response_bytes(observer_logon).await;
+    let (_, observer_logon_handles) =
+        response_rops_and_handles_from_execute_body(&observer_logon_body);
+    let observer_logon_handle = observer_logon_handles[0];
+    renew_mapi_request_id(&mut observer_execute_headers);
+    let mut observer_registration = vec![0x29, 0x00, 0x00, 0x01];
+    observer_registration.extend_from_slice(&0x0010u16.to_le_bytes());
+    observer_registration.push(0);
+    observer_registration.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(advertised_target.0)
+            .unwrap(),
+    );
+    observer_registration.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(advertised_target.1)
+            .unwrap(),
+    );
+    let observer_registered = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &observer_execute_headers,
+            &execute_body(&rop_buffer(
+                &observer_registration,
+                &[observer_logon_handle, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let observer_registered_rops = response_rops_from_execute_response(observer_registered).await;
+    assert!(contains_bytes(
+        &observer_registered_rops,
+        &[0x29, 0x01, 0, 0, 0, 0]
+    ));
+
+    // Save the nondefault value and require the same Execute buffer to see
+    // the committed custom value, the newly rotated durable identity, and the
+    // message-scoped ObjectModified notification registered by Probe M.
+    renew_mapi_request_id(&mut execute_headers);
+    let mut save_fixup_rops = Vec::new();
+    append_rop_open_message(
+        &mut save_fixup_rops,
+        0,
+        1,
+        advertised_target.0,
+        advertised_target.1,
+    );
+    save_fixup_rops.extend_from_slice(&[0x29, 0x00, 0x00, 0x02]);
+    save_fixup_rops.extend_from_slice(&0x0010u16.to_le_bytes()); // ObjectModified.
+    save_fixup_rops.push(0); // Scope is the following FID/MID pair.
+    save_fixup_rops.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(advertised_target.0)
+            .unwrap(),
+    );
+    save_fixup_rops.extend_from_slice(
+        &identity_codec
+            .wire_id_bytes_from_object_id(advertised_target.1)
+            .unwrap(),
+    );
+    append_rop_set_properties(&mut save_fixup_rops, 1, 1, &true_fixup_value);
+    append_rop_save_changes_message_with_flags(&mut save_fixup_rops, 1, 1, 0x0A);
+    append_rop_get_properties_specific(
+        &mut save_fixup_rops,
+        1,
+        &[
+            fixupfbfolder_tag,
+            PID_TAG_SOURCE_KEY,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_CHANGE_NUMBER,
+            PID_TAG_LAST_MODIFICATION_TIME,
+        ],
+    );
+    // A second Save on the now-clean retained handle is a no-op and must not
+    // produce another ObjectModified notification or identity rotation.
+    append_rop_save_changes_message_with_flags(&mut save_fixup_rops, 1, 1, 0x0A);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &save_fixup_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x29, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0A, 0x01, 0, 0, 0, 0]));
+    assert_eq!(
+        response_rops
+            .windows(6)
+            .filter(|window| *window == [0x0C, 0x01, 0, 0, 0, 0])
+            .count(),
+        2,
+        "both the mutating and no-op Save must succeed: {response_rops:02x?}"
+    );
+    let expected_notification_folder_id = identity_codec
+        .wire_id_bytes_from_object_id(advertised_target.0)
+        .unwrap();
+    let expected_notification_message_id = identity_codec
+        .wire_id_bytes_from_object_id(advertised_target.1)
+        .unwrap();
+    let object_modified_notifications = response_rops
+        .windows(26)
+        .enumerate()
+        .filter_map(|(offset, window)| {
+            (window[0] == 0x2A
+                && window[5] == 0
+                && window[6..8] == [0x10, 0x80]
+                && window[8..16] == expected_notification_folder_id
+                && window[16..24] == expected_notification_message_id
+                && window[24..26] == [0, 0])
+            .then_some(offset)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        object_modified_notifications.len(),
+        1,
+        "the committed LocalFreebusy mutation must emit one message ObjectModified: {response_rops:02x?}"
+    );
+    let notify_offset = object_modified_notifications[0];
+    assert_eq!(
+        &response_rops[notify_offset + 8..notify_offset + 16],
+        &expected_notification_folder_id
+    );
+    assert_eq!(
+        &response_rops[notify_offset + 16..notify_offset + 24],
+        &expected_notification_message_id
+    );
+    assert_eq!(
+        &response_rops[notify_offset + 24..notify_offset + 26],
+        &0u16.to_le_bytes(),
+        "[MS-OXCNOTIF] section 2.2.1.4.1.2 ObjectModified TagCount"
+    );
+    renew_mapi_request_id(&mut observer_execute_headers);
+    let observer_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &observer_execute_headers,
+            &execute_body(&rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+    let observer_response_rops = response_rops_from_execute_response(observer_response).await;
+    let observer_notifications = observer_response_rops
+        .windows(26)
+        .filter(|window| {
+            window[0] == 0x2A
+                && window[5] == 0
+                && window[6..8] == [0x10, 0x80]
+                && window[8..16] == expected_notification_folder_id
+                && window[16..24] == expected_notification_message_id
+                && window[24..26] == [0, 0]
+        })
+        .count();
+    assert_eq!(
+        observer_notifications, 1,
+        "the other live session must replay exactly one durable LocalFreebusy ObjectModified: {observer_response_rops:02x?}"
+    );
+    let row_offset = mapi_get_properties_specific_standard_row_offset(&response_rops, 1)
+        .expect("saved LocalFreebusy custom and identity GetProps");
+    let mut saved_value_offset = row_offset + 1;
+    assert_eq!(response_rops[saved_value_offset], 1);
+    saved_value_offset += 1;
+    let response_source_key = read_rop_binary_u16(&response_rops, &mut saved_value_offset)
+        .map_err(anyhow::Error::msg)?
+        .to_vec();
+    let response_change_key = read_rop_binary_u16(&response_rops, &mut saved_value_offset)
+        .map_err(anyhow::Error::msg)?
+        .to_vec();
+    let response_predecessor_change_list =
+        read_rop_binary_u16(&response_rops, &mut saved_value_offset)
+            .map_err(anyhow::Error::msg)?
+            .to_vec();
+    let response_change_number = crate::mapi::identity::object_id_from_wire_id(
+        &response_rops[saved_value_offset..saved_value_offset + 8],
+    )
+    .and_then(crate::mapi::identity::global_counter_from_store_id)
+    .expect("saved LocalFreebusy ChangeNumber wire id");
+    saved_value_offset += 8;
+    let response_last_modification_time = u64::from_le_bytes(
+        response_rops[saved_value_offset..saved_value_offset + 8]
+            .try_into()
+            .unwrap(),
+    );
+    let saved_snapshot = storage
+        .load_mapi_mail_store(delegate_account_id, 500)
+        .await?;
+    let saved_local_freebusy = saved_snapshot
+        .delegate_freebusy_messages()
+        .iter()
+        .find(|message| crate::mapi_store::is_outlook_local_freebusy_message(message))
+        .expect("saved delegate snapshot contains LocalFreebusy");
+    let saved_identity = saved_local_freebusy
+        .durable_identity
+        .clone()
+        .expect("saved LocalFreebusy has a durable MAPI identity");
+    assert_eq!(saved_identity.object_id, local_freebusy_identity.object_id);
+    assert_eq!(
+        saved_identity.source_key,
+        local_freebusy_identity.source_key
+    );
+    assert!(saved_identity.change_number > local_freebusy_identity.change_number);
+    assert_ne!(
+        saved_identity.change_key,
+        local_freebusy_identity.change_key
+    );
+    assert!(saved_identity.last_modification_time > local_freebusy_identity.last_modification_time);
+    assert!(test_mapi_pcl_includes_change_key(
+        &saved_identity.predecessor_change_list,
+        &local_freebusy_identity.change_key
+    ));
+    assert!(test_mapi_pcl_includes_change_key(
+        &saved_identity.predecessor_change_list,
+        &saved_identity.change_key
+    ));
+    assert_eq!(response_source_key, saved_identity.source_key);
+    assert_eq!(response_change_key, saved_identity.change_key);
+    assert_eq!(
+        response_predecessor_change_list,
+        saved_identity.predecessor_change_list
+    );
+    assert_eq!(response_change_number, saved_identity.change_number);
+    assert_eq!(
+        response_last_modification_time,
+        saved_identity.last_modification_time
+    );
+    assert_eq!(
+        saved_local_freebusy.custom_properties,
+        vec![crate::store::MapiCustomPropertyValue {
+            property_tag: fixupfbfolder_tag,
+            property_type: 0x000B,
+            property_value: vec![1],
+        }]
+    );
+    let projection_state_after = sqlx::query_as::<_, (i64, i64)>(
+        r#"
+        SELECT revision, applied_revision
+        FROM delegation_projection_state
+        WHERE tenant_id = $1 AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(delegate_account_id)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(projection_state_after, projection_state_before);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut reopened_fixup_rops = Vec::new();
+    append_rop_open_message(
+        &mut reopened_fixup_rops,
+        0,
+        1,
+        advertised_target.0,
+        advertised_target.1,
+    );
+    append_rop_get_properties_specific(&mut reopened_fixup_rops, 1, &[fixupfbfolder_tag]);
+    reopened_fixup_rops.extend_from_slice(&[0x08, 0x00, 0x01, 0x00, 0x10, 0x01, 0x00]);
+    reopened_fixup_rops.extend_from_slice(&[0x09, 0x00, 0x01]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&reopened_fixup_rops, &[logon_handle, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let reopened_open = response_rops
+        .windows(6)
+        .position(|window| window == [0x03, 0x01, 0, 0, 0, 0])
+        .expect("reopened LocalFreebusy OpenMessage");
+    assert_eq!(
+        response_rops[reopened_open + 6],
+        1,
+        "OpenMessage HasNamedProperties must reflect the persisted custom bag"
+    );
+    let row_offset = mapi_get_properties_specific_standard_row_offset(&response_rops, 1)
+        .expect("reopened LocalFreebusy fixupfbfolder GetProps");
+    assert_eq!(response_rops[row_offset + 1], 1);
+    let get_all_start = response_rops
+        .windows(6)
+        .position(|window| window == [0x08, 0x01, 0, 0, 0, 0])
+        .expect("persisted LocalFreebusy GetPropertiesAll");
+    let get_list_start = response_rops[get_all_start + 6..]
+        .windows(6)
+        .position(|window| window == [0x09, 0x01, 0, 0, 0, 0])
+        .map(|offset| get_all_start + 6 + offset)
+        .expect("persisted LocalFreebusy GetPropertiesList");
+    assert!(contains_bytes(
+        &response_rops[get_all_start..get_list_start],
+        &expected_fixup_property
+    ));
+    assert!(contains_bytes(
+        &response_rops[get_list_start..],
+        &fixupfbfolder_tag.to_le_bytes()
+    ));
+
+    // [MS-OXCPRPT] section 3.2.5.4: both property-copy ROPs participate in
+    // the destination Message transaction. Copy the source handle's pending
+    // value into two LocalFreebusy handles, then release all three without a
+    // Save; neither operation may publish the copied value.
+    renew_mapi_request_id(&mut execute_headers);
+    let mut transactional_copy_rops = Vec::new();
+    for output in 1..=3 {
+        append_rop_open_message(
+            &mut transactional_copy_rops,
+            0,
+            output,
+            advertised_target.0,
+            advertised_target.1,
+        );
+    }
+    let mut false_fixup_value = Vec::new();
+    append_mapi_bool_property(&mut false_fixup_value, fixupfbfolder_tag, false);
+    append_rop_set_properties(&mut transactional_copy_rops, 1, 1, &false_fixup_value);
+    transactional_copy_rops.extend_from_slice(&[
+        0x67, 0x00, 0x01, 0x02, // RopCopyProperties: handle 1 -> handle 2.
+        0x00, 0x00, // WantAsynchronous, CopyFlags.
+    ]);
+    transactional_copy_rops.extend_from_slice(&1u16.to_le_bytes());
+    transactional_copy_rops.extend_from_slice(&fixupfbfolder_tag.to_le_bytes());
+    transactional_copy_rops.extend_from_slice(&[
+        0x39, 0x00, 0x01, 0x03, // RopCopyTo: handle 1 -> handle 3.
+        0x00, 0x00, 0x00, // WantAsynchronous, WantSubObjects, CopyFlags.
+    ]);
+    transactional_copy_rops.extend_from_slice(&0u16.to_le_bytes());
+    append_rop_get_properties_specific(&mut transactional_copy_rops, 2, &[fixupfbfolder_tag]);
+    append_rop_get_properties_specific(&mut transactional_copy_rops, 3, &[fixupfbfolder_tag]);
+    transactional_copy_rops.extend_from_slice(&[
+        0x01, 0x00, 0x01, // Release source.
+        0x01, 0x00, 0x02, // Release CopyProperties destination.
+        0x01, 0x00, 0x03, // Release CopyTo destination.
+    ]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &transactional_copy_rops,
+                &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x67, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x39, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    for handle_index in [2, 3] {
+        let row = mapi_get_properties_specific_standard_row_offset(&response_rops, handle_index)
+            .expect("copied LocalFreebusy handle sees its pending custom value");
+        assert_eq!(&response_rops[row..row + 2], &[0, 0]);
+    }
+    let durable_fixup_value = sqlx::query_scalar::<_, Vec<u8>>(
+        r#"
+        SELECT property_value
+        FROM mapi_custom_property_values
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'delegate_freebusy_message'
+          AND canonical_id = $3
+          AND property_tag = $4
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(delegate_account_id)
+    .bind(crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID)
+    .bind(i64::from(fixupfbfolder_tag))
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(durable_fixup_value, vec![1]);
 
     renew_mapi_request_id(&mut execute_headers);
     let mut copy_rops = Vec::new();
@@ -754,7 +1378,30 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
     let transfer = &chunks[0].1;
     assert_eq!(
         mapi_last_binary_property(transfer, PID_TAG_SOURCE_KEY),
-        Some(local_freebusy_identity.source_key.as_slice())
+        Some(saved_identity.source_key.as_slice())
+    );
+    assert_eq!(
+        mapi_last_binary_property(transfer, PID_TAG_CHANGE_KEY),
+        Some(saved_identity.change_key.as_slice())
+    );
+    let fixup_property_offset = transfer
+        .windows(4)
+        .position(|window| window == fixupfbfolder_tag.to_le_bytes())
+        .expect("LocalFreebusy CopyTo includes persisted fixupfbfolder");
+    assert_eq!(
+        &transfer[fixup_property_offset + 4..fixup_property_offset + 20],
+        &ps_public_strings
+    );
+    assert_eq!(transfer[fixup_property_offset + 20], 0x01);
+    let fixup_name_start = fixup_property_offset + 21;
+    assert_eq!(
+        &transfer[fixup_name_start..fixup_name_start + fixupfbfolder_name.len()],
+        &fixupfbfolder_name
+    );
+    assert_eq!(
+        &transfer[fixup_name_start + fixupfbfolder_name.len()
+            ..fixup_name_start + fixupfbfolder_name.len() + 2],
+        &[1, 0]
     );
     for provider_local_tag in [PID_TAG_ENTRY_ID, 0x0FF6_0102, 0x0E0B_0102] {
         assert!(
@@ -762,6 +1409,89 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
             "LocalFreebusy direct CopyTo must omit provider-local property {provider_local_tag:#010x}"
         );
     }
+
+    // DeleteProperties has the same Message transaction boundary. The
+    // deleting handle hides the stored value immediately, an independently
+    // opened handle retains the durable value, and Save publishes deletion.
+    renew_mapi_request_id(&mut execute_headers);
+    let mut delete_fixup_rops = Vec::new();
+    append_rop_open_message(
+        &mut delete_fixup_rops,
+        0,
+        1,
+        advertised_target.0,
+        advertised_target.1,
+    );
+    append_rop_delete_properties(&mut delete_fixup_rops, 1, &[fixupfbfolder_tag]);
+    append_rop_get_properties_specific(&mut delete_fixup_rops, 1, &[fixupfbfolder_tag]);
+    delete_fixup_rops.extend_from_slice(&[0x08, 0x00, 0x01, 0x00, 0x10, 0x01, 0x00]);
+    delete_fixup_rops.extend_from_slice(&[0x09, 0x00, 0x01]);
+    append_rop_open_message(
+        &mut delete_fixup_rops,
+        0,
+        2,
+        advertised_target.0,
+        advertised_target.1,
+    );
+    append_rop_get_properties_specific(&mut delete_fixup_rops, 2, &[fixupfbfolder_tag]);
+    append_rop_save_changes_message_with_flags(&mut delete_fixup_rops, 1, 1, 0x0A);
+    append_rop_get_properties_specific(&mut delete_fixup_rops, 1, &[fixupfbfolder_tag]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &delete_fixup_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0B, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    let first_handle_marker = [0x07, 0x01, 0, 0, 0, 0];
+    let first_handle_rows = response_rops
+        .windows(first_handle_marker.len())
+        .enumerate()
+        .filter_map(|(offset, window)| {
+            (window == first_handle_marker).then_some(offset + first_handle_marker.len())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(first_handle_rows.len(), 2);
+    for row in first_handle_rows {
+        assert_eq!(response_rops[row], 1);
+        assert_eq!(response_rops[row + 1], 0x0A);
+        assert_eq!(
+            u32::from_le_bytes(response_rops[row + 2..row + 6].try_into().unwrap()),
+            0x8004_010F
+        );
+    }
+    let delete_get_all_start = response_rops
+        .windows(6)
+        .position(|window| window == [0x08, 0x01, 0, 0, 0, 0])
+        .expect("deleted LocalFreebusy GetPropertiesAll");
+    let delete_get_list_start = response_rops[delete_get_all_start + 6..]
+        .windows(6)
+        .position(|window| window == [0x09, 0x01, 0, 0, 0, 0])
+        .map(|offset| delete_get_all_start + 6 + offset)
+        .expect("deleted LocalFreebusy GetPropertiesList");
+    let delete_second_open = response_rops[delete_get_list_start + 6..]
+        .windows(6)
+        .position(|window| window == [0x03, 0x02, 0, 0, 0, 0])
+        .map(|offset| delete_get_list_start + 6 + offset)
+        .expect("second LocalFreebusy OpenMessage during deletion");
+    assert!(!contains_bytes(
+        &response_rops[delete_get_all_start..delete_get_list_start],
+        &fixupfbfolder_tag.to_le_bytes()
+    ));
+    assert!(!contains_bytes(
+        &response_rops[delete_get_list_start..delete_second_open],
+        &fixupfbfolder_tag.to_le_bytes()
+    ));
+    let other_handle_row = mapi_get_properties_specific_standard_row_offset(&response_rops, 2)
+        .expect("other LocalFreebusy handle retains the durable custom value");
+    assert_eq!(response_rops[other_handle_row + 1], 1);
 
     let reloaded_snapshot = storage
         .load_mapi_mail_store(delegate_account_id, 500)
@@ -772,10 +1502,82 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
         .find(|message| crate::mapi_store::is_outlook_local_freebusy_message(message))
         .expect("reloaded delegate snapshot contains LocalFreebusy");
     assert_eq!(reloaded_local_freebusy.id, local_freebusy_id);
-    assert_eq!(
-        reloaded_local_freebusy.durable_identity.as_ref(),
-        Some(&local_freebusy_identity)
+    let deleted_identity = reloaded_local_freebusy
+        .durable_identity
+        .as_ref()
+        .expect("reloaded LocalFreebusy has a durable identity");
+    assert_eq!(deleted_identity.object_id, saved_identity.object_id);
+    assert_eq!(deleted_identity.source_key, saved_identity.source_key);
+    assert!(deleted_identity.change_number > saved_identity.change_number);
+    assert_ne!(deleted_identity.change_key, saved_identity.change_key);
+    assert!(deleted_identity.last_modification_time > saved_identity.last_modification_time);
+    assert!(test_mapi_pcl_includes_change_key(
+        &deleted_identity.predecessor_change_list,
+        &saved_identity.change_key
+    ));
+    assert!(test_mapi_pcl_includes_change_key(
+        &deleted_identity.predecessor_change_list,
+        &deleted_identity.change_key
+    ));
+    assert!(reloaded_local_freebusy.custom_properties.is_empty());
+    let deleted_row_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_custom_property_values
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'delegate_freebusy_message'
+          AND canonical_id = $3
+          AND property_tag = $4
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(delegate_account_id)
+    .bind(crate::mapi_store::OUTLOOK_LOCAL_FREEBUSY_CANONICAL_ID)
+    .bind(i64::from(fixupfbfolder_tag))
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(deleted_row_count, 0);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut reopened_deleted_rops = Vec::new();
+    append_rop_open_message(
+        &mut reopened_deleted_rops,
+        0,
+        1,
+        advertised_target.0,
+        advertised_target.1,
     );
+    append_rop_get_properties_specific(&mut reopened_deleted_rops, 1, &[fixupfbfolder_tag]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &reopened_deleted_rops,
+                &[logon_handle, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    let deleted_marker = [0x07, 0x01, 0, 0, 0, 0];
+    let deleted_row = response_rops
+        .windows(deleted_marker.len())
+        .position(|window| window == deleted_marker)
+        .map(|offset| offset + deleted_marker.len())
+        .expect("reopened deleted LocalFreebusy fixupfbfolder GetProps");
+    assert_eq!(response_rops[deleted_row], 1);
+    assert_eq!(response_rops[deleted_row + 1], 0x0A);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[deleted_row + 2..deleted_row + 6]
+                .try_into()
+                .unwrap()
+        ),
+        0x8004_010F
+    );
+
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
@@ -786,9 +1588,61 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
         .await
         .unwrap();
     let reloaded_response_rops = response_rops_from_execute_response(response).await;
-    assert!(
-        contains_bytes(&reloaded_response_rops, &first_getprops),
-        "reopened LocalFreebusy must retain the exact durable raw548 property row"
+    let get_offset = reloaded_response_rops
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .expect("reloaded LocalFreebusy raw548 GetProps response");
+    let mut value_offset = get_offset + marker.len();
+    assert_eq!(reloaded_response_rops[value_offset], 1);
+    value_offset += 1;
+    for property_tag in EXCHANGE_RAW548_TAGS.iter().take(14) {
+        assert_eq!(
+            reloaded_response_rops[value_offset], 0x0A,
+            "reloaded LocalFreebusy {property_tag:#010x} must remain absent"
+        );
+        value_offset += 1;
+        assert_eq!(
+            u32::from_le_bytes(
+                reloaded_response_rops[value_offset..value_offset + 4]
+                    .try_into()
+                    .unwrap()
+            ),
+            0x8004_010F
+        );
+        value_offset += 4;
+    }
+    assert_eq!(reloaded_response_rops[value_offset], 0);
+    value_offset += 1;
+    assert_eq!(
+        u64::from_le_bytes(
+            reloaded_response_rops[value_offset..value_offset + 8]
+                .try_into()
+                .unwrap()
+        ),
+        deleted_identity.last_modification_time
+    );
+    value_offset += 8;
+    assert_eq!(reloaded_response_rops[value_offset], 0);
+    value_offset += 1;
+    assert_eq!(
+        read_rop_binary_u16(&reloaded_response_rops, &mut value_offset).unwrap(),
+        deleted_identity.change_key
+    );
+    assert_eq!(reloaded_response_rops[value_offset], 0);
+    value_offset += 1;
+    assert_eq!(
+        read_rop_binary_u16(&reloaded_response_rops, &mut value_offset).unwrap(),
+        crate::mapi::identity::outlook_message_list_settings_entry_id(
+            delegate_account_id,
+            local_freebusy_id,
+        )
+        .unwrap()
+    );
+    assert_eq!(reloaded_response_rops[value_offset], 0);
+    value_offset += 1;
+    assert_eq!(
+        read_rop_utf16z(&reloaded_response_rops, &mut value_offset).unwrap(),
+        "IPM.Microsoft.ScheduleData.FreeBusy"
     );
 
     let owner_snapshot = storage
