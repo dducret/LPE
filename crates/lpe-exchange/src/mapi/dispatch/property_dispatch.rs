@@ -52,7 +52,7 @@ pub(super) async fn append_property_dispatch_response<S>(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     created_emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
+    snapshot: &mut MapiMailStoreSnapshot,
     response_size_limit: usize,
     responses: &mut Vec<u8>,
 ) -> PropertyDispatchFlow

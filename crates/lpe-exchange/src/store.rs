@@ -94,7 +94,17 @@ pub trait ExchangeStore: AccountAuthStore {
         imported_last_modification_time: i64,
         imported_change_key: &'a [u8],
         imported_predecessor_change_list: &'a [u8],
+        profile_values: &'a [MapiFolderProfilePropertyValue],
+        aliases: &'a [MapiSpecialFolderAlias],
     ) -> StoreFuture<'a, MapiFolderHierarchyCommitOutcome>;
+
+    fn commit_mapi_folder_hierarchy_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        profile_values: &'a [MapiFolderProfilePropertyValue],
+        aliases: &'a [MapiSpecialFolderAlias],
+    ) -> StoreFuture<'a, MapiFolderVersion>;
 
     fn fetch_or_allocate_mapi_identities<'a>(
         &'a self,
@@ -241,6 +251,14 @@ pub trait ExchangeStore: AccountAuthStore {
         folder_id: u64,
         property_tags: &'a [u32],
     ) -> StoreFuture<'a, Vec<MapiFolderProfilePropertyValue>>;
+
+    fn fetch_mapi_folder_hierarchy_profile_snapshot<'a>(
+        &'a self,
+        account_id: Uuid,
+        identity_folder_id: u64,
+        profile_folder_id: u64,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, Option<MapiFolderHierarchyProfileSnapshot>>;
 
     fn upsert_mapi_folder_profile_property_values<'a>(
         &'a self,

@@ -65,7 +65,7 @@ pub(super) async fn append_set_properties_response<S>(
     request_id: &str,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
-    snapshot: &MapiMailStoreSnapshot,
+    snapshot: &mut MapiMailStoreSnapshot,
     responses: &mut Vec<u8>,
 ) -> PropertyMutationFlow
 where
@@ -303,58 +303,91 @@ where
                     responses.extend_from_slice(&response);
                     return PropertyMutationFlow::Continue;
                 }
-                let aliases = default_folder_entry_id_aliases(object.as_ref(), &values);
-                match store
-                    .upsert_mapi_special_folder_aliases(principal.account_id, &aliases)
-                    .await
-                {
-                    Err(error) => Err(error),
-                    Ok(_change_numbers) => {
-                        for alias in aliases {
+                async {
+                    let aliases = default_folder_entry_id_aliases(object.as_ref(), &values);
+                    let values = default_folder_identification_safe_property_values(
+                        principal,
+                        object.as_ref(),
+                        values,
+                    );
+                    let Some(MapiObject::Folder { folder_id, .. }) = object else {
+                        unreachable!("matched folder object")
+                    };
+                    if values.iter().any(|(tag, _)| {
+                        canonical_property_storage_tag(*tag) == PID_TAG_ADDITIONAL_REN_ENTRY_IDS
+                    }) {
+                        let folder_profile_values =
+                            folder_profile_property_values(folder_id, &values)?;
+                        let durable_inbox_folder_id = snapshot
+                            .identity_codec()
+                            .actual_object_id(INBOX_FOLDER_ID)
+                            .ok_or_else(|| anyhow!("durable MAPI Inbox identity was not found"))?;
+                        let mut version = store
+                            .commit_mapi_folder_hierarchy_property_values(
+                                principal.account_id,
+                                durable_inbox_folder_id,
+                                &folder_profile_values,
+                                &aliases,
+                            )
+                            .await?;
+                        version.folder_id = INBOX_FOLDER_ID;
+                        let change_number = version.change_number;
+                        snapshot.upsert_folder_version(version);
+                        for alias in &aliases {
                             session.record_special_folder_alias(
                                 alias.alias_folder_id,
                                 alias.canonical_folder_id,
                             );
                         }
-                        let values = default_folder_identification_safe_property_values(
-                            principal,
-                            object.as_ref(),
-                            values,
-                        );
-                        let result = apply_mapi_property_values(
+                        apply_mapi_property_values(
                             input_object_mut(session, handle_slots, request),
                             values.clone(),
+                        )?;
+                        clear_folder_profile_property_tombstones(
+                            session,
+                            handle_slots,
+                            request,
+                            &values,
                         );
-                        if result.is_ok() {
-                            clear_folder_profile_property_tombstones(
-                                session,
-                                handle_slots,
-                                request,
-                                &values,
+                        let mut event = MapiNotificationEvent::hierarchy(
+                            IPM_SUBTREE_FOLDER_ID,
+                            Some(INBOX_FOLDER_ID),
+                        )
+                        .with_object_kind("mailbox");
+                        event.modseq = Some(change_number);
+                        session.record_notification(event);
+                        Ok(())
+                    } else {
+                        store
+                            .upsert_mapi_special_folder_aliases(principal.account_id, &aliases)
+                            .await?;
+                        for alias in &aliases {
+                            session.record_special_folder_alias(
+                                alias.alias_folder_id,
+                                alias.canonical_folder_id,
                             );
-                            if let Some(MapiObject::Folder { folder_id, .. }) = object {
-                                if persist_profile_folder_property_values(
-                                    store, principal, folder_id, &values,
-                                )
-                                .await
-                                .is_err()
-                                {
-                                    tracing::warn!(
-                                        adapter = "mapi",
-                                        endpoint = "emsmdb",
-                                        mailbox = %principal.email,
-                                        folder_id = format_args!("0x{folder_id:016x}"),
-                                        property_tags = %format_debug_property_tags(
-                                            &values.iter().map(|(tag, _value)| *tag).collect::<Vec<_>>()
-                                        ),
-                                        "accepted MAPI folder property write but failed to persist profile state"
-                                    );
-                                }
-                            }
                         }
-                        result
+                        persist_profile_folder_property_values(
+                            store,
+                            principal,
+                            folder_id,
+                            &values,
+                        )
+                        .await?;
+                        apply_mapi_property_values(
+                            input_object_mut(session, handle_slots, request),
+                            values.clone(),
+                        )?;
+                        clear_folder_profile_property_tombstones(
+                            session,
+                            handle_slots,
+                            request,
+                            &values,
+                        );
+                        Ok(())
                     }
                 }
+                .await
             }
             _object => {
                 apply_mapi_property_values(input_object_mut(session, handle_slots, request), values)

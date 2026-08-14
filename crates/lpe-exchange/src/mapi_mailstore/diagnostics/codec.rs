@@ -522,6 +522,7 @@ pub(super) fn fast_transfer_value_shape(tag: u32, value: &[u8]) -> String {
             format_debug_hex_preview(value, 16)
         ),
         0x101E | 0x101F => format!("multistring:bytes={}", value.len()),
+        0x1102 => format!("multibinary:bytes={}", value.len()),
         _ => format!("bytes={}", value.len()),
     }
 }
@@ -999,7 +1000,7 @@ pub(super) fn parse_debug_fast_transfer_property(
             let len = read_debug_u32(bytes, value_start)? as usize;
             (value_start + 4, len)
         }
-        0x101E | 0x101F => {
+        0x101E | 0x101F | 0x1102 => {
             let count = read_debug_u32(bytes, value_start)? as usize;
             let mut end = value_start + 4;
             for _ in 0..count {
@@ -1291,4 +1292,22 @@ pub(super) fn counter_from_xid(value: &[u8]) -> Option<u64> {
         return None;
     }
     crate::mapi::identity::global_counter_from_globcnt(value.get(16..22)?)
+}
+
+#[cfg(test)]
+#[test]
+fn diagnostic_parser_accepts_fast_transfer_multi_binary() {
+    let mut bytes = Vec::new();
+    write_u32(&mut bytes, 0x36D8_1102);
+    write_u32(&mut bytes, 2);
+    write_u32(&mut bytes, 2);
+    bytes.extend_from_slice(&[0x11, 0x22]);
+    write_u32(&mut bytes, 3);
+    bytes.extend_from_slice(&[0x33, 0x44, 0x55]);
+
+    let property = parse_debug_fast_transfer_property(&bytes, 0).expect("parse PtypMultipleBinary");
+
+    assert_eq!(property.tag, 0x36D8_1102);
+    assert_eq!(property.value.as_slice(), &bytes[4..]);
+    assert_eq!(property.next_offset, bytes.len());
 }

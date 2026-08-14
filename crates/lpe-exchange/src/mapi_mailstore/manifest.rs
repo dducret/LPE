@@ -1,3 +1,7 @@
+use super::hierarchy_properties::{
+    write_multi_binary_property, OWNER_INBOX_SPECIAL_FOLDER_ENTRY_IDS,
+    PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+};
 use super::special_message::{
     special_message_access, special_message_access_level, special_message_change_key,
     special_message_change_number, special_message_delivery_sort_time, special_message_flags,
@@ -10,16 +14,6 @@ use super::special_message::{
 use super::*;
 use crate::mapi::properties::message_class_for_email;
 use sha2::{Digest, Sha256};
-
-const OWNER_INBOX_SPECIAL_FOLDER_ENTRY_IDS: [(u32, u64); 7] = [
-    (0x36D0_0102, crate::mapi::identity::CALENDAR_FOLDER_ID),
-    (0x36D1_0102, crate::mapi::identity::CONTACTS_FOLDER_ID),
-    (0x36D2_0102, crate::mapi::identity::JOURNAL_FOLDER_ID),
-    (0x36D3_0102, crate::mapi::identity::NOTES_FOLDER_ID),
-    (0x36D4_0102, crate::mapi::identity::TASKS_FOLDER_ID),
-    (0x36D5_0102, crate::mapi::identity::REMINDERS_FOLDER_ID),
-    (0x36D7_0102, crate::mapi::identity::DRAFTS_FOLDER_ID),
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttachmentSyncFact {
@@ -724,6 +718,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
         sync_flags,
         sync_extra_flags,
         sync_property_tags,
+        &[],
         folder_id,
         mailboxes,
         emails,
@@ -752,6 +747,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
     sync_flags: u16,
     sync_extra_flags: u32,
     sync_property_tags: &[u32],
+    owner_inbox_additional_ren_entry_ids: &[Vec<u8>],
     folder_id: u64,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
@@ -949,6 +945,18 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state_with_fol
                         .expect("special folders use valid MAPI folder IDs");
                         write_binary_property(&mut buffer, property_tag, &entry_id);
                     }
+                }
+                if !owner_inbox_additional_ren_entry_ids.is_empty()
+                    && !property_tag_excluded(
+                        excluded_property_tags,
+                        PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+                    )
+                {
+                    write_multi_binary_property(
+                        &mut buffer,
+                        PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+                        owner_inbox_additional_ren_entry_ids,
+                    );
                 }
             }
             if container_class == "IPF.Appointment"

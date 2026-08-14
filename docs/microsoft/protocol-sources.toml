@@ -671,7 +671,7 @@ used_for = [
   "Message-property enumeration for FAI and LPE message-object variants without substituting containing-Folder properties",
   "Compatible Message, Folder, or Attachment object-family validation before RopCopyTo and RopCopyProperties can succeed or mutate destination properties",
   "Server-owned PidTagAccess and PidTagAccessLevel projection in special-message FastTransfer downloads",
-  "RopSetProperties durable round-trip of Inbox PidTagAdditionalRenEntryIds client state",
+  "RopSetProperties atomic Inbox PidTagAdditionalRenEntryIds profile, hierarchy-version, alias, and replay publication",
   "Stable initial imported FAI and Calendar PidTagSearchKey semantics while generated Message search identities use the Microsoft MAPI 16-byte MAPIUID representation",
   "Silent disregard of Outlook's repeated imported Calendar PidTagLastModificationTime while retaining the import header as authoritative",
 ]
@@ -1172,6 +1172,7 @@ used_for = [
   "FastTransfer namedPropInfo encoding for property identifiers greater than or equal to 0x8000",
   "FastTransfer destination PutBuffer and PutBufferExtended lexical buffering, named-property mapping, and variable or multiple-value framing",
   "folderChange conditional FolderId and ParentFolderId identity properties",
+  "FastTransfer PtypMultipleBinary projection of the version-coherent Inbox PidTagAdditionalRenEntryIds hierarchy property",
   "Unicode and ForceUnicode FastTransfer string-property encoding",
   "RopFastTransferSourceCopyFolder topFolder root and folderContent marker behavior",
   "FastTransfer message element StartMessage versus StartFAIMsg behavior",
@@ -1662,7 +1663,7 @@ used_for = [
   "Outlook special folder hierarchy projection, identifiers, container classes, and search-folder placement",
   "Root, Finder/Search, Common Views, Personal Views, Deferred Action, FreeBusy Data, Reminders, To-Do, tracked mail, and Conversation Action Settings compatibility",
   "Deleted Items as the default destination for deleted objects and Calendar move projection",
-  "Durable preservation of Outlook PidTagAdditionalRenEntryIds client indexes",
+  "Durable preservation of Outlook PidTagAdditionalRenEntryIds client indexes with canonical Inbox hierarchy export and atomic version replay",
   "Root and Inbox PidTagFreeBusyEntryIds projection with a stable Delegate Information EntryID",
 ]
 sections = [

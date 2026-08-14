@@ -7124,6 +7124,543 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_inbox_additional_ren_entry_ids_versions_and_replays_hierarchy_in_postgresql(
+) -> anyhow::Result<()> {
+    // [MS-OXOSFLD] section 2.2.4 defines the five reserved entries in
+    // PidTagAdditionalRenEntryIds. Exercise the complete wire-to-PostgreSQL
+    // lane because FakeStore cannot couple profile writes, hierarchy versions,
+    // journal rows, and later stateful ICS downloads in one transaction.
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let mailboxes = storage
+        .ensure_jmap_system_mailboxes(fixture.account_id)
+        .await?;
+    let inbox_mailbox = mailboxes
+        .iter()
+        .find(|mailbox| mailbox.role == "inbox")
+        .expect("canonical Inbox mailbox")
+        .clone();
+    let identity_codec =
+        crate::mapi::load_mapi_identity_codec_for_test(&storage, fixture.account_id).await?;
+    let inbox_source_key = identity_codec
+        .source_key_for_object_id(crate::mapi::identity::INBOX_FOLDER_ID)
+        .expect("durable Inbox SourceKey");
+    let canonical_entries = [
+        crate::mapi::identity::CONFLICTS_FOLDER_ID,
+        crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+        crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
+        crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
+        crate::mapi::identity::JUNK_FOLDER_ID,
+    ]
+    .into_iter()
+    .map(|folder_id| {
+        identity_codec
+            .folder_entry_id_from_object_id(fixture.account_id, folder_id)
+            .expect("special-folder EntryID")
+    })
+    .collect::<Vec<_>>();
+    let profile_value_for = |entries: &[Vec<u8>]| {
+        let entries = entries.iter().map(Vec::as_slice).collect::<Vec<_>>();
+        let mut tagged_value = Vec::new();
+        append_mapi_multi_binary_property(
+            &mut tagged_value,
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+            &entries,
+        );
+        tagged_value.split_off(4)
+    };
+
+    let service = ExchangeService::new(storage.clone());
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut initial_rops = Vec::new();
+    append_rop_open_folder(
+        &mut initial_rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut initial_rops, 1, 2, 31_680);
+    let initial_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &initial_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
+        )
+        .await?;
+    assert_eq!(initial_response.status(), StatusCode::OK);
+    let initial_response_rops = response_rops_from_execute_response(initial_response).await;
+    let initial_hierarchy = strict_hierarchy_sync_transfer_from_response(&initial_response_rops)
+        .map_err(anyhow::Error::msg)?;
+    let initial_inbox = initial_hierarchy
+        .folder_changes
+        .iter()
+        .find(|folder| folder.source_key == inbox_source_key)
+        .expect("initial Inbox folderChange");
+    assert_eq!(
+        initial_inbox.additional_ren_entry_ids.as_ref(),
+        Some(&canonical_entries),
+        "initial Inbox folderChange must contain exact 0x36D81102 canonical slots"
+    );
+
+    let inbox_identity_request = [MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::Mailbox,
+        canonical_id: inbox_mailbox.id,
+        reserved_global_counter: Some(crate::mapi::identity::INBOX_FOLDER_COUNTER),
+        source_key: None,
+    }];
+    let initial_identity = storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &inbox_identity_request)
+        .await?
+        .remove(0);
+    assert_eq!(initial_inbox.change_key, initial_identity.change_key);
+    assert_eq!(
+        initial_inbox.predecessor_change_list,
+        initial_identity.predecessor_change_list
+    );
+    assert_eq!(
+        initial_inbox.last_modification_time,
+        initial_identity.last_modification_time
+    );
+    let initial_journal_cursor = sqlx::query_scalar::<_, Option<i64>>(
+        r#"
+        SELECT MAX(cursor)
+        FROM mail_change_log
+        WHERE account_id = $1
+        "#,
+    )
+    .bind(fixture.account_id)
+    .fetch_one(storage.pool())
+    .await?
+    .unwrap_or_default();
+
+    // Outlook writes this profile property through either Root or Inbox. Root
+    // must version the durable Inbox and must restore the five reserved slots,
+    // while preserving the opaque value at index 5.
+    let empty = &[][..];
+    let root_tail = [0x4d, 0x3c, 0x2b, 0x1a];
+    let mut root_property_values = Vec::new();
+    append_mapi_multi_binary_property(
+        &mut root_property_values,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        &[empty, empty, empty, empty, empty, &root_tail],
+    );
+    let mut expected_root_entries = canonical_entries.clone();
+    expected_root_entries.push(root_tail.to_vec());
+    let expected_root_profile_value = profile_value_for(&expected_root_entries);
+
+    let mut root_set_rops = Vec::new();
+    append_rop_open_folder(
+        &mut root_set_rops,
+        0,
+        1,
+        crate::mapi::identity::ROOT_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut root_set_rops, 1, 1, &root_property_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let root_set_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&root_set_rops, &[logon_handle, u32::MAX])),
+        )
+        .await?;
+    assert_eq!(root_set_response.status(), StatusCode::OK);
+    let root_set_response_rops = response_rops_from_execute_response(root_set_response).await;
+    assert!(
+        contains_bytes(&root_set_response_rops, &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]),
+        "Root AdditionalRenEntryIds SetProperties failed: {root_set_response_rops:02x?}"
+    );
+
+    let after_root_identity = storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &inbox_identity_request)
+        .await?
+        .remove(0);
+    assert_ne!(
+        after_root_identity.change_number, initial_identity.change_number,
+        "Root SetProperties must rotate the durable Inbox CN"
+    );
+    assert_ne!(
+        after_root_identity.change_key, initial_identity.change_key,
+        "Root SetProperties must rotate the durable Inbox ChangeKey"
+    );
+    assert!(
+        after_root_identity.last_modification_time > initial_identity.last_modification_time,
+        "Root SetProperties must advance the durable Inbox LMT"
+    );
+    assert!(test_mapi_pcl_includes_change_key(
+        &after_root_identity.predecessor_change_list,
+        &initial_identity.change_key
+    ));
+    assert!(test_mapi_pcl_includes_change_key(
+        &after_root_identity.predecessor_change_list,
+        &after_root_identity.change_key
+    ));
+    let stored_root_profile_value = sqlx::query_scalar::<_, Vec<u8>>(
+        r#"
+        SELECT property_value
+        FROM mapi_folder_profile_property_values
+        WHERE account_id = $1
+          AND folder_id = $2
+          AND property_tag = $3
+          AND property_type = $4
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(crate::mapi::identity::INBOX_FOLDER_ID as i64)
+    .bind(i64::from(PID_TAG_ADDITIONAL_REN_ENTRY_IDS))
+    .bind(0x1102_i32)
+    .fetch_one(storage.pool())
+    .await?;
+    assert_eq!(stored_root_profile_value, expected_root_profile_value);
+    let root_journal_rows = sqlx::query_as::<_, (i64, serde_json::Value)>(
+        r#"
+        SELECT cursor, summary_json
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND mailbox_id = $2
+          AND object_kind = 'mailbox'
+          AND change_kind = 'updated'
+          AND cursor > $3
+          AND summary_json @> '{"mapiOnly": true}'::jsonb
+        ORDER BY cursor
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(inbox_mailbox.id)
+    .bind(initial_journal_cursor)
+    .fetch_all(storage.pool())
+    .await?;
+    assert_eq!(
+        root_journal_rows.len(),
+        1,
+        "one Root property commit must write exactly one Inbox hierarchy journal row"
+    );
+    assert_eq!(
+        root_journal_rows[0].1["mapiFolderId"],
+        serde_json::Value::String(after_root_identity.object_id.to_string())
+    );
+    assert_eq!(
+        root_journal_rows[0].1["mapiChangeNumber"],
+        serde_json::Value::String(after_root_identity.change_number.to_string())
+    );
+
+    let mut first_replay_rops = Vec::new();
+    append_rop_open_folder(
+        &mut first_replay_rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
+        &mut first_replay_rops,
+        1,
+        2,
+        31_680,
+        &initial_hierarchy.idset_given,
+        &initial_hierarchy.cnset_seen,
+    );
+    renew_mapi_request_id(&mut execute_headers);
+    let first_replay_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &first_replay_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
+        )
+        .await?;
+    let first_replay_response_rops =
+        response_rops_from_execute_response(first_replay_response).await;
+    let first_replay = strict_hierarchy_sync_transfer_from_response(&first_replay_response_rops)
+        .map_err(anyhow::Error::msg)?;
+    assert_eq!(
+        first_replay.folder_changes.len(),
+        1,
+        "the one committed hierarchy journal row must replay exactly Inbox"
+    );
+    let replayed_root_inbox = &first_replay.folder_changes[0];
+    assert_eq!(replayed_root_inbox.source_key, inbox_source_key);
+    assert_eq!(
+        replayed_root_inbox.additional_ren_entry_ids.as_ref(),
+        Some(&expected_root_entries)
+    );
+    assert_eq!(
+        replayed_root_inbox.change_key,
+        after_root_identity.change_key
+    );
+    assert_eq!(
+        replayed_root_inbox.predecessor_change_list,
+        after_root_identity.predecessor_change_list
+    );
+    assert_eq!(
+        replayed_root_inbox.last_modification_time,
+        after_root_identity.last_modification_time
+    );
+    assert!(strict_replguid_globset_contains_counter(
+        &first_replay.cnset_seen,
+        &globcnt_bytes(after_root_identity.change_number),
+    )
+    .map_err(anyhow::Error::msg)?);
+
+    // Import a later client version for the existing Inbox. The profile values
+    // and hierarchy identity/journal update must commit together, and the five
+    // reserved slots must still normalize to the canonical EntryIDs.
+    let imported_change_key = vec![
+        0x51, 0xa1, 0x66, 0x72, 0x14, 0x93, 0x5c, 0x48, 0xaa, 0x14, 0xe7, 0xdc, 0xb0, 0x5e, 0x0d,
+        0xa6, 0x00, 0x00, 0x04, 0x36,
+    ];
+    let mut imported_change_key_pcl = vec![imported_change_key.len() as u8];
+    imported_change_key_pcl.extend_from_slice(&imported_change_key);
+    let imported_predecessor_change_list = test_merge_mapi_predecessor_change_lists(
+        &after_root_identity.predecessor_change_list,
+        &imported_change_key_pcl,
+    )
+    .expect("merge imported Inbox PCL");
+    let imported_last_modification_time = after_root_identity.last_modification_time + 10_000_000;
+    let import_tail = [0x36, 0xd8, 0x11, 0x02, 0x7a];
+    let mut import_property_values = Vec::new();
+    append_mapi_multi_binary_property(
+        &mut import_property_values,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        &[empty, empty, empty, empty, empty, &import_tail],
+    );
+    // Exchange 2016 raw/249 appends this bounded reserved record. Preserve it
+    // through the same hierarchy-import transaction as 36D8.
+    let imported_extended_folder_flags = vec![
+        0x01, 0x04, 0x00, 0x00, 0x10, 0x00, 0x06, 0x04, 0x03, 0x00, 0x00, 0x00,
+    ];
+    append_mapi_binary_property(
+        &mut import_property_values,
+        PID_TAG_EXTENDED_FOLDER_FLAGS,
+        &imported_extended_folder_flags,
+    );
+    let mut expected_import_entries = canonical_entries.clone();
+    expected_import_entries.push(import_tail.to_vec());
+    let expected_import_profile_value = profile_value_for(&expected_import_entries);
+
+    let mut hierarchy_values = Vec::new();
+    append_mapi_binary_property(
+        &mut hierarchy_values,
+        PID_TAG_PARENT_SOURCE_KEY,
+        &identity_codec
+            .source_key_for_object_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+            .expect("IPM subtree SourceKey"),
+    );
+    append_mapi_binary_property(&mut hierarchy_values, PID_TAG_SOURCE_KEY, &inbox_source_key);
+    append_mapi_i64_property(
+        &mut hierarchy_values,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        imported_last_modification_time as i64,
+    );
+    append_mapi_binary_property(
+        &mut hierarchy_values,
+        PID_TAG_CHANGE_KEY,
+        &imported_change_key,
+    );
+    append_mapi_binary_property(
+        &mut hierarchy_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &imported_predecessor_change_list,
+    );
+    append_mapi_utf16_property(&mut hierarchy_values, PID_TAG_DISPLAY_NAME_W, "Inbox");
+
+    let mut import_rops = Vec::new();
+    append_rop_open_folder(
+        &mut import_rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    import_rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x00, // OpenCollector, hierarchy.
+        0x73, 0x00, 0x02, // ImportHierarchyChange.
+    ]);
+    import_rops.extend_from_slice(&6u16.to_le_bytes());
+    import_rops.extend_from_slice(&hierarchy_values);
+    import_rops.extend_from_slice(&2u16.to_le_bytes());
+    import_rops.extend_from_slice(&import_property_values);
+    import_rops.extend_from_slice(&[
+        0x82, 0x00, 0x02, 0x03, // GetTransferState.
+        0x4E, 0x00, 0x03, // GetBuffer.
+    ]);
+    import_rops.extend_from_slice(&8192u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let import_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &import_rops,
+                &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await?;
+    assert_eq!(import_response.status(), StatusCode::OK);
+    let import_response_rops = response_rops_from_execute_response(import_response).await;
+    assert!(
+        contains_bytes(&import_response_rops, &[0x73, 0x02, 0, 0, 0, 0]),
+        "existing-Inbox ImportHierarchyChange failed: {import_response_rops:02x?}"
+    );
+
+    let after_import_identity = storage
+        .fetch_or_allocate_mapi_identities(fixture.account_id, &inbox_identity_request)
+        .await?
+        .remove(0);
+    assert_ne!(
+        after_import_identity.change_number,
+        after_root_identity.change_number
+    );
+    assert_eq!(after_import_identity.change_key, imported_change_key);
+    assert_eq!(
+        after_import_identity.predecessor_change_list,
+        imported_predecessor_change_list
+    );
+    assert_eq!(
+        after_import_identity.last_modification_time,
+        imported_last_modification_time
+    );
+    let import_chunks = mapi_fast_transfer_chunks(&import_response_rops);
+    assert_eq!(import_chunks.len(), 1);
+    let import_cnset_seen = mapi_binary_property_value(&import_chunks[0].1, META_TAG_CNSET_SEEN);
+    assert!(strict_replguid_globset_contains_counter(
+        import_cnset_seen,
+        &globcnt_bytes(after_import_identity.change_number),
+    )
+    .map_err(anyhow::Error::msg)?);
+    let imported_profile_tags = vec![
+        i64::from(PID_TAG_ADDITIONAL_REN_ENTRY_IDS),
+        i64::from(PID_TAG_EXTENDED_FOLDER_FLAGS),
+    ];
+    let stored_import_profile_values = sqlx::query_as::<_, (i64, i32, Vec<u8>)>(
+        r#"
+        SELECT property_tag, property_type, property_value
+        FROM mapi_folder_profile_property_values
+        WHERE account_id = $1
+          AND folder_id = $2
+          AND property_tag = ANY($3)
+        ORDER BY property_tag
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(crate::mapi::identity::INBOX_FOLDER_ID as i64)
+    .bind(&imported_profile_tags)
+    .fetch_all(storage.pool())
+    .await?;
+    assert_eq!(
+        stored_import_profile_values,
+        vec![
+            (
+                i64::from(PID_TAG_ADDITIONAL_REN_ENTRY_IDS),
+                0x1102,
+                expected_import_profile_value,
+            ),
+            (
+                i64::from(PID_TAG_EXTENDED_FOLDER_FLAGS),
+                0x0102,
+                imported_extended_folder_flags,
+            ),
+        ],
+        "ImportHierarchyChange must atomically preserve every supported profile property"
+    );
+    let import_journal_rows = sqlx::query_as::<_, (i64, serde_json::Value)>(
+        r#"
+        SELECT cursor, summary_json
+        FROM mail_change_log
+        WHERE account_id = $1
+          AND mailbox_id = $2
+          AND object_kind = 'mailbox'
+          AND change_kind = 'updated'
+          AND cursor > $3
+          AND summary_json @> '{"mapiOnly": true}'::jsonb
+        ORDER BY cursor
+        "#,
+    )
+    .bind(fixture.account_id)
+    .bind(inbox_mailbox.id)
+    .bind(root_journal_rows[0].0)
+    .fetch_all(storage.pool())
+    .await?;
+    assert_eq!(
+        import_journal_rows.len(),
+        1,
+        "one imported property/version commit must write exactly one Inbox hierarchy journal row"
+    );
+    assert_eq!(
+        import_journal_rows[0].1["mapiFolderId"],
+        serde_json::Value::String(after_import_identity.object_id.to_string())
+    );
+    assert_eq!(
+        import_journal_rows[0].1["mapiChangeNumber"],
+        serde_json::Value::String(after_import_identity.change_number.to_string())
+    );
+
+    let mut second_replay_rops = Vec::new();
+    append_rop_open_folder(
+        &mut second_replay_rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
+        &mut second_replay_rops,
+        1,
+        2,
+        31_680,
+        &first_replay.idset_given,
+        &first_replay.cnset_seen,
+    );
+    renew_mapi_request_id(&mut execute_headers);
+    let second_replay_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &second_replay_rops,
+                &[logon_handle, u32::MAX, u32::MAX],
+            )),
+        )
+        .await?;
+    let second_replay_response_rops =
+        response_rops_from_execute_response(second_replay_response).await;
+    let second_replay = strict_hierarchy_sync_transfer_from_response(&second_replay_response_rops)
+        .map_err(anyhow::Error::msg)?;
+    assert_eq!(second_replay.folder_changes.len(), 1);
+    let replayed_imported_inbox = &second_replay.folder_changes[0];
+    assert_eq!(replayed_imported_inbox.source_key, inbox_source_key);
+    assert_eq!(
+        replayed_imported_inbox.additional_ren_entry_ids.as_ref(),
+        Some(&expected_import_entries)
+    );
+    assert_eq!(
+        replayed_imported_inbox.change_key,
+        after_import_identity.change_key
+    );
+    assert_eq!(
+        replayed_imported_inbox.predecessor_change_list,
+        after_import_identity.predecessor_change_list
+    );
+    assert_eq!(
+        replayed_imported_inbox.last_modification_time,
+        after_import_identity.last_modification_time
+    );
+    assert!(strict_replguid_globset_contains_counter(
+        &second_replay.cnset_seen,
+        &globcnt_bytes(after_import_identity.change_number),
+    )
+    .map_err(anyhow::Error::msg)?);
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let store = FakeStore {
@@ -7773,7 +8310,7 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_hierarchy_sync_replays_version_2_server_checkpoint() {
+async fn mapi_over_http_hierarchy_sync_replays_version_3_server_checkpoint() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
     inbox.total_emails = 3;
@@ -7794,7 +8331,7 @@ async fn mapi_over_http_hierarchy_sync_replays_version_2_server_checkpoint() {
                 "source": "emsmdb-ics-download",
                 "syncType": 2,
                 "syncRootFolderId": test_mapi_folder_id(4),
-                "hierarchySyncVersion": 2
+                "hierarchySyncVersion": 3
             }),
         )
         .await
@@ -7858,7 +8395,7 @@ async fn mapi_over_http_hierarchy_sync_uses_baseline_for_stale_root_checkpoint_w
                 "source": "emsmdb-ics-download",
                 "syncType": 2,
                 "syncRootFolderId": test_mapi_folder_id(1),
-                "hierarchySyncVersion": 3
+                "hierarchySyncVersion": 4
             }),
         )
         .await
@@ -7973,7 +8510,7 @@ async fn mapi_over_http_hierarchy_sync_client_state_resumes_after_completed_down
             .cursor_json
             .get("hierarchySyncVersion")
             .and_then(serde_json::Value::as_u64),
-        Some(3)
+        Some(4)
     );
 
     *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {

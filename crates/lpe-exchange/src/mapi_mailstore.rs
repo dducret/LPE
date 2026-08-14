@@ -10,6 +10,7 @@ use uuid::Uuid;
 mod client_state;
 mod diagnostics;
 mod folders;
+mod hierarchy_properties;
 mod manifest;
 mod special_message;
 #[cfg(test)]

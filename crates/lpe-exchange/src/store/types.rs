@@ -4,6 +4,8 @@ use uuid::Uuid;
 use crate::mapi::notifications::MapiNotificationEvent;
 use crate::mapi::properties::MapiNamedProperty;
 
+use super::MapiFolderVersion;
+
 pub(crate) const MAX_MAPI_LOCAL_REPLICA_ID_COUNT: u32 = 0x0001_0000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -343,6 +345,12 @@ pub(crate) struct MapiFolderProfilePropertyValue {
     pub(crate) property_tag: u32,
     pub(crate) property_type: u16,
     pub(crate) property_value: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiFolderHierarchyProfileSnapshot {
+    pub(crate) version: MapiFolderVersion,
+    pub(crate) profile_values: Vec<MapiFolderProfilePropertyValue>,
 }
 
 #[allow(dead_code)]

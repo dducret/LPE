@@ -5,7 +5,9 @@ pub(super) use fast_transfer_destination::*;
 
 // Version 3 adds the owner Inbox special-folder identification properties to
 // folderChange, so version 2 checkpoints must replay a full hierarchy once.
-pub(super) const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 3;
+// Version 4 adds the Inbox PidTagAdditionalRenEntryIds hierarchy property.
+// Invalidate older checkpoints once so existing OSTs receive that cache repair.
+pub(super) const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 4;
 // Keep staged destination data within the 25 MiB maximum message size LPE
 // advertises, with one request's worth of framing headroom.
 const MAX_FAST_TRANSFER_DESTINATION_STAGED_BYTES: usize = 25 * 1024 * 1024 + u16::MAX as usize;

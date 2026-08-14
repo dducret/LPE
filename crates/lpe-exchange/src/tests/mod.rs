@@ -72,11 +72,12 @@ use crate::{
         MapiCalendarPropertyValue, MapiCheckpointKind, MapiContactCreateOutcome,
         MapiContentTableQuery, MapiContentTableQueryResult, MapiContentTableSortField,
         MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiEventCreateOutcome,
-        MapiFolderHierarchyCommitOutcome, MapiFolderProfilePropertyValue, MapiFolderVersion,
-        MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
-        MapiLocalFreebusyCommit, MapiLocalFreebusyProjection, MapiMailboxContentCommitTime,
-        MapiNamedPropertyMapping, MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet,
-        MapiSyncCheckpoint, UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
+        MapiFolderHierarchyCommitOutcome, MapiFolderHierarchyProfileSnapshot,
+        MapiFolderProfilePropertyValue, MapiFolderVersion, MapiIdentityLookupRecord,
+        MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiLocalFreebusyCommit,
+        MapiLocalFreebusyProjection, MapiMailboxContentCommitTime, MapiNamedPropertyMapping,
+        MapiNotificationPoll, MapiSpecialFolderAlias, MapiSyncChangeSet, MapiSyncCheckpoint,
+        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -3939,6 +3940,8 @@ async fn postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_linea
             (initial.last_modification_time + 600 * 10_000_000) as i64,
             &client_change_key,
             &imported_predecessor_change_list,
+            &[],
+            &[],
         )
         .await
         .unwrap();
@@ -4003,6 +4006,8 @@ async fn postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_linea
             applied_version.last_modification_time as i64,
             &client_change_key,
             &imported_predecessor_change_list,
+            &[],
+            &[],
         )
         .await
         .unwrap();
@@ -4040,6 +4045,8 @@ async fn postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_linea
             initial.last_modification_time as i64,
             &conflicting_change_key,
             &conflicting_predecessor_change_list,
+            &[],
+            &[],
         )
         .await
         .unwrap();
@@ -4150,6 +4157,8 @@ async fn postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_linea
             (common_views.last_modification_time + 10_000_000) as i64,
             &virtual_client_change_key,
             &virtual_import_pcl,
+            &[],
+            &[],
         )
         .await
         .unwrap();
@@ -5210,13 +5219,27 @@ impl ExchangeStore for FakeStore {
 
     fn commit_mapi_folder_hierarchy_change<'a>(
         &'a self,
-        _account_id: Uuid,
+        account_id: Uuid,
         folder_id: u64,
         imported_last_modification_time: i64,
         imported_change_key: &'a [u8],
         imported_predecessor_change_list: &'a [u8],
+        profile_values: &'a [MapiFolderProfilePropertyValue],
+        aliases: &'a [MapiSpecialFolderAlias],
     ) -> StoreFuture<'a, MapiFolderHierarchyCommitOutcome> {
         Box::pin(async move {
+            if profile_values.iter().any(|value| {
+                let supported = match (value.property_tag, value.property_type) {
+                    (0x36D8_1102, 0x1102) => {
+                        value.folder_id == crate::mapi::identity::INBOX_FOLDER_ID
+                    }
+                    (0x36DA_0102, 0x0102) => value.folder_id != 0,
+                    _ => false,
+                };
+                !supported || value.property_value.is_empty() || value.property_value.len() > 4096
+            }) {
+                anyhow::bail!("invalid MAPI hierarchy profile property value");
+            }
             if !(17..=24).contains(&imported_change_key.len())
                 || !test_mapi_pcl_includes_change_key(
                     imported_predecessor_change_list,
@@ -5295,19 +5318,36 @@ impl ExchangeStore for FakeStore {
                 imported_predecessor_change_list,
                 &current_change_key,
             );
-            let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
-            let change_number = *next_counter;
-            *next_counter = next_counter.saturating_add(1);
-            self.mapi_identity_change_numbers
-                .lock()
-                .unwrap()
-                .insert(canonical_id, change_number);
             let imported_last_modification_time = u64::try_from(imported_last_modification_time)
                 .map_err(|_| anyhow::anyhow!("invalid MAPI hierarchy modification time"))?;
             let imported_last_modification_time =
                 imported_last_modification_time - imported_last_modification_time % 10;
             let imported_wins =
                 !conflict || imported_last_modification_time > current_last_modification_time;
+            if imported_wins {
+                self.upsert_mapi_special_folder_aliases(account_id, aliases)
+                    .await?;
+                let mut stored = self.mapi_folder_profile_property_values.lock().unwrap();
+                for value in profile_values {
+                    stored.insert(
+                        (
+                            account_id,
+                            value.folder_id,
+                            value.property_tag,
+                            value.property_type,
+                        ),
+                        value.property_value.clone(),
+                    );
+                }
+            }
+            let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+            let change_number = *next_counter;
+            *next_counter = next_counter.saturating_add(1);
+            drop(next_counter);
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_number);
             let resolved_change_key = if imported_wins {
                 imported_change_key.to_vec()
             } else {
@@ -5342,6 +5382,227 @@ impl ExchangeStore for FakeStore {
             } else {
                 Ok(MapiFolderHierarchyCommitOutcome::Applied(version))
             }
+        })
+    }
+
+    fn commit_mapi_folder_hierarchy_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        profile_values: &'a [MapiFolderProfilePropertyValue],
+        aliases: &'a [MapiSpecialFolderAlias],
+    ) -> StoreFuture<'a, MapiFolderVersion> {
+        Box::pin(async move {
+            if !profile_values
+                .iter()
+                .any(|value| value.property_tag == 0x36D8_1102)
+                || profile_values.iter().any(|value| {
+                    let supported = match (value.property_tag, value.property_type) {
+                        (0x36D8_1102, 0x1102) => {
+                            value.folder_id == crate::mapi::identity::INBOX_FOLDER_ID
+                        }
+                        (0x36DA_0102, 0x0102) => value.folder_id != 0,
+                        _ => false,
+                    };
+                    !supported
+                        || value.property_value.is_empty()
+                        || value.property_value.len() > 4096
+                })
+            {
+                anyhow::bail!("invalid MAPI hierarchy profile property value");
+            }
+            let canonical_id = self
+                .mapi_identities
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|(canonical_id, object_id)| {
+                    (*object_id == folder_id).then_some(*canonical_id)
+                })
+                .ok_or_else(|| anyhow::anyhow!("MAPI folder identity not found"))?;
+            let current_change_number = self
+                .mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied()
+                .unwrap_or_else(|| {
+                    crate::mapi::identity::global_counter_from_store_id(folder_id).unwrap_or(1)
+                });
+            let current_change_key = self
+                .mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    crate::mapi::identity::change_key_for_change_number(current_change_number)
+                });
+            let current_predecessor_change_list = self
+                .mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    crate::mapi_mailstore::predecessor_change_list(current_change_number)
+                });
+            if !test_mapi_pcl_includes_change_key(
+                &current_predecessor_change_list,
+                &current_change_key,
+            ) {
+                anyhow::bail!("MAPI folder PCL does not contain its current ChangeKey");
+            }
+            let current_last_modification_time = self
+                .mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied()
+                .unwrap_or_else(|| {
+                    crate::mapi_mailstore::filetime_from_change_number(current_change_number)
+                });
+
+            self.upsert_mapi_special_folder_aliases(account_id, aliases)
+                .await?;
+            let mut stored = self.mapi_folder_profile_property_values.lock().unwrap();
+            for value in profile_values {
+                stored.insert(
+                    (
+                        account_id,
+                        value.folder_id,
+                        value.property_tag,
+                        value.property_type,
+                    ),
+                    value.property_value.clone(),
+                );
+            }
+            drop(stored);
+
+            let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+            let change_number = *next_counter;
+            *next_counter = next_counter.saturating_add(1);
+            drop(next_counter);
+            let change_key = crate::mapi::identity::change_key_for_change_number(change_number);
+            let mut change_key_pcl = vec![change_key.len() as u8];
+            change_key_pcl.extend_from_slice(&change_key);
+            let predecessor_change_list = test_merge_mapi_predecessor_change_lists(
+                &current_predecessor_change_list,
+                &change_key_pcl,
+            )
+            .ok_or_else(|| anyhow::anyhow!("invalid current MAPI hierarchy PCL"))?;
+            let last_modification_time = current_last_modification_time.saturating_add(10);
+            self.mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_number);
+            self.mapi_identity_change_keys
+                .lock()
+                .unwrap()
+                .insert(canonical_id, change_key.clone());
+            self.mapi_identity_predecessor_change_lists
+                .lock()
+                .unwrap()
+                .insert(canonical_id, predecessor_change_list.clone());
+            self.mapi_identity_last_modification_times
+                .lock()
+                .unwrap()
+                .insert(canonical_id, last_modification_time);
+            Ok(MapiFolderVersion {
+                folder_id,
+                change_number,
+                change_key,
+                predecessor_change_list,
+                last_modification_time,
+            })
+        })
+    }
+
+    fn fetch_mapi_folder_hierarchy_profile_snapshot<'a>(
+        &'a self,
+        account_id: Uuid,
+        identity_folder_id: u64,
+        profile_folder_id: u64,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, Option<MapiFolderHierarchyProfileSnapshot>> {
+        self.mapi_folder_profile_property_reads
+            .fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move {
+            let Some(canonical_id) = self.mapi_identities.lock().unwrap().iter().find_map(
+                |(canonical_id, object_id)| {
+                    (*object_id == identity_folder_id).then_some(*canonical_id)
+                },
+            ) else {
+                return Ok(None);
+            };
+            let change_number = self
+                .mapi_identity_change_numbers
+                .lock()
+                .unwrap()
+                .get(&canonical_id)
+                .copied()
+                .unwrap_or_else(|| {
+                    crate::mapi::identity::global_counter_from_store_id(identity_folder_id)
+                        .unwrap_or(1)
+                });
+            let version = MapiFolderVersion {
+                folder_id: identity_folder_id,
+                change_number,
+                change_key: self
+                    .mapi_identity_change_keys
+                    .lock()
+                    .unwrap()
+                    .get(&canonical_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::mapi::identity::change_key_for_change_number(change_number)
+                    }),
+                predecessor_change_list: self
+                    .mapi_identity_predecessor_change_lists
+                    .lock()
+                    .unwrap()
+                    .get(&canonical_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::mapi_mailstore::predecessor_change_list(change_number)
+                    }),
+                last_modification_time: self
+                    .mapi_identity_last_modification_times
+                    .lock()
+                    .unwrap()
+                    .get(&canonical_id)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        crate::mapi_mailstore::filetime_from_change_number(change_number)
+                    }),
+            };
+            let mut profile_values = self
+                .mapi_folder_profile_property_values
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(
+                    |(
+                        (stored_account_id, stored_folder_id, property_tag, property_type),
+                        value,
+                    )| {
+                        (*stored_account_id == account_id
+                            && *stored_folder_id == profile_folder_id
+                            && property_tags.contains(property_tag))
+                        .then(|| MapiFolderProfilePropertyValue {
+                            folder_id: profile_folder_id,
+                            property_tag: *property_tag,
+                            property_type: *property_type,
+                            property_value: value.clone(),
+                        })
+                    },
+                )
+                .collect::<Vec<_>>();
+            profile_values.sort_by_key(|value| (value.property_tag, value.property_type));
+            Ok(Some(MapiFolderHierarchyProfileSnapshot {
+                version,
+                profile_values,
+            }))
         })
     }
 
@@ -13667,7 +13928,9 @@ const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
+const PID_TAG_ADDITIONAL_REN_ENTRY_IDS: u32 = 0x36D8_1102;
 const PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX: u32 = 0x36D9_0102;
+const PID_TAG_EXTENDED_FOLDER_FLAGS: u32 = 0x36DA_0102;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_LOCAL_COMMIT_TIME: u32 = 0x6709_0040;
 const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
@@ -13736,7 +13999,9 @@ struct StrictHierarchySyncStream {
 struct StrictHierarchyFolderChange {
     source_key: Vec<u8>,
     parent_source_key: Vec<u8>,
+    last_modification_time: u64,
     change_key: Vec<u8>,
+    predecessor_change_list: Vec<u8>,
     display_name: String,
     container_class: Option<String>,
     default_post_message_class: Option<String>,
@@ -13747,6 +14012,7 @@ struct StrictHierarchyFolderChange {
     content_unread_count: Option<u32>,
     local_commit_time_max: Option<u64>,
     deleted_count_total: Option<u32>,
+    additional_ren_entry_ids: Option<Vec<Vec<u8>>>,
 }
 
 #[derive(Debug, Default)]
@@ -13754,7 +14020,9 @@ struct StrictHierarchyFolderBuilder {
     tags: Vec<u32>,
     source_key: Option<Vec<u8>>,
     parent_source_key: Option<Vec<u8>>,
+    last_modification_time: Option<u64>,
     change_key: Option<Vec<u8>>,
+    predecessor_change_list: Option<Vec<u8>>,
     display_name: Option<String>,
     container_class: Option<String>,
     default_post_message_class: Option<String>,
@@ -13765,6 +14033,7 @@ struct StrictHierarchyFolderBuilder {
     content_unread_count: Option<u32>,
     local_commit_time_max: Option<u64>,
     deleted_count_total: Option<u32>,
+    additional_ren_entry_ids: Option<Vec<Vec<u8>>>,
 }
 
 struct StrictFastTransferProperty {
@@ -14040,6 +14309,17 @@ fn strict_parse_fast_transfer_property(
             }
             (value_start, cursor - value_start)
         }
+        0x1102 => {
+            let count = read_strict_u32(bytes, value_start)? as usize;
+            let mut cursor = value_start + 4;
+            for _ in 0..count {
+                let len = read_strict_u32(bytes, cursor)? as usize;
+                cursor += 4;
+                read_strict_slice(bytes, cursor, len)?;
+                cursor += len;
+            }
+            (value_start, cursor - value_start)
+        }
         _ => {
             return Err(format!(
                 "unsupported FastTransfer property type in 0x{tag:08x}"
@@ -14071,7 +14351,13 @@ fn strict_record_folder_property(
     match property.tag {
         PID_TAG_PARENT_SOURCE_KEY => folder.parent_source_key = Some(property.value),
         PID_TAG_SOURCE_KEY => folder.source_key = Some(property.value),
+        PID_TAG_LAST_MODIFICATION_TIME => {
+            folder.last_modification_time = Some(strict_decode_u64_property(&property)?);
+        }
         PID_TAG_CHANGE_KEY => folder.change_key = Some(property.value),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => {
+            folder.predecessor_change_list = Some(property.value);
+        }
         PID_TAG_DISPLAY_NAME_W => {
             folder.display_name = Some(strict_decode_utf16z(&property.value)?)
         }
@@ -14106,6 +14392,9 @@ fn strict_record_folder_property(
         }
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
             folder.default_post_message_class = Some(strict_decode_utf16z(&property.value)?);
+        }
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS => {
+            folder.additional_ren_entry_ids = Some(strict_decode_multi_binary_property(&property)?);
         }
         _ => {}
     }
@@ -14146,6 +14435,27 @@ fn strict_decode_u64_property(property: &StrictFastTransferProperty) -> Result<u
     Ok(u64::from_le_bytes(
         property.value.as_slice().try_into().unwrap(),
     ))
+}
+
+fn strict_decode_multi_binary_property(
+    property: &StrictFastTransferProperty,
+) -> Result<Vec<Vec<u8>>, String> {
+    let count = read_strict_u32(&property.value, 0)? as usize;
+    let mut offset = 4;
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let len = read_strict_u32(&property.value, offset)? as usize;
+        offset += 4;
+        values.push(read_strict_slice(&property.value, offset, len)?.to_vec());
+        offset += len;
+    }
+    if offset != property.value.len() {
+        return Err(format!(
+            "PtypMultipleBinary property 0x{:08x} has trailing bytes",
+            property.tag
+        ));
+    }
+    Ok(values)
 }
 
 fn strict_decode_object_id_property(property: &StrictFastTransferProperty) -> Result<u64, String> {
@@ -14241,9 +14551,15 @@ fn strict_finish_folder_change(
     let parent_source_key = folder
         .parent_source_key
         .ok_or("folderChange missing PidTagParentSourceKey")?;
+    let last_modification_time = folder
+        .last_modification_time
+        .ok_or("folderChange missing PidTagLastModificationTime")?;
     let change_key = folder
         .change_key
         .ok_or("folderChange missing PidTagChangeKey")?;
+    let predecessor_change_list = folder
+        .predecessor_change_list
+        .ok_or("folderChange missing PidTagPredecessorChangeList")?;
     let display_name = folder
         .display_name
         .ok_or("folderChange missing PidTagDisplayName")?;
@@ -14264,7 +14580,9 @@ fn strict_finish_folder_change(
     folder_changes.push(StrictHierarchyFolderChange {
         source_key,
         parent_source_key,
+        last_modification_time,
         change_key,
+        predecessor_change_list,
         display_name,
         container_class: folder.container_class,
         default_post_message_class: folder.default_post_message_class,
@@ -14275,6 +14593,7 @@ fn strict_finish_folder_change(
         content_unread_count: folder.content_unread_count,
         local_commit_time_max: folder.local_commit_time_max,
         deleted_count_total: folder.deleted_count_total,
+        additional_ren_entry_ids: folder.additional_ren_entry_ids,
     });
     Ok(())
 }

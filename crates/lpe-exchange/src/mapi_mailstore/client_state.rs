@@ -1178,7 +1178,7 @@ fn parse_property(bytes: &[u8], offset: usize) -> Result<ParsedProperty<'_>, Str
         0x0014 | 0x0040 => fixed_property_range(bytes, value_start, 8)?,
         0x0048 => fixed_property_range(bytes, value_start, 16)?,
         0x001E | 0x001F | 0x0102 => variable_property_range(bytes, value_start)?,
-        0x101E | 0x101F => multi_string_property_range(bytes, value_start)?,
+        0x101E | 0x101F | 0x1102 => multi_variable_property_range(bytes, value_start)?,
         _ => {
             return Err(format!(
                 "unsupported LPE FastTransfer property type in 0x{tag:08x}"
@@ -1222,7 +1222,7 @@ fn variable_property_range(
     Ok((payload_start, len, end))
 }
 
-fn multi_string_property_range(
+fn multi_variable_property_range(
     bytes: &[u8],
     value_start: usize,
 ) -> Result<(usize, usize, usize), String> {
@@ -1234,7 +1234,7 @@ fn multi_string_property_range(
             .checked_add(4)
             .and_then(|offset| offset.checked_add(len))
             .filter(|offset| *offset <= bytes.len())
-            .ok_or_else(|| "multi-string FastTransfer property overruns stream".to_string())?;
+            .ok_or_else(|| "multi-value FastTransfer property overruns stream".to_string())?;
     }
     Ok((value_start, end - value_start, end))
 }
@@ -1291,4 +1291,22 @@ fn is_fast_transfer_marker(tag: u32) -> bool {
             | INCR_SYNC_PROGRESS_PER_MSG
             | 0x4010_0003 // StartFAIMsg
     )
+}
+
+#[cfg(test)]
+#[test]
+fn client_state_parser_accepts_fast_transfer_multi_binary() {
+    let mut bytes = Vec::new();
+    write_u32(&mut bytes, 0x36D8_1102);
+    write_u32(&mut bytes, 2);
+    write_u32(&mut bytes, 2);
+    bytes.extend_from_slice(&[0x11, 0x22]);
+    write_u32(&mut bytes, 3);
+    bytes.extend_from_slice(&[0x33, 0x44, 0x55]);
+
+    let property = parse_property(&bytes, 0).expect("parse PtypMultipleBinary");
+
+    assert_eq!(property.tag, 0x36D8_1102);
+    assert_eq!(property.value, &bytes[4..]);
+    assert_eq!(property.next_offset, bytes.len());
 }

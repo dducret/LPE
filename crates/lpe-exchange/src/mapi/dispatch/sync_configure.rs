@@ -293,7 +293,67 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     }
     deleted_message_ids.sort_unstable();
     deleted_message_ids.dedup();
-    let folder_versions = snapshot.folder_versions();
+    let mut folder_versions = snapshot.folder_versions();
+    let mut owner_inbox_additional_ren_entry_ids = Vec::new();
+    let inbox_folder_change_present = sync_type == MapiSyncType::Hierarchy.as_u8()
+        && folder_id != INBOX_FOLDER_ID
+        && all_sync_mailboxes
+            .iter()
+            .any(|mailbox| mapi_folder_id(mailbox) == INBOX_FOLDER_ID);
+    if inbox_folder_change_present {
+        let Some(actual_inbox_folder_id) =
+            snapshot.identity_codec().actual_object_id(INBOX_FOLDER_ID)
+        else {
+            responses.extend_from_slice(&rop_error_response(
+                0x70,
+                request.response_handle_index(),
+                0x8004_0102,
+            ));
+            return SyncConfigureFlow::Continue;
+        };
+        let hierarchy_profile_snapshot = match store
+            .fetch_mapi_folder_hierarchy_profile_snapshot(
+                principal.account_id,
+                actual_inbox_folder_id,
+                INBOX_FOLDER_ID,
+                &[PID_TAG_ADDITIONAL_REN_ENTRY_IDS],
+            )
+            .await
+        {
+            Ok(Some(snapshot)) => snapshot,
+            _ => {
+                responses.extend_from_slice(&rop_error_response(
+                    0x70,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                ));
+                return SyncConfigureFlow::Continue;
+            }
+        };
+        let Some(values) = normalized_additional_ren_entry_ids_from_profile(
+            principal,
+            &hierarchy_profile_snapshot.profile_values,
+        ) else {
+            responses.extend_from_slice(&rop_error_response(
+                0x70,
+                request.response_handle_index(),
+                0x8004_0102,
+            ));
+            return SyncConfigureFlow::Continue;
+        };
+        owner_inbox_additional_ren_entry_ids = values;
+
+        let mut inbox_version = hierarchy_profile_snapshot.version;
+        inbox_version.folder_id = INBOX_FOLDER_ID;
+        if let Some(version) = folder_versions
+            .iter_mut()
+            .find(|version| version.folder_id == INBOX_FOLDER_ID)
+        {
+            *version = inbox_version;
+        } else {
+            folder_versions.push(inbox_version);
+        }
+    }
     let state = mapi_mailstore::sync_state_token_with_special_objects_and_normal_message_facts(
         sync_type,
         sync_flags,
@@ -337,6 +397,7 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
         sync_flags,
         sync_extra_flags,
         &sync_property_tags,
+        &owner_inbox_additional_ren_entry_ids,
         folder_id,
         &all_sync_mailboxes,
         &all_sync_emails,
@@ -579,4 +640,30 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
     }
     *content_sync_configure_observed = sync_type == 0x01;
     SyncConfigureFlow::Continue
+}
+
+fn normalized_additional_ren_entry_ids_from_profile(
+    principal: &AccountPrincipal,
+    profile_values: &[crate::store::MapiFolderProfilePropertyValue],
+) -> Option<Vec<Vec<u8>>> {
+    let value = match profile_values
+        .iter()
+        .find(|value| value.property_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
+    {
+        Some(value)
+            if value.property_type == (PID_TAG_ADDITIONAL_REN_ENTRY_IDS & 0x0000_FFFF) as u16 =>
+        {
+            let value = additional_ren_entry_ids_from_profile_bytes(&value.property_value)?;
+            merge_additional_ren_entry_ids(principal, None, value)?
+        }
+        Some(_) => return None,
+        None => special_folder_identification_property_value(
+            principal.account_id,
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        )?,
+    };
+    match value {
+        MapiValue::MultiBinary(values) => Some(values),
+        _ => None,
+    }
 }

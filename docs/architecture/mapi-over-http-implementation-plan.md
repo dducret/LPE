@@ -471,6 +471,21 @@ before it is advertised.
   and identity rotation share one revision-fenced transaction so a concurrent
   write cannot consume a revision with stale property content. Ordinary
   Calendar item changes do not rotate it.
+  A deeper Probe N (`202608140800`) ETL and EMSMDB image audit finally
+  localizes the unchanged Calendar `[8004010F-501-0-1430]` report: duplicate
+  processing asks Outlook's cached special-folder state for the Conflicts
+  folder EntryID, but that cache is empty because the Inbox
+  `PidTagAdditionalRenEntryIds` value never completed a hierarchy round trip.
+  The wire and PostgreSQL state show both halves of the LPE defect. LPE accepted
+  Inbox hierarchy versions whose property bag contained empty reserved slots
+  but discarded those hierarchy property values; later Root
+  `RopSetProperties` calls persisted corrected profile bytes without rotating
+  or journaling the Inbox hierarchy version. Outlook therefore uploaded the
+  same empty slots again and failed before Calendar duplicate reconciliation.
+  The repair belongs to Inbox hierarchy state: export the normalized
+  multi-binary value in `folderChange`, and commit every accepted direct write
+  or hierarchy import with its Inbox version and replay row in one transaction.
+  This is independent of `LocalFreebusy` and Calendar item content.
   Probe L (`202608131831`) proves the durable identity and normal-content
   partition are active, but also exposes a missing table-row boundary: Outlook
   asks the FreeBusy Data contents table for `PidTagFolderId`, `PidTagMid`,
@@ -1183,7 +1198,10 @@ non-canonical LPE state.
   is bounded durable compatibility metadata, not canonical folder or
   user-visible state. A Root-handle write is normalized into that same Inbox
   compatibility value; Root has no independent persisted ownership or
-  advertised value.
+  advertised value. The normalized value is also emitted in the Inbox
+  hierarchy `folderChange`. A direct Root/Inbox write and an existing-Inbox
+  hierarchy import atomically commit that value, any validated aliases, the
+  Inbox CN/ChangeKey/PCL/LMT tuple, and one MAPI-only hierarchy replay row.
 - `RopIdFromLongTermId` advertises the canonical store replica GUID in
   `PidTagSerializedReplidGuidMap`, but it also accepts the authenticated
   mailbox account GUID byte layouts as legacy replica aliases so stale Outlook
@@ -1616,7 +1634,10 @@ not by itself authorize broad client publication.
   identity when that canonical folder is in the configured full hierarchy
   projection. An alias is not an LPE hierarchy replica folder object. Unlearned
   client-local folder identifiers remain unmapped and fail through the normal
-  `ecNotFound` folder-open path.
+  `ecNotFound` folder-open path. Profile bytes, aliases, the Inbox hierarchy
+  version tuple, and its replay row are one PostgreSQL commit; hierarchy import
+  normalizes the documented indexes before applying the same transaction, so
+  an empty client prefix cannot erase the canonical special-folder identities.
 - Outlook scalar default-folder EntryID writebacks on Root or Inbox are validated
   against the canonical special-folder map and acknowledged for interoperability.
   A valid alternate FID and matching SourceKey are recorded through the same
@@ -2003,7 +2024,7 @@ this plan explicitly documents that compatibility behavior.
 | Opaque item custom properties | `mapi_custom_property_values` | Stored only for supported canonical item/attachment objects where no canonical field owns the value, the fixed `LocalFreebusy` object's provider-private named metadata, plus the documented bounded Calendar standard-property passthrough set. Canonical grants/preferences and other canonical projections override stale compatibility values. |
 | Navigation shortcuts | `mapi_navigation_shortcuts` | Common Views shortcut and group-header FAI rows are durable canonical profile-visible state for cached-mode profile creation and reopen. |
 | Folder display flags | `mapi_folder_profile_property_values` | Outlook-written `PidTagExtendedFolderFlags` folder UI streams are persisted per account and MAPI folder id, then overlaid on folder open so display-option writes survive reconnect. This store is bounded to Outlook profile folder flags, not arbitrary Exchange folder truth. |
-| Additional Ren Entry IDs | `mapi_folder_profile_property_values` plus `mapi_special_folder_aliases` | Inbox `PidTagAdditionalRenEntryIds` always returns canonical values at the five documented positions and preserves opaque later values across abbreviated writes. A recognized alternate remains a durable redirect and a resident identity for the OST that imported it, but is never projected as a duplicate visible hierarchy row. |
+| Additional Ren Entry IDs | `mapi_folder_profile_property_values`, `mapi_special_folder_aliases`, `mapi_object_identities`, and `mail_change_log` | Inbox `PidTagAdditionalRenEntryIds` always returns canonical values at the five documented positions and preserves opaque later values across abbreviated writes. Root is an input alias for the same Inbox-owned property. Direct writes and hierarchy imports atomically publish the normalized value with its Inbox CN/ChangeKey/PCL/LMT and replay row, and Inbox `folderChange` exports that committed value. A recognized alternate remains a durable redirect and a resident identity for the OST that imported it, but is never projected as a duplicate visible hierarchy row. |
 | Associated configuration FAI | `mapi_associated_config_messages` | Outlook-created folder associated/config messages are durable MAPI-only compatibility state for view/form/client configuration sync replay. Direct associated-message deletes are supported and folder-scoped incremental content sync exports associated-config delete idsets. |
 | Sync checkpoints | `mapi_sync_checkpoints` | Durable operational EMSMDB/ICS completion cursors for hierarchy/content/read-state diagnostics; they neither store mailbox content nor select a client download delta. |
 | IPM subtree OST identity | `mapi_profile_settings.ipm_subtree_ost_id` | Outlook-written cached-mode profile identity is persisted account-wide and reloaded on IPM subtree open after reconnect. |
