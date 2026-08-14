@@ -38,7 +38,6 @@ pub(super) fn imported_folder_profile_property_values(
     principal: &AccountPrincipal,
     folder_id: u64,
     values: &[(u32, MapiValue)],
-    existing_profile_values: &[crate::store::MapiFolderProfilePropertyValue],
 ) -> Result<(
     Vec<crate::store::MapiFolderProfilePropertyValue>,
     Vec<MapiSpecialFolderAlias>,
@@ -48,14 +47,6 @@ pub(super) fn imported_folder_profile_property_values(
         properties: HashMap::new(),
     };
     let aliases = default_folder_entry_id_aliases(Some(&folder), values);
-    let existing_additional_ren_entry_ids = existing_profile_values
-        .iter()
-        .find(|value| {
-            value.folder_id == INBOX_FOLDER_ID
-                && value.property_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS
-                && value.property_type == (PID_TAG_ADDITIONAL_REN_ENTRY_IDS & 0xffff) as u16
-        })
-        .and_then(|value| additional_ren_entry_ids_from_profile_bytes(&value.property_value));
     let mut normalized = Vec::new();
     for (tag, value) in values {
         match (canonical_property_storage_tag(*tag), value) {
@@ -68,12 +59,8 @@ pub(super) fn imported_folder_profile_property_values(
                 return Err(anyhow!("invalid PidTagExtendedFolderFlags value"));
             }
             (PID_TAG_ADDITIONAL_REN_ENTRY_IDS, _) if folder_id == INBOX_FOLDER_ID => {
-                let value = merge_additional_ren_entry_ids(
-                    principal,
-                    existing_additional_ren_entry_ids.as_ref(),
-                    value.clone(),
-                )
-                .ok_or_else(|| anyhow!("invalid PidTagAdditionalRenEntryIds value"))?;
+                let value = merge_additional_ren_entry_ids(principal, None, value.clone())
+                    .ok_or_else(|| anyhow!("invalid PidTagAdditionalRenEntryIds value"))?;
                 if additional_ren_entry_ids_profile_bytes(&value).is_none() {
                     return Err(anyhow!("invalid PidTagAdditionalRenEntryIds value"));
                 }

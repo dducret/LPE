@@ -4050,9 +4050,14 @@ async fn postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_linea
         )
         .await
         .unwrap();
-    let MapiFolderHierarchyCommitOutcome::Conflict(conflict_version) = conflict else {
+    let MapiFolderHierarchyCommitOutcome::Conflict {
+        version: conflict_version,
+        imported_won,
+    } = conflict
+    else {
         panic!("expected a hierarchy conflict, got {conflict:?}");
     };
+    assert!(!imported_won);
     let conflict_change_number = conflict_version.change_number;
     assert_ne!(conflict_change_number, applied_change_number);
 
@@ -4271,6 +4276,7 @@ struct FakeStore {
     mapi_custom_property_values: Arc<Mutex<HashMap<FakeMapiCustomPropertyKey, Vec<u8>>>>,
     mapi_folder_profile_property_values:
         Arc<Mutex<HashMap<FakeMapiFolderProfilePropertyKey, Vec<u8>>>>,
+    mapi_hierarchy_projection_versions: Arc<Mutex<HashMap<(Uuid, u64), u32>>>,
     mapi_folder_profile_property_reads: Arc<AtomicU64>,
     mapi_checkpoints: Arc<Mutex<HashMap<(Option<Uuid>, MapiCheckpointKind), MapiSyncCheckpoint>>>,
     stale_protocol_local_folder_properties: Arc<Mutex<HashMap<(u64, u32), Vec<u8>>>>,
@@ -5143,6 +5149,47 @@ fn test_merge_mapi_predecessor_change_lists(first: &[u8], second: &[u8]) -> Opti
     Some(merged)
 }
 
+fn test_merge_mapi_hierarchy_multi_binary(
+    existing: Option<&[u8]>,
+    incoming: &[u8],
+) -> Option<Vec<u8>> {
+    let parse = |bytes: &[u8]| {
+        let mut offset = 0usize;
+        let count = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
+        offset += 4;
+        let mut values = Vec::with_capacity(count);
+        for _ in 0..count {
+            let length =
+                u16::from_le_bytes(bytes.get(offset..offset.checked_add(2)?)?.try_into().ok()?)
+                    as usize;
+            offset += 2;
+            let end = offset.checked_add(length)?;
+            values.push(bytes.get(offset..end)?.to_vec());
+            offset = end;
+        }
+        (offset == bytes.len()).then_some(values)
+    };
+    let incoming = parse(incoming)?;
+    let mut merged = match existing {
+        Some(existing) => parse(existing)?,
+        None => Vec::new(),
+    };
+    for (index, value) in incoming.into_iter().enumerate() {
+        if let Some(existing) = merged.get_mut(index) {
+            *existing = value;
+        } else {
+            merged.push(value);
+        }
+    }
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&u32::try_from(merged.len()).ok()?.to_le_bytes());
+    for value in merged {
+        bytes.extend_from_slice(&u16::try_from(value.len()).ok()?.to_le_bytes());
+        bytes.extend_from_slice(&value);
+    }
+    Some(bytes)
+}
+
 impl ExchangeStore for FakeStore {
     fn reserve_mapi_local_replica_ids<'a>(
         &'a self,
@@ -5329,15 +5376,32 @@ impl ExchangeStore for FakeStore {
                     .await?;
                 let mut stored = self.mapi_folder_profile_property_values.lock().unwrap();
                 for value in profile_values {
-                    stored.insert(
-                        (
-                            account_id,
-                            value.folder_id,
-                            value.property_tag,
-                            value.property_type,
-                        ),
-                        value.property_value.clone(),
+                    let key = (
+                        account_id,
+                        value.folder_id,
+                        value.property_tag,
+                        value.property_type,
                     );
+                    let property_value = if value.property_tag == 0x36D8_1102 {
+                        test_merge_mapi_hierarchy_multi_binary(
+                            stored.get(&key).map(Vec::as_slice),
+                            &value.property_value,
+                        )
+                        .ok_or_else(|| anyhow::anyhow!("invalid hierarchy multi-binary value"))?
+                    } else {
+                        value.property_value.clone()
+                    };
+                    stored.insert(key, property_value);
+                }
+                drop(stored);
+                if profile_values
+                    .iter()
+                    .any(|value| value.property_tag == 0x36D8_1102)
+                {
+                    self.mapi_hierarchy_projection_versions
+                        .lock()
+                        .unwrap()
+                        .insert((account_id, folder_id), 4);
                 }
             }
             let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
@@ -5378,7 +5442,10 @@ impl ExchangeStore for FakeStore {
                 last_modification_time: resolved_last_modification_time,
             };
             if conflict {
-                Ok(MapiFolderHierarchyCommitOutcome::Conflict(version))
+                Ok(MapiFolderHierarchyCommitOutcome::Conflict {
+                    version,
+                    imported_won: imported_wins,
+                })
             } else {
                 Ok(MapiFolderHierarchyCommitOutcome::Applied(version))
             }
@@ -5391,7 +5458,7 @@ impl ExchangeStore for FakeStore {
         folder_id: u64,
         profile_values: &'a [MapiFolderProfilePropertyValue],
         aliases: &'a [MapiSpecialFolderAlias],
-    ) -> StoreFuture<'a, MapiFolderVersion> {
+    ) -> StoreFuture<'a, MapiFolderHierarchyProfileSnapshot> {
         Box::pin(async move {
             if !profile_values
                 .iter()
@@ -5466,18 +5533,33 @@ impl ExchangeStore for FakeStore {
             self.upsert_mapi_special_folder_aliases(account_id, aliases)
                 .await?;
             let mut stored = self.mapi_folder_profile_property_values.lock().unwrap();
+            let mut committed_profile_values = Vec::with_capacity(profile_values.len());
             for value in profile_values {
-                stored.insert(
-                    (
-                        account_id,
-                        value.folder_id,
-                        value.property_tag,
-                        value.property_type,
-                    ),
-                    value.property_value.clone(),
+                let key = (
+                    account_id,
+                    value.folder_id,
+                    value.property_tag,
+                    value.property_type,
                 );
+                let property_value = if value.property_tag == 0x36D8_1102 {
+                    test_merge_mapi_hierarchy_multi_binary(
+                        stored.get(&key).map(Vec::as_slice),
+                        &value.property_value,
+                    )
+                    .ok_or_else(|| anyhow::anyhow!("invalid hierarchy multi-binary value"))?
+                } else {
+                    value.property_value.clone()
+                };
+                stored.insert(key, property_value.clone());
+                let mut committed = value.clone();
+                committed.property_value = property_value;
+                committed_profile_values.push(committed);
             }
             drop(stored);
+            self.mapi_hierarchy_projection_versions
+                .lock()
+                .unwrap()
+                .insert((account_id, folder_id), 4);
 
             let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
             let change_number = *next_counter;
@@ -5508,13 +5590,77 @@ impl ExchangeStore for FakeStore {
                 .lock()
                 .unwrap()
                 .insert(canonical_id, last_modification_time);
-            Ok(MapiFolderVersion {
-                folder_id,
-                change_number,
-                change_key,
-                predecessor_change_list,
-                last_modification_time,
+            Ok(MapiFolderHierarchyProfileSnapshot {
+                version: MapiFolderVersion {
+                    folder_id,
+                    change_number,
+                    change_key,
+                    predecessor_change_list,
+                    last_modification_time,
+                },
+                profile_values: committed_profile_values,
             })
+        })
+    }
+
+    fn ensure_mapi_folder_hierarchy_profile_snapshot<'a>(
+        &'a self,
+        account_id: Uuid,
+        identity_folder_id: u64,
+        profile_values: &'a [MapiFolderProfilePropertyValue],
+        aliases: &'a [MapiSpecialFolderAlias],
+    ) -> StoreFuture<'a, MapiFolderHierarchyProfileSnapshot> {
+        Box::pin(async move {
+            let profile_folder_id = profile_values
+                .iter()
+                .find(|value| value.property_tag == 0x36D8_1102)
+                .map(|value| value.folder_id)
+                .ok_or_else(|| anyhow::anyhow!("missing hierarchy projection value"))?;
+            let property_tags = profile_values
+                .iter()
+                .map(|value| value.property_tag)
+                .collect::<Vec<_>>();
+            let snapshot = self
+                .fetch_mapi_folder_hierarchy_profile_snapshot(
+                    account_id,
+                    identity_folder_id,
+                    profile_folder_id,
+                    &property_tags,
+                )
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("MAPI folder identity not found"))?;
+            let stored = snapshot
+                .profile_values
+                .iter()
+                .find(|value| value.property_tag == 0x36D8_1102 && value.property_type == 0x1102);
+            let incoming = profile_values
+                .iter()
+                .find(|value| value.property_tag == 0x36D8_1102)
+                .expect("validated above");
+            let merged = test_merge_mapi_hierarchy_multi_binary(
+                stored.map(|value| value.property_value.as_slice()),
+                &incoming.property_value,
+            )
+            .ok_or_else(|| anyhow::anyhow!("invalid hierarchy multi-binary value"))?;
+            let projection_version = self
+                .mapi_hierarchy_projection_versions
+                .lock()
+                .unwrap()
+                .get(&(account_id, identity_folder_id))
+                .copied()
+                .unwrap_or_default();
+            if stored.is_none_or(|stored| stored.property_value != merged) || projection_version < 4
+            {
+                self.commit_mapi_folder_hierarchy_property_values(
+                    account_id,
+                    identity_folder_id,
+                    profile_values,
+                    aliases,
+                )
+                .await
+            } else {
+                Ok(snapshot)
+            }
         })
     }
 
@@ -14202,9 +14348,6 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
     if offset != bytes.len() {
         return Err("FastTransfer stream ended on a partial atom".into());
     }
-    if folder_changes.is_empty() && deleted_idset.is_none() {
-        return Err("hierarchy sync stream contained no folderChange or deletion rows".into());
-    }
     let idset_given = idset_given.ok_or("missing MetaTagIdsetGiven")?;
     let cnset_seen = cnset_seen.ok_or("missing MetaTagCnsetSeen")?;
     strict_validate_replguid_globset(&idset_given)?;
@@ -14214,14 +14357,19 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
     }
     for folder in &folder_changes {
         strict_validate_store_xid(&folder.source_key)?;
-        strict_validate_store_xid(&folder.change_key)?;
+        strict_validate_change_key_xid(&folder.change_key)?;
         if !strict_replguid_globset_contains_counter(&idset_given, &folder.source_key[16..22])? {
             return Err(format!(
                 "final MetaTagIdsetGiven does not include folder {}",
                 folder.display_name
             ));
         }
-        if !strict_replguid_globset_contains_counter(&cnset_seen, &folder.change_key[16..22])? {
+        if folder.change_key.len() == 22
+            && folder
+                .change_key
+                .starts_with(&mapi_mailstore::STORE_REPLICA_GUID)
+            && !strict_replguid_globset_contains_counter(&cnset_seen, &folder.change_key[16..22])?
+        {
             return Err(format!(
                 "final MetaTagCnsetSeen does not include folder {} change key",
                 folder.display_name
@@ -14564,7 +14712,7 @@ fn strict_finish_folder_change(
         .display_name
         .ok_or("folderChange missing PidTagDisplayName")?;
     strict_validate_store_xid(&source_key)?;
-    strict_validate_store_xid(&change_key)?;
+    strict_validate_change_key_xid(&change_key)?;
     if !parent_source_key.is_empty() {
         strict_validate_store_xid(&parent_source_key)?;
         if !seen_source_keys

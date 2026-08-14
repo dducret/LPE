@@ -121,11 +121,18 @@ macro_rules! store_impl_mapi_hierarchy_versions {
                         aliases,
                     )
                     .await?;
-                    upsert_mapi_folder_hierarchy_profile_values_in_tx(
+                    let (profile_values, _) = merge_mapi_folder_hierarchy_profile_values_in_tx(
                         &mut tx,
                         tenant_id,
                         account_id,
                         profile_values,
+                    )
+                    .await?;
+                    upsert_mapi_folder_hierarchy_profile_values_in_tx(
+                        &mut tx,
+                        tenant_id,
+                        account_id,
+                        &profile_values,
                     )
                     .await?;
                 }
@@ -137,7 +144,8 @@ macro_rules! store_impl_mapi_hierarchy_versions {
                         change_key = $5,
                         predecessor_change_list = $6,
                         updated_at = TIMESTAMPTZ '1601-01-01 00:00:00+00'
-                            + (($7::bigint / 10) * INTERVAL '1 microsecond')
+                            + (($7::bigint / 10000000) * INTERVAL '1 second')
+                            + ((($7::bigint / 10) % 1000000) * INTERVAL '1 microsecond')
                     WHERE tenant_id = $1
                       AND account_id = $2
                       AND object_kind = 'mailbox'
@@ -172,6 +180,10 @@ macro_rules! store_impl_mapi_hierarchy_versions {
                     canonical_id,
                     folder_id,
                     change_number,
+                    imported_wins
+                        && profile_values
+                            .iter()
+                            .any(|value| value.property_tag == 0x36D8_1102),
                 )
                 .await?;
                 tx.commit().await?;
@@ -183,7 +195,10 @@ macro_rules! store_impl_mapi_hierarchy_versions {
                     last_modification_time: resolved_last_modification_time,
                 };
                 if conflict {
-                    Ok(MapiFolderHierarchyCommitOutcome::Conflict(version))
+                    Ok(MapiFolderHierarchyCommitOutcome::Conflict {
+                        version,
+                        imported_won: imported_wins,
+                    })
                 } else {
                     Ok(MapiFolderHierarchyCommitOutcome::Applied(version))
                 }
@@ -196,7 +211,7 @@ macro_rules! store_impl_mapi_hierarchy_versions {
             folder_id: u64,
             profile_values: &'a [MapiFolderProfilePropertyValue],
             aliases: &'a [MapiSpecialFolderAlias],
-        ) -> StoreFuture<'a, MapiFolderVersion> {
+        ) -> StoreFuture<'a, MapiFolderHierarchyProfileSnapshot> {
             Box::pin(async move {
                 if !profile_values
                     .iter()
@@ -229,11 +244,18 @@ macro_rules! store_impl_mapi_hierarchy_versions {
                     aliases,
                 )
                 .await?;
-                upsert_mapi_folder_hierarchy_profile_values_in_tx(
+                let (profile_values, _) = merge_mapi_folder_hierarchy_profile_values_in_tx(
                     &mut tx,
                     tenant_id,
                     account_id,
                     profile_values,
+                )
+                .await?;
+                upsert_mapi_folder_hierarchy_profile_values_in_tx(
+                    &mut tx,
+                    tenant_id,
+                    account_id,
+                    &profile_values,
                 )
                 .await?;
 
@@ -288,15 +310,107 @@ macro_rules! store_impl_mapi_hierarchy_versions {
                     canonical_id,
                     folder_id,
                     change_number,
+                    true,
                 )
                 .await?;
                 tx.commit().await?;
-                Ok(MapiFolderVersion {
-                    folder_id,
-                    change_number,
-                    change_key,
-                    predecessor_change_list,
-                    last_modification_time,
+                Ok(MapiFolderHierarchyProfileSnapshot {
+                    version: MapiFolderVersion {
+                        folder_id,
+                        change_number,
+                        change_key,
+                        predecessor_change_list,
+                        last_modification_time,
+                    },
+                    profile_values,
+                })
+            })
+        }
+
+        fn ensure_mapi_folder_hierarchy_profile_snapshot<'a>(
+            &'a self,
+            account_id: Uuid,
+            identity_folder_id: u64,
+            profile_values: &'a [MapiFolderProfilePropertyValue],
+            aliases: &'a [MapiSpecialFolderAlias],
+        ) -> StoreFuture<'a, MapiFolderHierarchyProfileSnapshot> {
+            Box::pin(async move {
+                if !profile_values
+                    .iter()
+                    .any(|value| value.property_tag == 0x36D8_1102)
+                {
+                    anyhow::bail!("MAPI hierarchy profile ensure has no versioned property");
+                }
+                validate_mapi_folder_hierarchy_profile_values(profile_values)?;
+                let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+                let mut tx = self.pool().begin().await?;
+                let store_identity =
+                    mapi_store_identity_for_account_in_tx(&mut tx, tenant_id, account_id).await?;
+                let (canonical_id, current_version) = lock_mapi_folder_version_in_tx(
+                    &mut tx,
+                    tenant_id,
+                    account_id,
+                    identity_folder_id,
+                )
+                .await?;
+                let (profile_values, changed) = merge_mapi_folder_hierarchy_profile_values_in_tx(
+                    &mut tx,
+                    tenant_id,
+                    account_id,
+                    profile_values,
+                )
+                .await?;
+                let versioned_projection = sqlx::query_scalar::<_, bool>(
+                    r#"
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM mail_change_log
+                        WHERE tenant_id = $1
+                          AND account_id = $2
+                          AND object_kind = 'mailbox'
+                          AND object_id = $3
+                          AND summary_json @> '{"mapiHierarchyProjectionVersion": 4}'::jsonb
+                    )
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(canonical_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                let version = if changed || !versioned_projection {
+                    upsert_mapi_special_folder_aliases_in_tx(
+                        &mut tx,
+                        tenant_id,
+                        account_id,
+                        store_identity,
+                        aliases,
+                    )
+                    .await?;
+                    upsert_mapi_folder_hierarchy_profile_values_in_tx(
+                        &mut tx,
+                        tenant_id,
+                        account_id,
+                        &profile_values,
+                    )
+                    .await?;
+                    rotate_mapi_folder_version_in_tx(
+                        &mut tx,
+                        tenant_id,
+                        account_id,
+                        canonical_id,
+                        current_version,
+                        store_identity,
+                        true,
+                    )
+                    .await?
+                } else {
+                    current_version
+                };
+                tx.commit().await?;
+                Ok(MapiFolderHierarchyProfileSnapshot {
+                    version,
+                    profile_values,
                 })
             })
         }
@@ -391,7 +505,11 @@ fn validate_mapi_folder_hierarchy_profile_values(
     let mut keys = std::collections::BTreeSet::new();
     for value in values {
         let supported = match (value.property_tag, value.property_type) {
-            (0x36D8_1102, 0x1102) => value.folder_id == crate::mapi::identity::INBOX_FOLDER_ID,
+            (0x36D8_1102, 0x1102) => {
+                value.folder_id == crate::mapi::identity::INBOX_FOLDER_ID
+                    && parse_mapi_hierarchy_multi_binary(&value.property_value)
+                        .is_ok_and(|values| values.len() >= 5)
+            }
             (0x36DA_0102, 0x0102) => value.folder_id != 0,
             _ => false,
         };
@@ -404,6 +522,47 @@ fn validate_mapi_folder_hierarchy_profile_values(
         }
     }
     Ok(())
+}
+
+async fn merge_mapi_folder_hierarchy_profile_values_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+    values: &[MapiFolderProfilePropertyValue],
+) -> Result<(Vec<MapiFolderProfilePropertyValue>, bool)> {
+    let mut merged_values = Vec::with_capacity(values.len());
+    let mut changed = false;
+    for value in values {
+        let mut value = value.clone();
+        let existing = sqlx::query_scalar::<_, Vec<u8>>(
+            r#"
+            SELECT property_value
+            FROM mapi_folder_profile_property_values
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND folder_id = $3
+              AND property_tag = $4
+              AND property_type = $5
+            FOR UPDATE
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(value.folder_id as i64)
+        .bind(i64::from(value.property_tag))
+        .bind(i32::from(value.property_type))
+        .fetch_optional(&mut **tx)
+        .await?;
+        if value.property_tag == 0x36D8_1102 {
+            value.property_value = merge_mapi_hierarchy_multi_binary(
+                existing.as_deref(),
+                &value.property_value,
+            )?;
+        }
+        changed |= existing.as_deref() != Some(value.property_value.as_slice());
+        merged_values.push(value);
+    }
+    Ok((merged_values, changed))
 }
 
 async fn upsert_mapi_folder_hierarchy_profile_values_in_tx(
@@ -446,6 +605,146 @@ async fn upsert_mapi_folder_hierarchy_profile_values_in_tx(
         .await?;
     }
     Ok(())
+}
+
+fn parse_mapi_hierarchy_multi_binary(bytes: &[u8]) -> Result<Vec<Vec<u8>>> {
+    let count_bytes: [u8; 4] = bytes
+        .get(..4)
+        .ok_or_else(|| anyhow::anyhow!("truncated MAPI hierarchy multi-binary count"))?
+        .try_into()
+        .expect("validated count width");
+    let count = u32::from_le_bytes(count_bytes) as usize;
+    let mut offset = 4usize;
+    let mut values = Vec::with_capacity(count.min(bytes.len() / 2));
+    for _ in 0..count {
+        let length_bytes: [u8; 2] = bytes
+            .get(offset..offset.saturating_add(2))
+            .ok_or_else(|| anyhow::anyhow!("truncated MAPI hierarchy binary length"))?
+            .try_into()
+            .expect("validated length width");
+        offset = offset.saturating_add(2);
+        let length = u16::from_le_bytes(length_bytes) as usize;
+        let end = offset
+            .checked_add(length)
+            .filter(|end| *end <= bytes.len())
+            .ok_or_else(|| anyhow::anyhow!("truncated MAPI hierarchy binary value"))?;
+        values.push(bytes[offset..end].to_vec());
+        offset = end;
+    }
+    if offset != bytes.len() {
+        anyhow::bail!("trailing MAPI hierarchy multi-binary bytes");
+    }
+    Ok(values)
+}
+
+fn merge_mapi_hierarchy_multi_binary(
+    existing: Option<&[u8]>,
+    incoming: &[u8],
+) -> Result<Vec<u8>> {
+    let incoming = parse_mapi_hierarchy_multi_binary(incoming)?;
+    let mut merged = match existing {
+        Some(existing) => parse_mapi_hierarchy_multi_binary(existing)?,
+        None => Vec::new(),
+    };
+    for (index, value) in incoming.into_iter().enumerate() {
+        if let Some(existing) = merged.get_mut(index) {
+            *existing = value;
+        } else {
+            merged.push(value);
+        }
+    }
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(
+        &u32::try_from(merged.len())
+            .map_err(|_| anyhow::anyhow!("too many MAPI hierarchy binary values"))?
+            .to_le_bytes(),
+    );
+    for value in merged {
+        bytes.extend_from_slice(
+            &u16::try_from(value.len())
+                .map_err(|_| anyhow::anyhow!("MAPI hierarchy binary value is too large"))?
+                .to_le_bytes(),
+        );
+        bytes.extend_from_slice(&value);
+    }
+    if bytes.len() > 4096 {
+        anyhow::bail!("MAPI hierarchy profile property value is too large");
+    }
+    Ok(bytes)
+}
+
+async fn rotate_mapi_folder_version_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+    canonical_id: Uuid,
+    current_version: MapiFolderVersion,
+    store_identity: lpe_storage::MapiStoreIdentity,
+    additional_ren_entry_ids_versioned: bool,
+) -> Result<MapiFolderVersion> {
+    let mut predecessor_entries =
+        parse_mapi_predecessor_change_list(&current_version.predecessor_change_list)?;
+    if !mapi_predecessors_contain_change_key(
+        &predecessor_entries,
+        &current_version.change_key,
+    )? {
+        anyhow::bail!("MAPI folder PCL does not contain its current ChangeKey");
+    }
+    let change_number = allocate_next_mapi_global_counter(tx, tenant_id, account_id).await?;
+    let change_key =
+        lpe_storage::mapi_store_identity::mapi_xid(store_identity.replica_guid, change_number);
+    merge_mapi_predecessor_change_key(&mut predecessor_entries, &change_key)?;
+    let predecessor_change_list = serialize_mapi_predecessor_change_list(&predecessor_entries)?;
+    let updated = sqlx::query(
+        r#"
+        UPDATE mapi_object_identities
+        SET mapi_change_number = $4,
+            change_key = $5,
+            predecessor_change_list = $6,
+            updated_at = GREATEST(
+                clock_timestamp(),
+                updated_at + INTERVAL '1 microsecond'
+            )
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'mailbox'
+          AND mapi_object_id = $3
+          AND deleted_at IS NULL
+        RETURNING to_char(
+            updated_at AT TIME ZONE 'UTC',
+            'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+        ) AS updated_at
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(current_version.folder_id as i64)
+    .bind(change_number as i64)
+    .bind(&change_key)
+    .bind(&predecessor_change_list)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("MAPI folder identity changed during hierarchy commit"))?;
+    let last_modification_time = crate::mapi_mailstore::filetime_from_rfc3339_utc(
+        &updated.get::<String, _>("updated_at"),
+    );
+    journal_mapi_folder_hierarchy_change_in_tx(
+        tx,
+        tenant_id,
+        account_id,
+        canonical_id,
+        current_version.folder_id,
+        change_number,
+        additional_ren_entry_ids_versioned,
+    )
+    .await?;
+    Ok(MapiFolderVersion {
+        folder_id: current_version.folder_id,
+        change_number,
+        change_key,
+        predecessor_change_list,
+        last_modification_time,
+    })
 }
 
 async fn lock_mapi_folder_version_in_tx(
@@ -501,6 +800,7 @@ async fn journal_mapi_folder_hierarchy_change_in_tx(
     canonical_id: Uuid,
     folder_id: u64,
     change_number: u64,
+    additional_ren_entry_ids_versioned: bool,
 ) -> Result<()> {
     // Keep the durable event's modseq equal to the committed hierarchy CN so
     // same-Execute notification-origin matching cannot claim another version.
@@ -516,7 +816,8 @@ async fn journal_mapi_folder_hierarchy_change_in_tx(
             jsonb_build_object(
                 'mapiOnly', TRUE,
                 'mapiFolderId', $5::text,
-                'mapiChangeNumber', $6::text
+                'mapiChangeNumber', $6::text,
+                'mapiHierarchyProjectionVersion', CASE WHEN $7 THEN 4 ELSE NULL END
             )
         )
         "#,
@@ -527,6 +828,7 @@ async fn journal_mapi_folder_hierarchy_change_in_tx(
     .bind(change_number as i64)
     .bind(folder_id as i64)
     .bind(change_number as i64)
+    .bind(additional_ren_entry_ids_versioned)
     .execute(&mut **tx)
     .await?;
     Ok(())

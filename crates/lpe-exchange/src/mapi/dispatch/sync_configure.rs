@@ -311,16 +311,44 @@ pub(super) async fn append_synchronization_configure_response<S: ExchangeStore>(
             ));
             return SyncConfigureFlow::Continue;
         };
+        let Some(canonical_additional_ren_entry_ids) = special_folder_identification_property_value(
+            principal.account_id,
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        ) else {
+            responses.extend_from_slice(&rop_error_response(
+                0x70,
+                request.response_handle_index(),
+                0x8004_0102,
+            ));
+            return SyncConfigureFlow::Continue;
+        };
+        let canonical_profile_values = match folder_profile_property_values(
+            INBOX_FOLDER_ID,
+            &[(
+                PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+                canonical_additional_ren_entry_ids,
+            )],
+        ) {
+            Ok(values) => values,
+            Err(_) => {
+                responses.extend_from_slice(&rop_error_response(
+                    0x70,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                ));
+                return SyncConfigureFlow::Continue;
+            }
+        };
         let hierarchy_profile_snapshot = match store
-            .fetch_mapi_folder_hierarchy_profile_snapshot(
+            .ensure_mapi_folder_hierarchy_profile_snapshot(
                 principal.account_id,
                 actual_inbox_folder_id,
-                INBOX_FOLDER_ID,
-                &[PID_TAG_ADDITIONAL_REN_ENTRY_IDS],
+                &canonical_profile_values,
+                &[],
             )
             .await
         {
-            Ok(Some(snapshot)) => snapshot,
+            Ok(snapshot) => snapshot,
             _ => {
                 responses.extend_from_slice(&rop_error_response(
                     0x70,

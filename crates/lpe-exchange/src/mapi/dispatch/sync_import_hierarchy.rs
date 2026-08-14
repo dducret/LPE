@@ -95,8 +95,24 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
     if let Some(canonical_folder_id) = canonical_folder_id {
         // [MS-OXCFXICS] section 2.2.3.2.4.3.1: SourceKey identifies the
         // imported folder. Under LPE's fixed-special-folder policy, a resolved
-        // stale alias only locates its target; it is not a tuple update.
-        if source_folder_id == canonical_folder_id {
+        // stale alias only locates its target unless it carries a supported
+        // property bag, which versions the canonical target atomically.
+        let (profile_values, mut aliases) = match imported_folder_profile_property_values(
+            principal,
+            canonical_folder_id,
+            &property_values,
+        ) {
+            Ok(values) => values,
+            Err(_) => {
+                responses.extend_from_slice(&rop_error_response(
+                    0x73,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                ));
+                return;
+            }
+        };
+        if source_folder_id == canonical_folder_id || !profile_values.is_empty() {
             let Some(durable_folder_id) = snapshot
                 .identity_codec()
                 .actual_object_id(canonical_folder_id)
@@ -108,49 +124,23 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                 ));
                 return;
             };
-            let existing_profile_values = if canonical_folder_id == INBOX_FOLDER_ID
-                && property_values.iter().any(|(tag, _)| {
-                    canonical_property_storage_tag(*tag) == PID_TAG_ADDITIONAL_REN_ENTRY_IDS
-                }) {
-                let profile_tags = [PID_TAG_ADDITIONAL_REN_ENTRY_IDS];
-                match store
-                    .fetch_mapi_folder_hierarchy_profile_snapshot(
-                        principal.account_id,
-                        durable_folder_id,
-                        INBOX_FOLDER_ID,
-                        &profile_tags,
-                    )
-                    .await
-                {
-                    Ok(Some(profile)) => profile.profile_values,
-                    Ok(None) | Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x73,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        return;
-                    }
-                }
-            } else {
-                Vec::new()
-            };
-            let (profile_values, aliases) = match imported_folder_profile_property_values(
-                principal,
-                canonical_folder_id,
-                &property_values,
-                &existing_profile_values,
-            ) {
-                Ok(values) => values,
-                Err(_) => {
+            if source_folder_id != canonical_folder_id {
+                let Some(reserved_global_counter) =
+                    persistable_import_source_key_global_counter(&source_key)
+                else {
                     responses.extend_from_slice(&rop_error_response(
                         0x73,
                         request.response_handle_index(),
                         0x8004_0102,
                     ));
                     return;
-                }
-            };
+                };
+                aliases.push(MapiSpecialFolderAlias {
+                    alias_folder_id: crate::mapi::identity::mapi_store_id(reserved_global_counter),
+                    canonical_folder_id,
+                    source_key: source_key.clone(),
+                });
+            }
             match store
                 .commit_mapi_folder_hierarchy_change(
                     principal.account_id,
@@ -199,9 +189,11 @@ pub(super) async fn append_synchronization_import_hierarchy_change_response<S: E
                         0x8004_0801,
                     ));
                 }
-                Ok(MapiFolderHierarchyCommitOutcome::Conflict(version)) => {
+                Ok(MapiFolderHierarchyCommitOutcome::Conflict {
+                    version,
+                    imported_won,
+                }) => {
                     let version = folder_version_for_snapshot(snapshot, version);
-                    let imported_won = version.change_key == imported_version.change_key;
                     let change_number = version.change_number;
                     snapshot.upsert_folder_version(version);
                     if imported_won {

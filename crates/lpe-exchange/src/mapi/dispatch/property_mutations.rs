@@ -71,7 +71,7 @@ pub(super) async fn append_set_properties_response<S>(
 where
     S: ExchangeStore,
 {
-    let mut set_properties_object = input_object(session, handle_slots, request).cloned();
+    let set_properties_object = input_object(session, handle_slots, request).cloned();
     let set_properties_probe = set_properties_probe_request(request);
     log_set_properties_specific_debug(
         principal,
@@ -156,21 +156,6 @@ where
         .into_iter()
         .map(|(tag, value)| (session.normalize_named_property_tag(tag), value))
         .collect::<Vec<_>>();
-    if values
-        .iter()
-        .any(|(tag, _)| canonical_property_storage_tag(*tag) == PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
-    {
-        hydrate_folder_handle_properties_for_request(
-            store,
-            principal,
-            session,
-            handle_slots,
-            request,
-            &[PID_TAG_ADDITIONAL_REN_ENTRY_IDS],
-        )
-        .await;
-        set_properties_object = input_object(session, handle_slots, request).cloned();
-    }
     let delegate_freebusy_mutation = matches!(
         set_properties_object.as_ref(),
         Some(MapiObject::DelegateFreeBusyMessage { .. })
@@ -305,7 +290,7 @@ where
                 }
                 async {
                     let aliases = default_folder_entry_id_aliases(object.as_ref(), &values);
-                    let values = default_folder_identification_safe_property_values(
+                    let mut values = default_folder_identification_safe_property_values(
                         principal,
                         object.as_ref(),
                         values,
@@ -322,7 +307,7 @@ where
                             .identity_codec()
                             .actual_object_id(INBOX_FOLDER_ID)
                             .ok_or_else(|| anyhow!("durable MAPI Inbox identity was not found"))?;
-                        let mut version = store
+                        let committed = store
                             .commit_mapi_folder_hierarchy_property_values(
                                 principal.account_id,
                                 durable_inbox_folder_id,
@@ -330,6 +315,31 @@ where
                                 &aliases,
                             )
                             .await?;
+                        let committed_additional_ren_entry_ids = committed
+                            .profile_values
+                            .iter()
+                            .find(|value| {
+                                value.property_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS
+                                    && value.property_type
+                                        == (PID_TAG_ADDITIONAL_REN_ENTRY_IDS & 0xffff) as u16
+                            })
+                            .and_then(|value| {
+                                additional_ren_entry_ids_from_profile_bytes(&value.property_value)
+                            })
+                            .ok_or_else(|| {
+                                anyhow!("committed PidTagAdditionalRenEntryIds was not found")
+                            })?;
+                        let (_, additional_ren_entry_ids) = values
+                            .iter_mut()
+                            .find(|(tag, _)| {
+                                canonical_property_storage_tag(*tag)
+                                    == PID_TAG_ADDITIONAL_REN_ENTRY_IDS
+                            })
+                            .ok_or_else(|| {
+                                anyhow!("PidTagAdditionalRenEntryIds mutation was not found")
+                            })?;
+                        *additional_ren_entry_ids = committed_additional_ren_entry_ids;
+                        let mut version = committed.version;
                         version.folder_id = INBOX_FOLDER_ID;
                         let change_number = version.change_number;
                         snapshot.upsert_folder_version(version);

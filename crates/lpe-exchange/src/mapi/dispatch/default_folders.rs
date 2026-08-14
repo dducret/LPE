@@ -180,13 +180,10 @@ fn default_folder_identification_safe_property_value(
                 .map(|value| (storage_tag, value))
         }
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS => {
-            let existing = match object {
-                Some(MapiObject::Folder { properties, .. }) => {
-                    properties.get(&PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
-                }
-                _ => None,
-            };
-            merge_additional_ren_entry_ids(principal, existing, value)
+            // Only canonicalize the values supplied by this request here. The
+            // durable opaque tail is merged under the Inbox version lock by
+            // the atomic hierarchy-property commit.
+            merge_additional_ren_entry_ids(principal, None, value)
                 .map(|value| (canonical_property_storage_tag(tag), value))
         }
         PID_TAG_FREE_BUSY_ENTRY_IDS => {

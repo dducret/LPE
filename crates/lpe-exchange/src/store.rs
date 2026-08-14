@@ -38,7 +38,10 @@ pub struct MapiFolderVersion {
 pub enum MapiFolderHierarchyCommitOutcome {
     Applied(MapiFolderVersion),
     Duplicate(MapiFolderVersion),
-    Conflict(MapiFolderVersion),
+    Conflict {
+        version: MapiFolderVersion,
+        imported_won: bool,
+    },
 }
 
 use crate::mapi::notifications::{MapiNotificationEvent, MapiNotificationKind};
@@ -104,7 +107,15 @@ pub trait ExchangeStore: AccountAuthStore {
         folder_id: u64,
         profile_values: &'a [MapiFolderProfilePropertyValue],
         aliases: &'a [MapiSpecialFolderAlias],
-    ) -> StoreFuture<'a, MapiFolderVersion>;
+    ) -> StoreFuture<'a, MapiFolderHierarchyProfileSnapshot>;
+
+    fn ensure_mapi_folder_hierarchy_profile_snapshot<'a>(
+        &'a self,
+        account_id: Uuid,
+        identity_folder_id: u64,
+        profile_values: &'a [MapiFolderProfilePropertyValue],
+        aliases: &'a [MapiSpecialFolderAlias],
+    ) -> StoreFuture<'a, MapiFolderHierarchyProfileSnapshot>;
 
     fn fetch_or_allocate_mapi_identities<'a>(
         &'a self,
