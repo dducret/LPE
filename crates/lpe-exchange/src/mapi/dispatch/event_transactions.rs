@@ -66,22 +66,19 @@ pub(super) fn imported_event_identity_from_properties(
         Some(MapiValue::Binary(predecessor_change_list)) => predecessor_change_list.clone(),
         _ => bail!("imported Event PCL is missing or not binary"),
     };
+    let last_modification_time = properties
+        .get(&PID_TAG_LAST_MODIFICATION_TIME)
+        .and_then(MapiValue::as_i64)
+        .ok_or_else(|| anyhow!("imported Event LastModificationTime is missing or invalid"))?;
+    let last_modification_time = u64::try_from(last_modification_time)
+        .map_err(|_| anyhow!("imported Event LastModificationTime cannot be negative"))?;
+    let last_modification_time = last_modification_time - last_modification_time % 10;
     Ok(Some(MapiEventImportedIdentity {
         source_key: source_key.clone(),
         change_key,
         predecessor_change_list,
+        last_modification_time,
     }))
-}
-
-pub(super) fn imported_event_last_modification_filetime(
-    properties: &HashMap<u32, MapiValue>,
-) -> Result<u64> {
-    let value = properties
-        .get(&PID_TAG_LAST_MODIFICATION_TIME)
-        .and_then(MapiValue::as_i64)
-        .ok_or_else(|| anyhow!("imported Event LastModificationTime is missing or invalid"))?;
-    u64::try_from(value)
-        .map_err(|_| anyhow!("imported Event LastModificationTime cannot be negative"))
 }
 
 pub(super) fn stage_event_property_values(
@@ -1064,6 +1061,9 @@ mod calendar_search_key_tests {
                 search_key: None,
                 change_key: mapi_mailstore::change_key_for_change_number(change_number),
                 predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+                last_modification_time: mapi_mailstore::filetime_from_rfc3339_utc(
+                    "2026-08-11T11:37:00Z",
+                ),
                 created_at: "2026-08-11T11:37:00Z".to_string(),
                 updated_at: "2026-08-11T11:37:00Z".to_string(),
             },
@@ -1362,6 +1362,9 @@ mod calendar_search_key_tests {
                 search_key: None,
                 change_key: mapi_mailstore::change_key_for_change_number(change_number),
                 predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+                last_modification_time: mapi_mailstore::filetime_from_rfc3339_utc(
+                    "2026-08-12T10:10:00Z",
+                ),
                 created_at: "2026-08-12T10:10:00Z".to_string(),
                 updated_at: "2026-08-12T10:10:00Z".to_string(),
             },

@@ -240,9 +240,7 @@ pub(super) fn calendar_sync_object(
             &event.event,
         )),
         message_class: "IPM.Appointment".to_string(),
-        last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(
-            &event.version.updated_at,
-        ),
+        last_modified_filetime: event.version.last_modification_time,
         message_size: event_size(&event.event),
         read_state: None,
         recipients,

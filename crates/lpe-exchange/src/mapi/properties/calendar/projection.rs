@@ -98,7 +98,10 @@ fn event_property_value_with_optional_version(
                     &version.created_at,
                 ) as i64))
             }
-            PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
+            PID_TAG_LAST_MODIFICATION_TIME => {
+                return Some(MapiValue::I64(version.last_modification_time as i64))
+            }
+            PID_TAG_LOCAL_COMMIT_TIME => {
                 return Some(MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc(
                     &version.updated_at,
                 ) as i64))

@@ -20,7 +20,10 @@ use custom_properties::{
     apply_mapi_event_custom_properties_in_tx, fetch_mapi_event_search_key_in_tx,
     mapi_event_search_key, PID_TAG_SEARCH_KEY,
 };
-use imported_identity::{allocate_mapi_event_identity_in_tx, validate_imported_identity};
+use imported_identity::{
+    allocate_mapi_event_identity_in_tx, current_mapi_event_filetime_in_tx,
+    normalize_mapi_event_filetime, validate_imported_identity,
+};
 
 pub(crate) const MAX_MAPI_GLOBAL_COUNTER: u64 = MAPI_MAX_GLOBAL_COUNTER;
 pub(crate) const FIRST_RESERVED_HIGH_GLOBAL_COUNTER: u64 = MAPI_FIRST_RESERVED_HIGH_GLOBAL_COUNTER;
@@ -70,6 +73,7 @@ pub struct MapiEventImportedIdentity {
     pub source_key: Vec<u8>,
     pub change_key: Vec<u8>,
     pub predecessor_change_list: Vec<u8>,
+    pub last_modification_time: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -91,7 +95,10 @@ pub struct MapiEventVersion {
     pub search_key: Option<Vec<u8>>,
     pub change_key: Vec<u8>,
     pub predecessor_change_list: Vec<u8>,
+    /// Durable MAPI version time from mapi_object_identities.updated_at.
+    pub last_modification_time: u64,
     pub created_at: String,
+    /// Canonical Event commit time, projected as PidTagLocalCommitTime.
     pub updated_at: String,
 }
 
@@ -125,6 +132,7 @@ pub(crate) struct EventIdentityVersion {
     change_number: u64,
     change_key: Vec<u8>,
     predecessor_change_list: Vec<u8>,
+    last_modification_time: u64,
 }
 
 impl Storage {
@@ -465,6 +473,7 @@ impl Storage {
                 .flatten(),
             change_key: identity_version.change_key,
             predecessor_change_list: identity_version.predecessor_change_list,
+            last_modification_time: identity_version.last_modification_time,
             created_at,
             updated_at,
         };
@@ -501,6 +510,9 @@ impl Storage {
                 END AS search_key,
                 identity.change_key,
                 identity.predecessor_change_list,
+                (EXTRACT(EPOCH FROM (
+                    identity.updated_at - TIMESTAMPTZ '1601-01-01 00:00:00+00'
+                )) * 10000000)::bigint AS last_modification_time,
                 to_char(
                     event.created_at AT TIME ZONE 'UTC',
                     'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
@@ -732,6 +744,7 @@ impl Storage {
                 search_key,
                 change_key: principal_version.change_key,
                 predecessor_change_list: principal_version.predecessor_change_list,
+                last_modification_time: principal_version.last_modification_time,
                 created_at,
                 updated_at,
             },
@@ -1269,21 +1282,26 @@ async fn rotate_mapi_event_identities_in_tx(
         ensure_mapi_mailbox_replica_in_tx(tx, *tenant_id, account_id, store_identity).await?;
         let principal_imported_identity =
             imported_identity.filter(|_| imported_principal_account_id == Some(account_id));
-        let (change_key, predecessor_change_list) =
+        let (change_key, predecessor_change_list, last_modification_time) =
             if let Some(imported) = principal_imported_identity {
                 if source_key != imported.source_key {
                     bail!("MAPI Event SourceKey changed before the imported update");
                 }
                 imported_identity_applied = true;
-                let change_key = mapi_change_key(store_identity.replica_guid, change_number);
-                let predecessor_change_list =
-                    merge_predecessor_change_list(&imported.predecessor_change_list, &change_key)?;
-                (change_key, predecessor_change_list)
+                (
+                    imported.change_key.clone(),
+                    imported.predecessor_change_list.clone(),
+                    normalize_mapi_event_filetime(imported.last_modification_time)?,
+                )
             } else {
                 let change_key = mapi_change_key(store_identity.replica_guid, change_number);
                 let predecessor_change_list =
                     merge_predecessor_change_list(&predecessor_change_list, &change_key)?;
-                (change_key, predecessor_change_list)
+                (
+                    change_key,
+                    predecessor_change_list,
+                    current_mapi_event_filetime_in_tx(tx).await?,
+                )
             };
         let updated = sqlx::query(
             r#"
@@ -1291,7 +1309,9 @@ async fn rotate_mapi_event_identities_in_tx(
             SET mapi_change_number = $5,
                 change_key = $6,
                 predecessor_change_list = $7,
-                updated_at = NOW()
+                updated_at = TIMESTAMPTZ '1601-01-01 00:00:00+00'
+                    + ($8 / 10000000) * INTERVAL '1 second'
+                    + (($8 / 10) % 1000000) * INTERVAL '1 microsecond'
             WHERE tenant_id = $1
               AND account_id = $2
               AND object_kind = $3
@@ -1306,6 +1326,7 @@ async fn rotate_mapi_event_identities_in_tx(
         .bind(change_number as i64)
         .bind(&change_key)
         .bind(&predecessor_change_list)
+        .bind(last_modification_time as i64)
         .execute(&mut **tx)
         .await?;
         if updated.rows_affected() != 1 {
@@ -1316,6 +1337,7 @@ async fn rotate_mapi_event_identities_in_tx(
             change_number,
             change_key,
             predecessor_change_list,
+            last_modification_time,
         });
     }
     if imported_identity.is_some() && !imported_identity_applied {
@@ -1392,6 +1414,10 @@ fn mapi_event_version_from_row(row: sqlx::postgres::PgRow) -> Result<MapiEventVe
     if change_number <= 0 || change_number as u64 > MAX_MAPI_GLOBAL_COUNTER {
         bail!("stored MAPI Event change number is outside the GLOBCNT range");
     }
+    let last_modification_time = row.get::<i64, _>("last_modification_time");
+    if last_modification_time < 0 {
+        bail!("stored MAPI Event LastModificationTime is invalid");
+    }
     Ok(MapiEventVersion {
         event_id: row.get("event_id"),
         canonical_modseq: row.get("modseq"),
@@ -1399,6 +1425,7 @@ fn mapi_event_version_from_row(row: sqlx::postgres::PgRow) -> Result<MapiEventVe
         search_key: row.get("search_key"),
         change_key: row.get("change_key"),
         predecessor_change_list: row.get("predecessor_change_list"),
+        last_modification_time: last_modification_time as u64,
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })

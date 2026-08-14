@@ -280,9 +280,11 @@ pub(in crate::mapi) fn sort_events(
                 PID_TAG_MESSAGE_DELIVERY_TIME => {
                     left.version.created_at.cmp(&right.version.created_at)
                 }
-                PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
-                    left.version.updated_at.cmp(&right.version.updated_at)
-                }
+                PID_TAG_LAST_MODIFICATION_TIME => left
+                    .version
+                    .last_modification_time
+                    .cmp(&right.version.last_modification_time),
+                PID_TAG_LOCAL_COMMIT_TIME => left.version.updated_at.cmp(&right.version.updated_at),
                 PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
                     event_end_filetime(&left.event).cmp(&event_end_filetime(&right.event))
                 }

@@ -50,7 +50,6 @@ pub(super) fn imported_fai_identity(
 pub(super) fn imported_event_transaction(
     event: &crate::mapi_store::MapiEvent,
     mut imported_identity: MapiEventImportedIdentity,
-    imported_last_modification_time: u64,
     fail_on_conflict: bool,
 ) -> Result<MapiEventTransaction, u32> {
     let relation = sync_import_version_relation(
@@ -68,12 +67,10 @@ pub(super) fn imported_event_transaction(
                 &imported_identity.predecessor_change_list,
             )
             .map_err(|_| 0x8004_0102u32)?;
-            let current_last_modification_time =
-                mapi_mailstore::filetime_from_rfc3339_utc(&event.version.updated_at);
             if imported_version_wins_last_writer(
-                imported_last_modification_time,
+                imported_identity.last_modification_time,
                 &imported_identity.change_key,
-                current_last_modification_time,
+                event.version.last_modification_time,
                 &event.version.change_key,
             )
             .map_err(|_| 0x8004_0102u32)?
@@ -81,6 +78,7 @@ pub(super) fn imported_event_transaction(
                 MapiEventImportDisposition::Apply
             } else {
                 imported_identity.change_key = event.version.change_key.clone();
+                imported_identity.last_modification_time = event.version.last_modification_time;
                 MapiEventImportDisposition::KeepServerContent
             }
         }
@@ -358,18 +356,6 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                     return;
                 }
             };
-            let imported_last_modification_time =
-                match imported_event_last_modification_filetime(&properties) {
-                    Ok(value) => value,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x72,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        return;
-                    }
-                };
             if imported_identity.source_key != event.source_key {
                 responses.extend_from_slice(&rop_error_response(
                     0x72,
@@ -378,22 +364,19 @@ pub(super) async fn append_synchronization_import_message_change_response<S: Exc
                 ));
                 return;
             }
-            let transaction = match imported_event_transaction(
-                event,
-                imported_identity,
-                imported_last_modification_time,
-                import_flag & 0x40 != 0,
-            ) {
-                Ok(transaction) => transaction,
-                Err(error) => {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x72,
-                        request.response_handle_index(),
-                        error,
-                    ));
-                    return;
-                }
-            };
+            let transaction =
+                match imported_event_transaction(event, imported_identity, import_flag & 0x40 != 0)
+                {
+                    Ok(transaction) => transaction,
+                    Err(error) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x72,
+                            request.response_handle_index(),
+                            error,
+                        ));
+                        return;
+                    }
+                };
             let handle = allocate_sync_import_message_handle(
                 session,
                 request.output_handle_index,

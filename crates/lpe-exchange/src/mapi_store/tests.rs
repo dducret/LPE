@@ -155,6 +155,9 @@ fn test_mapi_event(canonical_id: Uuid, account_id: Uuid, object_id: u64, title: 
             search_key: None,
             change_key: crate::mapi_mailstore::change_key_for_change_number(change_number),
             predecessor_change_list: crate::mapi_mailstore::predecessor_change_list(change_number),
+            last_modification_time: crate::mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-07-15T09:00:00Z",
+            ),
             created_at: "2026-07-15T09:00:00Z".to_string(),
             updated_at: "2026-07-15T09:00:00Z".to_string(),
         },

@@ -12,6 +12,33 @@ use crate::mapi_store_identity::{
     ensure_mapi_store_identity_in_tx,
 };
 
+pub(super) fn normalize_mapi_event_filetime(value: u64) -> Result<u64> {
+    if value > i64::MAX as u64 {
+        bail!("MAPI Event LastModificationTime is outside the PostgreSQL FILETIME range");
+    }
+    Ok(value - value % 10)
+}
+
+pub(super) async fn current_mapi_event_filetime_in_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+) -> Result<u64> {
+    let value = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT (
+            EXTRACT(EPOCH FROM (
+                clock_timestamp() - TIMESTAMPTZ '1601-01-01 00:00:00+00'
+            )) * 1000000
+        )::bigint * 10
+        "#,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if value <= 0 {
+        bail!("PostgreSQL returned an invalid current MAPI Event FILETIME");
+    }
+    Ok(value as u64)
+}
+
 pub(super) fn validate_imported_identity(identity: &MapiEventImportedIdentity) -> Result<()> {
     if identity.source_key.len() != 22 {
         bail!("MAPI Event imported SourceKey must be exactly 22 bytes");
@@ -27,6 +54,7 @@ pub(super) fn validate_imported_identity(identity: &MapiEventImportedIdentity) -
     if normalized != identity.predecessor_change_list {
         bail!("MAPI Event imported PCL must be canonical and contain its ChangeKey");
     }
+    normalize_mapi_event_filetime(identity.last_modification_time)?;
     Ok(())
 }
 
@@ -88,24 +116,21 @@ pub(super) async fn allocate_mapi_event_identity_in_tx(
     }
     let (_, change_number) = allocate_mapi_store_global_counter_in_tx(tx).await?;
 
-    // [MS-OXCFXICS] 3.1.5.3 assigns the imported version its client CK. The
-    // subsequent normal-Message Save observed from Exchange advances that
-    // version again: keep the imported SourceKey/MID, return a server CK that
-    // matches the allocated CN, and retain the imported CK in the PCL.
+    // [MS-OXCFXICS] 3.1.5.3 assigns the imported version its supplied CK/PCL
+    // while allocating a distinct server-internal CN for MetaTagCnsetSeen.
+    // Only a later direct modification replaces that foreign CK with the XID
+    // for its new server CN.
     let (source_global_counter, source_key, change_key, predecessor_change_list) =
         match (imported_source_counter, imported_identity) {
             (Some(source_global_counter), Some(identity)) => {
                 if source_global_counter == change_number {
                     bail!("MAPI Event imported SourceKey and server ChangeNumber must differ");
                 }
-                let change_key = mapi_change_key(replica_guid, change_number);
-                let predecessor_change_list =
-                    merge_predecessor_change_list(&identity.predecessor_change_list, &change_key)?;
                 (
                     source_global_counter,
                     identity.source_key.clone(),
-                    change_key,
-                    predecessor_change_list,
+                    identity.change_key.clone(),
+                    identity.predecessor_change_list.clone(),
                 )
             }
             (None, None) => {
@@ -121,14 +146,23 @@ pub(super) async fn allocate_mapi_event_identity_in_tx(
             _ => unreachable!("validated imported identity state must be paired"),
         };
     let object_id = mapi_store_id(source_global_counter);
+    let last_modification_time = match imported_identity {
+        Some(identity) => normalize_mapi_event_filetime(identity.last_modification_time)?,
+        None => current_mapi_event_filetime_in_tx(tx).await?,
+    };
     sqlx::query(
         r#"
         INSERT INTO mapi_object_identities (
             tenant_id, account_id, object_kind, canonical_id,
             mapi_global_counter, mapi_object_id, source_key, change_key,
-            instance_key, mapi_change_number, predecessor_change_list
+            instance_key, mapi_change_number, predecessor_change_list, updated_at
         )
-        VALUES ($1, $2, 'calendar_event', $3, $4, $5, $6, $7, $6, $8, $9)
+        VALUES (
+            $1, $2, 'calendar_event', $3, $4, $5, $6, $7, $6, $8, $9,
+            TIMESTAMPTZ '1601-01-01 00:00:00+00'
+                + ($10 / 10000000) * INTERVAL '1 second'
+                + (($10 / 10) % 1000000) * INTERVAL '1 microsecond'
+        )
         "#,
     )
     .bind(tenant_id)
@@ -140,6 +174,7 @@ pub(super) async fn allocate_mapi_event_identity_in_tx(
     .bind(&change_key)
     .bind(change_number as i64)
     .bind(&predecessor_change_list)
+    .bind(last_modification_time as i64)
     .execute(&mut **tx)
     .await?;
     Ok((
@@ -149,6 +184,7 @@ pub(super) async fn allocate_mapi_event_identity_in_tx(
             change_number,
             change_key,
             predecessor_change_list,
+            last_modification_time,
         },
     ))
 }
@@ -168,6 +204,7 @@ mod tests {
             source_key: mapi_change_key(Uuid::from_u128(2), 0x0df8_974b_7f66),
             change_key,
             predecessor_change_list,
+            last_modification_time: 134_128_518_000_000_000,
         }
     }
 

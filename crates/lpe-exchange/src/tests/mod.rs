@@ -354,6 +354,7 @@ async fn postgres_mapi_calendar_property_bag_survives_web_update_and_reload() ->
     ];
     let mut predecessor_change_list = vec![imported_change_key.len() as u8];
     predecessor_change_list.extend_from_slice(&imported_change_key);
+    let imported_last_modification_time = 134_309_167_800_000_000;
 
     let named_tag = 0x9001_0102;
     let named_value = vec![3, 0, 0xaa, 0xbb, 0xcc];
@@ -389,7 +390,8 @@ async fn postgres_mapi_calendar_property_bag_survives_web_update_and_reload() ->
             imported_identity: Some(MapiEventImportedIdentity {
                 source_key,
                 change_key: imported_change_key.clone(),
-                predecessor_change_list,
+                predecessor_change_list: predecessor_change_list.clone(),
+                last_modification_time: imported_last_modification_time,
             }),
             reminder: MapiEventReminderPatch::default(),
             custom_property_upserts: vec![
@@ -417,19 +419,50 @@ async fn postgres_mapi_calendar_property_bag_survives_web_update_and_reload() ->
             attachment_changes: MapiEventAttachmentChanges::default(),
         })
         .await?;
-    assert_eq!(
+    assert_ne!(
         created.version.change_key,
         mapi_mailstore::change_key_for_change_number(created.version.change_number)
     );
-    assert_ne!(created.version.change_key, imported_change_key);
-    assert!(test_mapi_pcl_includes_change_key(
-        &created.version.predecessor_change_list,
-        &imported_change_key
-    ));
-    assert!(test_mapi_pcl_includes_change_key(
-        &created.version.predecessor_change_list,
-        &created.version.change_key
-    ));
+    assert_eq!(created.version.change_key, imported_change_key);
+    assert_eq!(
+        created.version.predecessor_change_list,
+        predecessor_change_list
+    );
+    assert_eq!(
+        created.version.last_modification_time,
+        imported_last_modification_time
+    );
+    let imported_times = sqlx::query(
+        r#"
+        SELECT
+            (EXTRACT(EPOCH FROM (
+                identity.updated_at - TIMESTAMPTZ '1601-01-01 00:00:00+00'
+            )) * 10000000)::bigint AS identity_lmt,
+            (EXTRACT(EPOCH FROM (
+                event.updated_at - TIMESTAMPTZ '1601-01-01 00:00:00+00'
+            )) * 10000000)::bigint AS local_commit_time
+        FROM calendar_events event
+        JOIN mapi_object_identities identity
+          ON identity.tenant_id = event.tenant_id
+         AND identity.account_id = $1
+         AND identity.object_kind = 'calendar_event'
+         AND identity.canonical_id = event.id
+        WHERE event.id = $2
+        "#,
+    )
+    .bind(account_id)
+    .bind(event_id)
+    .fetch_one(fixture.storage.pool())
+    .await?;
+    assert_eq!(
+        imported_times.get::<i64, _>("identity_lmt") as u64,
+        imported_last_modification_time
+    );
+    assert_ne!(
+        imported_times.get::<i64, _>("local_commit_time") as u64,
+        imported_last_modification_time,
+        "the imported version LMT must not replace the local commit time"
+    );
 
     let mut web_update = event;
     web_update.title = "Probe F - web update".to_string();
@@ -506,6 +539,28 @@ async fn postgres_mapi_calendar_property_bag_survives_web_update_and_reload() ->
         .find(|event| event.canonical_id == event_id)
         .expect("reloaded imported Calendar event");
     assert_eq!(reloaded_event.event.title, "Probe F - web update");
+    assert_eq!(
+        reloaded_event.version.change_key,
+        mapi_mailstore::change_key_for_change_number(reloaded_event.version.change_number)
+    );
+    assert_ne!(reloaded_event.version.change_key, imported_change_key);
+    assert_ne!(
+        reloaded_event.version.last_modification_time, imported_last_modification_time,
+        "a later web modification must rotate the durable identity LMT"
+    );
+    assert!(
+        mapi_mailstore::filetime_from_rfc3339_utc(&reloaded_event.version.updated_at)
+            > imported_last_modification_time,
+        "a later web modification must advance the independent local commit time"
+    );
+    assert!(test_mapi_pcl_includes_change_key(
+        &reloaded_event.version.predecessor_change_list,
+        &imported_change_key
+    ));
+    assert!(test_mapi_pcl_includes_change_key(
+        &reloaded_event.version.predecessor_change_list,
+        &reloaded_event.version.change_key
+    ));
     assert_eq!(
         reloaded_event
             .stored_properties
@@ -8342,6 +8397,7 @@ impl ExchangeStore for FakeStore {
                     search_key: None,
                     change_key: mapi_mailstore::change_key_for_change_number(change_number),
                     predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+                    last_modification_time: test_filetime("2026-07-15", "10:00") as u64,
                     created_at: "2026-07-15T10:00:00Z".to_string(),
                     updated_at: "2026-07-15T10:00:00Z".to_string(),
                 };
@@ -8546,16 +8602,22 @@ impl ExchangeStore for FakeStore {
                 .insert(event_id, identity.source_key.clone());
         }
         self.event_versions.lock().unwrap().insert(event_id, 1);
-        let change_key = mapi_mailstore::change_key_for_change_number(change_number);
-        let predecessor_change_list = imported_identity
+        let (change_key, predecessor_change_list, last_modification_time) = imported_identity
             .as_ref()
-            .and_then(|identity| {
-                test_merge_mapi_predecessor_change_lists(
-                    &identity.predecessor_change_list,
-                    &mapi_mailstore::predecessor_change_list(change_number),
+            .map(|identity| {
+                (
+                    identity.change_key.clone(),
+                    identity.predecessor_change_list.clone(),
+                    identity.last_modification_time,
                 )
             })
-            .unwrap_or_else(|| mapi_mailstore::predecessor_change_list(change_number));
+            .unwrap_or_else(|| {
+                (
+                    mapi_mailstore::change_key_for_change_number(change_number),
+                    mapi_mailstore::predecessor_change_list(change_number),
+                    test_filetime("2026-07-15", "10:00") as u64,
+                )
+            });
         let version = MapiEventVersion {
             event_id,
             canonical_modseq: 1,
@@ -8563,6 +8625,7 @@ impl ExchangeStore for FakeStore {
             search_key,
             change_key,
             predecessor_change_list,
+            last_modification_time,
             created_at: "2026-07-15T10:00:00Z".to_string(),
             updated_at: "2026-07-15T10:00:00Z".to_string(),
         };
@@ -9286,16 +9349,22 @@ impl ExchangeStore for FakeStore {
             .max(imported_source_counter.saturating_add(1));
         let change_number = *next_counter;
         *next_counter = next_counter.saturating_add(1);
-        let change_key = mapi_mailstore::change_key_for_change_number(change_number);
-        let predecessor_change_list = imported_identity
+        let (change_key, predecessor_change_list, last_modification_time) = imported_identity
             .as_ref()
-            .and_then(|identity| {
-                test_merge_mapi_predecessor_change_lists(
-                    &identity.predecessor_change_list,
-                    &mapi_mailstore::predecessor_change_list(change_number),
+            .map(|identity| {
+                (
+                    identity.change_key.clone(),
+                    identity.predecessor_change_list.clone(),
+                    identity.last_modification_time,
                 )
             })
-            .unwrap_or_else(|| mapi_mailstore::predecessor_change_list(change_number));
+            .unwrap_or_else(|| {
+                (
+                    mapi_mailstore::change_key_for_change_number(change_number),
+                    mapi_mailstore::predecessor_change_list(change_number),
+                    test_filetime("2026-07-15", "10:15") as u64,
+                )
+            });
         let version = MapiEventVersion {
             event_id: input.event_id,
             canonical_modseq: next_modseq,
@@ -9303,6 +9372,7 @@ impl ExchangeStore for FakeStore {
             search_key: current_version.and_then(|version| version.search_key),
             change_key,
             predecessor_change_list,
+            last_modification_time,
             created_at: "2026-07-15T10:00:00Z".to_string(),
             updated_at: "2026-07-15T10:15:00Z".to_string(),
         };
@@ -9812,6 +9882,7 @@ impl ExchangeStore for FakeStore {
                 search_key: old_search_key,
                 change_key: new_change_key.clone(),
                 predecessor_change_list: new_predecessor_change_list,
+                last_modification_time: test_filetime("2026-07-16", "20:52") as u64,
                 created_at: "2026-07-15T10:00:00Z".to_string(),
                 updated_at: "2026-07-16T20:52:00Z".to_string(),
             },

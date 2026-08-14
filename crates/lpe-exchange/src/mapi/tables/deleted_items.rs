@@ -66,10 +66,12 @@ pub(super) fn sort_deleted_items_content_rows(
                 }
                 PID_TAG_MESSAGE_DELIVERY_TIME => deleted_items_content_row_delivery_time(left)
                     .cmp(deleted_items_content_row_delivery_time(right)),
-                PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
-                    deleted_items_content_row_updated_time(left)
-                        .cmp(deleted_items_content_row_updated_time(right))
+                PID_TAG_LAST_MODIFICATION_TIME => {
+                    deleted_items_content_row_last_modification_time(left)
+                        .cmp(&deleted_items_content_row_last_modification_time(right))
                 }
+                PID_TAG_LOCAL_COMMIT_TIME => deleted_items_content_row_updated_time(left)
+                    .cmp(deleted_items_content_row_updated_time(right)),
                 PID_TAG_MESSAGE_CLASS_W | PID_TAG_CONTAINER_CLASS_W => {
                     deleted_items_content_row_class(left)
                         .cmp(deleted_items_content_row_class(right))
@@ -338,5 +340,14 @@ fn deleted_items_content_row_updated_time<'a>(row: &'a DeletedItemsContentRow<'a
     match row {
         DeletedItemsContentRow::Message(email) => &email.received_at,
         DeletedItemsContentRow::Event(event) => &event.version.updated_at,
+    }
+}
+
+fn deleted_items_content_row_last_modification_time(row: &DeletedItemsContentRow<'_>) -> u64 {
+    match row {
+        DeletedItemsContentRow::Message(email) => {
+            mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at)
+        }
+        DeletedItemsContentRow::Event(event) => event.version.last_modification_time,
     }
 }

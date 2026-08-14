@@ -1180,7 +1180,7 @@ used_for = [
   "Partial item upload example using OpenCollector, UploadStateStream, existing-message property changes, and GetTransferState",
   "PredecessorChangeList conflict detection examples for FailOnConflict content uploads",
   "MS-OXCFXICS 3.1.5.3 successful-import baseline: a distinct internal server CN with the supplied ChangeKey and PCL{ChangeKey} assigned to the imported version",
-  "LPE normal-Message interoperability capture in logs/202608041041.saz raw 216 to 221 to 223: Save returns a server ChangeKey matching the new server CN and the normal Calendar path merges the imported ChangeKey ancestry into PCL; this is not Exchange product evidence",
+  "Historical LPE interoperability capture in logs/202608041041.saz raw 216 to 221 to 223: Save replaced the imported ChangeKey with a server-CN XID; this is not Exchange product evidence and must not override the MS-OXCFXICS 3.1.5.3 imported-version rule",
   "Exchange associated-message product controls in logs/test1_202608031300.saz raw 306 to 307, 467 to 468, 513 to 514, and 689 to 690: Save preserves each imported FAI ChangeKey",
   "Imported message and hierarchy deletion flags and PtypMultipleBinary GID list semantics",
   "Preservation of persisted FAI SourceKey, ChangeKey, and PredecessorChangeList across ICS upload and download when NoForeignIdentifiers is absent",

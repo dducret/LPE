@@ -1106,6 +1106,9 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
             search_key: Some(search_key.clone()),
             change_key: mapi_mailstore::change_key_for_change_number(124),
             predecessor_change_list: mapi_mailstore::predecessor_change_list(124),
+            last_modification_time: mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-25T13:45:00Z",
+            ),
             created_at: "2026-05-25T14:00:00Z".to_string(),
             updated_at: "2026-05-25T14:00:00Z".to_string(),
         },
@@ -1269,6 +1272,17 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
             )
     }));
     assert!(sync.named_properties.iter().any(|(tag, value)| {
+        *tag == PID_TAG_LAST_MODIFICATION_TIME
+            && matches!(
+                value,
+                mapi_mailstore::SpecialMessagePropertyValue::I64(filetime)
+                    if *filetime
+                        == mapi_mailstore::filetime_from_rfc3339_utc(
+                            "2026-05-25T13:45:00Z"
+                        ) as i64
+            )
+    }));
+    assert!(sync.named_properties.iter().any(|(tag, value)| {
         *tag == PID_TAG_LOCAL_COMMIT_TIME
             && matches!(
                 value,
@@ -1296,7 +1310,7 @@ fn calendar_sync_object_projects_stable_identity_and_attachment_presence() {
         .any(|(tag, _)| *tag == 0x3A0D_001F));
     assert_eq!(
         sync.last_modified_filetime,
-        mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T14:00:00Z")
+        mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T13:45:00Z")
     );
 }
 

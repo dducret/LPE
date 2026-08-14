@@ -29,6 +29,7 @@ pub(super) fn fallback_event_version(event: &AccessibleEvent, event_id: u64) -> 
         search_key: None,
         change_key: mapi_mailstore::change_key_for_change_number(change_number),
         predecessor_change_list: mapi_mailstore::predecessor_change_list(change_number),
+        last_modification_time: mapi_mailstore::filetime_from_rfc3339_utc(&timestamp),
         created_at: timestamp.clone(),
         updated_at: timestamp,
     }

@@ -277,8 +277,7 @@ async fn mapi_over_http_calendar_import_save_restores_containing_folder_response
         "SaveChangesMessage failed: {response_rops:02x?}"
     );
     let committed_change_key = last_get_properties_binary_value(&response_rops, 3);
-    assert_eq!(committed_change_key.len(), 22);
-    assert_ne!(committed_change_key, imported_change_key);
+    assert_eq!(committed_change_key, imported_change_key);
     assert!(!contains_bytes(&response_rops, &root_change_key));
     assert_eq!(
         response_handles[3], response_handles[1],

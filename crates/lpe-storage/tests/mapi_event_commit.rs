@@ -1559,6 +1559,7 @@ async fn calendar_search_key_survives_web_update_and_mapi_reload() -> Result<()>
         source_key: change_key(source_counter),
         change_key: imported_change_key.clone(),
         predecessor_change_list: predecessor_change_list(&imported_change_key),
+        last_modification_time: 134_309_167_800_000_000,
     });
     create
         .custom_property_upserts
@@ -1921,8 +1922,8 @@ async fn mapi_event_create_rolls_back_every_artifact_and_retry_creates_one_event
 }
 
 #[tokio::test]
-async fn exchange_product_imported_event_save_rotates_ck_and_retains_client_ancestry() -> Result<()>
-{
+async fn microsoft_oxcfxics_imported_event_save_preserves_client_version_and_allocates_cn(
+) -> Result<()> {
     let _guard = database_test_lock().lock().await;
     let Some(fixture) = event_fixture().await? else {
         return Ok(());
@@ -1936,6 +1937,7 @@ async fn exchange_product_imported_event_save_rotates_ck_and_retains_client_ance
         0xc1, 0x00, 0x00, 0x04, 0x57,
     ];
     let client_pcl = predecessor_change_list(&client_change_key);
+    let client_last_modification_time = 134_309_167_800_000_000;
     let mut input = create_input(
         fixture.account_id,
         "default",
@@ -1946,6 +1948,7 @@ async fn exchange_product_imported_event_save_rotates_ck_and_retains_client_ance
         source_key: source_key.clone(),
         change_key: client_change_key.clone(),
         predecessor_change_list: client_pcl.clone(),
+        last_modification_time: client_last_modification_time,
     });
 
     let created = fixture.storage.create_mapi_event(input).await?;
@@ -1953,14 +1956,20 @@ async fn exchange_product_imported_event_save_rotates_ck_and_retains_client_ance
     assert_eq!(created.mapi_object_id, mapi_store_id(source_counter));
     assert_ne!(created.version.change_number, source_counter);
     let server_change_key = change_key(created.version.change_number);
-    assert_eq!(created.version.change_key, server_change_key);
-    let mut expected_pcl = client_pcl;
-    expected_pcl.extend_from_slice(&predecessor_change_list(&server_change_key));
-    assert_eq!(created.version.predecessor_change_list, expected_pcl);
+    assert_ne!(created.version.change_key, server_change_key);
+    assert_eq!(created.version.change_key, client_change_key);
+    assert_eq!(created.version.predecessor_change_list, client_pcl);
+    assert_eq!(
+        created.version.last_modification_time,
+        client_last_modification_time
+    );
     let identity = sqlx::query(
         r#"
         SELECT mapi_global_counter, mapi_object_id, source_key, change_key,
-               mapi_change_number, predecessor_change_list, instance_key
+               mapi_change_number, predecessor_change_list, instance_key,
+               (EXTRACT(EPOCH FROM (
+                   updated_at - TIMESTAMPTZ '1601-01-01 00:00:00+00'
+               )) * 10000000)::bigint AS last_modification_time
         FROM mapi_object_identities
         WHERE account_id = $1
           AND object_kind = 'calendar_event'
@@ -1993,6 +2002,10 @@ async fn exchange_product_imported_event_save_rotates_ck_and_retains_client_ance
         created.version.predecessor_change_list
     );
     assert_eq!(identity.get::<Vec<u8>, _>("instance_key"), source_key);
+    assert_eq!(
+        identity.get::<i64, _>("last_modification_time") as u64,
+        client_last_modification_time
+    );
 
     fixture.cleanup().await
 }
@@ -2025,6 +2038,7 @@ async fn microsoft_oxcfxics_imported_calendar_move_is_atomic_and_keeps_destinati
         source_key: source_key.clone(),
         change_key: client_change_key.clone(),
         predecessor_change_list: client_pcl.clone(),
+        last_modification_time: 134_309_167_800_000_000,
     });
     fixture.storage.create_mapi_event(input).await?;
 
@@ -2181,7 +2195,8 @@ async fn microsoft_oxcfxics_imported_calendar_move_is_atomic_and_keeps_destinati
 }
 
 #[tokio::test]
-async fn exchange_product_imported_deleted_event_rotates_version_atomically() -> Result<()> {
+async fn microsoft_oxcfxics_imported_deleted_event_preserves_imported_version_atomically(
+) -> Result<()> {
     let _guard = database_test_lock().lock().await;
     let Some(fixture) = event_fixture().await? else {
         return Ok(());
@@ -2207,6 +2222,7 @@ async fn exchange_product_imported_deleted_event_rotates_version_atomically() ->
         source_key: source_key.clone(),
         change_key: move_change_key.clone(),
         predecessor_change_list: move_pcl.clone(),
+        last_modification_time: 134_309_167_800_000_000,
     });
     fixture.storage.create_mapi_event(create).await?;
     fixture
@@ -2282,6 +2298,7 @@ async fn exchange_product_imported_deleted_event_rotates_version_atomically() ->
         source_key: change_key(destination_counter + 1),
         change_key: update_change_key.clone(),
         predecessor_change_list: update_pcl.clone(),
+        last_modification_time: 134_309_168_400_000_000,
     });
     let error = fixture
         .storage
@@ -2399,6 +2416,7 @@ async fn exchange_product_imported_deleted_event_rotates_version_atomically() ->
         source_key: destination_source_key.clone(),
         change_key: update_change_key.clone(),
         predecessor_change_list: update_pcl.clone(),
+        last_modification_time: 134_309_168_400_000_000,
     });
     let saved = fixture
         .storage
@@ -2413,10 +2431,13 @@ async fn exchange_product_imported_deleted_event_rotates_version_atomically() ->
         before_event.get::<i64, _>("modseq") + 1
     );
     let server_change_key = change_key(saved.version.change_number);
-    assert_eq!(saved.version.change_key, server_change_key);
-    let mut expected_pcl = update_pcl;
-    expected_pcl.extend_from_slice(&predecessor_change_list(&server_change_key));
-    assert_eq!(saved.version.predecessor_change_list, expected_pcl);
+    assert_ne!(saved.version.change_key, server_change_key);
+    assert_eq!(saved.version.change_key, update_change_key);
+    assert_eq!(saved.version.predecessor_change_list, update_pcl);
+    assert_eq!(
+        saved.version.last_modification_time,
+        134_309_168_400_000_000
+    );
     assert!(
         saved.version.change_number > before_identity.get::<i64, _>("mapi_change_number") as u64
     );

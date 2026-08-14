@@ -2589,6 +2589,9 @@ fn calendar_sort_uses_only_backed_calendar_values() {
                 search_key: None,
                 change_key: mapi_mailstore::change_key_for_change_number(1),
                 predecessor_change_list: mapi_mailstore::predecessor_change_list(1),
+                last_modification_time: mapi_mailstore::filetime_from_rfc3339_utc(
+                    "2026-05-25T14:00:00Z",
+                ),
                 created_at: "2026-05-25T15:00:00Z".to_string(),
                 updated_at: "2026-05-25T15:00:00Z".to_string(),
             },
@@ -2608,6 +2611,9 @@ fn calendar_sort_uses_only_backed_calendar_values() {
                 search_key: None,
                 change_key: mapi_mailstore::change_key_for_change_number(2),
                 predecessor_change_list: mapi_mailstore::predecessor_change_list(2),
+                last_modification_time: mapi_mailstore::filetime_from_rfc3339_utc(
+                    "2026-05-25T15:00:00Z",
+                ),
                 created_at: "2026-05-25T14:00:00Z".to_string(),
                 updated_at: "2026-05-25T14:00:00Z".to_string(),
             },
@@ -2657,7 +2663,10 @@ fn calendar_sort_uses_only_backed_calendar_values() {
     assert_eq!(row_refs[0].event.title, "One minute");
     assert_eq!(row_refs[1].event.title, "Zero");
 
-    for property_tag in [PID_TAG_LAST_MODIFICATION_TIME, PID_TAG_LOCAL_COMMIT_TIME] {
+    for (property_tag, first, second) in [
+        (PID_TAG_LAST_MODIFICATION_TIME, "Zero", "One minute"),
+        (PID_TAG_LOCAL_COMMIT_TIME, "One minute", "Zero"),
+    ] {
         let mut row_refs = rows.iter().collect::<Vec<_>>();
         sort_events(
             &mut row_refs,
@@ -2666,8 +2675,8 @@ fn calendar_sort_uses_only_backed_calendar_values() {
                 order: 0,
             }],
         );
-        assert_eq!(row_refs[0].event.title, "One minute");
-        assert_eq!(row_refs[1].event.title, "Zero");
+        assert_eq!(row_refs[0].event.title, first);
+        assert_eq!(row_refs[1].event.title, second);
     }
 
     let mut row_refs = rows.iter().collect::<Vec<_>>();
@@ -2697,6 +2706,27 @@ fn calendar_sort_uses_only_backed_calendar_values() {
         [DeletedItemsContentRow::Event(first), DeletedItemsContentRow::Event(second)]
             if first.event.title == "One minute" && second.event.title == "Zero"
     ));
+    for (property_tag, first_title, second_title) in [
+        (PID_TAG_LAST_MODIFICATION_TIME, "Zero", "One minute"),
+        (PID_TAG_LOCAL_COMMIT_TIME, "One minute", "Zero"),
+    ] {
+        let mut deleted_rows = rows
+            .iter()
+            .map(DeletedItemsContentRow::Event)
+            .collect::<Vec<_>>();
+        sort_deleted_items_content_rows(
+            &mut deleted_rows,
+            &[MapiSortOrder {
+                property_tag,
+                order: 0,
+            }],
+        );
+        assert!(matches!(
+            deleted_rows.as_slice(),
+            [DeletedItemsContentRow::Event(first), DeletedItemsContentRow::Event(second)]
+                if first.event.title == first_title && second.event.title == second_title
+        ));
+    }
 }
 
 #[test]

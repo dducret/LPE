@@ -60,39 +60,23 @@ pub(super) async fn save_pending_event<S: ExchangeStore>(
         imported_event_global_object_id(&properties),
     ) {
         if let Some(event) = snapshot.event_for_uid(folder_id, &uid).cloned() {
-            let imported_last_modification_time =
-                match imported_event_last_modification_filetime(&properties) {
-                    Ok(value) => value,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x0C,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        return;
-                    }
-                };
             // Outlook can upload an existing appointment under a remapped local
             // MID. The Global Object ID identifies the appointment; its durable
             // SourceKey remains the server's identity and CK/PCL still decide
             // whether this imported version may change canonical content.
             imported_identity.source_key = event.source_key.clone();
-            let mut transaction = match imported_event_transaction(
-                &event,
-                imported_identity,
-                imported_last_modification_time,
-                fail_on_conflict,
-            ) {
-                Ok(transaction) => transaction,
-                Err(error) => {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x0C,
-                        request.response_handle_index(),
-                        error,
-                    ));
-                    return;
-                }
-            };
+            let mut transaction =
+                match imported_event_transaction(&event, imported_identity, fail_on_conflict) {
+                    Ok(transaction) => transaction,
+                    Err(error) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x0C,
+                            request.response_handle_index(),
+                            error,
+                        ));
+                        return;
+                    }
+                };
             transaction.pending_properties = imported_event_content_properties(&properties);
             if recipients_modified {
                 transaction.pending_recipients = Some(recipients);

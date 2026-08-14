@@ -13025,10 +13025,12 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         0x0061_0040,
         test_filetime("2026-07-16", "21:22"),
     );
+    let imported_last_modification_time =
+        i64::from_le_bytes([0x00, 0x49, 0xaa, 0x9a, 0xc3, 0x15, 0xdd, 0x01]);
     append_mapi_i64_property(
         &mut appointment_values,
         PID_TAG_LAST_MODIFICATION_TIME,
-        i64::from_le_bytes([0x00, 0x49, 0xaa, 0x9a, 0xc3, 0x15, 0xdd, 0x01]),
+        imported_last_modification_time,
     );
     let submitted_search_key = [
         0x70, 0xc8, 0xfa, 0x8d, 0xfd, 0x82, 0x10, 0x4d, 0xb7, 0x80, 0x6a, 0xed, 0x2b, 0xa1, 0x70,
@@ -13112,7 +13114,15 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
     let mut save_rops = Vec::new();
     append_rop_set_properties(&mut save_rops, 1, 30, &appointment_values);
     append_rop_save_changes_message_with_flags(&mut save_rops, 1, 1, 0x08);
-    append_rop_get_properties_specific(&mut save_rops, 1, &[PID_TAG_CHANGE_KEY]);
+    append_rop_get_properties_specific(
+        &mut save_rops,
+        1,
+        &[
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            PID_TAG_LOCAL_COMMIT_TIME,
+        ],
+    );
 
     renew_mapi_request_id(&mut execute_headers);
     let response = service
@@ -13145,8 +13155,26 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
     ) as usize;
     let committed_change_key =
         save_response[get_properties_row + 3..get_properties_row + 3 + change_key_size].to_vec();
-    assert_eq!(committed_change_key.len(), 22);
-    assert_ne!(committed_change_key, change_xid);
+    assert_eq!(committed_change_key, change_xid);
+    let committed_lmt_offset = get_properties_row + 3 + change_key_size;
+    let committed_last_modification_time = i64::from_le_bytes(
+        save_response[committed_lmt_offset..committed_lmt_offset + 8]
+            .try_into()
+            .unwrap(),
+    );
+    let committed_local_commit_time = i64::from_le_bytes(
+        save_response[committed_lmt_offset + 8..committed_lmt_offset + 16]
+            .try_into()
+            .unwrap(),
+    );
+    assert_eq!(
+        committed_last_modification_time, imported_last_modification_time,
+        "Save/GetProps must retain the imported Calendar version LMT"
+    );
+    assert_ne!(
+        committed_local_commit_time, imported_last_modification_time,
+        "Save/GetProps must keep the local commit time separate from the imported version LMT"
+    );
 
     let events = events.lock().unwrap();
     assert_eq!(
@@ -13171,18 +13199,18 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         Some(submitted_search_key.as_slice())
     );
     assert_eq!(canonical_version.change_key, committed_change_key);
-    assert_eq!(
+    assert_ne!(
         canonical_version.change_key,
         mapi_mailstore::change_key_for_change_number(canonical_version.change_number)
     );
-    assert!(test_mapi_pcl_includes_change_key(
-        &canonical_version.predecessor_change_list,
-        &change_xid
-    ));
-    assert!(test_mapi_pcl_includes_change_key(
-        &canonical_version.predecessor_change_list,
-        &canonical_version.change_key
-    ));
+    assert_eq!(
+        canonical_version.predecessor_change_list,
+        predecessor_change_list
+    );
+    assert_eq!(
+        canonical_version.last_modification_time,
+        imported_last_modification_time as u64
+    );
     let stored_property_tags = mapi_custom_property_values
         .lock()
         .unwrap()
@@ -13477,6 +13505,7 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
                     &mapi_mailstore::predecessor_change_list(web_change_number),
                 )
                 .unwrap(),
+                last_modification_time: test_filetime("2026-08-11", "12:12") as u64,
                 created_at: canonical_version.created_at.clone(),
                 updated_at: "2026-08-11T12:12:00Z".to_string(),
             },
@@ -13496,6 +13525,11 @@ async fn mapi_over_http_replays_outlook_calendar_sync_import_then_save() {
         .find(|message| message.source_key == imported_source_key)
         .expect("Probe F full Calendar ICS message");
     assert_eq!(downloaded.subject, "Probe F - web update");
+    assert_eq!(
+        downloaded.last_modification_time,
+        Some(test_filetime("2026-08-11", "12:12") as u64),
+        "fresh Calendar ICS must expose the direct web version LMT"
+    );
     assert!(test_mapi_pcl_includes_change_key(
         &downloaded.predecessor_change_list,
         &change_xid
@@ -13737,6 +13771,7 @@ async fn mapi_over_http_replays_outlook_calendar_import_move_to_deleted_items() 
                 search_key: None,
                 change_key: change_xid.to_vec(),
                 predecessor_change_list: predecessor_change_list.clone(),
+                last_modification_time: test_filetime("2026-07-16", "20:52") as u64,
                 created_at: "2026-07-16T20:52:00Z".to_string(),
                 updated_at: "2026-07-16T20:52:00Z".to_string(),
             },
@@ -13938,6 +13973,7 @@ async fn mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_even
                 search_key: None,
                 change_key: move_change_xid.to_vec(),
                 predecessor_change_list: move_predecessor_change_list.clone(),
+                last_modification_time: test_filetime("2026-07-16", "20:52") as u64,
                 created_at: "2026-07-16T20:52:00Z".to_string(),
                 updated_at: "2026-07-16T20:52:00Z".to_string(),
             },
@@ -14129,20 +14165,19 @@ async fn mapi_over_http_replays_outlook_calendar_move_then_modifies_deleted_even
         updated_version.change_number > moved_change_number,
         "the server must allocate a fresh internal CN for the imported update"
     );
-    assert_eq!(
+    assert_ne!(
         updated_version.change_key,
         mapi_mailstore::change_key_for_change_number(updated_version.change_number)
     );
-    for predecessor in [
-        move_change_xid.as_slice(),
-        update_change_xid.as_slice(),
-        updated_version.change_key.as_slice(),
-    ] {
-        assert!(test_mapi_pcl_includes_change_key(
-            &updated_version.predecessor_change_list,
-            predecessor
-        ));
-    }
+    assert_eq!(updated_version.change_key, update_change_xid);
+    assert_eq!(
+        updated_version.predecessor_change_list,
+        update_predecessor_change_list
+    );
+    assert_eq!(
+        updated_version.last_modification_time,
+        imported_last_modification_time as u64
+    );
 }
 
 fn calendar_sync_conflict_xid(replica_byte: u8, counter: u64) -> Vec<u8> {
@@ -14214,6 +14249,7 @@ fn calendar_sync_conflict_store(
                 search_key: None,
                 change_key,
                 predecessor_change_list,
+                last_modification_time: last_modification_time as u64,
                 created_at: updated_at.to_string(),
                 updated_at: updated_at.to_string(),
             },
@@ -14365,18 +14401,16 @@ async fn mapi_over_http_calendar_sync_import_applies_newer_outlook_unicode_subje
     assert!(contains_bytes(&response, &[0x0c, 0x02, 0, 0, 0, 0]));
     assert_eq!(events.lock().unwrap()[0].title, "Café avec neuchatel");
     let version = versions.lock().unwrap()[&event_id].clone();
-    assert_eq!(
+    assert_ne!(
         version.change_key,
         mapi_mailstore::change_key_for_change_number(version.change_number)
     );
-    assert!(test_mapi_pcl_includes_change_key(
-        &version.predecessor_change_list,
-        &client_change_key
-    ));
-    assert!(test_mapi_pcl_includes_change_key(
-        &version.predecessor_change_list,
-        &version.change_key
-    ));
+    assert_eq!(version.change_key, client_change_key);
+    assert_eq!(version.predecessor_change_list, client_pcl);
+    assert_eq!(
+        version.last_modification_time,
+        test_filetime("2026-07-17", "11:00") as u64
+    );
     let metrics_after = crate::mapi::mapi_calendar_event_save_metrics();
     assert!(metrics_after.ics_applied_total >= metrics_before.ics_applied_total + 1);
 }
@@ -14437,18 +14471,16 @@ async fn mapi_over_http_calendar_sync_import_remapped_mid_uses_global_object_id(
         crate::mapi::identity::source_key_for_object_id(message_id)
     );
     let version = versions.lock().unwrap()[&event_id].clone();
-    assert_eq!(
+    assert_ne!(
         version.change_key,
         mapi_mailstore::change_key_for_change_number(version.change_number)
     );
-    assert!(test_mapi_pcl_includes_change_key(
-        &version.predecessor_change_list,
-        &client_change_key
-    ));
-    assert!(test_mapi_pcl_includes_change_key(
-        &version.predecessor_change_list,
-        &version.change_key
-    ));
+    assert_eq!(version.change_key, client_change_key);
+    assert_eq!(version.predecessor_change_list, client_pcl);
+    assert_eq!(
+        version.last_modification_time,
+        test_filetime("2026-07-17", "11:00") as u64
+    );
 }
 
 #[tokio::test]
@@ -14492,6 +14524,10 @@ async fn mapi_over_http_calendar_sync_import_ignores_an_older_client_version_at_
     let version = versions.lock().unwrap()[&event_id].clone();
     assert_eq!(version.change_key, server_change_key);
     assert_eq!(version.predecessor_change_list, server_pcl);
+    assert_eq!(
+        version.last_modification_time,
+        test_filetime("2026-07-17", "10:00") as u64
+    );
     let metrics_after = crate::mapi::mapi_calendar_event_save_metrics();
     assert!(
         metrics_after.ics_ignored_older_or_same_total
@@ -14579,11 +14615,16 @@ async fn mapi_over_http_calendar_sync_import_conflict_merges_both_predecessor_li
     assert_eq!(events.lock().unwrap()[0].title, "Resolved client version");
     let version = versions.lock().unwrap()[&event_id].clone();
     assert!(version.change_number > previous_change_number);
-    assert_eq!(
+    assert_ne!(
         version.change_key,
         mapi_mailstore::change_key_for_change_number(version.change_number)
     );
-    for predecessor in [&server_change_key, &client_change_key, &version.change_key] {
+    assert_eq!(version.change_key, client_change_key);
+    assert_eq!(
+        version.last_modification_time,
+        test_filetime("2026-07-17", "11:00") as u64
+    );
+    for predecessor in [&server_change_key, &client_change_key] {
         assert!(test_mapi_pcl_includes_change_key(
             &version.predecessor_change_list,
             predecessor
@@ -14636,11 +14677,17 @@ async fn mapi_over_http_calendar_sync_import_conflict_keeps_the_newer_server_con
     assert_eq!(events.lock().unwrap()[0].title, "Server version");
     let version = versions.lock().unwrap()[&event_id].clone();
     assert!(version.change_number > previous_change_number);
-    assert_eq!(
+    assert_ne!(
         version.change_key,
         mapi_mailstore::change_key_for_change_number(version.change_number)
     );
-    for predecessor in [&server_change_key, &client_change_key, &version.change_key] {
+    assert_eq!(version.change_key, server_change_key);
+    assert_eq!(
+        version.last_modification_time,
+        test_filetime("2026-07-17", "10:00") as u64,
+        "a server-winning conflict must retain the current version LMT"
+    );
+    for predecessor in [&server_change_key, &client_change_key] {
         assert!(test_mapi_pcl_includes_change_key(
             &version.predecessor_change_list,
             predecessor
