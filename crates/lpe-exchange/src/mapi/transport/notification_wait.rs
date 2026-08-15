@@ -55,7 +55,7 @@ where
             "MAPI session context not found",
         );
     };
-    if !session_matches(&session, endpoint, principal) {
+    if !mapi_http_session_matches(&session, endpoint, principal) {
         return mapi_diagnostic_response(
             "NotificationWait",
             request_id,
@@ -204,7 +204,7 @@ where
     let Some(mut session) = remove_session(session_id) else {
         return Err(10);
     };
-    if !session_matches(&session, endpoint, principal) {
+    if !mapi_http_session_matches(&session, endpoint, principal) {
         return Err(10);
     }
 

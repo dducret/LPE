@@ -6371,6 +6371,7 @@ fn already_open_common_view_missing_descriptor_uses_empty_stream_semantics() {
         },
     );
     let mut session = MapiSession {
+        authentication: None,
         endpoint: MapiEndpoint::Emsmdb,
         tenant_id: Uuid::nil(),
         account_id,
@@ -6461,6 +6462,7 @@ fn common_view_named_view_descriptor_accepts_microsoft_write_stream_sequence() {
         },
     );
     let mut session = MapiSession {
+        authentication: None,
         endpoint: MapiEndpoint::Emsmdb,
         tenant_id: Uuid::nil(),
         account_id,
@@ -6572,6 +6574,7 @@ fn associated_config_stream_rops_require_the_actual_stream_handle() {
         },
     );
     let mut session = MapiSession {
+        authentication: None,
         endpoint: MapiEndpoint::Emsmdb,
         tenant_id: Uuid::nil(),
         account_id,
@@ -6732,6 +6735,7 @@ fn message_list_settings_private_binary_stream_is_projected_without_widening_oth
         },
     );
     let mut session = MapiSession {
+        authentication: None,
         endpoint: MapiEndpoint::Emsmdb,
         tenant_id: Uuid::nil(),
         account_id,

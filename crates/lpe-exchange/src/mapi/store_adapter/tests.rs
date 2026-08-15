@@ -6,6 +6,7 @@ use std::time::SystemTime;
 
 fn empty_session() -> MapiSession {
     MapiSession {
+        authentication: None,
         endpoint: MapiEndpoint::Emsmdb,
         tenant_id: Uuid::nil(),
         account_id: Uuid::nil(),

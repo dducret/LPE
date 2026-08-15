@@ -15,6 +15,16 @@ fn principal() -> AccountPrincipal {
     }
 }
 
+fn authentication(principal: &AccountPrincipal, fingerprint: u8) -> MapiSessionAuthentication {
+    MapiSessionAuthentication {
+        principal: principal.clone(),
+        method: AccountAuthenticationMethod::Password,
+        app_password_id: None,
+        credential_fingerprint: [fingerprint; 32],
+        verifier_fingerprint: Some([0x55; 32]),
+    }
+}
+
 #[test]
 fn reconnect_session_rejects_active_context() {
     let principal = principal();
@@ -186,6 +196,49 @@ fn reconnect_session_replaces_the_prior_emsmdb_context() {
     assert_ne!(session_id, previous_session_id);
     assert!(get_session(&previous_session_id).is_none());
     assert!(get_session(&session_id).is_some());
+    remove_session(&session_id);
+}
+
+#[test]
+fn rejected_authenticated_reconnect_preserves_last_seen_at() {
+    let principal = principal();
+    let session_id = create_authenticated_session(
+        MapiEndpoint::Emsmdb,
+        authentication(&principal, 0x11),
+        "Connect",
+        "test:1",
+    );
+    let original_last_seen_at = SystemTime::now() - Duration::from_secs(5);
+    {
+        let mut session_table = sessions()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        session_table
+            .get_mut(&session_id)
+            .expect("fresh session should exist")
+            .last_seen_at = original_last_seen_at;
+    }
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!("MapiContext={session_id}")).unwrap(),
+    );
+
+    let result = reconnect_authenticated_session(
+        MapiEndpoint::Emsmdb,
+        &authentication(&principal, 0x22),
+        &headers,
+        "Connect",
+        "{11111111-2222-3333-4444-555555555555}:7",
+    );
+
+    assert!(result.is_err());
+    assert_eq!(
+        get_session(&session_id)
+            .expect("rejected reconnect must preserve the old context")
+            .last_seen_at,
+        original_last_seen_at
+    );
     remove_session(&session_id);
 }
 

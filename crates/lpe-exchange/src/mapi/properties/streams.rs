@@ -1066,6 +1066,7 @@ mod tests {
         let mut handles = HashMap::new();
         handles.insert(1, object);
         MapiSession {
+            authentication: None,
             endpoint: MapiEndpoint::Emsmdb,
             tenant_id: Uuid::nil(),
             account_id: Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376),

@@ -4,7 +4,9 @@ mod store;
 
 pub use crate::auth::{
     authenticate_account, authenticate_bearer_access_token, authenticate_plain_credentials,
-    normalize_login_name, verify_password,
+    normalize_login_name, record_account_login_success, verify_account_authentication,
+    verify_password, AccountAuthenticationMethod, AccountAuthenticationVerifier,
+    VerifiedAccountAuthentication,
 };
 pub use crate::oauth::{
     basic_credentials, bearer_token, issue_oauth_access_token, normalize_scope,

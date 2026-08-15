@@ -38,11 +38,7 @@ where
             Vec::new(),
         );
     };
-    if session.endpoint != endpoint
-        || session.tenant_id != principal.tenant_id
-        || session.account_id != principal.account_id
-        || session.email != principal.email
-    {
+    if !mapi_http_session_matches(&session, endpoint, principal) {
         return execute_transport_failure_response(
             request_id,
             10,
@@ -64,14 +60,6 @@ where
             );
         }
     };
-    if !session_matches(&session, endpoint, principal) {
-        return execute_transport_failure_response(
-            request_id,
-            10,
-            "MAPI authentication context changed",
-            session_context_cookies(endpoint, &session_id, false),
-        );
-    }
     let rop_fingerprint = mapi_payload_fingerprint(&execute.rop_buffer);
     let request_debug = summarize_request_rop_buffer(&execute.rop_buffer);
     log_execute_request_start_debug(

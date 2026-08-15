@@ -15,37 +15,143 @@ use crate::{
     store::AccountAuthStore,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountAuthenticationMethod {
+    Session,
+    OAuth,
+    Password,
+    AppPassword,
+}
+
+impl AccountAuthenticationMethod {
+    pub fn audit_subject(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::OAuth => "oauth",
+            Self::Password => "password",
+            Self::AppPassword => "app-password",
+        }
+    }
+
+    fn existing_flow_records_success(self) -> bool {
+        matches!(self, Self::Password | Self::AppPassword)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum AccountAuthenticationVerifier {
+    None,
+    PasswordHash(String),
+    AppPassword {
+        id: uuid::Uuid,
+        password_hash: String,
+    },
+}
+
+impl std::fmt::Debug for AccountAuthenticationVerifier {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => formatter.write_str("None"),
+            Self::PasswordHash(_) => formatter.write_str("PasswordHash([redacted])"),
+            Self::AppPassword { id, .. } => formatter
+                .debug_struct("AppPassword")
+                .field("id", id)
+                .field("password_hash", &"[redacted]")
+                .finish(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedAccountAuthentication {
+    pub principal: AccountPrincipal,
+    pub method: AccountAuthenticationMethod,
+    pub verifier: AccountAuthenticationVerifier,
+}
+
 pub async fn authenticate_account<S: AccountAuthStore>(
     store: &S,
     hinted_user: Option<&str>,
     headers: &HeaderMap,
     surface: &str,
 ) -> Result<AccountPrincipal> {
+    let authentication =
+        verify_account_authentication(store, hinted_user, headers, surface).await?;
+    if authentication.method.existing_flow_records_success() {
+        record_account_login_success(store, &authentication, surface).await;
+    }
+    Ok(authentication.principal)
+}
+
+pub async fn verify_account_authentication<S: AccountAuthStore>(
+    store: &S,
+    hinted_user: Option<&str>,
+    headers: &HeaderMap,
+    surface: &str,
+) -> Result<VerifiedAccountAuthentication> {
+    verify_account_authentication_inner(store, hinted_user, headers, surface).await
+}
+
+async fn verify_account_authentication_inner<S: AccountAuthStore>(
+    store: &S,
+    hinted_user: Option<&str>,
+    headers: &HeaderMap,
+    surface: &str,
+) -> Result<VerifiedAccountAuthentication> {
     if let Some(token) = bearer_token(headers) {
         if let Some(account) = store.fetch_account_session(&token).await? {
-            return Ok(AccountPrincipal {
-                tenant_id: account.tenant_id,
-                account_id: account.account_id,
-                email: account.email,
-                display_name: account.display_name,
-                quota_mb: None,
-                quota_used_octets: None,
+            return Ok(VerifiedAccountAuthentication {
+                principal: AccountPrincipal {
+                    tenant_id: account.tenant_id,
+                    account_id: account.account_id,
+                    email: account.email,
+                    display_name: account.display_name,
+                    quota_mb: None,
+                    quota_used_octets: None,
+                },
+                method: AccountAuthenticationMethod::Session,
+                verifier: AccountAuthenticationVerifier::None,
             });
         }
 
         if let Ok(principal) =
             authenticate_bearer_access_token(store, hinted_user, &token, surface).await
         {
-            return Ok(principal);
+            return Ok(VerifiedAccountAuthentication {
+                principal,
+                method: AccountAuthenticationMethod::OAuth,
+                verifier: AccountAuthenticationVerifier::None,
+            });
         }
     }
 
     if let Some((username, password)) = basic_credentials(headers)? {
-        return authenticate_plain_credentials(store, hinted_user, &username, &password, surface)
-            .await;
+        return verify_plain_credentials(store, hinted_user, &username, &password, surface).await;
     }
 
     bail!("missing account authentication");
+}
+
+pub async fn record_account_login_success<S: AccountAuthStore>(
+    store: &S,
+    authentication: &VerifiedAccountAuthentication,
+    surface: &str,
+) {
+    if let AccountAuthenticationVerifier::AppPassword { id, .. } = &authentication.verifier {
+        let _ = store
+            .touch_account_app_password(&authentication.principal.email, *id)
+            .await;
+    }
+    let _ = store
+        .append_audit_event(
+            &authentication.principal.tenant_id,
+            AuditEntryInput {
+                actor: authentication.principal.email.clone(),
+                action: format!("mail-auth.{surface}.login-succeeded"),
+                subject: authentication.method.audit_subject().to_string(),
+            },
+        )
+        .await;
 }
 
 pub async fn authenticate_bearer_access_token<S: AccountAuthStore>(
@@ -93,6 +199,19 @@ pub async fn authenticate_plain_credentials<S: AccountAuthStore>(
     password: &str,
     surface: &str,
 ) -> Result<AccountPrincipal> {
+    let authentication =
+        verify_plain_credentials(store, hinted_user, username, password, surface).await?;
+    record_account_login_success(store, &authentication, surface).await;
+    Ok(authentication.principal)
+}
+
+async fn verify_plain_credentials<S: AccountAuthStore>(
+    store: &S,
+    hinted_user: Option<&str>,
+    username: &str,
+    password: &str,
+    surface: &str,
+) -> Result<VerifiedAccountAuthentication> {
     let normalized = normalize_login_name(username, hinted_user);
     let login = store
         .fetch_account_login(&normalized)
@@ -113,8 +232,11 @@ pub async fn authenticate_plain_credentials<S: AccountAuthStore>(
         bail!("invalid credentials");
     }
 
-    let auth_method = if verify_password(&login.password_hash, password) {
-        "password".to_string()
+    let (auth_method, verifier) = if verify_password(&login.password_hash, password) {
+        (
+            AccountAuthenticationMethod::Password,
+            AccountAuthenticationVerifier::PasswordHash(login.password_hash.clone()),
+        )
     } else {
         let app_passwords = store
             .fetch_active_account_app_passwords(&normalized)
@@ -135,30 +257,26 @@ pub async fn authenticate_plain_credentials<S: AccountAuthStore>(
                 .await;
             bail!("invalid credentials");
         };
-        let _ = store
-            .touch_account_app_password(&normalized, app_password.id)
-            .await;
-        "app-password".to_string()
-    };
-
-    let _ = store
-        .append_audit_event(
-            &login.tenant_id,
-            AuditEntryInput {
-                actor: login.email.clone(),
-                action: format!("mail-auth.{surface}.login-succeeded"),
-                subject: auth_method,
+        (
+            AccountAuthenticationMethod::AppPassword,
+            AccountAuthenticationVerifier::AppPassword {
+                id: app_password.id,
+                password_hash: app_password.password_hash,
             },
         )
-        .await;
+    };
 
-    Ok(AccountPrincipal {
-        tenant_id: login.tenant_id,
-        account_id: login.account_id,
-        email: login.email,
-        display_name: login.display_name,
-        quota_mb: Some(login.quota_mb),
-        quota_used_octets: Some(login.quota_used_octets),
+    Ok(VerifiedAccountAuthentication {
+        principal: AccountPrincipal {
+            tenant_id: login.tenant_id,
+            account_id: login.account_id,
+            email: login.email,
+            display_name: login.display_name,
+            quota_mb: Some(login.quota_mb),
+            quota_used_octets: Some(login.quota_used_octets),
+        },
+        method: auth_method,
+        verifier,
     })
 }
 

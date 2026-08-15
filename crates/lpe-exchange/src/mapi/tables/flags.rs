@@ -6,7 +6,7 @@ pub(in crate::mapi) fn message_flags(email: &JmapEmail) -> u32 {
 
 pub(in crate::mapi) fn unread_from_read_flags(read_flags: Option<u8>) -> Option<bool> {
     match read_flags {
-        Some(flags) if flags & 0x10 != 0 => None,
+        Some(flags) if flags & (0x10 | 0x20 | 0x40) != 0 => None,
         Some(flags) if flags & 0x04 != 0 => Some(true),
         Some(_) => Some(false),
         None => Some(false),
@@ -39,4 +39,22 @@ pub(in crate::mapi) fn read_flags_are_valid(read_flags: Option<u8>, allow_defaul
     // make the server-side clear-read operation ambiguous.
     let valid = matches!(effective, 0x00 | 0x01 | 0x04 | 0x05 | 0x10 | 0x20 | 0x40);
     valid && (allow_default || effective != 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn receipt_and_notification_cleanup_flags_do_not_change_read_state() {
+        for flags in [0x10, 0x20, 0x40, 0x60] {
+            assert_eq!(unread_from_read_flags(Some(flags)), None);
+        }
+    }
+
+    #[test]
+    fn combined_notification_cleanup_is_not_a_general_read_flags_value() {
+        assert!(!read_flags_are_valid(Some(0x60), true));
+        assert!(!read_flags_are_valid(Some(0x80), true));
+    }
 }

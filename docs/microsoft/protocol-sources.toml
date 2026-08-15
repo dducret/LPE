@@ -367,6 +367,7 @@ used_for = [
   "MAPI over HTTP request and response framing",
   "EMSMDB and NSPI endpoint transport behavior",
   "Bind, Execute, Connect, Disconnect, and session cookie interoperability",
+  "Session Context authentication-context capture and subsequent request comparison",
   "PING idle Session Context refresh behavior",
   "NotificationWait chunked PROCESSING/PENDING/DONE signaling followed by notification details in Execute",
   "Connect, Execute, reconnect, and Disconnect protocol example sequence behavior",

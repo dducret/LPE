@@ -1499,8 +1499,10 @@ name = "lpe-exchange"
 version = "0.5.2"
 dependencies = [
  "anyhow",
+ "argon2",
  "axum",
  "base64",
+ "hmac",
  "lpe-core",
  "lpe-domain",
  "lpe-magika",

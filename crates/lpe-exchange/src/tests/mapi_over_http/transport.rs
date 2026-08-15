@@ -1,5 +1,574 @@
 use super::*;
 
+fn mapi_basic_account_login(password: &str) -> AccountLogin {
+    let account = FakeStore::account();
+    AccountLogin {
+        tenant_id: account.tenant_id,
+        account_id: account.account_id,
+        email: account.email,
+        password_hash: mapi_test_password_hash(password),
+        status: "active".to_string(),
+        display_name: account.display_name,
+        quota_mb: 4096,
+        quota_used_octets: 1234,
+    }
+}
+
+fn mapi_auth_audits(store: &FakeStore) -> Vec<lpe_storage::AuditEntryInput> {
+    store.account_auth_audits.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn mapi_basic_session_records_one_success_across_continuations() {
+    let store = FakeStore {
+        account_login: Arc::new(Mutex::new(Some(mapi_basic_account_login("secret")))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let connect = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_basic_headers("Connect", "alice@example.test", "secret"),
+            b"",
+        )
+        .await
+        .unwrap();
+    assert_eq!(connect.headers().get("x-responsecode").unwrap(), "0");
+    let cookie = mapi_cookie_header(&connect);
+    let audits = mapi_auth_audits(&store);
+    assert_eq!(audits.len(), 1);
+    assert_eq!(audits[0].action, "mail-auth.mapi.login-succeeded");
+    assert_eq!(audits[0].subject, "password");
+
+    let mut execute_headers = mapi_basic_headers("Execute", "alice@example.test", "secret");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let execute = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(execute.headers().get("x-responsecode").unwrap(), "0");
+    let cookie = mapi_cookie_header(&execute);
+    assert_eq!(mapi_auth_audits(&store).len(), 1);
+
+    let mut wait_headers = mapi_basic_headers("NotificationWait", "alice@example.test", "secret");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let wait = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(wait.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(mapi_auth_audits(&store).len(), 1);
+
+    let mut ping_headers = mapi_basic_headers("PING", "alice@example.test", "secret");
+    ping_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "0");
+    let cookie = mapi_cookie_header(&ping);
+    assert_eq!(mapi_auth_audits(&store).len(), 1);
+
+    let mut disconnect_headers = mapi_basic_headers("Disconnect", "alice@example.test", "secret");
+    disconnect_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let disconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &disconnect_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(disconnect.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(mapi_auth_audits(&store).len(), 1);
+}
+
+#[tokio::test]
+async fn mapi_app_password_touch_and_success_audit_wait_for_establishment() {
+    let app_password_id = Uuid::new_v4();
+    let store = FakeStore {
+        account_login: Arc::new(Mutex::new(Some(mapi_basic_account_login("primary")))),
+        account_app_passwords: Arc::new(Mutex::new(vec![StoredAccountAppPassword {
+            id: app_password_id,
+            password_hash: mapi_test_password_hash("device-secret"),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let mut malformed = mapi_basic_headers("Connect", "alice@example.test", "device-secret");
+    malformed.remove("x-clientinfo");
+
+    let malformed_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &malformed, b"")
+        .await
+        .unwrap();
+    assert_eq!(
+        malformed_response.headers().get("x-responsecode").unwrap(),
+        "7"
+    );
+    assert!(mapi_auth_audits(&store).is_empty());
+    assert_eq!(
+        store.account_app_password_touches.load(Ordering::Relaxed),
+        0
+    );
+
+    let connect = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_basic_headers("Connect", "alice@example.test", "device-secret"),
+            b"",
+        )
+        .await
+        .unwrap();
+    assert_eq!(connect.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(mapi_auth_audits(&store).len(), 1);
+    assert_eq!(mapi_auth_audits(&store)[0].subject, "app-password");
+    assert_eq!(
+        store.account_app_password_touches.load(Ordering::Relaxed),
+        1
+    );
+
+    let mut ping_headers = mapi_basic_headers("PING", "alice@example.test", "device-secret");
+    ping_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(mapi_auth_audits(&store).len(), 1);
+    assert_eq!(
+        store.account_app_password_touches.load(Ordering::Relaxed),
+        1
+    );
+}
+
+#[tokio::test]
+async fn mapi_changed_valid_credential_is_rejected_without_dropping_context() {
+    let app_password_id = Uuid::new_v4();
+    let store = FakeStore {
+        account_login: Arc::new(Mutex::new(Some(mapi_basic_account_login("primary")))),
+        account_app_passwords: Arc::new(Mutex::new(vec![StoredAccountAppPassword {
+            id: app_password_id,
+            password_hash: mapi_test_password_hash("device-secret"),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_basic_headers("Connect", "alice@example.test", "primary"),
+            b"",
+        )
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let mut changed_ping_headers =
+        mapi_basic_headers("PING", "alice@example.test", "device-secret");
+    changed_ping_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let original_last_seen_at =
+        mapi_http_session_last_seen_for_test(MapiEndpoint::Emsmdb, &changed_ping_headers).unwrap();
+
+    let changed_ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &changed_ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(changed_ping.headers().get("x-responsecode").unwrap(), "10");
+    assert!(changed_ping.headers().get("set-cookie").is_none());
+    assert_eq!(
+        mapi_http_session_last_seen_for_test(MapiEndpoint::Emsmdb, &changed_ping_headers).unwrap(),
+        original_last_seen_at
+    );
+    assert_eq!(
+        store.account_app_password_touches.load(Ordering::Relaxed),
+        0
+    );
+    let audits = mapi_auth_audits(&store);
+    assert_eq!(audits.len(), 2);
+    assert_eq!(audits[1].action, "mail-auth.mapi.login-failed");
+    assert_eq!(audits[1].subject, "authentication-context-changed");
+
+    let mut old_ping_headers = mapi_basic_headers("PING", "alice@example.test", "primary");
+    old_ping_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let old_ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &old_ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(old_ping.headers().get("x-responsecode").unwrap(), "0");
+    let cookie = mapi_cookie_header(&old_ping);
+
+    let mut reconnect_headers =
+        mapi_basic_headers("Connect", "alice@example.test", "device-secret");
+    reconnect_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+
+    let reconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &reconnect_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(reconnect.headers().get("x-responsecode").unwrap(), "10");
+    assert_eq!(
+        store.account_app_password_touches.load(Ordering::Relaxed),
+        0
+    );
+    let audits = mapi_auth_audits(&store);
+    assert_eq!(audits.len(), 3);
+    assert_eq!(audits[2].action, "mail-auth.mapi.login-failed");
+    assert_eq!(audits[2].subject, "authentication-context-changed");
+
+    let mut ping_headers = mapi_basic_headers("PING", "alice@example.test", "primary");
+    ping_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "0");
+}
+
+#[tokio::test]
+async fn mapi_wrong_password_continuation_is_audited_once_without_refreshing_context() {
+    let store = FakeStore {
+        account_login: Arc::new(Mutex::new(Some(mapi_basic_account_login("secret")))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_basic_headers("Connect", "alice@example.test", "secret"),
+            b"",
+        )
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let mut wrong_headers = mapi_basic_headers("PING", "alice@example.test", "wrong-secret");
+    wrong_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let original_last_seen_at =
+        mapi_http_session_last_seen_for_test(MapiEndpoint::Emsmdb, &wrong_headers).unwrap();
+
+    let wrong = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wrong_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(wrong.headers().get("x-responsecode").unwrap(), "10");
+    assert!(wrong.headers().get("set-cookie").is_none());
+    assert_eq!(
+        mapi_http_session_last_seen_for_test(MapiEndpoint::Emsmdb, &wrong_headers).unwrap(),
+        original_last_seen_at
+    );
+    let audits = mapi_auth_audits(&store);
+    assert_eq!(audits.len(), 2);
+    assert_eq!(
+        audits
+            .iter()
+            .filter(|audit| audit.action == "mail-auth.mapi.login-failed")
+            .count(),
+        1
+    );
+    assert_eq!(audits[1].subject, "authentication-context-changed");
+
+    let mut original_headers = mapi_basic_headers("PING", "alice@example.test", "secret");
+    original_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let original = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &original_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(original.headers().get("x-responsecode").unwrap(), "0");
+}
+
+#[tokio::test]
+async fn mapi_password_and_app_password_revision_changes_revoke_continuation() {
+    let store = FakeStore {
+        account_login: Arc::new(Mutex::new(Some(mapi_basic_account_login("secret")))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_basic_headers("Connect", "alice@example.test", "secret"),
+            b"",
+        )
+        .await
+        .unwrap();
+    store
+        .account_login
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .password_hash = mapi_test_password_hash("rotated-secret");
+    let mut ping_headers = mapi_basic_headers("PING", "alice@example.test", "secret");
+    ping_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "10");
+    assert_eq!(mapi_auth_audits(&store).len(), 2);
+    assert_eq!(mapi_auth_audits(&store)[1].subject, "credential-revoked");
+
+    let app_password_id = Uuid::new_v4();
+    let app_store = FakeStore {
+        account_login: Arc::new(Mutex::new(Some(mapi_basic_account_login("primary")))),
+        account_app_passwords: Arc::new(Mutex::new(vec![StoredAccountAppPassword {
+            id: app_password_id,
+            password_hash: mapi_test_password_hash("device-secret"),
+        }])),
+        ..Default::default()
+    };
+    let app_service = ExchangeService::new(app_store.clone());
+    let app_connect = app_service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_basic_headers("Connect", "alice@example.test", "device-secret"),
+            b"",
+        )
+        .await
+        .unwrap();
+    app_store.account_app_passwords.lock().unwrap().clear();
+    let mut app_ping_headers = mapi_basic_headers("PING", "alice@example.test", "device-secret");
+    app_ping_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&app_connect)).unwrap(),
+    );
+
+    let app_ping = app_service
+        .handle_mapi(MapiEndpoint::Emsmdb, &app_ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(app_ping.headers().get("x-responsecode").unwrap(), "10");
+    assert_eq!(mapi_auth_audits(&app_store).len(), 2);
+    assert_eq!(
+        mapi_auth_audits(&app_store)[1].subject,
+        "credential-revoked"
+    );
+    assert_eq!(
+        app_store
+            .account_app_password_touches
+            .load(Ordering::Relaxed),
+        1
+    );
+}
+
+#[tokio::test]
+async fn mapi_disabled_account_revokes_matching_session_credential() {
+    let store = FakeStore {
+        account_login: Arc::new(Mutex::new(Some(mapi_basic_account_login("secret")))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_basic_headers("Connect", "alice@example.test", "secret"),
+            b"",
+        )
+        .await
+        .unwrap();
+    store.account_login.lock().unwrap().as_mut().unwrap().status = "disabled".to_string();
+    let mut ping_headers = mapi_basic_headers("PING", "alice@example.test", "secret");
+    ping_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "10");
+    assert_eq!(mapi_auth_audits(&store).len(), 2);
+    assert_eq!(mapi_auth_audits(&store)[1].subject, "inactive-account");
+}
+
+#[tokio::test]
+async fn mapi_bearer_nspi_session_reuses_authentication_without_success_audit_flood() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let bind = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
+        .await
+        .unwrap();
+    assert_eq!(bind.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(mapi_auth_audits(&store).len(), 1);
+    assert_eq!(mapi_auth_audits(&store)[0].subject, "session");
+
+    let mut query_headers = mapi_headers("QueryColumns");
+    query_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&bind)).unwrap(),
+    );
+    let query = service
+        .handle_mapi(MapiEndpoint::Nspi, &query_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(query.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(mapi_auth_audits(&store).len(), 1);
+
+    let mut unbind_headers = mapi_headers("Unbind");
+    unbind_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&query)).unwrap(),
+    );
+    let unbind = service
+        .handle_mapi(MapiEndpoint::Nspi, &unbind_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(unbind.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(mapi_auth_audits(&store).len(), 1);
+}
+
+#[tokio::test]
+async fn mapi_bearer_continuation_revalidates_the_account_session() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    store
+        .revoked_account_session_tokens
+        .lock()
+        .unwrap()
+        .insert("token".to_string());
+    let mut ping_headers = mapi_headers("PING");
+    ping_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "10");
+    let audits = mapi_auth_audits(&store);
+    assert_eq!(audits.len(), 2);
+    assert_eq!(audits[1].action, "mail-auth.mapi.login-failed");
+    assert_eq!(audits[1].subject, "credential-revoked");
+}
+
+#[tokio::test]
+async fn direct_mapi_cannot_adopt_an_rpc_style_session_context() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let principal = AccountPrincipal {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: FakeStore::account().account_id,
+        email: FakeStore::account().email,
+        display_name: FakeStore::account().display_name,
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let context = create_rpc_emsmdb_context(&principal);
+    let session_id = Uuid::from_slice(&context[4..]).unwrap().to_string();
+    let mut ping_headers = mapi_headers("PING");
+    ping_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&format!("MapiContext={session_id}")).unwrap(),
+    );
+
+    let ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "10");
+    let audits = mapi_auth_audits(&store);
+    assert_eq!(audits.len(), 1);
+    assert_eq!(audits[0].action, "mail-auth.mapi.login-failed");
+    assert_eq!(audits[0].subject, "authentication-context-changed");
+}
+
+#[tokio::test]
+async fn direct_mapi_rejects_and_audits_a_context_from_the_other_endpoint() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut ping_headers = mapi_headers("PING");
+    ping_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let ping = service
+        .handle_mapi(MapiEndpoint::Nspi, &ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "10");
+    let audits = mapi_auth_audits(&store);
+    assert_eq!(audits.len(), 2);
+    assert_eq!(audits[1].action, "mail-auth.mapi.login-failed");
+    assert_eq!(audits[1].subject, "authentication-context-changed");
+}
+
+#[tokio::test]
+async fn rpc_transport_cannot_adopt_a_direct_mapi_session_context() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let session_id = cookie
+        .split("; ")
+        .find_map(|part| part.strip_prefix("MapiContext="))
+        .unwrap();
+    let mut rpc_context = [0u8; 20];
+    rpc_context[4..].copy_from_slice(Uuid::parse_str(session_id).unwrap().as_bytes());
+    let account = FakeStore::account();
+    let principal = AccountPrincipal {
+        tenant_id: account.tenant_id,
+        account_id: account.account_id,
+        email: account.email,
+        display_name: account.display_name,
+        quota_mb: None,
+        quota_used_octets: None,
+    };
+    let validator = Validator::new(FakeDetector::text(), 0.8);
+
+    let error = execute_rpc_emsmdb_rops(&store, &validator, &principal, &rpc_context, &[0x01])
+        .await
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("RPC/HTTP EMSMDB authentication context changed"));
+
+    let mut ping_headers = mapi_headers("PING");
+    ping_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "0");
+}
+
 #[tokio::test]
 async fn mapi_over_http_connect_creates_emsmdb_session() {
     let store = FakeStore {

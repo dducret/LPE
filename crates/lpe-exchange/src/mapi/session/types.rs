@@ -1,7 +1,47 @@
 use super::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct MapiSessionAuthentication {
+    pub(in crate::mapi) principal: AccountPrincipal,
+    pub(in crate::mapi) method: AccountAuthenticationMethod,
+    pub(in crate::mapi) app_password_id: Option<Uuid>,
+    pub(in crate::mapi) credential_fingerprint: [u8; 32],
+    pub(in crate::mapi) verifier_fingerprint: Option<[u8; 32]>,
+}
+
+impl MapiSessionAuthentication {
+    pub(in crate::mapi) fn credential_fingerprint_matches(&self, other: &[u8; 32]) -> bool {
+        constant_time_fingerprint_eq(&self.credential_fingerprint, other)
+    }
+
+    pub(in crate::mapi) fn credential_matches(&self, other: &Self) -> bool {
+        self.principal.tenant_id == other.principal.tenant_id
+            && self.principal.account_id == other.principal.account_id
+            && self.principal.email == other.principal.email
+            && self.method == other.method
+            && self.app_password_id == other.app_password_id
+            && constant_time_fingerprint_eq(
+                &self.credential_fingerprint,
+                &other.credential_fingerprint,
+            )
+            && match (&self.verifier_fingerprint, &other.verifier_fingerprint) {
+                (Some(left), Some(right)) => constant_time_fingerprint_eq(left, right),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+fn constant_time_fingerprint_eq(left: &[u8; 32], right: &[u8; 32]) -> bool {
+    left.iter()
+        .zip(right.iter())
+        .fold(0u8, |difference, (left, right)| difference | (left ^ right))
+        == 0
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiSession {
+    pub(in crate::mapi) authentication: Option<MapiSessionAuthentication>,
     pub(in crate::mapi) endpoint: MapiEndpoint,
     pub(in crate::mapi) tenant_id: Uuid,
     pub(in crate::mapi) account_id: Uuid,

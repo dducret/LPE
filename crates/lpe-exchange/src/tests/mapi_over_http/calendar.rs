@@ -69,6 +69,141 @@ async fn save_staged_calendar_event(
 }
 
 #[tokio::test]
+async fn mapi_over_http_outlook_combined_notification_cleanup_on_event_is_noop_before_save() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("60860860-8608-4608-8608-608608608608").unwrap();
+    let events = Arc::new(Mutex::new(vec![AccessibleEvent {
+        id: event_id,
+        uid: event_id.to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: account.account_id,
+        owner_email: account.email.clone(),
+        owner_display_name: account.display_name.clone(),
+        rights: FakeStore::rights(),
+        date: "2026-08-14".to_string(),
+        time: "16:33".to_string(),
+        time_zone: "Europe/Berlin".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: "Probe P before cleanup".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "{}".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    }]));
+    let event_versions = Arc::new(Mutex::new(HashMap::from([(event_id, 7)])));
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: events.clone(),
+        event_versions: event_versions.clone(),
+        ..Default::default()
+    };
+    let calendar_folder_id = durable_special_folder_id_for_test(
+        &store,
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .await;
+    let service = ExchangeService::new(store);
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, calendar_folder_id);
+    append_rop_open_message_with_flags(
+        &mut open_rops,
+        1,
+        2,
+        calendar_folder_id,
+        test_mapi_uuid_id(&event_id),
+        0x01,
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&open_rops, &[logon_handle, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_body = response_bytes(response).await;
+    let (_, handles) = response_rops_and_handles_from_execute_body(&response_body);
+    let calendar_handle = handles[1];
+    let event_handle = handles[2];
+
+    // Outlook 16 Probe P capture 202608141633 sent this exact request after
+    // opening an existing Calendar Event. The capture is interoperability
+    // evidence for the combined value, while [MS-OXCROPS] 2.2.6.11.1 defines
+    // the wire order and [MS-OXCMSG] 2.2.3.10.1 defines the two individual
+    // notification-cleanup bits as no-read-state operations.
+    let cleanup_rops = [0x11, 0x00, 0x00, 0x01, 0x60];
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&cleanup_rops, &[calendar_handle, event_handle])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let cleanup_response = response_rops_from_execute_response(response).await;
+    assert_eq!(cleanup_response, [0x11, 0x00, 0, 0, 0, 0, 0]);
+    assert_eq!(events.lock().unwrap()[0].title, "Probe P before cleanup");
+    assert_eq!(event_versions.lock().unwrap()[&event_id], 7);
+
+    let invalid_cleanup_rops = [0x11, 0x00, 0x00, 0x01, 0x61];
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &invalid_cleanup_rops,
+                &[calendar_handle, event_handle],
+            )),
+        )
+        .await
+        .unwrap();
+    let invalid_response = response_rops_from_execute_response(response).await;
+    assert_eq!(invalid_response, [0x11, 0x00, 0x57, 0x00, 0x07, 0x80]);
+    assert_eq!(events.lock().unwrap()[0].title, "Probe P before cleanup");
+    assert_eq!(event_versions.lock().unwrap()[&event_id], 7);
+
+    let mut subject = Vec::new();
+    append_mapi_utf16_property(&mut subject, 0x0037_001F, "Probe P after cleanup");
+    let mut save_rops = Vec::new();
+    append_rop_set_properties(&mut save_rops, 1, 1, &subject);
+    append_rop_save_changes_message_with_flags(&mut save_rops, 0, 1, 0x02);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&save_rops, &[calendar_handle, event_handle])),
+        )
+        .await
+        .unwrap();
+    let save_response = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &save_response,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&save_response, &[0x0C, 0x00, 0, 0, 0, 0]));
+    assert_eq!(events.lock().unwrap()[0].title, "Probe P after cleanup");
+}
+
+#[tokio::test]
 async fn mapi_over_http_calendar_same_folder_move_is_idempotent() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("21492149-2149-4149-8149-214921492149").unwrap();

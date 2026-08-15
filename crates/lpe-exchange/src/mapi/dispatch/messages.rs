@@ -737,14 +737,26 @@ pub(super) async fn append_set_message_read_flag_response<S>(
         ));
         return;
     };
+    let read_flags = request.read_flags();
     // [MS-OXCMSG] 2.2.3.10.1 and 2.2.3.11.1: rfDefault (0x00)
     // marks the message read and is valid for RopSetMessageReadFlag.
-    if !read_flags_are_valid(request.read_flags(), true) {
+    // Outlook 16 also combines rfClearNotifyRead and rfClearNotifyUnread
+    // (0x60) on an open Calendar Event. MS-OXCMSG lists those alternatives
+    // as mutually exclusive, so keep this observed interoperability no-op
+    // scoped to Event objects rather than widening general Message handling.
+    let event_notification_cleanup = matches!(&object, MapiObject::Event { .. })
+        && matches!(read_flags, Some(0x20 | 0x40 | 0x60));
+    let outlook_event_notification_cleanup = event_notification_cleanup && read_flags == Some(0x60);
+    if !read_flags_are_valid(read_flags, true) && !outlook_event_notification_cleanup {
         responses.extend_from_slice(&rop_error_response(
             0x11,
             request.response_handle_index(),
             0x8007_0057,
         ));
+        return;
+    }
+    if event_notification_cleanup {
+        responses.extend_from_slice(&rop_set_message_read_flag_response(request, false));
         return;
     }
     if let MapiObject::PublicFolderItem {
@@ -759,7 +771,7 @@ pub(super) async fn append_set_message_read_flag_response<S>(
             ));
             return;
         };
-        let unread = unread_from_read_flags(request.read_flags());
+        let unread = unread_from_read_flags(read_flags);
         let changed = unread.is_some_and(|unread| unread == item.item.is_read);
         if let Some(unread) = unread {
             let patch = lpe_storage::PublicFolderPerUserStatePatch {
@@ -815,7 +827,7 @@ pub(super) async fn append_set_message_read_flag_response<S>(
         ));
         return;
     };
-    let unread = unread_from_read_flags(request.read_flags());
+    let unread = unread_from_read_flags(read_flags);
     let changed = unread.is_some_and(|unread| unread != email.unread);
     if let Some(unread) = unread {
         if !snapshot

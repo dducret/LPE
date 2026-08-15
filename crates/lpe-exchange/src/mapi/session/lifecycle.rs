@@ -60,6 +60,41 @@ pub(in crate::mapi) fn reconnect_session(
     request_type: &str,
     request_id: &str,
 ) -> std::result::Result<Option<String>, Response> {
+    reconnect_session_with_authentication(
+        endpoint,
+        principal,
+        None,
+        headers,
+        request_type,
+        request_id,
+    )
+}
+
+pub(in crate::mapi) fn reconnect_authenticated_session(
+    endpoint: MapiEndpoint,
+    authentication: &MapiSessionAuthentication,
+    headers: &HeaderMap,
+    request_type: &str,
+    request_id: &str,
+) -> std::result::Result<Option<String>, Response> {
+    reconnect_session_with_authentication(
+        endpoint,
+        &authentication.principal,
+        Some(authentication),
+        headers,
+        request_type,
+        request_id,
+    )
+}
+
+fn reconnect_session_with_authentication(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    authentication: Option<&MapiSessionAuthentication>,
+    headers: &HeaderMap,
+    request_type: &str,
+    request_id: &str,
+) -> std::result::Result<Option<String>, Response> {
     let Some(previous_session_id) = request_cookie(endpoint, headers) else {
         return Ok(None);
     };
@@ -83,13 +118,31 @@ pub(in crate::mapi) fn reconnect_session(
         ));
     };
     if !session_matches(&session, endpoint, principal) {
-        store_session(previous_session_id, session);
+        restore_session(previous_session_id, session);
         return Err(mapi_diagnostic_response(
             request_type,
             request_id,
             10,
             "MAPI authentication context changed",
         ));
+    }
+
+    if let Some(authentication) = authentication {
+        if session.authentication.is_none()
+            || !session
+                .authentication
+                .as_ref()
+                .is_some_and(|current| current.credential_matches(authentication))
+        {
+            restore_session(previous_session_id, session);
+            return Err(mapi_diagnostic_response(
+                request_type,
+                request_id,
+                10,
+                "MAPI authentication context changed",
+            ));
+        }
+        session.authentication = Some(authentication.clone());
     }
 
     session.record_transport_request(request_type, request_id);
@@ -105,9 +158,36 @@ pub(in crate::mapi) fn create_session(
     request_type: &str,
     request_id: &str,
 ) -> String {
+    create_session_with_authentication(endpoint, principal, None, request_type, request_id)
+}
+
+pub(in crate::mapi) fn create_authenticated_session(
+    endpoint: MapiEndpoint,
+    authentication: MapiSessionAuthentication,
+    request_type: &str,
+    request_id: &str,
+) -> String {
+    let principal = authentication.principal.clone();
+    create_session_with_authentication(
+        endpoint,
+        &principal,
+        Some(authentication),
+        request_type,
+        request_id,
+    )
+}
+
+fn create_session_with_authentication(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    authentication: Option<MapiSessionAuthentication>,
+    request_type: &str,
+    request_id: &str,
+) -> String {
     let session_id = Uuid::new_v4().to_string();
     let now = SystemTime::now();
     let mut session = MapiSession {
+        authentication,
         endpoint,
         tenant_id: principal.tenant_id,
         account_id: principal.account_id,
@@ -192,7 +272,9 @@ where
     let Some(mut session) = get_session(&session_id) else {
         return Err(anyhow!("RPC/HTTP EMSMDB session context not found"));
     };
-    if !session_matches(&session, MapiEndpoint::Emsmdb, principal) {
+    if session.authentication.is_some()
+        || !session_matches(&session, MapiEndpoint::Emsmdb, principal)
+    {
         return Err(anyhow!("RPC/HTTP EMSMDB authentication context changed"));
     }
     if rop_buffer.is_empty() {
@@ -224,7 +306,10 @@ where
     let Some(mut session) = remove_session(&session_id) else {
         return Err(anyhow!("RPC/HTTP EMSMDB session context not found"));
     };
-    if !session_matches(&session, MapiEndpoint::Emsmdb, principal) {
+    if session.authentication.is_some()
+        || !session_matches(&session, MapiEndpoint::Emsmdb, principal)
+    {
+        restore_session(session_id, session);
         return Err(anyhow!("RPC/HTTP EMSMDB authentication context changed"));
     }
     if let Err(error) =
@@ -307,6 +392,17 @@ pub(in crate::mapi) fn store_session(session_id: String, mut session: MapiSessio
     guard.insert(session_id, session);
 }
 
+pub(in crate::mapi) fn restore_session(session_id: String, session: MapiSession) {
+    let now = SystemTime::now();
+    let mut guard = sessions()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_expired_sessions_locked(&mut guard, now);
+    if !session_is_expired(&session, now) {
+        guard.insert(session_id, session);
+    }
+}
+
 /// [MS-OXCMAPIHTTP] sections 3.1.5.1 and 3.2.5.2 associate the current
 /// returned cookies with the next request for a Session Context.
 pub(in crate::mapi) fn rotate_session_request_sequence_token(session_id: &str) -> bool {
@@ -356,6 +452,37 @@ pub(in crate::mapi) fn session_matches(
         && session.email == principal.email
 }
 
+pub(in crate::mapi) fn mapi_http_session_matches(
+    session: &MapiSession,
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+) -> bool {
+    session.authentication.is_some() && session_matches(session, endpoint, principal)
+}
+
+pub(in crate::mapi) fn update_session_authentication(
+    session_id: &str,
+    authentication: &MapiSessionAuthentication,
+) -> bool {
+    let now = SystemTime::now();
+    let mut guard = sessions()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_expired_sessions_locked(&mut guard, now);
+    let Some(session) = guard.get_mut(session_id) else {
+        return false;
+    };
+    if !session
+        .authentication
+        .as_ref()
+        .is_some_and(|current| current.credential_matches(authentication))
+    {
+        return false;
+    }
+    session.authentication = Some(authentication.clone());
+    true
+}
+
 pub(in crate::mapi) fn established_session_request(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
@@ -379,7 +506,7 @@ pub(in crate::mapi) fn established_session_request(
             "MAPI session context not found",
         ));
     };
-    if !session_matches(&session, endpoint, principal) {
+    if !mapi_http_session_matches(&session, endpoint, principal) {
         return Err(mapi_diagnostic_response(
             request_type,
             request_id,

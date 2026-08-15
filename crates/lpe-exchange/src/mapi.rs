@@ -9,7 +9,11 @@ use axum::{
 use lpe_magika::{
     Detector, ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator,
 };
-use lpe_mail_auth::{authenticate_account, AccountPrincipal};
+use lpe_mail_auth::{
+    basic_credentials, bearer_token, normalize_login_name, record_account_login_success,
+    verify_account_authentication, AccountAuthenticationMethod, AccountAuthenticationVerifier,
+    AccountPrincipal, VerifiedAccountAuthentication,
+};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AttachmentUploadInput, AuditEntryInput,
     CalendarParticipantsMetadata, ClientNote, ClientTask, CollaborationRights, JmapEmail,
@@ -81,6 +85,15 @@ pub(crate) use notification_metrics::{
 pub(crate) use crate::mapi::session::begin_active_session_request_for_test;
 #[cfg(test)]
 pub(crate) use crate::mapi::store_adapter::load_mapi_identity_codec_for_test;
+
+#[cfg(test)]
+pub(crate) fn mapi_http_session_last_seen_for_test(
+    endpoint: MapiEndpoint,
+    headers: &HeaderMap,
+) -> Option<SystemTime> {
+    let session_id = transport::request_cookie(endpoint, headers)?;
+    session::get_session(&session_id).map(|session| session.last_seen_at)
+}
 
 static MAPI_FOLDER_PURGE_ATTEMPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
 static MAPI_FOLDER_PURGE_SUCCEEDED_TOTAL: AtomicU64 = AtomicU64::new(0);

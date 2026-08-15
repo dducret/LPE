@@ -3354,6 +3354,79 @@ async fn mapi_over_http_set_message_read_flag_updates_open_message_state() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_message_notification_cleanup_preserves_unread_without_notify() {
+    let message_id = "37373737-3737-3737-3737-373737373730";
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 1;
+    inbox.unread_emails = 1;
+    let mut email = FakeStore::email(
+        message_id,
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Message notification cleanup",
+    );
+    email.unread = true;
+    let emails = Arc::new(Mutex::new(vec![email]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let (mut execute_headers, logon_handle) = mapi_connect_with_private_logon(&service).await;
+
+    let mut open_rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    append_mapi_wire_id(&mut open_rops, test_mapi_folder_id(5));
+    open_rops.push(0);
+    open_rops.extend_from_slice(&[0x29, 0x00, 0x00, 0x02]); // RopRegisterNotification
+    open_rops.extend_from_slice(&0x0178u16.to_le_bytes());
+    open_rops.push(0);
+    append_mapi_wire_id(&mut open_rops, test_mapi_folder_id(5));
+    open_rops.extend_from_slice(&0u64.to_le_bytes());
+    open_rops.extend_from_slice(&[
+        0x03, 0x00, 0x01, 0x03, // RopOpenMessage
+    ]);
+    open_rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
+    append_mapi_wire_id(&mut open_rops, test_mapi_folder_id(5));
+    open_rops.push(0);
+    append_mapi_wire_id(&mut open_rops, test_mapi_message_id(message_id));
+
+    let request = execute_body(&rop_buffer(
+        &open_rops,
+        &[logon_handle, u32::MAX, u32::MAX, u32::MAX],
+    ));
+    let open_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+    let open_cookie = mapi_cookie_header(&open_response);
+    let open_body = response_bytes(open_response).await;
+    let (_, open_handles) = response_rops_and_handles_from_execute_body(&open_body);
+    execute_headers.insert("cookie", HeaderValue::from_str(&open_cookie).unwrap());
+
+    // [MS-OXCMSG] 2.2.3.10.1: each flag clears a receipt-notification bit
+    // without changing mfRead. Neither request is a contents-table change.
+    for read_flags in [0x20, 0x40] {
+        let cleanup_rops = [0x11, 0x00, 0x00, 0x01, read_flags];
+        renew_mapi_request_id(&mut execute_headers);
+        let request = execute_body(&rop_buffer(
+            &cleanup_rops,
+            &[open_handles[1], open_handles[3]],
+        ));
+        let response = service
+            .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+            .await
+            .unwrap();
+        let response_rops = response_rops_from_execute_response(response).await;
+        assert_eq!(response_rops, [0x11, 0x00, 0, 0, 0, 0, 0]);
+        assert!(emails.lock().unwrap()[0].unread);
+    }
+}
+
+#[tokio::test]
 async fn mapi_over_http_outlook_set_message_read_flag_accepts_default_flag() {
     let message_id = "37373737-3737-3737-3737-373737373738";
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");

@@ -1,3 +1,4 @@
+use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
 use axum::body::{to_bytes, Body};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -33,7 +34,7 @@ use lpe_storage::{
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{PgPool, Row};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     str::FromStr,
     sync::{
@@ -46,6 +47,7 @@ use uuid::Uuid;
 
 use crate::{
     mapi::{
+        create_rpc_emsmdb_context, execute_rpc_emsmdb_rops, mapi_http_session_last_seen_for_test,
         notifications::{MapiNotificationEvent, MapiNotificationKind},
         permissions::{rights_from_grant, MapiFolderPermission},
         properties::{MapiNamedProperty, MapiNamedPropertyKind, MAX_NAMED_PROPERTY_ID},
@@ -4205,6 +4207,11 @@ async fn postgres_mapi_folder_hierarchy_commit_keeps_durable_trash_version_linea
 #[derive(Clone, Default)]
 struct FakeStore {
     session: Option<AuthenticatedAccount>,
+    revoked_account_session_tokens: Arc<Mutex<HashSet<String>>>,
+    account_login: Arc<Mutex<Option<AccountLogin>>>,
+    account_app_passwords: Arc<Mutex<Vec<StoredAccountAppPassword>>>,
+    account_auth_audits: Arc<Mutex<Vec<lpe_storage::AuditEntryInput>>>,
+    account_app_password_touches: Arc<AtomicU64>,
     contact_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     task_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
@@ -5045,35 +5052,80 @@ impl AccountAuthStore for FakeStore {
         &'a self,
         token: &'a str,
     ) -> StoreFuture<'a, Option<AuthenticatedAccount>> {
-        let session = (token == "token").then(|| self.session.clone()).flatten();
+        let session = (token == "token"
+            && !self
+                .revoked_account_session_tokens
+                .lock()
+                .unwrap()
+                .contains(token))
+        .then(|| self.session.clone())
+        .flatten();
         Box::pin(async move { Ok(session) })
     }
 
-    fn fetch_account_login<'a>(&'a self, _email: &'a str) -> StoreFuture<'a, Option<AccountLogin>> {
-        Box::pin(async move { Ok(None) })
+    fn fetch_account_login<'a>(&'a self, email: &'a str) -> StoreFuture<'a, Option<AccountLogin>> {
+        Box::pin(async move {
+            Ok(self
+                .account_login
+                .lock()
+                .unwrap()
+                .clone()
+                .filter(|login| login.email.eq_ignore_ascii_case(email)))
+        })
     }
 
     fn fetch_active_account_app_passwords<'a>(
         &'a self,
-        _email: &'a str,
+        email: &'a str,
     ) -> StoreFuture<'a, Vec<StoredAccountAppPassword>> {
-        Box::pin(async move { Ok(Vec::new()) })
+        Box::pin(async move {
+            let account_matches = self
+                .account_login
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|login| login.email.eq_ignore_ascii_case(email));
+            Ok(account_matches
+                .then(|| self.account_app_passwords.lock().unwrap().clone())
+                .unwrap_or_default())
+        })
     }
 
     fn touch_account_app_password<'a>(
         &'a self,
-        _email: &'a str,
-        _app_password_id: Uuid,
+        email: &'a str,
+        app_password_id: Uuid,
     ) -> StoreFuture<'a, ()> {
-        Box::pin(async move { Ok(()) })
+        Box::pin(async move {
+            let account_matches = self
+                .account_login
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|login| login.email.eq_ignore_ascii_case(email));
+            let app_password_matches = self
+                .account_app_passwords
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|entry| entry.id == app_password_id);
+            if account_matches && app_password_matches {
+                self.account_app_password_touches
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            Ok(())
+        })
     }
 
     fn append_audit_event<'a>(
         &'a self,
         _tenant_id: &'a Uuid,
-        _entry: lpe_storage::AuditEntryInput,
+        entry: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
-        Box::pin(async move { Ok(()) })
+        Box::pin(async move {
+            self.account_auth_audits.lock().unwrap().push(entry);
+            Ok(())
+        })
     }
 }
 
@@ -13383,6 +13435,23 @@ fn mapi_headers(request_type: &str) -> HeaderMap {
     );
     headers.insert("host", HeaderValue::from_static("mail.example.test"));
     headers
+}
+
+fn mapi_basic_headers(request_type: &str, username: &str, password: &str) -> HeaderMap {
+    let mut headers = mapi_headers(request_type);
+    let credentials = BASE64_STANDARD.encode(format!("{username}:{password}"));
+    headers.insert(
+        axum::http::header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Basic {credentials}")).unwrap(),
+    );
+    headers
+}
+
+fn mapi_test_password_hash(password: &str) -> String {
+    argon2::Argon2::default()
+        .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+        .unwrap()
+        .to_string()
 }
 
 fn insert_mapi_content_length(headers: &mut HeaderMap) {

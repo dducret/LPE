@@ -57,6 +57,18 @@ before it is advertised.
 - EMSMDB `Connect`, `Execute`, and `Disconnect` traffic must maintain a
   server-side MAPI session context with strict `MapiContext` and `MapiSequence`
   handling.
+- EMSMDB `Connect` and NSPI `Bind` perform full credential verification. A
+  `mail-auth.mapi.login-succeeded` audit event is written only after that
+  request actually establishes or reconnects its Session Context. Subsequent
+  requests compare the transport/endpoint/account-bound authentication context required
+  by `[MS-OXCMAPIHTTP]` section 3.2.5.1, including a process-keyed credential
+  proof and the current active password or app-password verifier, without
+  repeating Argon2 verification or successful-login audit writes. Session
+  state retains the complete principal projection and keyed digests, never a
+  plaintext credential or stored password hash. Changed, disabled, or revoked
+  credentials fail the request and retain failed-authentication auditing.
+  Direct MAPI/HTTP Session Contexts and legacy RPC context handles are not
+  interchangeable.
 - `Execute` refreshes `MapiContext` and `MapiSequence` on every accepted request.
 - Required MAPI HTTP request headers, request identifiers, client information,
   cookies, request-body framing, and response-code mapping are part of the wire
@@ -1594,7 +1606,10 @@ not by itself authorize broad client publication.
   and NSPI surfaces.
 - EMSMDB session context handling covers connection, execution, disconnect,
   request id handling, client info echoing, response-code mapping, cookies, and
-  overlapping same-session sequence validation.
+  overlapping same-session sequence validation. Password and app-password
+  verification plus successful-login audit happen once per established or
+  reconnected EMSMDB/NSPI context; accepted continuation requests use the
+  bound session proof plus a current lightweight verifier-state check.
 - Profile bootstrap projects private mailbox store/logon properties, default
   folder identities, hierarchy metadata, and basic contents sync data required
   by the local Outlook cached-mode gate.

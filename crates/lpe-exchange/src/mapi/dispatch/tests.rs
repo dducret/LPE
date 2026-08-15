@@ -3706,6 +3706,7 @@ pub(super) fn test_principal() -> AccountPrincipal {
 pub(super) fn test_mapi_session() -> MapiSession {
     let principal = test_principal();
     MapiSession {
+        authentication: None,
         endpoint: MapiEndpoint::Emsmdb,
         tenant_id: principal.tenant_id,
         account_id: principal.account_id,

@@ -38,6 +38,7 @@ pub(in crate::mapi) const NSPI_SERVER_GUID: [u8; 16] = [
     0x2b, 0xe6, 0x0b, 0x5d, 0x9f, 0x35, 0x3f, 0x45, 0x9a, 0x68, 0x4c, 0x4b, 0xc5, 0x8f, 0x3f, 0x30,
 ];
 
+mod authentication;
 mod cookies;
 mod diagnostics;
 mod headers;
@@ -79,10 +80,12 @@ where
     S: ExchangeStore + Clone + Send + Sync + 'static,
     V: Detector,
 {
-    let principal = authenticate_account(store, None, headers, "mapi").await?;
     let request_type = match request_type(headers) {
         Ok(request_type) => request_type,
         Err(error) => {
+            let principal = verify_account_authentication(store, None, headers, "mapi")
+                .await?
+                .principal;
             let request_id = request_id(headers).unwrap_or_default();
             let response = mapi_diagnostic_response("Unknown", &request_id, 7, &error.to_string());
             let response = finalize_mapi_response(response, headers);
@@ -99,6 +102,35 @@ where
         }
     };
     let request_type_label = request_type.header_value().to_string();
+    let authentication_request_id = request_id(headers).unwrap_or_default();
+    let request_authentication = match authentication::authenticate_mapi_request(
+        store,
+        endpoint,
+        headers,
+        &request_type,
+        &authentication_request_id,
+    )
+    .await?
+    {
+        authentication::MapiAuthenticationOutcome::Accepted(authentication) => authentication,
+        authentication::MapiAuthenticationOutcome::Rejected {
+            principal,
+            response,
+        } => {
+            let response = finalize_mapi_response(response, headers);
+            log_mapi_connection(
+                endpoint,
+                &principal,
+                headers,
+                _body,
+                &request_type_label,
+                &authentication_request_id,
+                &response,
+            );
+            return Ok(response);
+        }
+    };
+    let principal = &request_authentication.verified.principal;
     let Some(request_id) = request_id(headers) else {
         let response = mapi_diagnostic_response(
             &request_type_label,
@@ -301,19 +333,23 @@ where
             None
         };
 
+    let establishment_request_type = request_type.clone();
     let mut response = match (endpoint, request_type) {
-        (MapiEndpoint::Emsmdb, MapiRequestType::Connect) => {
-            connect_response(endpoint, &principal, headers, &request_id)
-        }
+        (MapiEndpoint::Emsmdb, MapiRequestType::Connect) => connect_authenticated_response(
+            endpoint,
+            &request_authentication.session_authentication,
+            headers,
+            &request_id,
+        ),
         (MapiEndpoint::Emsmdb, MapiRequestType::Disconnect) => {
-            disconnect_response(endpoint, &principal, headers, &request_id, "Disconnect")
+            disconnect_response(endpoint, principal, headers, &request_id, "Disconnect")
         }
         (MapiEndpoint::Emsmdb, MapiRequestType::Execute) => {
             execute_response(
                 store,
                 validator,
                 endpoint,
-                &principal,
+                principal,
                 headers,
                 _body,
                 &request_id,
@@ -324,17 +360,23 @@ where
             notification_wait::notification_wait_response(
                 (*store).clone(),
                 endpoint,
-                &principal,
+                principal,
                 headers,
                 &request_id,
             )
             .await
         }
         (_, MapiRequestType::Ping) => {
-            ping_response(endpoint, &principal, headers, _body, &request_id)
+            ping_response(endpoint, principal, headers, _body, &request_id)
         }
+        (MapiEndpoint::Nspi, MapiRequestType::Bind) => bind_authenticated_response(
+            endpoint,
+            &request_authentication.session_authentication,
+            headers,
+            &request_id,
+        ),
         (MapiEndpoint::Nspi, request_type) => {
-            handle_nspi_request(store, &principal, headers, _body, request_type, &request_id).await
+            handle_nspi_request(store, principal, headers, _body, request_type, &request_id).await
         }
         (_, MapiRequestType::Unsupported(value)) => mapi_diagnostic_response(
             &value,
@@ -349,6 +391,16 @@ where
             "request type is not valid for the EMSMDB endpoint",
         ),
     };
+
+    let establishment_response_code = response_header(&response, "x-responsecode");
+    authentication::record_mapi_establishment_result(
+        store,
+        endpoint,
+        &establishment_request_type,
+        &request_authentication,
+        establishment_response_code.as_deref(),
+    )
+    .await;
 
     refresh_accepted_session_response_cookies(
         &mut response,
@@ -383,21 +435,67 @@ pub(crate) fn mapi_error_response(error: &anyhow::Error) -> Response {
     mapi_diagnostic_response("Unknown", "", 4, &message)
 }
 
+#[cfg(test)]
 pub(in crate::mapi) fn connect_response(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
     headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
-    let (session_id, reconnected) =
-        match reconnect_session(endpoint, principal, headers, "Connect", request_id) {
-            Ok(Some(session_id)) => (session_id, true),
-            Ok(None) => (
-                create_session(endpoint, principal, "Connect", request_id),
-                false,
-            ),
-            Err(response) => return response,
-        };
+    connect_response_with_authentication(endpoint, principal, None, headers, request_id)
+}
+
+pub(in crate::mapi) fn connect_authenticated_response(
+    endpoint: MapiEndpoint,
+    authentication: &MapiSessionAuthentication,
+    headers: &HeaderMap,
+    request_id: &str,
+) -> Response {
+    connect_response_with_authentication(
+        endpoint,
+        &authentication.principal,
+        Some(authentication),
+        headers,
+        request_id,
+    )
+}
+
+fn connect_response_with_authentication(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    authentication: Option<&MapiSessionAuthentication>,
+    headers: &HeaderMap,
+    request_id: &str,
+) -> Response {
+    let (session_id, reconnected) = match authentication.map_or_else(
+        || reconnect_session(endpoint, principal, headers, "Connect", request_id),
+        |authentication| {
+            reconnect_authenticated_session(
+                endpoint,
+                authentication,
+                headers,
+                "Connect",
+                request_id,
+            )
+        },
+    ) {
+        Ok(Some(session_id)) => (session_id, true),
+        Ok(None) => {
+            let session_id = authentication.map_or_else(
+                || create_session(endpoint, principal, "Connect", request_id),
+                |authentication| {
+                    create_authenticated_session(
+                        endpoint,
+                        authentication.clone(),
+                        "Connect",
+                        request_id,
+                    )
+                },
+            );
+            (session_id, false)
+        }
+        Err(response) => return response,
+    };
     log_mapi_session_establish(
         endpoint,
         principal,
@@ -543,11 +641,8 @@ pub(in crate::mapi) fn disconnect_response(
             "MAPI session context not found",
         );
     };
-    if session.endpoint != endpoint
-        || session.tenant_id != principal.tenant_id
-        || session.account_id != principal.account_id
-        || session.email != principal.email
-    {
+    if !mapi_http_session_matches(&session, endpoint, principal) {
+        restore_session(session_id, session);
         return mapi_diagnostic_response(
             response_request_type,
             request_id,
@@ -622,7 +717,8 @@ pub(in crate::mapi) fn ping_response(
     let Some(session) = remove_session(&session_id) else {
         return mapi_diagnostic_response("PING", request_id, 10, "MAPI session context not found");
     };
-    if !session_matches(&session, endpoint, principal) {
+    if !mapi_http_session_matches(&session, endpoint, principal) {
+        restore_session(session_id, session);
         return mapi_diagnostic_response(
             "PING",
             request_id,

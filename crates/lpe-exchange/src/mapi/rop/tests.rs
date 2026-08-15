@@ -1321,6 +1321,7 @@ fn get_properties_specific_size_limit_preserves_unspecified_property_type() {
 pub(in crate::mapi) fn session_idle_expiry_follows_cookie_max_age() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10_000);
     let fresh = MapiSession {
+        authentication: None,
         endpoint: MapiEndpoint::Emsmdb,
         tenant_id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
         account_id: Uuid::nil(),

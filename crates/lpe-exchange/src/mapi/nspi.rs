@@ -141,15 +141,54 @@ pub(in crate::mapi) fn bind_response(
     headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
-    let (session_id, reconnected) =
-        match reconnect_session(endpoint, principal, headers, "Bind", request_id) {
-            Ok(Some(session_id)) => (session_id, true),
-            Ok(None) => (
-                create_session(endpoint, principal, "Bind", request_id),
-                false,
-            ),
-            Err(response) => return response,
-        };
+    bind_response_with_authentication(endpoint, principal, None, headers, request_id)
+}
+
+pub(in crate::mapi) fn bind_authenticated_response(
+    endpoint: MapiEndpoint,
+    authentication: &MapiSessionAuthentication,
+    headers: &HeaderMap,
+    request_id: &str,
+) -> Response {
+    bind_response_with_authentication(
+        endpoint,
+        &authentication.principal,
+        Some(authentication),
+        headers,
+        request_id,
+    )
+}
+
+fn bind_response_with_authentication(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    authentication: Option<&MapiSessionAuthentication>,
+    headers: &HeaderMap,
+    request_id: &str,
+) -> Response {
+    let (session_id, reconnected) = match authentication.map_or_else(
+        || reconnect_session(endpoint, principal, headers, "Bind", request_id),
+        |authentication| {
+            reconnect_authenticated_session(endpoint, authentication, headers, "Bind", request_id)
+        },
+    ) {
+        Ok(Some(session_id)) => (session_id, true),
+        Ok(None) => {
+            let session_id = authentication.map_or_else(
+                || create_session(endpoint, principal, "Bind", request_id),
+                |authentication| {
+                    create_authenticated_session(
+                        endpoint,
+                        authentication.clone(),
+                        "Bind",
+                        request_id,
+                    )
+                },
+            );
+            (session_id, false)
+        }
+        Err(response) => return response,
+    };
     log_mapi_session_establish(
         endpoint,
         principal,

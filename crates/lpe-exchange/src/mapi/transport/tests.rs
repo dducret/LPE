@@ -12,6 +12,7 @@ use tokio_stream::StreamExt;
 
 fn test_session(handles: HashMap<u32, MapiObject>) -> MapiSession {
     MapiSession {
+        authentication: None,
         endpoint: MapiEndpoint::Emsmdb,
         tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
         account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
@@ -78,6 +79,21 @@ fn test_principal() -> AccountPrincipal {
         quota_mb: None,
         quota_used_octets: None,
     }
+}
+
+fn create_test_http_session(principal: &AccountPrincipal) -> String {
+    create_authenticated_session(
+        MapiEndpoint::Emsmdb,
+        MapiSessionAuthentication {
+            principal: principal.clone(),
+            method: AccountAuthenticationMethod::Session,
+            app_password_id: None,
+            credential_fingerprint: [0x11; 32],
+            verifier_fingerprint: None,
+        },
+        "Connect",
+        "test:1",
+    )
 }
 
 #[test]
@@ -479,7 +495,7 @@ fn accepted_response_rotates_the_mapi_sequence_cookie() {
 #[test]
 fn ping_accepts_missing_or_prior_mapi_sequence_cookie() {
     let principal = test_principal();
-    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let session_id = create_test_http_session(&principal);
     let mut missing_sequence_headers = HeaderMap::new();
     missing_sequence_headers.insert("content-length", HeaderValue::from_static("0"));
     missing_sequence_headers.insert(
@@ -521,7 +537,7 @@ fn ping_accepts_missing_or_prior_mapi_sequence_cookie() {
 #[test]
 fn active_session_ping_failure_returns_current_session_cookies() {
     let principal = test_principal();
-    let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+    let session_id = create_test_http_session(&principal);
     let mut headers = HeaderMap::new();
     headers.insert("content-length", HeaderValue::from_static("0"));
     headers.insert(

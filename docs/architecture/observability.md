@@ -19,6 +19,10 @@
   - outbound queue worker results
   - protocol adapter errors
   - storage errors
+- MAPI authentication audit semantics:
+  - one `mail-auth.mapi.login-succeeded` event is emitted when EMSMDB `Connect` or NSPI `Bind` successfully establishes or reconnects a Session Context
+  - `Execute`, `NotificationWait`, `PING`, `Disconnect`, `Unbind`, and ordinary NSPI continuation requests do not emit repeated successful-login events
+  - invalid, revoked, disabled, or changed credentials remain failed-authentication events
 - `LPE-CT` logs:
   - SMTP session events
   - edge policy decisions
