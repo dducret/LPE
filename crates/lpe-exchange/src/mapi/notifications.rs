@@ -215,22 +215,27 @@ impl MapiNotificationEvent {
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn change_cursor(&self) -> Option<i64> {
         self.change_cursor
     }
 
+    #[cfg(test)]
     pub(crate) fn modseq(&self) -> Option<u64> {
         self.modseq
     }
 
+    #[cfg(test)]
     pub(crate) fn canonical_folder_id(&self) -> Option<uuid::Uuid> {
         self.canonical_folder_id
     }
 
+    #[cfg(test)]
     pub(crate) fn canonical_message_id(&self) -> Option<uuid::Uuid> {
         self.canonical_message_id
     }
 
+    #[cfg(test)]
     pub(crate) fn change_kind(&self) -> Option<&str> {
         self.change_kind.as_deref()
     }
