@@ -91,11 +91,10 @@ pub(in crate::service) fn message_item_xml_with_details(
     xml.insert_str(
         xml.len() - "</t:Message>".len(),
         &format!(
-            "{}{body}{}{}{}{}",
+            "{}{body}{}{}{}",
             mime_content,
             message_recipients_xml("ToRecipients", &email.to),
             message_recipients_xml("CcRecipients", &email.cc),
-            message_recipients_xml("BccRecipients", &email.bcc),
             message_attachments_xml(attachments),
         ),
     );

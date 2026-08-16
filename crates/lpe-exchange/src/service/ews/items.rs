@@ -80,34 +80,10 @@ where
                 change_key_for(&task_change_keys, task.id, "task")?,
             ));
         }
-        let mut emails = self
+        let emails = self
             .store
             .fetch_jmap_emails(principal.account_id, &message_ids)
             .await?;
-        let protected_bcc_ids = emails
-            .iter()
-            .filter(|email| {
-                email
-                    .mailbox_states
-                    .iter()
-                    .any(|state| matches!(state.role.as_str(), "drafts" | "sent"))
-            })
-            .map(|email| email.id)
-            .collect::<Vec<_>>();
-        if !protected_bcc_ids.is_empty() {
-            let protected_emails = self
-                .store
-                .fetch_jmap_emails_with_protected_bcc(principal.account_id, &protected_bcc_ids)
-                .await?;
-            for email in &mut emails {
-                if let Some(protected) = protected_emails
-                    .iter()
-                    .find(|protected| protected.id == email.id)
-                {
-                    email.bcc = protected.bcc.clone();
-                }
-            }
-        }
         for email in emails {
             let attachments = if email.has_attachments {
                 self.store
@@ -302,6 +278,8 @@ where
         }
     }
 
+    // [MS-OXWSMSG] section 3.1.4.7: validate every bounded target and payload
+    // before the first canonical item mutation.
     pub(in crate::service) async fn update_item(
         &self,
         principal: &AccountPrincipal,
@@ -422,8 +400,14 @@ where
                 event_update = Some((event_id, existing, input));
             }
 
-            let mut items = String::new();
-            if !message_ids.is_empty() {
+            let contact_update = contact_update
+                .map(|(contact_id, existing, update_request)| {
+                    let input = parse_update_contact_input(principal, &existing, update_request);
+                    validate_contact_photo(&self.validator, &input)?;
+                    Ok::<_, anyhow::Error>((contact_id, input))
+                })
+                .transpose()?;
+            let message_update = if !message_ids.is_empty() {
                 let Some((unread, flagged)) = parse_update_message_flags(request)? else {
                     return Ok(operation_error_response(
                         "UpdateItem",
@@ -431,19 +415,86 @@ where
                         "UpdateItem message updates currently support only IsRead and FlagStatus.",
                     ));
                 };
-                for message_id in message_ids {
-                    let existing = self
-                        .store
-                        .fetch_jmap_emails(principal.account_id, &[message_id])
-                        .await?
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| anyhow!("message not found"))?;
+                let messages = self
+                    .store
+                    .fetch_jmap_emails(principal.account_id, &message_ids)
+                    .await?;
+                if messages.len() != message_ids.len() {
+                    bail!("message not found");
+                }
+                for existing in &messages {
                     validate_supplied_item_change_key(
                         &item_references,
-                        &format!("message:{message_id}"),
+                        &format!("message:{}", existing.id),
                         &message_change_key(&existing),
                     )?;
+                }
+                Some((unread, flagged))
+            } else {
+                None
+            };
+            let mut task_updates = Vec::new();
+            for task_id in &task_ids {
+                let existing = self
+                    .store
+                    .fetch_accessible_tasks_by_ids(principal.account_id, &[*task_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("task not found"))?;
+                let change_keys = task_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(&existing),
+                )
+                .await?;
+                let id = format!("task:{task_id}");
+                validate_supplied_item_change_key(
+                    &item_references,
+                    &id,
+                    change_key_for(&change_keys, *task_id, "task")?,
+                )?;
+                task_updates.push((
+                    *task_id,
+                    parse_update_task_input(
+                        principal,
+                        &existing,
+                        update_item_change_content(&item_changes, &id)?,
+                    )?,
+                ));
+            }
+            let public_folder_items = self
+                .store
+                .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
+                .await?;
+            if public_folder_items.len() != public_folder_item_ids.len() {
+                return Ok(operation_error_response(
+                    "UpdateItem",
+                    "ErrorItemNotFound",
+                    "public folder item not found",
+                ));
+            }
+            let mut public_folder_updates = Vec::new();
+            for existing in public_folder_items {
+                let id = format!("public-folder-item:{}", existing.id);
+                validate_supplied_item_change_key(
+                    &item_references,
+                    &id,
+                    &public_folder_item_change_key(&existing),
+                )?;
+                public_folder_updates.push((
+                    existing.id,
+                    parse_update_public_folder_item_input(
+                        principal,
+                        &existing,
+                        update_item_change_content(&item_changes, &id)?,
+                    ),
+                ));
+            }
+
+            let mut items = String::new();
+            if let Some((unread, flagged)) = message_update {
+                for message_id in message_ids {
                     let updated = self
                         .store
                         .update_jmap_email_flags(
@@ -461,9 +512,7 @@ where
                     items.push_str(&message_item_xml(&updated));
                 }
             }
-            if let Some((contact_id, existing, update_request)) = contact_update {
-                let input = parse_update_contact_input(principal, &existing, update_request);
-                validate_contact_photo(&self.validator, &input)?;
+            if let Some((contact_id, input)) = contact_update {
                 let updated = self
                     .store
                     .update_accessible_contact(
@@ -497,31 +546,13 @@ where
                     change_key_for(&change_keys, updated.id, "calendar")?,
                 ));
             }
-            for task_id in task_ids {
-                let existing = self
-                    .store
-                    .fetch_accessible_tasks_by_ids(principal.account_id, &[task_id])
-                    .await?
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| anyhow!("task not found"))?;
-                let change_keys = task_change_keys(
-                    &self.store,
-                    principal.account_id,
-                    std::slice::from_ref(&existing),
-                )
-                .await?;
-                validate_supplied_item_change_key(
-                    &item_references,
-                    &format!("task:{task_id}"),
-                    change_key_for(&change_keys, task_id, "task")?,
-                )?;
+            for (task_id, input) in task_updates {
                 let updated = self
                     .store
                     .update_accessible_task(
                         principal.account_id,
                         task_id,
-                        parse_update_task_input(principal, &existing, request)?,
+                        input,
                     )
                     .await?;
                 let change_keys =
@@ -532,31 +563,15 @@ where
                     change_key_for(&change_keys, updated.id, "task")?,
                 ));
             }
-            let public_folder_items = self
-                .store
-                .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
-                .await?;
-            if public_folder_items.len() != public_folder_item_ids.len() {
-                return Ok(operation_error_response(
-                    "UpdateItem",
-                    "ErrorItemNotFound",
-                    "public folder item not found",
-                ));
-            }
-            for existing in public_folder_items {
-                validate_supplied_item_change_key(
-                    &item_references,
-                    &format!("public-folder-item:{}", existing.id),
-                    &public_folder_item_change_key(&existing),
-                )?;
+            for (item_id, input) in public_folder_updates {
                 let updated = self
                     .store
                     .upsert_public_folder_item(
-                        parse_update_public_folder_item_input(principal, &existing, request),
+                        input,
                         AuditEntryInput {
                             actor: principal.email.clone(),
                             action: "ews-update-public-folder-item".to_string(),
-                            subject: existing.id.to_string(),
+                            subject: item_id.to_string(),
                         },
                     )
                     .await?;
@@ -756,6 +771,8 @@ where
         }))
     }
 
+    // [MS-OXWSMSG] section 3.1.4.6: SendItem accepts Message item identifiers;
+    // canonical submission remains the authority for Sent membership.
     pub(in crate::service) async fn send_item(
         &self,
         principal: &AccountPrincipal,
@@ -764,12 +781,36 @@ where
         let result = async {
             self.validate_mutating_item_change_keys(principal, request)
                 .await?;
-            let draft_ids = requested_item_ids(request)
-                .into_iter()
-                .filter_map(|id| canonical_message_id_from_ews_id(&id))
-                .collect::<Vec<_>>();
-            if draft_ids.is_empty() {
+            let ids = requested_item_ids(request);
+            let draft_ids = ids
+                .iter()
+                .map(|id| {
+                    id.strip_prefix("message:")
+                        .ok_or_else(|| anyhow!("SendItem requires canonical message ItemIds."))
+                        .and_then(|id| {
+                            Uuid::parse_str(id).map_err(|_| {
+                                anyhow!("SendItem received an invalid message ItemId.")
+                            })
+                        })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if draft_ids.is_empty() || draft_ids.len() != ids.len() {
                 bail!("SendItem requires at least one message ItemId.");
+            }
+            let drafts = self
+                .store
+                .fetch_jmap_emails(principal.account_id, &draft_ids)
+                .await?;
+            if drafts.len() != draft_ids.len()
+                || drafts.iter().any(|draft| {
+                    !draft
+                        .mailbox_states
+                        .iter()
+                        .any(|state| state.role == "drafts")
+                        && draft.mailbox_role != "drafts"
+                })
+            {
+                bail!("SendItem requires accessible canonical drafts.");
             }
             for draft_id in draft_ids {
                 self.store
@@ -1201,6 +1242,8 @@ where
         }))
     }
 
+    // [MS-OXWSMSG] section 3.1.4.3: reject an invalid bounded delete request
+    // before it can partially mutate canonical item lifecycles.
     pub(in crate::service) async fn delete_item(
         &self,
         principal: &AccountPrincipal,
@@ -1318,6 +1361,67 @@ where
                     change_key_for(&change_keys, *event_id, "calendar")?,
                 )?;
             }
+            let tasks = self
+                .store
+                .fetch_accessible_tasks_by_ids(principal.account_id, &task_ids)
+                .await?;
+            if tasks.len() != task_ids.len() {
+                return Ok(operation_error_response(
+                    "DeleteItem",
+                    "ErrorItemNotFound",
+                    "task not found",
+                ));
+            }
+            for task in &tasks {
+                let change_keys = task_change_keys(
+                    &self.store,
+                    principal.account_id,
+                    std::slice::from_ref(task),
+                )
+                .await?;
+                validate_supplied_item_change_key(
+                    &item_references,
+                    &format!("task:{}", task.id),
+                    change_key_for(&change_keys, task.id, "task")?,
+                )?;
+            }
+            let messages = self
+                .store
+                .fetch_jmap_emails(principal.account_id, &message_ids)
+                .await?;
+            if messages.len() != message_ids.len() {
+                return Ok(operation_error_response(
+                    "DeleteItem",
+                    "ErrorItemNotFound",
+                    "message not found",
+                ));
+            }
+            let public_folder_items = self
+                .store
+                .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
+                .await?;
+            if public_folder_items.len() != public_folder_item_ids.len() {
+                return Ok(operation_error_response(
+                    "DeleteItem",
+                    "ErrorItemNotFound",
+                    "public folder item not found",
+                ));
+            }
+            for item in &public_folder_items {
+                validate_supplied_item_change_key(
+                    &item_references,
+                    &format!("public-folder-item:{}", item.id),
+                    &public_folder_item_change_key(item),
+                )?;
+            }
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+            let trash_mailbox_id = mailboxes
+                .iter()
+                .find(|mailbox| mailbox.role == "trash")
+                .map(|mailbox| mailbox.id);
 
             for contact_id in contact_ids {
                 self.store
@@ -1344,27 +1448,12 @@ where
                     .delete_accessible_task(principal.account_id, task_id)
                     .await?;
             }
-            let mailboxes = self
-                .store
-                .fetch_jmap_mailboxes(principal.account_id)
-                .await?;
-            let trash_mailbox_id = mailboxes
-                .iter()
-                .find(|mailbox| mailbox.role == "trash")
-                .map(|mailbox| mailbox.id);
 
             for message_id in message_ids {
-                let existing = self
-                    .store
-                    .fetch_jmap_emails(principal.account_id, &[message_id])
-                    .await?;
-                let Some(email) = existing.into_iter().next() else {
-                    return Ok(operation_error_response(
-                        "DeleteItem",
-                        "ErrorItemNotFound",
-                        "message not found",
-                    ));
-                };
+                let email = messages
+                    .iter()
+                    .find(|email| email.id == message_id)
+                    .ok_or_else(|| anyhow!("message not found"))?;
                 if delete_type == EwsDeleteType::HardDelete || email.mailbox_role == "trash" {
                     self.store
                         .delete_jmap_email(
@@ -1403,17 +1492,6 @@ where
                         )
                         .await?;
                 }
-            }
-            let public_folder_items = self
-                .store
-                .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
-                .await?;
-            if public_folder_items.len() != public_folder_item_ids.len() {
-                return Ok(operation_error_response(
-                    "DeleteItem",
-                    "ErrorItemNotFound",
-                    "public folder item not found",
-                ));
             }
             for item in public_folder_items {
                 self.store
