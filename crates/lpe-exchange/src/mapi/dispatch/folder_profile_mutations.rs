@@ -107,9 +107,17 @@ where
     for (tag, value) in values {
         if canonical_property_storage_tag(*tag) == PID_TAG_OST_OSTID {
             if let MapiValue::Binary(ost_id) = value {
-                store
+                if let Err(error) = store
                     .store_mapi_ipm_subtree_ost_id(principal.account_id, ost_id)
-                    .await?;
+                    .await
+                {
+                    tracing::warn!(
+                        adapter = "mapi",
+                        account_id = %principal.account_id,
+                        error = %error,
+                        "unable to persist client IPM subtree OST identity"
+                    );
+                }
             }
         }
     }

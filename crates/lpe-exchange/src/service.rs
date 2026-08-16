@@ -73,6 +73,7 @@ mod ews {
     pub(super) mod folder_requests;
     pub(super) mod folders;
     pub(super) mod ids;
+    pub(super) mod item_reads;
     pub(super) mod items;
     pub(super) mod mail;
     pub(super) mod mail_apps;

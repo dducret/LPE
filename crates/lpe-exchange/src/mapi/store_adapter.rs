@@ -299,7 +299,7 @@ where
         Vec::new()
     } else {
         store
-            .fetch_jmap_emails_with_protected_bcc(account_id, &message_ids)
+            .fetch_jmap_emails(account_id, &message_ids)
             .await
             .with_context(|| format!("fetch {} MAPI content messages", message_ids.len()))?
     };

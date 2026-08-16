@@ -173,7 +173,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         access: &MailboxAccountAccess,
         data_type: &str,
     ) -> Result<Vec<StateEntry>> {
-        self.mail_object_state_entries_with_bcc(access.account_id, data_type, access.is_owned)
+        self.mail_object_state_entries_with_bcc(access.account_id, data_type, false)
             .await
     }
 
@@ -252,7 +252,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     .collect())
             }
             "Email" | "Thread" => {
-                self.mail_object_state_entries_with_bcc(account_id, data_type, true)
+                self.mail_object_state_entries_with_bcc(account_id, data_type, false)
                     .await
             }
             "AddressBook" => {

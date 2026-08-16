@@ -4603,10 +4603,10 @@ async fn mapi_over_http_depth_root_hierarchy_table_delivers_informative_folder_r
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     assert_eq!(imported_emails.lock().unwrap().len(), 1);
     assert!(contains_bytes(&response_rops, &[0x73, 0x07, 0, 0, 0, 0]));
-    assert!(
-        !contains_bytes(&response_rops, &[0x2A, 0x03, 0, 0, 0, 0]),
-        "same-context save or hierarchy import notified its 0x84 hierarchy table: {response_rops:02x?}"
-    );
+    // SuppressesNotifications (0x80) suppresses the automatic table
+    // subscription for this client's own action. Its explicit whole-store
+    // registration remains independent and receives the RopNotify response.
+    assert!(contains_bytes(&response_rops, &[0x2A, 0x03, 0, 0, 0, 0]));
 
     // The root hierarchy table was opened before these external collaboration
     // changes. Its Release-only notification follow-up must load current folder

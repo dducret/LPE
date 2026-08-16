@@ -445,9 +445,7 @@ impl<T: ExchangeStore> MapiStore for T {
             // UUID-ordered mailbox here permanently hid messages outside an
             // arbitrary prefix from Outlook's contents synchronization.
             let message_ids = self.fetch_all_jmap_email_ids(account_id).await?;
-            let emails = self
-                .fetch_jmap_emails_with_protected_bcc(account_id, &message_ids)
-                .await?;
+            let emails = self.fetch_jmap_emails(account_id, &message_ids).await?;
             let mut attachments = Vec::with_capacity(emails.len());
             for email in &emails {
                 let message_attachments =

@@ -4197,11 +4197,34 @@ async fn email_submission_set_rejects_read_only_shared_mailbox_draft_submit() {
 }
 
 #[tokio::test]
-async fn email_get_only_returns_bcc_for_explicit_owner_draft_request() {
+async fn email_get_only_returns_bcc_for_explicit_owner_sent_request() {
+    let sent_mailbox = JmapMailbox {
+        id: Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap(),
+        parent_id: None,
+        role: "sent".to_string(),
+        name: "Sent".to_string(),
+        sort_order: 20,
+        modseq: 1,
+        total_emails: 1,
+        unread_emails: 0,
+        size_octets: 0,
+        is_subscribed: true,
+    };
+    let mut sent_email = FakeStore::draft_email();
+    sent_email.id = Uuid::parse_str("efefefef-efef-efef-efef-efefefefefef").unwrap();
+    sent_email.mailbox_ids = vec![sent_mailbox.id];
+    sent_email.mailbox_states = vec![FakeStore::mailbox_state(&sent_mailbox, false, false, false)];
+    sent_email.mailbox_id = sent_mailbox.id;
+    sent_email.mailbox_role = sent_mailbox.role.clone();
+    sent_email.mailbox_name = sent_mailbox.name.clone();
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        mailboxes: vec![FakeStore::draft_mailbox()],
-        emails: vec![FakeStore::draft_email(), FakeStore::inbox_email()],
+        mailboxes: vec![sent_mailbox, FakeStore::draft_mailbox()],
+        emails: vec![
+            sent_email.clone(),
+            FakeStore::draft_email(),
+            FakeStore::inbox_email(),
+        ],
         ..Default::default()
     };
     let service = JmapService::new(store);
@@ -4218,6 +4241,7 @@ async fn email_get_only_returns_bcc_for_explicit_owner_draft_request() {
                     "Email/get".to_string(),
                     json!({
                         "ids": [
+                            sent_email.id.to_string(),
                             FakeStore::draft_email().id.to_string(),
                             FakeStore::inbox_email().id.to_string()
                         ],
@@ -4236,6 +4260,7 @@ async fn email_get_only_returns_bcc_for_explicit_owner_draft_request() {
         Value::String("hidden@example.test".to_string())
     );
     assert_eq!(list[1]["bcc"], Value::Null);
+    assert_eq!(list[2]["bcc"], Value::Null);
 }
 
 #[tokio::test]
@@ -4530,7 +4555,7 @@ async fn delegated_email_and_thread_states_ignore_bcc_only_changes() {
         .mail_object_state(&owner_access, "Email")
         .await
         .unwrap();
-    assert_ne!(owner_email_without, owner_email_with);
+    assert_eq!(owner_email_without, owner_email_with);
 
     let delegated_email_without = without_bcc
         .mail_object_state(&delegated_access, "Email")
@@ -4578,8 +4603,8 @@ async fn email_state_tokens_do_not_expose_message_or_bcc_content() {
         .unwrap();
 
     assert_eq!(
-        response.method_responses[0].1["list"][0]["bcc"][0]["email"],
-        Value::String("hidden@example.test".to_string())
+        response.method_responses[0].1["list"][0]["bcc"],
+        Value::Null
     );
     let token = response.method_responses[0].1["state"].as_str().unwrap();
     let decoded = decode_state(token).unwrap();

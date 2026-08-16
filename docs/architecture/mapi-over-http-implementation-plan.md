@@ -1690,8 +1690,9 @@ not by itself authorize broad client publication.
   stored value remains a bounded profile setting, with a 2048-byte limit that
   covers observed Outlook cached-mode values without becoming a general OST
   profile store. If the persistence path is unavailable, the accepted write
-  remains visible in the current session so Outlook bootstrap can continue, and
-  installation checks must report the missing canonical schema state.
+  remains visible in the current session and logs the persistence failure so
+  Outlook bootstrap can continue; installation checks must report the missing
+  canonical schema state.
 - `RopGetReceiveFolder` and `RopGetReceiveFolderTable` use the same primed
   receive-folder table: `IPM` and `IPM.Note` resolve to Inbox and
   `IPM.Appointment` resolves to the canonical Calendar folder. Empty or

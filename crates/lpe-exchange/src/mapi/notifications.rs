@@ -219,6 +219,10 @@ impl MapiNotificationEvent {
         self.change_cursor
     }
 
+    pub(crate) fn modseq(&self) -> Option<u64> {
+        self.modseq
+    }
+
     pub(crate) fn canonical_folder_id(&self) -> Option<uuid::Uuid> {
         self.canonical_folder_id
     }

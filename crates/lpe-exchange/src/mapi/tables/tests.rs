@@ -8992,7 +8992,7 @@ fn calendar_invitation_contents_row_projects_meeting_request_class() {
 }
 
 #[test]
-fn bcc_projections_only_expose_drafts_and_sent_items() {
+fn bcc_projections_only_expose_sent_items() {
     let mut email = test_table_email(
         Uuid::from_u128(0x7171_0002),
         Uuid::from_u128(0x8181_0002),
@@ -9008,23 +9008,21 @@ fn bcc_projections_only_expose_drafts_and_sent_items() {
         crate::mapi::identity::mapi_store_id(0x7171_0002),
     );
 
-    for role in ["drafts", "sent"] {
-        email.mailbox_role = role.to_string();
-        assert!(message_can_expose_bcc(&email));
-        assert!(message_recipients(&email)
-            .iter()
-            .any(|recipient| recipient.recipient_type == 0x03));
-        assert_eq!(
-            email_property_value(&email, PID_TAG_DISPLAY_BCC_W),
-            Some(MapiValue::String("Hidden recipient".to_string()))
-        );
-        assert_response_contains_utf16(
-            &serialize_message_row(&email, &[PID_TAG_DISPLAY_BCC_W]),
-            "Hidden recipient",
-        );
-    }
+    email.mailbox_role = "sent".to_string();
+    assert!(message_can_expose_bcc(&email));
+    assert!(message_recipients(&email)
+        .iter()
+        .any(|recipient| recipient.recipient_type == 0x03));
+    assert_eq!(
+        email_property_value(&email, PID_TAG_DISPLAY_BCC_W),
+        Some(MapiValue::String("Hidden recipient".to_string()))
+    );
+    assert_response_contains_utf16(
+        &serialize_message_row(&email, &[PID_TAG_DISPLAY_BCC_W]),
+        "Hidden recipient",
+    );
 
-    for role in ["inbox", "shared"] {
+    for role in ["drafts", "inbox", "shared"] {
         email.mailbox_role = role.to_string();
         assert!(!message_can_expose_bcc(&email));
         assert!(!message_recipients(&email)

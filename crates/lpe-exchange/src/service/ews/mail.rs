@@ -91,14 +91,23 @@ pub(in crate::service) fn message_item_xml_with_details(
     xml.insert_str(
         xml.len() - "</t:Message>".len(),
         &format!(
-            "{}{body}{}{}{}",
+            "{}{body}{}{}{}{}",
             mime_content,
             message_recipients_xml("ToRecipients", &email.to),
             message_recipients_xml("CcRecipients", &email.cc),
+            message_bcc_recipients_xml(email),
             message_attachments_xml(attachments),
         ),
     );
     xml
+}
+
+// [MS-OXWSMSG] section 2.2.4.3 defines MessageType.BccRecipients. It remains
+// protected metadata outside the authenticated owner's canonical Sent projection.
+fn message_bcc_recipients_xml(email: &JmapEmail) -> String {
+    (email.mailbox_role == "sent")
+        .then(|| message_recipients_xml("BccRecipients", &email.bcc))
+        .unwrap_or_default()
 }
 
 fn message_recipients_xml(kind: &str, recipients: &[JmapEmailAddress]) -> String {

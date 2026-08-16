@@ -4,6 +4,12 @@
 
 `lpe-exchange` exposes bounded EWS compatibility and guarded MAPI over HTTP endpoints over canonical `LPE` mailbox, contacts, calendar, task, address-book, and submission state. Full Outlook functionality is the target, but current Exchange compatibility remains incomplete and release-gated; the adapter must not introduce Exchange-specific mailbox storage or protocol-local canonical state.
 
+EWS GetItem obtains protected Bcc metadata only through the canonical
+owner-bound mailbox projection and emits BccRecipients only for that owner's
+Sent item. Draft, delegate, shared, search, sync, MIME, and AI projections
+remain Bcc-free. This bounded MessageType.BccRecipients projection follows
+[MS-OXWSMSG] sections 2.2.4.3 and 3.1.4.4.
+
 The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI over HTTP is maintained in `docs/architecture/mapi-over-http-implementation-plan.md`.
 
 ## Implementation/Usage

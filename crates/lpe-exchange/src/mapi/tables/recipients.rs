@@ -43,7 +43,7 @@ pub(in crate::mapi) fn message_recipients(email: &JmapEmail) -> Vec<MapiRecipien
 }
 
 pub(in crate::mapi) fn message_can_expose_bcc(email: &JmapEmail) -> bool {
-    matches!(email.mailbox_role.as_str(), "drafts" | "sent")
+    email.mailbox_role == "sent"
 }
 
 pub(in crate::mapi) fn serialize_recipient_row(address: &JmapEmailAddress) -> Vec<u8> {

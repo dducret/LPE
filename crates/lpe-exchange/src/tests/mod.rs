@@ -5675,17 +5675,14 @@ impl ExchangeStore for FakeStore {
                 .iter()
                 .map(|value| value.property_tag)
                 .collect::<Vec<_>>();
-            let snapshot = self
-                .fetch_mapi_folder_hierarchy_profile_snapshot(
+            let stored_profile_values = self
+                .fetch_mapi_folder_profile_property_values(
                     account_id,
-                    identity_folder_id,
                     profile_folder_id,
                     &property_tags,
                 )
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("MAPI folder identity not found"))?;
-            let stored = snapshot
-                .profile_values
+                .await?;
+            let stored = stored_profile_values
                 .iter()
                 .find(|value| value.property_tag == 0x36D8_1102 && value.property_type == 0x1102);
             let incoming = profile_values
@@ -5714,7 +5711,62 @@ impl ExchangeStore for FakeStore {
                 )
                 .await
             } else {
-                Ok(snapshot)
+                let canonical_id = self
+                    .mapi_identities
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find_map(|(canonical_id, object_id)| {
+                        (*object_id == identity_folder_id).then_some(*canonical_id)
+                    })
+                    .ok_or_else(|| anyhow::anyhow!("MAPI folder identity not found"))?;
+                let change_number = self
+                    .mapi_identity_change_numbers
+                    .lock()
+                    .unwrap()
+                    .get(&canonical_id)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        crate::mapi::identity::global_counter_from_store_id(identity_folder_id)
+                            .unwrap_or(1)
+                    });
+                let change_key = self
+                    .mapi_identity_change_keys
+                    .lock()
+                    .unwrap()
+                    .get(&canonical_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::mapi::identity::change_key_for_change_number(change_number)
+                    });
+                let predecessor_change_list = self
+                    .mapi_identity_predecessor_change_lists
+                    .lock()
+                    .unwrap()
+                    .get(&canonical_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        crate::mapi_mailstore::predecessor_change_list(change_number)
+                    });
+                let last_modification_time = self
+                    .mapi_identity_last_modification_times
+                    .lock()
+                    .unwrap()
+                    .get(&canonical_id)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        crate::mapi_mailstore::filetime_from_change_number(change_number)
+                    });
+                Ok(MapiFolderHierarchyProfileSnapshot {
+                    version: MapiFolderVersion {
+                        folder_id: identity_folder_id,
+                        change_number,
+                        change_key,
+                        predecessor_change_list,
+                        last_modification_time,
+                    },
+                    profile_values: stored_profile_values,
+                })
             }
         })
     }
@@ -8372,7 +8424,7 @@ impl ExchangeStore for FakeStore {
                                     mailbox_id: event.canonical_folder_id()?,
                                     message_id: event.canonical_message_id()?,
                                     change_kind: event.change_kind()?.to_string(),
-                                    modseq: 1,
+                                    modseq: event.modseq()?,
                                     created_at: "2026-08-16T00:00:00.000000Z".to_string(),
                                 })
                             })

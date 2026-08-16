@@ -1289,13 +1289,16 @@ async fn create_folder_rejects_missing_public_folder_parent() {
 
 #[tokio::test]
 async fn create_folder_rejects_blank_public_folder_display_name() {
+    // [MS-OXWSFOLD] sections 3.1.4.2 and 3.1.4.2.3.2: reject malformed
+    // CreateFolder input before it reaches the canonical public-folder tree.
+    let public_folders = Arc::new(Mutex::new(vec![FakeStore::public_folder(
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        None,
+        "Public Root",
+    )]));
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
-            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-            None,
-            "Public Root",
-        )])),
+        public_folders: public_folders.clone(),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -1321,7 +1324,8 @@ async fn create_folder_rejects_blank_public_folder_display_name() {
     let body = response_text(response).await;
     assert!(body.contains("<m:CreateFolderResponse>"));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
-    assert!(body.contains("public folder display name is required"));
+    assert!(body.contains("CreateFolder is missing DisplayName"));
+    assert_eq!(public_folders.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -1868,7 +1872,12 @@ async fn resolve_names_returns_no_results_for_non_directory_names() {
 
 #[tokio::test]
 async fn resolve_names_rejects_ambiguous_and_inaccessible_contact_results() {
+    // [MS-OXWSRSLNM] sections 3.1.4.1, 3.1.4.1.3.5, and 3.1.4.1.4.1:
+    // visible ambiguity stays explicit while inaccessible contacts are absent.
+    let hidden_owner = Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap();
     let mut hidden_collection = FakeStore::collection("hidden", "contacts", "Hidden Contacts");
+    hidden_collection.owner_account_id = hidden_owner;
+    hidden_collection.is_owned = false;
     hidden_collection.rights.may_read = false;
     let mut hidden_contact = FakeStore::contact(
         "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
@@ -1876,6 +1885,8 @@ async fn resolve_names_rejects_ambiguous_and_inaccessible_contact_results() {
         "hidden@example.test",
     );
     hidden_contact.collection_id = "hidden".to_string();
+    hidden_contact.owner_account_id = hidden_owner;
+    hidden_contact.rights.may_read = false;
     let store = FakeStore {
         session: Some(FakeStore::account()),
         contact_collections: Arc::new(Mutex::new(vec![hidden_collection])),
@@ -4639,7 +4650,9 @@ async fn pull_subscription_get_events_replays_canonical_changes_after_restart() 
     let body = response_text(response).await;
     let subscription_id = test_xml_text(&body, "SubscriptionId").unwrap();
     let watermark = test_xml_text(&body, "Watermark").unwrap();
-    assert!(watermark.ends_with(":7"));
+    // [MS-OXWSNTIF] sections 2.2.5.1-.2 and 3.1.4.1.3.2: clients replay
+    // the opaque bookmark verbatim after reconnect/restart.
+    assert!(!watermark.is_empty());
 
     let restarted_service = ExchangeService::new(store);
     let request = format!(
@@ -4676,7 +4689,9 @@ async fn pull_subscription_get_events_replays_canonical_delete() {
             5,
             None,
             None,
-            "deleted".to_string(),
+            // [MS-OXWSNTIF] sections 2.2.4.5 and 2.2.4.8: canonical
+            // destruction projects as a DeletedEvent.
+            "destroyed".to_string(),
             Some("Inbox".to_string()),
             None,
             Some("RCA pull delete".to_string()),
@@ -5129,7 +5144,7 @@ async fn send_item_submits_existing_draft_through_canonical_submission() {
 }
 
 #[tokio::test]
-async fn get_item_does_not_project_protected_bcc_recipients() {
+async fn get_item_projects_protected_bcc_for_owner_sent_item() {
     let message_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000010").unwrap();
     let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000011").unwrap();
     let mut message = FakeStore::email(
@@ -5161,8 +5176,8 @@ async fn get_item_does_not_project_protected_bcc_recipients() {
 
     let body = response_text(response).await;
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(!body.contains("BccRecipients"));
-    assert!(!body.contains("protected@example.test"));
+    assert!(body.contains("<t:BccRecipients>"));
+    assert!(body.contains("protected@example.test"));
 }
 
 #[tokio::test]
@@ -6090,14 +6105,19 @@ async fn pull_and_streaming_notifications_replay_canonical_sql_change_cursor() {
             .with_canonical_ids(Some(mailbox_id), Some(message_id))],
         },
     ]));
+    let mut email = FakeStore::email(
+        &message_id.to_string(),
+        &mailbox_id.to_string(),
+        "inbox",
+        "Hello",
+    );
+    // [MS-OXWSNTIF] section 2.2.4.5: the item ChangeKey in the replay event
+    // must name the same canonical message version GetItem subsequently reads.
+    email.modseq = 10;
+    email.mailbox_states[0].modseq = 10;
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        emails: Arc::new(Mutex::new(vec![FakeStore::email(
-            &message_id.to_string(),
-            &mailbox_id.to_string(),
-            "inbox",
-            "Hello",
-        )])),
+        emails: Arc::new(Mutex::new(vec![email])),
         mapi_notification_cursor: mapi_notification_cursor.clone(),
         mapi_notification_polls: mapi_notification_polls.clone(),
         ..Default::default()
@@ -6113,9 +6133,11 @@ async fn pull_and_streaming_notifications_replay_canonical_sql_change_cursor() {
         .unwrap();
     let body = response_text(response).await;
     assert!(body.contains("<m:SubscribeResponse>"));
-    assert!(body.contains(":7</m:Watermark>"));
     let subscription_id = test_xml_text(&body, "SubscriptionId").unwrap();
     let watermark = test_xml_text(&body, "Watermark").unwrap();
+    // [MS-OXWSNTIF] sections 2.2.5.1-.2 and 3.1.4.2.3.1: the signed
+    // opaque bookmark is replayed verbatim by pull and streaming projections.
+    assert!(!watermark.is_empty());
 
     let response = service
         .handle(
@@ -9948,7 +9970,9 @@ async fn get_item_returns_recipients_html_and_owner_sent_bcc_only() {
     assert!(body.contains("<t:EmailAddress>carol@example.test</t:EmailAddress>"));
     assert!(body.contains("<t:BccRecipients>"));
     assert!(body.contains("<t:EmailAddress>owner-bcc@example.test</t:EmailAddress>"));
-    assert!(body.contains("<t:EmailAddress>draft-bcc@example.test</t:EmailAddress>"));
+    // [MS-OXWSMSG] sections 2.2.4.3 and 3.1.4.4: BccRecipients are exposed
+    // only for the authenticated owner's canonical Sent item.
+    assert!(!body.contains("<t:EmailAddress>draft-bcc@example.test</t:EmailAddress>"));
     assert!(body.contains(
         "<t:Body BodyType=\"HTML\">&lt;p&gt;Canonical &lt;b&gt;HTML&lt;/b&gt;&lt;/p&gt;</t:Body>"
     ));

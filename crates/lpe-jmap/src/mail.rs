@@ -335,7 +335,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             && email
                                 .mailbox_states
                                 .iter()
-                                .any(|state| matches!(state.role.as_str(), "drafts" | "sent")),
+                                .any(|state| state.role == "sent"),
                     )
                 })
                 .collect::<Vec<_>>(),
