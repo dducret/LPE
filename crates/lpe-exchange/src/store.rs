@@ -263,14 +263,6 @@ pub trait ExchangeStore: AccountAuthStore {
         property_tags: &'a [u32],
     ) -> StoreFuture<'a, Vec<MapiFolderProfilePropertyValue>>;
 
-    fn fetch_mapi_folder_hierarchy_profile_snapshot<'a>(
-        &'a self,
-        account_id: Uuid,
-        identity_folder_id: u64,
-        profile_folder_id: u64,
-        property_tags: &'a [u32],
-    ) -> StoreFuture<'a, Option<MapiFolderHierarchyProfileSnapshot>>;
-
     fn upsert_mapi_folder_profile_property_values<'a>(
         &'a self,
         account_id: Uuid,
